@@ -16,7 +16,7 @@ import {
 import toast from 'react-hot-toast';
 
 // Google Maps API Key - should be in environment variable or config
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCZGiWbfOkYWHBt8b7UWvyOUUirSWDj0V4';
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
 const mapContainerStyle = {
   width: '100%',

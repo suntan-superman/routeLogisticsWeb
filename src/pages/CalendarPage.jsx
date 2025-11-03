@@ -13,6 +13,7 @@ import {
   PencilIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import '../styles/syncfusion.css';
 
 const CalendarPage = () => {
   const [scheduleData, setScheduleData] = useState([]);
@@ -208,7 +209,7 @@ const CalendarPage = () => {
           showQuickInfo={true}
           enableAdaptiveUI={true}
           allowDragAndDrop={false}
-          allowResize={false}
+          allowResizing={false}
           cssClass="custom-schedule"
         >
           <ViewsDirective>
@@ -370,53 +371,6 @@ const CalendarPage = () => {
           </div>
         </div>
       )}
-
-      {/* Custom CSS for Syncfusion Schedule */}
-      <style jsx global>{`
-        .custom-schedule .e-schedule {
-          border: none;
-        }
-        
-        .custom-schedule .e-header-cells {
-          background-color: #f8fafc;
-          color: #374151;
-          font-weight: 600;
-        }
-        
-        .custom-schedule .e-content-table .e-content-row .e-content-cell {
-          border-color: #e5e7eb;
-        }
-        
-        .custom-schedule .e-appointment {
-          border-radius: 6px;
-          font-size: 12px;
-        }
-        
-        .custom-schedule .e-appointment .e-subject {
-          font-weight: 500;
-        }
-        
-        .custom-schedule .e-toolbar {
-          background-color: #ffffff;
-          border-bottom: 1px solid #e5e7eb;
-        }
-        
-        .custom-schedule .e-toolbar .e-btn {
-          background-color: #10b981;
-          border-color: #10b981;
-          color: white;
-        }
-        
-        .custom-schedule .e-toolbar .e-btn:hover {
-          background-color: #059669;
-          border-color: #059669;
-        }
-        
-        .custom-schedule .e-toolbar .e-btn.e-active {
-          background-color: #047857;
-          border-color: #047857;
-        }
-      `}</style>
     </motion.div>
   );
 };

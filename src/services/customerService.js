@@ -185,7 +185,7 @@ class CustomerService {
   }
 
   // Get all customers (role-aware: company scope for admins/supervisors, own for field techs)
-  static async getCustomers(limitCount = 50, lastDoc = null, filters = {}, userProfile = null) {
+  static async getCustomers(limitCount = 50, lastDoc = null, filters = {}, userProfile = null, companyId = null) {
     try {
       const userId = this.getCurrentUserId();
       
@@ -194,20 +194,39 @@ class CustomerService {
         userProfile = await this.getCurrentUserProfile();
       }
       
+      // Use provided companyId or fall back to userProfile companyId
+      const effectiveCompanyId = companyId || userProfile?.companyId;
+      
       // Build query based on role
       let q;
       
-      // Super admin, admin, or supervisor: get all company customers
-      if (userProfile?.role === 'super_admin' || 
-          userProfile?.role === 'admin' || 
-          userProfile?.role === 'supervisor') {
-        
-        // If companyId exists, filter by company
-        if (userProfile?.companyId) {
+      // Super admin: can access all customers (no company filter)
+      if (userProfile?.role === 'super_admin') {
+        // For super admin, get all customers if no companyId specified
+        // Otherwise filter by selected company
+        if (effectiveCompanyId) {
+          // Remove orderBy to avoid composite index requirement - sort client-side
           q = query(
             collection(db, 'customers'),
-            where('companyId', '==', userProfile.companyId),
-            orderBy('name', 'asc'),
+            where('companyId', '==', effectiveCompanyId),
+            limit(limitCount)
+          );
+        } else {
+          // Super admin without company selection - get all customers
+          // Use createdAt for ordering (no index needed for single field)
+          q = query(
+            collection(db, 'customers'),
+            orderBy('createdAt', 'desc'),
+            limit(limitCount)
+          );
+        }
+      } else if (userProfile?.role === 'admin' || userProfile?.role === 'supervisor') {
+        // Admin or supervisor: get all company customers
+        if (effectiveCompanyId) {
+          // Remove orderBy to avoid composite index requirement - sort client-side
+          q = query(
+            collection(db, 'customers'),
+            where('companyId', '==', effectiveCompanyId),
             limit(limitCount)
           );
         } else {
@@ -215,7 +234,6 @@ class CustomerService {
           q = query(
             collection(db, 'customers'),
             where('userId', '==', userId),
-            orderBy('name', 'asc'),
             limit(limitCount)
           );
         }
@@ -224,7 +242,6 @@ class CustomerService {
         q = query(
           collection(db, 'customers'),
           where('userId', '==', userId),
-          orderBy('name', 'asc'),
           limit(limitCount)
         );
       }
@@ -238,6 +255,13 @@ class CustomerService {
       
       querySnapshot.forEach((doc) => {
         customers.push({ id: doc.id, ...doc.data() });
+      });
+
+      // Sort by name (ascending) client-side since we removed orderBy to avoid index requirement
+      customers.sort((a, b) => {
+        const nameA = (a.name || '').toLowerCase();
+        const nameB = (b.name || '').toLowerCase();
+        return nameA.localeCompare(nameB);
       });
 
       // Apply client-side filters (status, etc.)
@@ -289,23 +313,36 @@ class CustomerService {
       }
       
       const effectiveCompanyId = companyId || userProfile?.companyId;
+      const userId = this.getCurrentUserId();
       
       let q;
-      if (effectiveCompanyId) {
+      if (userProfile?.role === 'super_admin') {
+        // Super admin: get all pending customers if no company selected, otherwise filter by company
+        // Note: We'll filter by status client-side to avoid composite index requirement
+        if (effectiveCompanyId) {
+          // Remove orderBy to avoid composite index - sort client-side
+          q = query(
+            collection(db, 'customers'),
+            where('companyId', '==', effectiveCompanyId)
+          );
+        } else {
+          // Super admin without company selection - get all customers, filter pending client-side
+          q = query(
+            collection(db, 'customers'),
+            orderBy('createdAt', 'desc')
+          );
+        }
+      } else if (effectiveCompanyId) {
+        // Admin/supervisor with company - filter status client-side, no orderBy to avoid index
         q = query(
           collection(db, 'customers'),
-          where('companyId', '==', effectiveCompanyId),
-          where('status', '==', 'pending'),
-          orderBy('createdAt', 'desc')
+          where('companyId', '==', effectiveCompanyId)
         );
       } else {
         // For users without company, filter by userId
-        const userId = this.getCurrentUserId();
         q = query(
           collection(db, 'customers'),
-          where('userId', '==', userId),
-          where('status', '==', 'pending'),
-          orderBy('createdAt', 'desc')
+          where('userId', '==', userId)
         );
       }
 
@@ -313,7 +350,18 @@ class CustomerService {
       const customers = [];
       
       querySnapshot.forEach((doc) => {
-        customers.push({ id: doc.id, ...doc.data() });
+        const customerData = doc.data();
+        // Filter by pending status client-side to avoid index requirement
+        if (customerData.status === 'pending') {
+          customers.push({ id: doc.id, ...customerData });
+        }
+      });
+
+      // Sort by createdAt descending (already sorted from query, but ensure it)
+      customers.sort((a, b) => {
+        const dateA = new Date(a.createdAt || 0);
+        const dateB = new Date(b.createdAt || 0);
+        return dateB - dateA;
       });
 
       return {
@@ -533,7 +581,7 @@ class CustomerService {
   }
 
   // Get customer statistics (role-aware)
-  static async getCustomerStats(userProfile = null) {
+  static async getCustomerStats(userProfile = null, companyId = null) {
     try {
       const userId = this.getCurrentUserId();
       
@@ -541,15 +589,28 @@ class CustomerService {
         userProfile = await this.getCurrentUserProfile();
       }
       
+      const effectiveCompanyId = companyId || userProfile?.companyId;
+      
       // Build query based on role
       let q;
-      if (userProfile?.role === 'super_admin' || 
-          userProfile?.role === 'admin' || 
-          userProfile?.role === 'supervisor') {
-        if (userProfile?.companyId) {
+      if (userProfile?.role === 'super_admin') {
+        // Super admin: get all customers if no company selected, otherwise filter by company
+        if (effectiveCompanyId) {
+          // Remove orderBy to avoid composite index - sort client-side
           q = query(
             collection(db, 'customers'),
-            where('companyId', '==', userProfile.companyId)
+            where('companyId', '==', effectiveCompanyId)
+          );
+        } else {
+          // Super admin without company selection - get all customers
+          q = query(collection(db, 'customers'));
+        }
+      } else if (userProfile?.role === 'admin' || userProfile?.role === 'supervisor') {
+        if (effectiveCompanyId) {
+          // Remove orderBy to avoid composite index - sort client-side
+          q = query(
+            collection(db, 'customers'),
+            where('companyId', '==', effectiveCompanyId)
           );
         } else {
           q = query(
@@ -582,6 +643,8 @@ class CustomerService {
         }
         totalRevenue += data.totalSpent || 0;
       });
+      
+      // Note: Results are not sorted since we removed orderBy to avoid index requirements
 
       return {
         success: true,

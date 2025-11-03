@@ -512,7 +512,7 @@ const SignUpPage = () => {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700">
+                <label className="block text-sm font-bold text-gray-700">
                   Company Name *
                 </label>
                 <input

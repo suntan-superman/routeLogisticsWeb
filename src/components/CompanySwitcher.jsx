@@ -3,8 +3,11 @@ import { useCompany } from '../contexts/CompanyContext';
 import { ChevronDownIcon, CheckIcon } from '@heroicons/react/24/outline';
 
 const CompanySwitcher = () => {
-  const { availableCompanies, activeCompany, switchCompany, canSwitchCompanies } = useCompany();
   const [isOpen, setIsOpen] = useState(false);
+  
+  // Get company context - this will throw if not in provider, which is expected
+  // The component should only be used within CompanyProvider
+  const { availableCompanies = [], activeCompany = null, switchCompany = () => {}, canSwitchCompanies = false } = useCompany();
 
   // Always show current company prominently, even if can't switch
   if (!activeCompany) {

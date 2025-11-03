@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useCompany } from '../contexts/CompanyContext';
 import CompanyService from '../services/companyService';
 import InvitationService from '../services/invitationService';
 import { auth } from '../services/firebase';
@@ -21,6 +22,7 @@ const ROLE_OPTIONS = [
 
 const InvitationsPage = () => {
   const { userProfile, isSuperAdmin } = useAuth();
+  const { getEffectiveCompanyId } = useCompany();
   const [company, setCompany] = useState(null);
   const [invitations, setInvitations] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -30,17 +32,18 @@ const InvitationsPage = () => {
   const [newInviteRole, setNewInviteRole] = useState('field_tech');
 
   useEffect(() => {
-    if (userProfile?.companyId) {
-      loadCompany();
-      loadInvitations();
+    const companyId = getEffectiveCompanyId();
+    if (companyId) {
+      loadCompany(companyId);
+      loadInvitations(companyId);
     }
   }, [userProfile]);
 
-  const loadCompany = async () => {
-    if (!userProfile?.companyId) return;
+  const loadCompany = async (companyId) => {
+    if (!companyId) return;
     
     try {
-      const result = await CompanyService.getCompany(userProfile.companyId);
+      const result = await CompanyService.getCompany(companyId);
       if (result.success) {
         setCompany(result.company);
       }
@@ -49,12 +52,12 @@ const InvitationsPage = () => {
     }
   };
 
-  const loadInvitations = async () => {
-    if (!userProfile?.companyId) return;
+  const loadInvitations = async (companyId) => {
+    if (!companyId) return;
     
     setIsLoading(true);
     try {
-      const result = await InvitationService.getCompanyInvitations(userProfile.companyId);
+      const result = await InvitationService.getCompanyInvitations(companyId);
       if (result.success) {
         setInvitations(result.invitations);
       }
@@ -72,18 +75,19 @@ const InvitationsPage = () => {
       return;
     }
 
-    if (!userProfile?.companyId) {
-      toast.error('No company associated');
+    const companyId = getEffectiveCompanyId();
+    if (!companyId) {
+      toast.error('No company selected');
       return;
     }
 
     setIsLoading(true);
     try {
       const result = await InvitationService.createInvitation(
-        userProfile.companyId,
+        companyId,
         newInviteEmail,
         newInviteRole,
-        userProfile.id
+        userProfile?.id || auth.currentUser?.uid
       );
 
       if (result.success) {
@@ -95,7 +99,7 @@ const InvitationsPage = () => {
         setNewInviteEmail('');
         setNewInviteRole('field_tech');
         setShowInviteModal(false);
-        loadInvitations();
+        loadInvitations(companyId);
       } else {
         toast.error(result.error || 'Failed to create invitation');
       }
@@ -154,7 +158,8 @@ const InvitationsPage = () => {
       const result = await InvitationService.cancelInvitation(invitationId);
       if (result.success) {
         toast.success('Invitation cancelled');
-        loadInvitations();
+        const companyId = getEffectiveCompanyId();
+        if (companyId) loadInvitations(companyId);
       } else {
         toast.error(result.error || 'Failed to cancel invitation');
       }
@@ -173,7 +178,8 @@ const InvitationsPage = () => {
       if (result.success) {
         await sendInvitationEmail(result.invitation);
         toast.success('Invitation resent!');
-        loadInvitations();
+        const companyId = getEffectiveCompanyId();
+        if (companyId) loadInvitations(companyId);
       } else {
         toast.error(result.error || 'Failed to resend invitation');
       }

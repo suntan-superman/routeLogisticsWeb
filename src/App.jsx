@@ -3,7 +3,6 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
 import { HelmetProvider } from 'react-helmet-async';
-import { registerLicense } from '@syncfusion/ej2-base';
 
 // Contexts
 import { AuthProvider } from './contexts/AuthContext';
@@ -30,11 +29,10 @@ import TeamTrackingPage from './pages/TeamTrackingPage';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 
+// Register Syncfusion license - import from license file
+import './syncfusion-license';
+
 // Create a client
-// Register Syncfusion license
-registerLicense(
-  "ORg4AjUWIQA/Gnt3VVhhQlJDfV5AQmBIYVp/TGpJfl96cVxMZVVBJAtUQF1hTH5bd0diUX1WcnNQT2lVWkd2"
-);
 
 const queryClient = new QueryClient({
   defaultOptions: {

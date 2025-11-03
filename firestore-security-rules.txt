@@ -1,20 +1,20 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Users collection - users can only access their own data
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-    }
-    
-    // Helper function to get user profile
+    // Helper function to get user profile (cached to avoid multiple reads)
     function getUserProfile() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
     
     // Helper function to check if user is super admin
+    // Check user profile document for email and role
+    // Note: Firestore caches get() calls, so calling getUserProfile() twice is optimized
     function isSuperAdmin() {
-      return getUserProfile().email == 'sroy@worksidesoftware.com' || 
-             getUserProfile().role == 'super_admin';
+      // Check if user document exists, then check email and role
+      // User document has email: "sroy@worksidesoftware.com" and role: "super_admin"
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             (getUserProfile().email == 'sroy@worksidesoftware.com' || 
+              getUserProfile().role == 'super_admin');
     }
     
     // Helper function to check if user is company admin or supervisor
@@ -24,15 +24,25 @@ service cloud.firestore {
              getUserProfile().role == 'supervisor';
     }
     
+    // Users collection - users can only access their own data
+    // Super admin can read all users (needed for batch queries)
+    match /users/{userId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        request.auth.uid == userId
+      );
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    
     // Customers collection - role-based access
     match /customers/{customerId} {
       // Allow read:
       // - Owner of the customer
-      // - Super admin
+      // - Super admin (can read all customers - check first to bypass company checks)
       // - Company admin/supervisor for same company
       allow read: if request.auth != null && (
-        resource.data.userId == request.auth.uid ||
         isSuperAdmin() ||
+        resource.data.userId == request.auth.uid ||
         (isCompanyAdminOrSupervisor() && 
          resource.data.companyId == getUserProfile().companyId)
       );
@@ -43,24 +53,24 @@ service cloud.firestore {
         request.auth.uid == request.resource.data.userId;
       
       // Allow update:
+      // - Super admin (can update any customer - check first)
       // - Owner of pending customer (field tech can edit their own pending)
       // - Company admin/supervisor for same company
-      // - Super admin
       allow update: if request.auth != null && (
+        isSuperAdmin() ||
         (resource.data.status == 'pending' && 
          resource.data.createdBy == request.auth.uid) ||
         (isCompanyAdminOrSupervisor() && 
-         resource.data.companyId == getUserProfile().companyId) ||
-        isSuperAdmin()
+         resource.data.companyId == getUserProfile().companyId)
       );
       
       // Allow delete:
+      // - Super admin (can delete any customer - check first)
       // - Company admin/supervisor for same company
-      // - Super admin
       allow delete: if request.auth != null && (
+        isSuperAdmin() ||
         (isCompanyAdminOrSupervisor() && 
-         resource.data.companyId == getUserProfile().companyId) ||
-        isSuperAdmin()
+         resource.data.companyId == getUserProfile().companyId)
       );
     }
     
@@ -111,82 +121,118 @@ service cloud.firestore {
         request.auth.uid == request.resource.data.ownerId;
     }
     
-        // Team Members collection - users can access if they own the company
-        match /teamMembers/{teamMemberId} {
-          allow read, write: if request.auth != null && 
-            request.auth.uid == get(/databases/$(database)/documents/companies/$(resource.data.companyId)).data.ownerId;
-          allow create: if request.auth != null && 
-            request.auth.uid == get(/databases/$(database)/documents/companies/$(request.resource.data.companyId)).data.ownerId;
-        }
-        
-        // Estimate Templates collection - users can only access their own templates
-        match /estimateTemplates/{templateId} {
-          allow read, write: if request.auth != null && 
-            request.auth.uid == resource.data.userId;
-          allow create: if request.auth != null && 
-            request.auth.uid == request.resource.data.userId;
-        }
-        
-        // Invoices collection - users can only access their own invoices
-        match /invoices/{invoiceId} {
-          allow read, write: if request.auth != null && 
-            request.auth.uid == resource.data.userId;
-          allow create: if request.auth != null && 
-            request.auth.uid == request.resource.data.userId;
-        }
-        
-        // Recurring Jobs collection - users can only access their own recurring jobs
-        match /recurringJobs/{recurringJobId} {
-          allow read, write: if request.auth != null && 
-            request.auth.uid == resource.data.userId;
-          allow create: if request.auth != null && 
-            request.auth.uid == request.resource.data.userId;
-        }
-        
-        // Locations collection - GPS tracking data
-        match /locations/{locationId} {
-          // Allow create: users can create their own location data
-          allow create: if request.auth != null && 
-            request.auth.uid == request.resource.data.userId;
-          
-          // Allow read:
-          // - Owner of the location
-          // - Company admin/supervisor for same company
-          // - Super admin
-          allow read: if request.auth != null && (
-            resource.data.userId == request.auth.uid ||
-            isSuperAdmin() ||
-            (isCompanyAdminOrSupervisor() && 
-             resource.data.companyId == getUserProfile().companyId)
-          );
-          
-          // No updates or deletes allowed (immutable tracking data)
-          allow update, delete: if false;
-        }
-        
-        // Work Sessions collection - tracking sessions
-        match /workSessions/{sessionId} {
-          // Allow create: users can create their own work sessions
-          allow create: if request.auth != null && 
-            request.auth.uid == request.resource.data.userId;
-          
-          // Allow read:
-          // - Owner of the session
-          // - Company admin/supervisor for same company
-          // - Super admin
-          allow read: if request.auth != null && (
-            resource.data.userId == request.auth.uid ||
-            isSuperAdmin() ||
-            (isCompanyAdminOrSupervisor() && 
-             resource.data.companyId == getUserProfile().companyId)
-          );
-          
-          // Allow update: only owner can update their own session
-          allow update: if request.auth != null && 
-            resource.data.userId == request.auth.uid;
-          
-          // No deletes allowed
-          allow delete: if false;
-        }
-      }
+    // Team Members collection - users can access if they own the company
+    match /teamMembers/{teamMemberId} {
+      allow read, write: if request.auth != null && 
+        request.auth.uid == get(/databases/$(database)/documents/companies/$(resource.data.companyId)).data.ownerId;
+      allow create: if request.auth != null && 
+        request.auth.uid == get(/databases/$(database)/documents/companies/$(request.resource.data.companyId)).data.ownerId;
     }
+    
+    // Invitations collection - company admins and super admin can manage invitations
+    match /invitations/{invitationId} {
+      // Allow read: super admin (first) or company admins/supervisors for same company
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        (isCompanyAdminOrSupervisor() && 
+         resource.data.companyId == getUserProfile().companyId)
+      );
+      
+      // Allow create: super admin (first) or company admins/supervisors
+      allow create: if request.auth != null && (
+        isSuperAdmin() ||
+        (isCompanyAdminOrSupervisor() && 
+         request.resource.data.companyId == getUserProfile().companyId)
+      );
+      
+      // Allow update/delete: super admin (first) or company admins/supervisors
+      allow update, delete: if request.auth != null && (
+        isSuperAdmin() ||
+        (isCompanyAdminOrSupervisor() && 
+         resource.data.companyId == getUserProfile().companyId)
+      );
+    }
+    
+    // Estimate Templates collection - users can only access their own templates
+    match /estimateTemplates/{templateId} {
+      allow read, write: if request.auth != null && 
+        request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.userId;
+    }
+    
+    // Invoices collection - users can only access their own invoices
+    match /invoices/{invoiceId} {
+      allow read, write: if request.auth != null && 
+        request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.userId;
+    }
+    
+    // Recurring Jobs collection - users can only access their own recurring jobs
+    // Super admin can access all recurring jobs
+    match /recurringJobs/{recurringJobId} {
+      // Allow read: check super admin first (for better performance on bulk queries)
+      // IMPORTANT: When querying without where clause, Firestore evaluates this for each document
+      // So isSuperAdmin() must be efficient and reliable
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        resource.data.userId == request.auth.uid
+      );
+      allow write: if request.auth != null && (
+        isSuperAdmin() ||
+        resource.data.userId == request.auth.uid
+      );
+      allow create: if request.auth != null && (
+        isSuperAdmin() ||
+        request.resource.data.userId == request.auth.uid
+      );
+    }
+    
+    // Locations collection - GPS tracking data
+    match /locations/{locationId} {
+      // Allow create: users can create their own location data
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.userId;
+      
+      // Allow read:
+      // - Owner of the location
+      // - Company admin/supervisor for same company
+      // - Super admin
+      allow read: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        isSuperAdmin() ||
+        (isCompanyAdminOrSupervisor() && 
+         resource.data.companyId == getUserProfile().companyId)
+      );
+      
+      // No updates or deletes allowed (immutable tracking data)
+      allow update, delete: if false;
+    }
+    
+    // Work Sessions collection - tracking sessions
+    match /workSessions/{sessionId} {
+      // Allow create: users can create their own work sessions
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.userId;
+      
+      // Allow read:
+      // - Owner of the session
+      // - Company admin/supervisor for same company
+      // - Super admin
+      allow read: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        isSuperAdmin() ||
+        (isCompanyAdminOrSupervisor() && 
+         resource.data.companyId == getUserProfile().companyId)
+      );
+      
+      // Allow update: only owner can update their own session
+      allow update: if request.auth != null && 
+        resource.data.userId == request.auth.uid;
+      
+      // No deletes allowed
+      allow delete: if false;
+    }
+  }
+}

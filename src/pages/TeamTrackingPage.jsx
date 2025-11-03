@@ -15,8 +15,13 @@ import {
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 
-// Google Maps API Key - should be in environment variable or config
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+// Google Maps API Key - check both VITE and EXPO_PUBLIC env vars for compatibility
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 
+                             import.meta.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 
+                             '';
+
+// Move libraries constant outside component to avoid re-renders
+const GOOGLE_MAPS_LIBRARIES = ['places'];
 
 const mapContainerStyle = {
   width: '100%',
@@ -35,7 +40,7 @@ const TeamTrackingPage = () => {
   // Load Google Maps API
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
-    libraries: ['places'],
+    libraries: GOOGLE_MAPS_LIBRARIES,
   });
   
   const [teamMembers, setTeamMembers] = useState([]);

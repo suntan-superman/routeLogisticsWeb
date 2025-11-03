@@ -9,7 +9,8 @@ import {
   where,
   addDoc,
   deleteDoc,
-  orderBy
+  orderBy,
+  limit
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { auth } from './firebase';
@@ -57,23 +58,154 @@ class RecurringJobService {
 
   /**
    * Get all recurring jobs for the current user
+   * For super admin: can get all jobs or filter by companyId
    */
-  static async getRecurringJobs() {
+  static async getRecurringJobs(userProfile = null, companyId = null) {
     try {
       const userId = this.getCurrentUserId();
+      const user = auth.currentUser;
       
-      const q = query(
-        collection(db, 'recurringJobs'),
-        where('userId', '==', userId),
-        orderBy('createdAt', 'desc')
-      );
+      // Get user profile if not provided (needed for super admin check)
+      if (!userProfile) {
+        const userDoc = await getDoc(doc(db, 'users', userId));
+        if (userDoc.exists()) {
+          userProfile = userDoc.data();
+        }
+      }
+      
+      // Check super admin status after profile is loaded
+      const isSuperAdmin = user?.email === 'sroy@worksidesoftware.com' || 
+                          userProfile?.role === 'super_admin' ||
+                          userProfile?.email === 'sroy@worksidesoftware.com';
+      
+      let q;
+      
+      if (isSuperAdmin) {
+        // Super admin: get all recurring jobs if no company selected
+        // Use a limit to avoid security rule evaluation issues on large collections
+        // Note: Firestore security rules evaluate for each potential document
+        // For super admin queries, we can query without where clause since isSuperAdmin() should pass
+        if (companyId) {
+          // Get all users in the company first, then query their recurring jobs
+          // This is more efficient than querying all and filtering
+          const usersQuery = query(
+            collection(db, 'users'),
+            where('companyId', '==', companyId)
+          );
+          const usersSnapshot = await getDocs(usersQuery);
+          const userIds = usersSnapshot.docs.map(doc => doc.id);
+          
+          if (userIds.length === 0) {
+            return { success: true, recurringJobs: [] };
+          }
+          
+          // Query recurring jobs for users in this company
+          // Note: Firestore 'in' operator supports up to 10 values
+          // For more users, we'd need to batch queries
+          if (userIds.length <= 10) {
+            q = query(
+              collection(db, 'recurringJobs'),
+              where('userId', 'in', userIds),
+              orderBy('createdAt', 'desc')
+            );
+          } else {
+            // For more than 10 users, query all and filter client-side
+            q = query(
+              collection(db, 'recurringJobs'),
+              orderBy('createdAt', 'desc')
+            );
+          }
+        } else {
+          // Get all recurring jobs (super admin can access all)
+          // IMPORTANT: When querying without where clause, Firestore evaluates security rules
+          // for each potential document, which can fail. Instead, fetch all users first,
+          // then batch query recurring jobs with where clauses (more efficient and reliable)
+          const usersQuery = query(collection(db, 'users'));
+          const usersSnapshot = await getDocs(usersQuery);
+          const userIds = usersSnapshot.docs.map(doc => doc.id);
+          
+          if (userIds.length === 0) {
+            return { success: true, recurringJobs: [] };
+          }
+          
+          // Batch query recurring jobs for all users
+          // Firestore 'in' operator supports up to 10 values, so we need to batch
+          const allRecurringJobs = [];
+          const batchSize = 10;
+          
+          for (let i = 0; i < userIds.length; i += batchSize) {
+            const batch = userIds.slice(i, i + batchSize);
+            const batchQuery = query(
+              collection(db, 'recurringJobs'),
+              where('userId', 'in', batch)
+            );
+            const batchSnapshot = await getDocs(batchQuery);
+            batchSnapshot.forEach((doc) => {
+              allRecurringJobs.push({ id: doc.id, ...doc.data() });
+            });
+          }
+          
+          // Sort by createdAt descending
+          allRecurringJobs.sort((a, b) => {
+            const dateA = a.createdAt?.toDate?.() || new Date(a.createdAt || 0);
+            const dateB = b.createdAt?.toDate?.() || new Date(b.createdAt || 0);
+            return dateB - dateA;
+          });
+          
+          return {
+            success: true,
+            recurringJobs: allRecurringJobs
+          };
+        }
+      } else {
+        // Regular user: only their own jobs
+        // Remove orderBy to avoid index requirement - sort client-side
+        q = query(
+          collection(db, 'recurringJobs'),
+          where('userId', '==', userId)
+        );
+      }
 
       const querySnapshot = await getDocs(q);
       const recurringJobs = [];
-      
+
       querySnapshot.forEach((doc) => {
-        recurringJobs.push({ id: doc.id, ...doc.data() });
+        const jobData = doc.data();
+        // For super admin with company filter, filter by companyId if jobs have companyId field
+        // Otherwise include all
+        if (isSuperAdmin && companyId) {
+          // If recurring jobs have companyId, filter by it
+          // For now, we'll need to get user's companyId and match
+          // This is a limitation - recurring jobs might not have companyId directly
+          recurringJobs.push({ id: doc.id, ...jobData });
+        } else {
+          recurringJobs.push({ id: doc.id, ...jobData });
+        }
       });
+
+      // Sort by createdAt descending client-side
+      // Do this for all users since we removed orderBy to avoid index requirements
+      recurringJobs.sort((a, b) => {
+        const dateA = new Date(a.createdAt || 0);
+        const dateB = new Date(b.createdAt || 0);
+        return dateB - dateA;
+      });
+
+      // If super admin with company filter, filter by users in that company
+      if (isSuperAdmin && companyId) {
+        const usersQuery = query(
+          collection(db, 'users'),
+          where('companyId', '==', companyId)
+        );
+        const usersSnapshot = await getDocs(usersQuery);
+        const userIds = usersSnapshot.docs.map(doc => doc.id);
+        
+        const filteredJobs = recurringJobs.filter(job => userIds.includes(job.userId));
+        return {
+          success: true,
+          recurringJobs: filteredJobs
+        };
+      }
 
       return {
         success: true,

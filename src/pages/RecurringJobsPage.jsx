@@ -4,6 +4,7 @@ import RecurringJobService from '../services/recurringJobService';
 import CustomerService from '../services/customerService';
 import CompanyService from '../services/companyService';
 import { useAuth } from '../contexts/AuthContext';
+import { useCompany } from '../contexts/CompanyContext';
 import { SERVICE_CATEGORIES } from '../constants/serviceCategories';
 import { 
   ArrowPathIcon, 
@@ -41,6 +42,7 @@ const DAY_OF_WEEK_OPTIONS = [
 
 const RecurringJobsPage = () => {
   const { userProfile, isSuperAdmin } = useAuth();
+  const { getEffectiveCompanyId } = useCompany();
   const [recurringJobs, setRecurringJobs] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [companyServices, setCompanyServices] = useState([]);
@@ -73,7 +75,8 @@ const RecurringJobsPage = () => {
   const loadRecurringJobs = async () => {
     setIsLoading(true);
     try {
-      const result = await RecurringJobService.getRecurringJobs();
+      const companyId = getEffectiveCompanyId();
+      const result = await RecurringJobService.getRecurringJobs(userProfile, companyId);
       if (result.success) {
         setRecurringJobs(result.recurringJobs);
       } else {
@@ -88,7 +91,8 @@ const RecurringJobsPage = () => {
 
   const loadCustomers = async () => {
     try {
-      const result = await CustomerService.getCustomers();
+      const companyId = getEffectiveCompanyId();
+      const result = await CustomerService.getCustomers(100, null, {}, userProfile, companyId);
       if (result.success) {
         setCustomers(result.customers);
       }

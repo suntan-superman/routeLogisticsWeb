@@ -77,7 +77,8 @@ const CustomerManagementPage = () => {
   const loadCustomers = async () => {
     setIsLoading(true);
     try {
-      const result = await CustomerService.getCustomers(100, null, {}, userProfile);
+      const companyId = getEffectiveCompanyId();
+      const result = await CustomerService.getCustomers(100, null, {}, userProfile, companyId);
       if (result.success) {
         setCustomers(result.customers);
       } else {
@@ -110,7 +111,8 @@ const CustomerManagementPage = () => {
 
   const loadStats = async () => {
     try {
-      const result = await CustomerService.getCustomerStats(userProfile);
+      const companyId = getEffectiveCompanyId();
+      const result = await CustomerService.getCustomerStats(userProfile, companyId);
       if (result.success) {
         setStats(result.stats);
       }

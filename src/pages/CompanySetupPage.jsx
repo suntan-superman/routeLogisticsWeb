@@ -12,16 +12,40 @@ import {
   CogIcon,
   DocumentTextIcon,
   PhotoIcon,
-  XMarkIcon
+  XMarkIcon,
+  PlusIcon,
+  TrashIcon,
+  XCircleIcon,
+  EyeIcon,
+  ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 
 const CompanySetupPage = () => {
-  const { userProfile, updateUserProfile } = useAuth();
+  const { userProfile, updateUserProfile, isSuperAdmin } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [company, setCompany] = useState(null);
   const [teamMembers, setTeamMembers] = useState([]);
+  
+  // Super admin company management states
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showCompanyList, setShowCompanyList] = useState(false);
+  const [allCompanies, setAllCompanies] = useState([]);
+  const [newCompanyData, setNewCompanyData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    address: '',
+    city: '',
+    state: '',
+    zipCode: '',
+    ownerEmail: '',
+    description: '',
+    serviceCategories: [],
+    services: []
+  });
 
   // Form states
   const [companyData, setCompanyData] = useState({
@@ -57,6 +81,142 @@ const CompanySetupPage = () => {
   useEffect(() => {
     loadCompanyData();
   }, []);
+
+  const resetNewCompanyForm = () => {
+    setNewCompanyData({
+      name: '',
+      email: '',
+      phone: '',
+      address: '',
+      city: '',
+      state: '',
+      zipCode: '',
+      ownerEmail: '',
+      description: '',
+      serviceCategories: [],
+      services: []
+    });
+    setCurrentStep(1);
+  };
+
+  const loadAllCompanies = async () => {
+    setIsLoading(true);
+    try {
+      const result = await CompanyService.getAllCompanies();
+      if (result.success) {
+        setAllCompanies(result.companies || []);
+        if (result.companies && result.companies.length === 0) {
+          // Only log if actually no companies found
+          console.log('No companies found');
+        }
+      } else {
+        console.error('Error loading companies:', result.error);
+        toast.error(result.error || 'Failed to load companies');
+        setAllCompanies([]);
+      }
+    } catch (error) {
+      console.error('Error loading companies:', error);
+      toast.error('Failed to load companies: ' + error.message);
+      setAllCompanies([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCreateCompanyConfirm = async () => {
+    if (!newCompanyData.name || !newCompanyData.ownerEmail) {
+      toast.error('Please fill in company name and owner email');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const result = await CompanyService.createCompanyForUser(
+        {
+          name: newCompanyData.name,
+          description: newCompanyData.description,
+          address: newCompanyData.address,
+          city: newCompanyData.city,
+          state: newCompanyData.state,
+          zipCode: newCompanyData.zipCode,
+          phone: newCompanyData.phone,
+          email: newCompanyData.email,
+          serviceCategories: newCompanyData.serviceCategories,
+          services: newCompanyData.services,
+        },
+        newCompanyData.ownerEmail
+      );
+
+      if (result.success) {
+        toast.success(`Company created successfully! Company code: ${result.companyCode}`);
+        setShowCreateModal(false);
+        setShowConfirmModal(false);
+        resetNewCompanyForm();
+        loadAllCompanies();
+      } else {
+        toast.error(result.error);
+      }
+    } catch (error) {
+      console.error('Error creating company:', error);
+      toast.error('Failed to create company');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteCompany = async (companyId) => {
+    if (!window.confirm('Are you sure you want to delete this company? This action cannot be undone.')) {
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const result = await CompanyService.deleteCompany(companyId);
+      if (result.success) {
+        toast.success(result.message);
+        loadAllCompanies();
+        if (company && company.id === companyId) {
+          // If deleting current company, reload
+          window.location.reload();
+        }
+      } else {
+        if (result.history) {
+          toast.error(`${result.error} History: ${result.history.customers} customers, ${result.history.jobs} jobs, ${result.history.estimates} estimates, ${result.history.invoices} invoices`);
+          toast.info('Use "Deactivate" instead to disable the company while preserving data');
+        } else {
+          toast.error(result.error);
+        }
+      }
+    } catch (error) {
+      console.error('Error deleting company:', error);
+      toast.error('Failed to delete company');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeactivateCompany = async (companyId, isActive) => {
+    const action = isActive ? 'activate' : 'deactivate';
+    if (!window.confirm(`Are you sure you want to ${action} this company?`)) {
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const result = await CompanyService.deactivateCompany(companyId, isActive);
+      if (result.success) {
+        toast.success(result.message);
+        loadAllCompanies();
+      } else {
+        toast.error(result.error);
+      }
+    } catch (error) {
+      console.error('Error deactivating company:', error);
+      toast.error('Failed to deactivate company');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const loadCompanyData = async () => {
     if (!userProfile?.companyId) return;
@@ -201,7 +361,7 @@ const CompanySetupPage = () => {
               <h3 className="text-lg font-medium text-gray-900 mb-4">Basic Company Information</h3>
               <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Company Name *</label>
+                  <label className="block text-sm font-bold text-gray-700">Company Name *</label>
                   <input
                     type="text"
                     value={companyData.name}
@@ -211,7 +371,7 @@ const CompanySetupPage = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Phone Number</label>
+                  <label className="block text-sm font-bold text-gray-700">Phone Number</label>
                   <input
                     type="tel"
                     value={companyData.phone}
@@ -221,7 +381,7 @@ const CompanySetupPage = () => {
                   />
                 </div>
                 <div className="sm:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700">Description</label>
+                  <label className="block text-sm font-bold text-gray-700">Description</label>
                   <textarea
                     value={companyData.description}
                     onChange={(e) => handleInputChange('description', e.target.value)}
@@ -231,7 +391,7 @@ const CompanySetupPage = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Email</label>
+                  <label className="block text-sm font-bold text-gray-700">Email</label>
                   <input
                     type="email"
                     value={companyData.email}
@@ -241,7 +401,7 @@ const CompanySetupPage = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Website</label>
+                  <label className="block text-sm font-bold text-gray-700">Website</label>
                   <input
                     type="url"
                     value={companyData.website}
@@ -251,7 +411,7 @@ const CompanySetupPage = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">
+                  <label className="block text-sm font-bold text-gray-700">
                     Contact Link
                     <span className="ml-2 text-xs text-gray-500 font-normal">
                       (Link shown in invoice emails)
@@ -272,10 +432,10 @@ const CompanySetupPage = () => {
             </div>
             
             <div>
-              <h4 className="text-md font-medium text-gray-900 mb-4">Address</h4>
+              <h4 className="text-sm font-bold text-gray-900 mb-4">Address</h4>
               <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
                 <div className="sm:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700">Street Address</label>
+                  <label className="block text-sm font-bold text-gray-700">Street Address</label>
                   <input
                     type="text"
                     value={companyData.address}
@@ -285,7 +445,7 @@ const CompanySetupPage = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">City</label>
+                  <label className="block text-sm font-bold text-gray-700">City</label>
                   <input
                     type="text"
                     value={companyData.city}
@@ -295,7 +455,7 @@ const CompanySetupPage = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">State</label>
+                  <label className="block text-sm font-bold text-gray-700">State</label>
                   <input
                     type="text"
                     value={companyData.state}
@@ -305,7 +465,7 @@ const CompanySetupPage = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">ZIP Code</label>
+                  <label className="block text-sm font-bold text-gray-700">ZIP Code</label>
                   <input
                     type="text"
                     value={companyData.zipCode}
@@ -323,7 +483,7 @@ const CompanySetupPage = () => {
         return (
           <div className="space-y-6">
             <div>
-              <h3 className="text-lg font-medium text-gray-900 mb-4">Service Categories</h3>
+              <h3 className="text-lg font-bold text-gray-900 mb-4">Service Categories</h3>
               <p className="text-sm text-gray-600 mb-4">
                 Select the service categories your company offers. These match the options available in the mobile app and will be used in estimates and job scheduling.
               </p>
@@ -655,14 +815,40 @@ const CompanySetupPage = () => {
     >
       {/* Header */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <div className="flex items-center">
-          <BuildingOfficeIcon className="h-8 w-8 text-primary-500 mr-3" />
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Company Setup</h1>
-            <p className="text-gray-600">
-              {company ? 'Manage your company settings' : 'Set up your company profile'}
-            </p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center">
+            <BuildingOfficeIcon className="h-8 w-8 text-primary-500 mr-3" />
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Company Setup</h1>
+              <p className="text-gray-600">
+                {company ? 'Manage your company settings' : 'Set up your company profile'}
+              </p>
+            </div>
           </div>
+          {isSuperAdmin && (
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setShowCompanyList(true);
+                  loadAllCompanies();
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+              >
+                <EyeIcon className="w-4 h-4 inline mr-2" />
+                View All Companies
+              </button>
+              <button
+                onClick={() => {
+                  resetNewCompanyForm();
+                  setShowCreateModal(true);
+                }}
+                className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+              >
+                <PlusIcon className="w-4 h-4 inline mr-2" />
+                Create New Company
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -746,6 +932,332 @@ const CompanySetupPage = () => {
           </div>
         </div>
       </div>
+      {/* Create New Company Modal (Super Admin) */}
+      {showCreateModal && isSuperAdmin && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => {
+              setShowCreateModal(false);
+              setShowConfirmModal(false);
+            }} />
+            
+            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-4xl sm:w-full">
+              <div className="bg-white px-4 pt-5 pb-4 sm:p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">Create New Company</h3>
+                  <button
+                    onClick={() => {
+                      setShowCreateModal(false);
+                      setShowConfirmModal(false);
+                    }}
+                    className="text-gray-400 hover:text-gray-500"
+                  >
+                    <XMarkIcon className="w-6 h-6" />
+                  </button>
+                </div>
+
+                {!showConfirmModal ? (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div className="sm:col-span-2">
+                        <label className="block text-sm font-medium text-gray-700">Owner Email *</label>
+                        <input
+                          type="email"
+                          value={newCompanyData.ownerEmail}
+                          onChange={(e) => setNewCompanyData(prev => ({ ...prev, ownerEmail: e.target.value }))}
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          placeholder="owner@example.com"
+                        />
+                        <p className="mt-1 text-xs text-gray-500">User must already have an account</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Company Name *</label>
+                        <input
+                          type="text"
+                          value={newCompanyData.name}
+                          onChange={(e) => setNewCompanyData(prev => ({ ...prev, name: e.target.value }))}
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          placeholder="Company Name"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Phone</label>
+                        <input
+                          type="tel"
+                          value={newCompanyData.phone}
+                          onChange={(e) => setNewCompanyData(prev => ({ ...prev, phone: e.target.value }))}
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          placeholder="(555) 123-4567"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Email</label>
+                        <input
+                          type="email"
+                          value={newCompanyData.email}
+                          onChange={(e) => setNewCompanyData(prev => ({ ...prev, email: e.target.value }))}
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          placeholder="company@example.com"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="block text-sm font-medium text-gray-700">Description</label>
+                        <textarea
+                          value={newCompanyData.description}
+                          onChange={(e) => setNewCompanyData(prev => ({ ...prev, description: e.target.value }))}
+                          rows={2}
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          placeholder="Brief company description"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="block text-sm font-medium text-gray-700">Street Address</label>
+                        <input
+                          type="text"
+                          value={newCompanyData.address}
+                          onChange={(e) => setNewCompanyData(prev => ({ ...prev, address: e.target.value }))}
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          placeholder="123 Main Street"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">City</label>
+                        <input
+                          type="text"
+                          value={newCompanyData.city}
+                          onChange={(e) => setNewCompanyData(prev => ({ ...prev, city: e.target.value }))}
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          placeholder="Bakersfield"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">State</label>
+                        <input
+                          type="text"
+                          value={newCompanyData.state}
+                          onChange={(e) => setNewCompanyData(prev => ({ ...prev, state: e.target.value }))}
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          placeholder="CA"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">ZIP Code</label>
+                        <input
+                          type="text"
+                          value={newCompanyData.zipCode}
+                          onChange={(e) => setNewCompanyData(prev => ({ ...prev, zipCode: e.target.value }))}
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          placeholder="93311"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <h4 className="text-sm font-medium text-blue-900 mb-3">Company Summary</h4>
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <span className="text-gray-600">Company Name:</span>
+                          <p className="font-medium text-gray-900">{newCompanyData.name}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">Owner Email:</span>
+                          <p className="font-medium text-gray-900">{newCompanyData.ownerEmail}</p>
+                        </div>
+                        {newCompanyData.phone && (
+                          <div>
+                            <span className="text-gray-600">Phone:</span>
+                            <p className="font-medium text-gray-900">{newCompanyData.phone}</p>
+                          </div>
+                        )}
+                        {newCompanyData.email && (
+                          <div>
+                            <span className="text-gray-600">Email:</span>
+                            <p className="font-medium text-gray-900">{newCompanyData.email}</p>
+                          </div>
+                        )}
+                        {newCompanyData.address && (
+                          <div className="col-span-2">
+                            <span className="text-gray-600">Address:</span>
+                            <p className="font-medium text-gray-900">
+                              {newCompanyData.address}, {newCompanyData.city}, {newCompanyData.state} {newCompanyData.zipCode}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-sm text-gray-600">
+                      This will create a new company and assign it to <strong>{newCompanyData.ownerEmail}</strong>. 
+                      The owner will be set as admin and receive a company code to share with team members.
+                    </p>
+                  </div>
+                )}
+
+                <div className="mt-6 flex justify-end gap-3">
+                  <button
+                    onClick={() => {
+                      setShowCreateModal(false);
+                      setShowConfirmModal(false);
+                      resetNewCompanyForm();
+                    }}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  {!showConfirmModal ? (
+                    <button
+                      onClick={() => {
+                        if (!newCompanyData.name || !newCompanyData.ownerEmail) {
+                          toast.error('Please fill in company name and owner email');
+                          return;
+                        }
+                        setShowConfirmModal(true);
+                      }}
+                      className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+                    >
+                      Continue to Review
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleCreateCompanyConfirm}
+                      disabled={isLoading}
+                      className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50"
+                    >
+                      {isLoading ? 'Creating...' : 'Create Company'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Company List Modal (Super Admin) */}
+      {showCompanyList && isSuperAdmin && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowCompanyList(false)} />
+            
+            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-6xl sm:w-full">
+              <div className="bg-white px-4 pt-5 pb-4 sm:p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">All Companies</h3>
+                  <button
+                    onClick={() => setShowCompanyList(false)}
+                    className="text-gray-400 hover:text-gray-500"
+                  >
+                    <XMarkIcon className="w-6 h-6" />
+                  </button>
+                </div>
+
+                <div className="mt-4">
+                  {allCompanies.length === 0 ? (
+                    <p className="text-center text-gray-500 py-8">No companies found</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Owner</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Code</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {allCompanies.map((comp) => (
+                            <tr key={comp.id}>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="flex items-center gap-2">
+                                  <div className="text-sm font-medium text-gray-900">{comp.name}</div>
+                                  {(comp.isAdminCompany || comp.isProtected) && (
+                                    <span 
+                                      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800"
+                                      title="Protected administrative company - cannot be deleted or deactivated"
+                                    >
+                                      Protected
+                                    </span>
+                                  )}
+                                </div>
+                                {comp.email && (
+                                  <div className="text-sm text-gray-500">{comp.email}</div>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="text-sm text-gray-900">{comp.ownerName || 'N/A'}</div>
+                                <div className="text-sm text-gray-500">{comp.ownerEmail || ''}</div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <code className="text-sm font-mono bg-gray-100 px-2 py-1 rounded">{comp.code}</code>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                  comp.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                }`}>
+                                  {comp.isActive ? 'Active' : 'Inactive'}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {comp.createdAt ? new Date(comp.createdAt).toLocaleDateString() : 'N/A'}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                <div className="flex justify-end gap-2">
+                                  {/* Deactivate/Activate button - disabled for protected companies */}
+                                  {!(comp.isAdminCompany || comp.isProtected) ? (
+                                    <button
+                                      onClick={() => handleDeactivateCompany(comp.id, !comp.isActive)}
+                                      className={`${
+                                        comp.isActive 
+                                          ? 'text-yellow-600 hover:text-yellow-900' 
+                                          : 'text-green-600 hover:text-green-900'
+                                      }`}
+                                      title={comp.isActive ? 'Deactivate' : 'Activate'}
+                                    >
+                                      <XCircleIcon className="w-5 h-5" />
+                                    </button>
+                                  ) : (
+                                    <span 
+                                      className="text-gray-400 cursor-not-allowed" 
+                                      title="Protected company - cannot be deactivated"
+                                    >
+                                      <XCircleIcon className="w-5 h-5" />
+                                    </span>
+                                  )}
+                                  {/* Delete button - hidden for protected companies */}
+                                  {!(comp.isAdminCompany || comp.isProtected) ? (
+                                    <button
+                                      onClick={() => handleDeleteCompany(comp.id)}
+                                      className="text-red-600 hover:text-red-900"
+                                      title="Delete"
+                                    >
+                                      <TrashIcon className="w-5 h-5" />
+                                    </button>
+                                  ) : (
+                                    <span 
+                                      className="text-gray-400 cursor-not-allowed" 
+                                      title="Protected company - cannot be deleted"
+                                    >
+                                      <TrashIcon className="w-5 h-5" />
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 };

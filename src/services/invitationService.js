@@ -198,17 +198,24 @@ class InvitationService {
         };
       }
 
+      // Remove orderBy to avoid composite index requirement - sort client-side
       const q = query(
         collection(db, 'invitations'),
-        where('companyId', '==', companyId),
-        orderBy('createdAt', 'desc')
+        where('companyId', '==', companyId)
       );
 
       const querySnapshot = await getDocs(q);
       const invitations = [];
-
+      
       querySnapshot.forEach((doc) => {
         invitations.push({ id: doc.id, ...doc.data() });
+      });
+
+      // Sort by createdAt descending client-side (since we removed orderBy)
+      invitations.sort((a, b) => {
+        const dateA = new Date(a.createdAt || 0);
+        const dateB = new Date(b.createdAt || 0);
+        return dateB - dateA;
       });
 
       return {

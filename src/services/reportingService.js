@@ -109,10 +109,10 @@ class ReportingService {
   // Get jobs for analytics
   static async getJobsForAnalytics(userId, startDate, endDate) {
     try {
+      // Remove orderBy to avoid composite index requirement - sort client-side
       const q = query(
         collection(db, 'jobs'),
-        where('userId', '==', userId),
-        orderBy('date', 'desc')
+        where('userId', '==', userId)
       );
 
       const querySnapshot = await getDocs(q);
@@ -126,6 +126,13 @@ class ReportingService {
         if (jobDate >= startDate && jobDate <= endDate) {
           jobs.push({ id: doc.id, ...jobData });
         }
+      });
+
+      // Sort by date descending client-side
+      jobs.sort((a, b) => {
+        const dateA = new Date(a.date || 0);
+        const dateB = new Date(b.date || 0);
+        return dateB - dateA;
       });
 
       return {
@@ -172,10 +179,10 @@ class ReportingService {
   // Get estimates for analytics
   static async getEstimatesForAnalytics(userId, startDate, endDate) {
     try {
+      // Remove orderBy to avoid composite index requirement - sort client-side
       const q = query(
         collection(db, 'estimates'),
-        where('userId', '==', userId),
-        orderBy('createdAt', 'desc')
+        where('userId', '==', userId)
       );
 
       const querySnapshot = await getDocs(q);
@@ -189,6 +196,13 @@ class ReportingService {
         if (estimateDate >= startDate && estimateDate <= endDate) {
           estimates.push({ id: doc.id, ...estimateData });
         }
+      });
+
+      // Sort by createdAt descending client-side
+      estimates.sort((a, b) => {
+        const dateA = new Date(a.createdAt || 0);
+        const dateB = new Date(b.createdAt || 0);
+        return dateB - dateA;
       });
 
       return {

@@ -5,7 +5,8 @@ import {
   createUserWithEmailAndPassword, 
   signOut, 
   onAuthStateChanged,
-  updateProfile
+  updateProfile,
+  sendEmailVerification
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import toast from 'react-hot-toast';
@@ -50,6 +51,20 @@ export const AuthProvider = ({ children }) => {
         displayName: userData.name
       });
 
+      // Send email verification
+      // Firebase will send an email with a link that goes through Firebase's action handler
+      // The link will include action code parameters that we handle in EmailVerificationPage
+      // Make sure your domain is added to Authorized domains in Firebase Console:
+      // Authentication → Settings → Authorized domains
+      try {
+        await sendEmailVerification(user);
+        console.log('Verification email sent successfully to:', user.email);
+      } catch (emailError) {
+        console.error('Error sending verification email:', emailError);
+        // Don't fail the signup if email fails, but log it
+        // User can resend from verification page
+      }
+
       // Create user profile in Firestore
       const userProfileData = {
         id: user.uid,
@@ -66,15 +81,37 @@ export const AuthProvider = ({ children }) => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         companyId: null, // Will be set when company is created
-        role: 'admin' // First user is admin
+        role: userData.role || 'admin', // Use provided role or default to admin
+        emailVerified: false // Track verification status
       };
 
       await setDoc(doc(db, 'users', user.uid), userProfileData);
       
-      setUserProfile(userProfileData);
-      toast.success('Account created successfully!');
+      // Store signup data temporarily for pre-filling Company Setup
+      if (userData.businessName || userData.address || userData.phoneNumber) {
+        const signupCompanyData = {
+          name: userData.businessName || '',
+          phone: userData.phoneNumber || '',
+          address: userData.address || '',
+          city: userData.city || '',
+          state: userData.state || '',
+          zipCode: userData.zipCode || '',
+          email: email
+        };
+        localStorage.setItem('pendingCompanyData', JSON.stringify(signupCompanyData));
+      }
       
-      return { success: true, user };
+      // Sign out user so they must verify email first
+      await signOut(auth);
+      
+      toast.success('Account created! Please check your email to verify your account.');
+      
+      return { 
+        success: true, 
+        user,
+        needsEmailVerification: true,
+        email: user.email
+      };
     } catch (error) {
       console.error('Signup error:', error);
       
@@ -243,9 +280,16 @@ export const AuthProvider = ({ children }) => {
     needsCompanySetup: needsCompanySetup()
   };
 
+  // Always provide a value, even during initialization
   return (
     <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
+};
+
+// Export a safe version that doesn't throw during initialization
+export const useAuthSafe = () => {
+  const context = useContext(AuthContext);
+  return context; // Return undefined/null if not available instead of throwing
 };

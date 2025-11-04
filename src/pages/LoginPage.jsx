@@ -17,7 +17,13 @@ const LoginPage = () => {
     const result = await signin(email, password);
     
     if (result.success) {
-      navigate('/');
+      // Check if email is verified
+      const user = result.user;
+      if (user && !user.emailVerified && user.email !== 'sroy@worksidesoftware.com') {
+        navigate('/verify-email', { state: { email: user.email } });
+      } else {
+        navigate('/');
+      }
     }
     
     setIsLoading(false);

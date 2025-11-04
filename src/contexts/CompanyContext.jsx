@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { useAuth } from './AuthContext';
+import { useAuthSafe } from './AuthContext';
 import CompanyService from '../services/companyService';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../services/firebase';
@@ -15,7 +15,11 @@ export const useCompany = () => {
 };
 
 export const CompanyProvider = ({ children }) => {
-  const { userProfile, isSuperAdmin } = useAuth();
+  // Get auth context safely - handles case where AuthProvider might still be initializing
+  const authContext = useAuthSafe();
+  const userProfile = authContext?.userProfile || null;
+  const isSuperAdmin = authContext?.isSuperAdmin || false;
+  
   const [availableCompanies, setAvailableCompanies] = useState([]);
   const [activeCompanyId, setActiveCompanyId] = useState(null);
   const [activeCompany, setActiveCompany] = useState(null);

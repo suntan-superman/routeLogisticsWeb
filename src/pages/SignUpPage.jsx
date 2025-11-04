@@ -9,6 +9,7 @@ import {
   CheckCircleIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import { formatPhoneNumber } from '../utils/phoneFormatter';
 
 const ROLE_OPTIONS = [
   { value: 'admin', label: 'Company Administrator', description: 'Full access to manage company settings, customers, jobs, and team' },
@@ -40,12 +41,39 @@ const SignUpPage = () => {
   const [companyName, setCompanyName] = useState('');
   const [companyPhone, setCompanyPhone] = useState('');
   const [companyAddress, setCompanyAddress] = useState('');
+  const [companyCity, setCompanyCity] = useState('');
+  const [companyState, setCompanyState] = useState('');
+  const [companyZipCode, setCompanyZipCode] = useState('');
   
   const { signup } = useAuth();
   const navigate = useNavigate();
 
   const [validatingCode, setValidatingCode] = useState(false);
   const [codeValidationMessage, setCodeValidationMessage] = useState('');
+
+  // Reset all form fields when component mounts
+  useEffect(() => {
+    // Clear all form state when navigating to signup page
+    setName('');
+    setEmail('');
+    setPassword('');
+    setConfirmPassword('');
+    setStep(1);
+    setCompanyOption('new');
+    setCompanyCode('');
+    setCompanySearchTerm('');
+    setSearchResults([]);
+    setSelectedCompany(null);
+    setRole('field_tech');
+    setCompanyName('');
+    setCompanyPhone('');
+    setCompanyAddress('');
+    setCompanyCity('');
+    setCompanyState('');
+    setCompanyZipCode('');
+    setCodeValidationMessage('');
+    setValidatingCode(false);
+  }, []); // Run only on mount
 
   useEffect(() => {
     // Validate company code when it's 6 characters
@@ -133,7 +161,7 @@ const SignUpPage = () => {
   };
 
   const handleStep4Next = () => {
-    if (!companyName || !companyPhone || !companyAddress) {
+    if (!companyName || !companyPhone || !companyAddress || !companyCity || !companyState || !companyZipCode) {
       toast.error('Please fill in all company fields');
       return;
     }
@@ -147,9 +175,12 @@ const SignUpPage = () => {
       // Create user account first
       const userData = {
         name,
-        phoneNumber: '',
+        phoneNumber: companyOption === 'new' ? companyPhone : '',
         businessName: companyOption === 'new' ? companyName : '',
         address: companyOption === 'new' ? companyAddress : '',
+        city: companyOption === 'new' ? companyCity : '',
+        state: companyOption === 'new' ? companyState : '',
+        zipCode: companyOption === 'new' ? companyZipCode : '',
         services: [],
         serviceCategories: [],
         role: role
@@ -163,29 +194,24 @@ const SignUpPage = () => {
         return;
       }
 
+      // If email verification is required, redirect to verification page
+      if (signupResult.needsEmailVerification) {
+        navigate('/verify-email', { 
+          state: { email: signupResult.email } 
+        });
+        setIsLoading(false);
+        return;
+      }
+
       const userId = signupResult.user?.uid;
 
-      // If creating new company, create it now
+      // If creating new company, store data for later (after email verification)
       if (companyOption === 'new') {
-        const companyData = {
-          name: companyName,
-          phone: companyPhone,
-          address: companyAddress,
-          email: email,
-          services: [],
-          serviceCategories: []
-        };
-
-        const companyResult = await CompanyService.createCompany(companyData);
-        
-        if (companyResult.success) {
-          toast.success(`Account and company created! Your company code is: ${companyResult.companyCode}`);
-          // User profile already updated by createCompany
-          navigate('/company-setup');
-        } else {
-          toast.error('Account created but company setup failed: ' + companyResult.error);
-          navigate('/company-setup');
-        }
+        // Company will be created after email verification in Company Setup
+        // Data is already stored in localStorage by signup function
+        navigate('/verify-email', { 
+          state: { email: signupResult.email } 
+        });
       } else {
         // For existing company, link user via company code
         if (companyCode) {
@@ -193,16 +219,19 @@ const SignUpPage = () => {
           
           if (joinResult.success) {
             toast.success(`Successfully joined ${joinResult.company.name}!`);
-            navigate('/');
+            navigate('/verify-email', { 
+              state: { email: signupResult.email } 
+            });
           } else {
             toast.error('Failed to join company: ' + joinResult.error);
-            toast.info('You can complete company setup later');
-            navigate('/');
+            navigate('/verify-email', { 
+              state: { email: signupResult.email } 
+            });
           }
         } else {
-          toast.success('Account created successfully!');
-          toast.info('Please contact your company administrator to complete setup');
-          navigate('/');
+          navigate('/verify-email', { 
+            state: { email: signupResult.email } 
+          });
         }
       }
     } catch (error) {
@@ -287,6 +316,7 @@ const SignUpPage = () => {
                   id="email"
                   type="email"
                   required
+                  autoComplete="off"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
@@ -302,6 +332,7 @@ const SignUpPage = () => {
                   id="password"
                   type="password"
                   required
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
@@ -317,6 +348,7 @@ const SignUpPage = () => {
                   id="confirmPassword"
                   type="password"
                   required
+                  autoComplete="new-password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
@@ -533,7 +565,11 @@ const SignUpPage = () => {
                   type="tel"
                   required
                   value={companyPhone}
-                  onChange={(e) => setCompanyPhone(e.target.value)}
+                  onChange={(e) => {
+                    const formatted = formatPhoneNumber(e.target.value);
+                    setCompanyPhone(formatted);
+                  }}
+                  maxLength={14}
                   className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
                   placeholder="(555) 123-4567"
                 />
@@ -541,7 +577,7 @@ const SignUpPage = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700">
-                  Address *
+                  Street Address *
                 </label>
                 <input
                   type="text"
@@ -549,8 +585,55 @@ const SignUpPage = () => {
                   value={companyAddress}
                   onChange={(e) => setCompanyAddress(e.target.value)}
                   className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                  placeholder="123 Main St, City, State ZIP"
+                  placeholder="123 Main St"
                 />
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    City *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={companyCity}
+                    onChange={(e) => setCompanyCity(e.target.value)}
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                    placeholder="City"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    State *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={companyState}
+                    onChange={(e) => setCompanyState(e.target.value.toUpperCase())}
+                    maxLength={2}
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                    placeholder="CA"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    ZIP Code *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={companyZipCode}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/\D/g, '').slice(0, 5);
+                      setCompanyZipCode(value);
+                    }}
+                    maxLength={5}
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                    placeholder="12345"
+                  />
+                </div>
               </div>
 
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">

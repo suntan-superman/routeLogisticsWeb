@@ -12,6 +12,7 @@ import { CompanyProvider } from './contexts/CompanyContext';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import SignUpPage from './pages/SignUpPage';
+import EmailVerificationPage from './pages/EmailVerificationPage';
 import CompanySetupPage from './pages/CompanySetupPage';
 import CustomerManagementPage from './pages/CustomerManagementPage';
 import EstimateTemplatesPage from './pages/EstimateTemplatesPage';
@@ -49,12 +50,18 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <CompanyProvider>
-            <Router>
+            <Router
+              future={{
+                v7_startTransition: true,
+                v7_relativeSplatPath: true
+              }}
+            >
             <div className="min-h-screen bg-gray-50">
               <Routes>
                 {/* Public Routes */}
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/signup" element={<SignUpPage />} />
+                <Route path="/verify-email" element={<EmailVerificationPage />} />
                 
                 {/* Protected Routes */}
                 <Route path="/" element={

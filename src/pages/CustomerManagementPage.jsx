@@ -20,6 +20,7 @@ import {
   ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import { formatPhoneNumber } from '../utils/phoneFormatter';
 
 const CustomerManagementPage = () => {
   const { userProfile, isSuperAdmin } = useAuth();
@@ -880,7 +881,11 @@ const CustomerManagementPage = () => {
                     <input
                       type="tel"
                       value={customerData.phone}
-                      onChange={(e) => handleInputChange('phone', e.target.value)}
+                      onChange={(e) => {
+                        const formatted = formatPhoneNumber(e.target.value);
+                        handleInputChange('phone', formatted);
+                      }}
+                      maxLength={14}
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                       placeholder="(555) 123-4567"
                     />
@@ -1029,7 +1034,11 @@ const CustomerManagementPage = () => {
                     <input
                       type="tel"
                       value={customerData.phone}
-                      onChange={(e) => handleInputChange('phone', e.target.value)}
+                      onChange={(e) => {
+                        const formatted = formatPhoneNumber(e.target.value);
+                        handleInputChange('phone', formatted);
+                      }}
+                      maxLength={14}
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                       placeholder="(555) 123-4567"
                     />

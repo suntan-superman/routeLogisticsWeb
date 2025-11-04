@@ -31,7 +31,7 @@ import {
 import toast from 'react-hot-toast';
 
 const CompanySetupPage = () => {
-  const { userProfile, updateUserProfile, isSuperAdmin } = useAuth();
+  const { userProfile, updateUserProfile, isSuperAdmin, currentUser } = useAuth();
   const { getEffectiveCompanyId } = useCompany();
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
@@ -116,8 +116,43 @@ const CompanySetupPage = () => {
   ];
 
   useEffect(() => {
+    // IMPORTANT: Only load company data if user is verified
+    // This prevents unverified users from accessing company setup
+    if (!currentUser) return;
+    
+    // Check if user is verified (super admin bypasses check)
+    const isSuperAdminUser = currentUser?.email === 'sroy@worksidesoftware.com';
+    if (!isSuperAdminUser && !currentUser.emailVerified) {
+      // User is not verified, don't load company data
+      return;
+    }
+    
     loadCompanyData();
-  }, []);
+    
+    // Check for pending company data from signup
+    const pendingCompanyData = localStorage.getItem('pendingCompanyData');
+    if (pendingCompanyData && !company?.id) {
+      try {
+        const companyData = JSON.parse(pendingCompanyData);
+        // Pre-fill company data from signup
+        setCompanyData(prev => ({
+          ...prev,
+          name: companyData.name || prev.name,
+          phone: companyData.phone || prev.phone,
+          address: companyData.address || prev.address,
+          city: companyData.city || prev.city,
+          state: companyData.state || prev.state,
+          zipCode: companyData.zipCode || prev.zipCode,
+          email: companyData.email || prev.email
+        }));
+        
+        // Clear the pending data after using it
+        localStorage.removeItem('pendingCompanyData');
+      } catch (error) {
+        console.error('Error parsing pending company data:', error);
+      }
+    }
+  }, [currentUser, isSuperAdmin]);
 
   // Load materials when on materials step
   useEffect(() => {
@@ -699,7 +734,11 @@ const CompanySetupPage = () => {
                   <input
                     type="tel"
                     value={companyData.phone}
-                    onChange={(e) => handleInputChange('phone', e.target.value)}
+                    onChange={(e) => {
+                      const formatted = formatPhoneNumber(e.target.value);
+                      handleInputChange('phone', formatted);
+                    }}
+                    maxLength={14}
                     className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                     placeholder="(555) 123-4567"
                   />
@@ -1494,7 +1533,11 @@ const CompanySetupPage = () => {
                         <input
                           type="tel"
                           value={newCompanyData.phone}
-                          onChange={(e) => setNewCompanyData(prev => ({ ...prev, phone: e.target.value }))}
+                          onChange={(e) => {
+                            const formatted = formatPhoneNumber(e.target.value);
+                            setNewCompanyData(prev => ({ ...prev, phone: formatted }));
+                          }}
+                          maxLength={14}
                           className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                           placeholder="(555) 123-4567"
                         />

@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
+import { useCompany } from '../contexts/CompanyContext';
 import CompanyService from '../services/companyService';
+import MaterialsService from '../services/materialsService';
 import StorageService from '../services/storageService';
 import { useDropzone } from 'react-dropzone';
 import { SERVICE_CATEGORIES } from '../constants/serviceCategories';
+import { getDefaultMaterialsForCategories } from '../constants/defaultMaterials';
+import * as XLSX from 'xlsx';
 import { 
   BuildingOfficeIcon, 
   CheckCircleIcon,
@@ -17,12 +21,18 @@ import {
   TrashIcon,
   XCircleIcon,
   EyeIcon,
-  ExclamationTriangleIcon
+  ExclamationTriangleIcon,
+  WrenchScrewdriverIcon,
+  ArrowDownTrayIcon,
+  ArrowUpTrayIcon,
+  MagnifyingGlassIcon,
+  PencilIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 
 const CompanySetupPage = () => {
   const { userProfile, updateUserProfile, isSuperAdmin } = useAuth();
+  const { getEffectiveCompanyId } = useCompany();
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [company, setCompany] = useState(null);
@@ -69,18 +79,59 @@ const CompanySetupPage = () => {
   const [newMemberEmail, setNewMemberEmail] = useState('');
   const [newMemberRole, setNewMemberRole] = useState('technician');
   const [logoUploading, setLogoUploading] = useState(false);
+  
+  // Materials state
+  const [materials, setMaterials] = useState([]);
+  const [filteredMaterials, setFilteredMaterials] = useState([]);
+  const [materialsSearchTerm, setMaterialsSearchTerm] = useState('');
+  const [materialsCategoryFilter, setMaterialsCategoryFilter] = useState('all');
+  const [showMaterialModal, setShowMaterialModal] = useState(false);
+  const [showMaterialImportModal, setShowMaterialImportModal] = useState(false);
+  const [selectedMaterial, setSelectedMaterial] = useState(null);
+  const [materialData, setMaterialData] = useState({
+    name: '',
+    description: '',
+    category: '',
+    subcategory: '',
+    unit: '',
+    costPerUnit: 0,
+    retailPrice: 0,
+    supplier: '',
+    reorderThreshold: 0,
+    quantityInStock: 0,
+    storageLocation: '',
+    imageUrl: '',
+    barcode: '',
+    expirationDate: null,
+    active: true
+  });
 
   const steps = [
     { id: 1, name: 'Basic Info', icon: BuildingOfficeIcon },
     { id: 2, name: 'Services', icon: CogIcon },
-    { id: 3, name: 'Team', icon: UserGroupIcon },
-    { id: 4, name: 'Branding', icon: PhotoIcon },
-    { id: 5, name: 'Templates', icon: DocumentTextIcon }
+    { id: 3, name: 'Materials', icon: WrenchScrewdriverIcon },
+    { id: 4, name: 'Team', icon: UserGroupIcon },
+    { id: 5, name: 'Branding', icon: PhotoIcon },
+    { id: 6, name: 'Templates', icon: DocumentTextIcon }
   ];
 
   useEffect(() => {
     loadCompanyData();
   }, []);
+
+  // Load materials when on materials step
+  useEffect(() => {
+    if (currentStep === 3) {
+      loadMaterials();
+    }
+  }, [currentStep, company?.id, getEffectiveCompanyId]);
+
+  // Filter materials
+  useEffect(() => {
+    if (currentStep === 3) {
+      filterMaterials();
+    }
+  }, [materials, materialsSearchTerm, materialsCategoryFilter]);
 
   const resetNewCompanyForm = () => {
     setNewCompanyData({
@@ -352,6 +403,279 @@ const CompanySetupPage = () => {
     }
   };
 
+  // Materials functions
+  const loadMaterials = async () => {
+    const companyId = company?.id || getEffectiveCompanyId();
+    if (!companyId) {
+      setMaterials([]);
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const result = await MaterialsService.getMaterials(companyId, userProfile);
+      if (result.success) {
+        setMaterials(result.materials || []);
+      } else {
+        toast.error(result.error || 'Failed to load materials');
+        setMaterials([]);
+      }
+    } catch (error) {
+      console.error('Error loading materials:', error);
+      toast.error('Error loading materials');
+      setMaterials([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const filterMaterials = () => {
+    let filtered = [...materials];
+
+    // Apply search filter
+    if (materialsSearchTerm) {
+      const searchLower = materialsSearchTerm.toLowerCase();
+      filtered = filtered.filter(m => 
+        m.name?.toLowerCase().includes(searchLower) ||
+        m.description?.toLowerCase().includes(searchLower) ||
+        m.category?.toLowerCase().includes(searchLower) ||
+        m.supplier?.toLowerCase().includes(searchLower)
+      );
+    }
+
+    // Apply category filter
+    if (materialsCategoryFilter !== 'all') {
+      filtered = filtered.filter(m => m.category === materialsCategoryFilter);
+    }
+
+    setFilteredMaterials(filtered);
+  };
+
+  const resetMaterialForm = () => {
+    setMaterialData({
+      name: '',
+      description: '',
+      category: '',
+      subcategory: '',
+      unit: '',
+      costPerUnit: 0,
+      retailPrice: 0,
+      supplier: '',
+      reorderThreshold: 0,
+      quantityInStock: 0,
+      storageLocation: '',
+      imageUrl: '',
+      barcode: '',
+      expirationDate: null,
+      active: true
+    });
+    setSelectedMaterial(null);
+  };
+
+  const handleMaterialInputChange = (field, value) => {
+    setMaterialData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleOpenMaterialModal = (material = null) => {
+    if (material) {
+      setSelectedMaterial(material);
+      setMaterialData({
+        name: material.name || '',
+        description: material.description || '',
+        category: material.category || '',
+        subcategory: material.subcategory || '',
+        unit: material.unit || '',
+        costPerUnit: material.costPerUnit || 0,
+        retailPrice: material.retailPrice || 0,
+        supplier: material.supplier || '',
+        reorderThreshold: material.reorderThreshold || 0,
+        quantityInStock: material.quantityInStock || 0,
+        storageLocation: material.storageLocation || '',
+        imageUrl: material.imageUrl || '',
+        barcode: material.barcode || '',
+        expirationDate: material.expirationDate || null,
+        active: material.active !== undefined ? material.active : true
+      });
+    } else {
+      resetMaterialForm();
+    }
+    setShowMaterialModal(true);
+  };
+
+  const handleSaveMaterial = async () => {
+    // Validate required fields
+    if (!materialData.name || !materialData.category || !materialData.unit || !materialData.retailPrice) {
+      toast.error('Please fill in all required fields (Name, Category, Unit, Retail Price)');
+      return;
+    }
+
+    const companyId = company?.id || getEffectiveCompanyId();
+    if (!companyId) {
+      toast.error('Company ID is required');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      let result;
+      if (selectedMaterial) {
+        result = await MaterialsService.updateMaterial(selectedMaterial.id, materialData);
+      } else {
+        result = await MaterialsService.createMaterial(materialData, companyId);
+      }
+
+      if (result.success) {
+        toast.success(selectedMaterial ? 'Material updated successfully!' : 'Material created successfully!');
+        setShowMaterialModal(false);
+        resetMaterialForm();
+        loadMaterials();
+      } else {
+        toast.error(result.error || 'Failed to save material');
+      }
+    } catch (error) {
+      console.error('Error saving material:', error);
+      toast.error('Error saving material');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteMaterial = async (materialId) => {
+    if (!window.confirm('Are you sure you want to delete this material? It cannot be deleted if it has been used in jobs.')) {
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const result = await MaterialsService.deleteMaterial(materialId);
+      if (result.success) {
+        toast.success('Material deleted successfully!');
+        loadMaterials();
+      } else {
+        toast.error(result.error || 'Failed to delete material');
+      }
+    } catch (error) {
+      console.error('Error deleting material:', error);
+      toast.error('Error deleting material');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDownloadMaterialTemplate = () => {
+    const template = [
+      {
+        'Name': 'Chlorine Tablets',
+        'Description': '3-inch stabilized chlorine tablets',
+        'Category': 'Pool Chemicals',
+        'Subcategory': '',
+        'Unit': 'bucket (50 lbs)',
+        'CostPerUnit': 85.00,
+        'RetailPrice': 125.00,
+        'Supplier': 'PoolSupplyCo',
+        'Active': true
+      }
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(template);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Materials');
+    XLSX.writeFile(wb, 'materials_import_template.xlsx');
+    toast.success('Template downloaded successfully!');
+  };
+
+  const handleMaterialImport = async (file) => {
+    // Implementation will be added in next step
+    toast.info('Material import functionality coming soon');
+  };
+
+  const handleImportDefaultMaterials = async () => {
+    const companyId = company?.id || getEffectiveCompanyId();
+    if (!companyId) {
+      toast.error('Company ID is required');
+      return;
+    }
+
+    if (!serviceCategories || serviceCategories.length === 0) {
+      toast.error('Please select service categories first before importing default materials');
+      return;
+    }
+
+    // Check if materials already exist
+    if (materials.length > 0) {
+      const confirmImport = window.confirm(
+        `You already have ${materials.length} materials. Importing default materials will add new ones but won't duplicate existing materials by name. Continue?`
+      );
+      if (!confirmImport) {
+        return;
+      }
+    }
+
+    setIsLoading(true);
+    try {
+      // Get default materials for selected service categories
+      const defaultMaterials = getDefaultMaterialsForCategories(serviceCategories);
+      
+      if (defaultMaterials.length === 0) {
+        toast.info('No default materials found for your selected service categories');
+        setIsLoading(false);
+        return;
+      }
+
+      // Get existing material names to avoid duplicates
+      const existingNames = new Set(materials.map(m => m.name.toLowerCase().trim()));
+
+      // Import materials that don't already exist
+      let importedCount = 0;
+      let skippedCount = 0;
+
+      for (const material of defaultMaterials) {
+        // Check if material with same name already exists
+        if (existingNames.has(material.name.toLowerCase().trim())) {
+          skippedCount++;
+          continue;
+        }
+
+        const result = await MaterialsService.createMaterial(material, companyId);
+        if (result.success) {
+          importedCount++;
+        } else {
+          console.warn(`Failed to import ${material.name}:`, result.error);
+        }
+      }
+
+      // Reload materials
+      await loadMaterials();
+
+      if (importedCount > 0) {
+        toast.success(`Successfully imported ${importedCount} default materials${skippedCount > 0 ? ` (${skippedCount} skipped - already exist)` : ''}`);
+      } else if (skippedCount > 0) {
+        toast.info(`All ${skippedCount} default materials already exist in your materials list`);
+      } else {
+        toast.error('Failed to import materials');
+      }
+    } catch (error) {
+      console.error('Error importing default materials:', error);
+      toast.error('Error importing default materials');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Get unique categories from materials
+  const getMaterialCategories = () => {
+    const categories = new Set();
+    materials.forEach(m => {
+      if (m.category) {
+        categories.add(m.category);
+      }
+    });
+    return Array.from(categories).sort();
+  };
+
   const renderStepContent = () => {
     switch (currentStep) {
       case 1:
@@ -616,6 +940,182 @@ const CompanySetupPage = () => {
         return (
           <div className="space-y-6">
             <div>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-medium text-gray-900">Materials Management</h3>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Manage materials and products used by your technicians. These will be available for selection on jobs.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDownloadMaterialTemplate}
+                    className="px-3 py-2 text-sm border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50 flex items-center gap-2"
+                  >
+                    <ArrowDownTrayIcon className="h-4 w-4" />
+                    Template
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowMaterialImportModal(true)}
+                    className="px-3 py-2 text-sm border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50 flex items-center gap-2"
+                  >
+                    <ArrowUpTrayIcon className="h-4 w-4" />
+                    Import
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenMaterialModal()}
+                    className="px-4 py-2 text-sm bg-primary-600 text-white rounded-md hover:bg-primary-700 flex items-center gap-2"
+                  >
+                    <PlusIcon className="h-4 w-4" />
+                    Add Material
+                  </button>
+                </div>
+              </div>
+
+              {/* Import Default Materials Banner */}
+              {materials.length === 0 && serviceCategories.length > 0 && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <h4 className="text-sm font-medium text-blue-900 mb-1">
+                        Quick Start: Import Default Materials
+                      </h4>
+                      <p className="text-sm text-blue-700 mb-3">
+                        Based on your selected service categories ({serviceCategories.join(', ')}), we can automatically import a starter set of common materials. You can edit or remove them later.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleImportDefaultMaterials}
+                        disabled={isLoading}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isLoading ? 'Importing...' : `Import Default Materials (${getDefaultMaterialsForCategories(serviceCategories).length} items)`}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Import Default Materials Button (when materials exist) */}
+              {materials.length > 0 && serviceCategories.length > 0 && (
+                <div className="mb-4">
+                  <button
+                    type="button"
+                    onClick={handleImportDefaultMaterials}
+                    disabled={isLoading}
+                    className="px-3 py-2 text-sm border border-primary-300 rounded-md text-primary-700 bg-primary-50 hover:bg-primary-100 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <ArrowUpTrayIcon className="h-4 w-4" />
+                    {isLoading ? 'Importing...' : `Import More Default Materials (${getDefaultMaterialsForCategories(serviceCategories).length} available)`}
+                  </button>
+                </div>
+              )}
+
+              {/* Search and Filter */}
+              <div className="flex gap-4 mb-4">
+                <div className="flex-1">
+                  <div className="relative">
+                    <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                      type="text"
+                      value={materialsSearchTerm}
+                      onChange={(e) => setMaterialsSearchTerm(e.target.value)}
+                      placeholder="Search materials..."
+                      className="pl-10 w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    />
+                  </div>
+                </div>
+                <select
+                  value={materialsCategoryFilter}
+                  onChange={(e) => setMaterialsCategoryFilter(e.target.value)}
+                  className="rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                >
+                  <option value="all">All Categories</option>
+                  {getMaterialCategories().map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Materials Table */}
+              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost/Unit</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Price/Unit</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier</th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Active</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {isLoading ? (
+                        <tr>
+                          <td colSpan="8" className="px-4 py-8 text-center text-gray-500">
+                            <div className="flex justify-center">
+                              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-500"></div>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : filteredMaterials.length === 0 ? (
+                        <tr>
+                          <td colSpan="8" className="px-4 py-8 text-center text-gray-500">
+                            {materials.length === 0 ? 'No materials added yet. Click "Add Material" to get started.' : 'No materials match your search criteria.'}
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredMaterials.map((material) => (
+                          <tr key={material.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{material.name}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{material.category || '-'}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{material.unit || '-'}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 text-right">${(material.costPerUnit || 0).toFixed(2)}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900 text-right">${(material.retailPrice || 0).toFixed(2)}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{material.supplier || '-'}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-center">
+                              {material.active ? (
+                                <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">Active</span>
+                              ) : (
+                                <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">Inactive</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
+                              <button
+                                onClick={() => handleOpenMaterialModal(material)}
+                                className="text-primary-600 hover:text-primary-900 mr-3"
+                              >
+                                <PencilIcon className="h-4 w-4 inline" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteMaterial(material.id)}
+                                className="text-red-600 hover:text-red-900"
+                              >
+                                <TrashIcon className="h-4 w-4 inline" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 4:
+        return (
+          <div className="space-y-6">
+            <div>
               <h3 className="text-lg font-medium text-gray-900 mb-4">Team Members</h3>
               <p className="text-sm text-gray-600 mb-4">
                 Invite team members to join your company. They'll be able to access jobs and customers.
@@ -693,7 +1193,7 @@ const CompanySetupPage = () => {
           </div>
         );
 
-      case 4:
+      case 5:
         return (
           <div className="space-y-6">
             <div>
@@ -754,7 +1254,7 @@ const CompanySetupPage = () => {
           </div>
         );
 
-      case 5:
+      case 6:
         return (
           <div className="space-y-6">
             <div>
@@ -862,26 +1362,35 @@ const CompanySetupPage = () => {
             
             return (
               <div key={step.id} className="flex items-center">
-                <div className={`flex items-center justify-center w-10 h-10 rounded-full border-2 ${
-                  isCompleted 
-                    ? 'bg-primary-500 border-primary-500 text-white' 
-                    : isActive 
-                    ? 'border-primary-500 text-primary-500' 
-                    : 'border-gray-300 text-gray-400'
-                }`}>
+                <button
+                  type="button"
+                  onClick={() => setCurrentStep(step.id)}
+                  className={`flex items-center justify-center w-10 h-10 rounded-full border-2 transition-all ${
+                    isCompleted 
+                      ? 'bg-primary-500 border-primary-500 text-white hover:bg-primary-600' 
+                      : isActive 
+                      ? 'border-primary-500 text-primary-500 hover:bg-primary-50' 
+                      : 'border-gray-300 text-gray-400 hover:border-gray-400'
+                  }`}
+                  title={`Go to ${step.name}`}
+                >
                   {isCompleted ? (
                     <CheckCircleIcon className="w-6 h-6" />
                   ) : (
                     <Icon className="w-6 h-6" />
                   )}
-                </div>
-                <div className="ml-3">
-                  <p className={`text-sm font-medium ${
-                    isActive ? 'text-primary-600' : isCompleted ? 'text-gray-900' : 'text-gray-500'
-                  }`}>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCurrentStep(step.id)}
+                  className={`ml-3 text-left ${
+                    isActive ? 'text-primary-600' : isCompleted ? 'text-gray-900 hover:text-primary-600' : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <p className={`text-sm font-medium transition-colors`}>
                     {step.name}
                   </p>
-                </div>
+                </button>
                 {index < steps.length - 1 && (
                   <div className={`ml-8 w-16 h-0.5 ${
                     isCompleted ? 'bg-primary-500' : 'bg-gray-300'
@@ -1252,6 +1761,176 @@ const CompanySetupPage = () => {
                       </table>
                     </div>
                   )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Material Add/Edit Modal */}
+      {showMaterialModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => {
+              setShowMaterialModal(false);
+              resetMaterialForm();
+            }} />
+            
+            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-3xl sm:w-full">
+              <div className="bg-white px-4 pt-5 pb-4 sm:p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">
+                    {selectedMaterial ? 'Edit Material' : 'Add New Material'}
+                  </h3>
+                  <button
+                    onClick={() => {
+                      setShowMaterialModal(false);
+                      resetMaterialForm();
+                    }}
+                    className="text-gray-400 hover:text-gray-500"
+                  >
+                    <XMarkIcon className="w-6 h-6" />
+                  </button>
+                </div>
+
+                <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="sm:col-span-2">
+                      <label className="block text-sm font-medium text-gray-700">Name *</label>
+                      <input
+                        type="text"
+                        value={materialData.name}
+                        onChange={(e) => handleMaterialInputChange('name', e.target.value)}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        placeholder="e.g., Chlorine Tablets"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-sm font-medium text-gray-700">Description</label>
+                      <textarea
+                        value={materialData.description}
+                        onChange={(e) => handleMaterialInputChange('description', e.target.value)}
+                        rows={2}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        placeholder="Detailed notes for internal use"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Category *</label>
+                      <input
+                        type="text"
+                        value={materialData.category}
+                        onChange={(e) => handleMaterialInputChange('category', e.target.value)}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        placeholder="e.g., Pool Chemicals"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Subcategory</label>
+                      <input
+                        type="text"
+                        value={materialData.subcategory}
+                        onChange={(e) => handleMaterialInputChange('subcategory', e.target.value)}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        placeholder="e.g., Liquid"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Unit *</label>
+                      <input
+                        type="text"
+                        value={materialData.unit}
+                        onChange={(e) => handleMaterialInputChange('unit', e.target.value)}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        placeholder="e.g., bucket (50 lbs)"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Retail Price per Unit *</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={materialData.retailPrice}
+                        onChange={(e) => handleMaterialInputChange('retailPrice', parseFloat(e.target.value) || 0)}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Cost per Unit</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={materialData.costPerUnit}
+                        onChange={(e) => handleMaterialInputChange('costPerUnit', parseFloat(e.target.value) || 0)}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Supplier</label>
+                      <input
+                        type="text"
+                        value={materialData.supplier}
+                        onChange={(e) => handleMaterialInputChange('supplier', e.target.value)}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        placeholder="Preferred supplier/vendor"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Storage Location</label>
+                      <input
+                        type="text"
+                        value={materialData.storageLocation}
+                        onChange={(e) => handleMaterialInputChange('storageLocation', e.target.value)}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        placeholder="Truck, warehouse, etc."
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Barcode</label>
+                      <input
+                        type="text"
+                        value={materialData.barcode}
+                        onChange={(e) => handleMaterialInputChange('barcode', e.target.value)}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        placeholder="Optional"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={materialData.active}
+                          onChange={(e) => handleMaterialInputChange('active', e.target.checked)}
+                          className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                        />
+                        <span className="ml-2 text-sm text-gray-700">Active (available for selection)</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex justify-end space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowMaterialModal(false);
+                      resetMaterialForm();
+                    }}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveMaterial}
+                    disabled={isLoading}
+                    className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isLoading ? 'Saving...' : selectedMaterial ? 'Update' : 'Create'}
+                  </button>
                 </div>
               </div>
             </div>

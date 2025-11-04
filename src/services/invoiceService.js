@@ -135,7 +135,7 @@ class InvoiceService {
         invoiceDate,
         dueDate,
         paymentTerms: invoiceData.paymentTerms || 'net30',
-        items: this.buildInvoiceItems(job, invoiceData),
+        items: await this.buildInvoiceItems(job, invoiceData),
         subtotal: invoiceData.subtotal || job.totalCost || 0,
         tax: invoiceData.tax || 0,
         taxRate: invoiceData.taxRate || 0,
@@ -169,11 +169,12 @@ class InvoiceService {
 
   /**
    * Build invoice line items from job
+   * Includes service charge and materials used
    */
-  static buildInvoiceItems(job, invoiceData) {
+  static async buildInvoiceItems(job, invoiceData) {
     const items = [];
 
-    // Main service item
+    // Main service item (appears first)
     items.push({
       description: job.serviceType || 'Service',
       quantity: 1,
@@ -181,6 +182,63 @@ class InvoiceService {
       amount: invoiceData.subtotal || job.totalCost || 0,
       notes: job.actualWorkDone || job.completionNotes || ''
     });
+
+    // Fetch materials used on this job
+    try {
+      const jobMaterialsQuery = query(
+        collection(db, 'jobMaterials'),
+        where('jobId', '==', job.id)
+      );
+      const jobMaterialsSnapshot = await getDocs(jobMaterialsQuery);
+      
+      // Fetch all materials in parallel
+      const materialPromises = [];
+      jobMaterialsSnapshot.forEach((doc) => {
+        const jobMaterial = doc.data();
+        
+        if (jobMaterial.materialId) {
+          materialPromises.push(
+            getDoc(doc(db, 'materials', jobMaterial.materialId))
+              .then(materialDoc => ({
+                jobMaterial,
+                material: materialDoc.exists() ? materialDoc.data() : null
+              }))
+              .catch(err => {
+                console.error('Error fetching material:', err);
+                return { jobMaterial, material: null };
+              })
+          );
+        }
+      });
+
+      // Wait for all material fetches to complete
+      const materialResults = await Promise.all(materialPromises);
+      
+      // Add materials as line items (after service charge)
+      materialResults.forEach(({ jobMaterial, material }) => {
+        if (material) {
+          items.push({
+            description: material.name || 'Material',
+            quantity: jobMaterial.quantityUsed || 1,
+            unitPrice: jobMaterial.unitPriceAtUse || 0,
+            amount: jobMaterial.totalPrice || 0,
+            notes: jobMaterial.notes || ''
+          });
+        } else if (jobMaterial.materialId) {
+          // Fallback to materialId if material not found
+          items.push({
+            description: `Material (${jobMaterial.materialId.substring(0, 8)}...)`,
+            quantity: jobMaterial.quantityUsed || 1,
+            unitPrice: jobMaterial.unitPriceAtUse || 0,
+            amount: jobMaterial.totalPrice || 0,
+            notes: jobMaterial.notes || ''
+          });
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching job materials:', error);
+      // Continue without materials if there's an error
+    }
 
     // Add additional items if provided
     if (invoiceData.additionalItems && Array.isArray(invoiceData.additionalItems)) {

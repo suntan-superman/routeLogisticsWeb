@@ -234,5 +234,45 @@ service cloud.firestore {
       // No deletes allowed
       allow delete: if false;
     }
+    
+    // Materials collection - company-specific materials list
+    match /materials/{materialId} {
+      // Allow read: 
+      // - Super admin can read all materials (check first for efficiency)
+      // - Regular users (including technicians) can read their company's materials
+      // Note: Technicians need to see active materials for job completion
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        (resource.data.companyId != null && 
+         resource.data.companyId == getUserProfile().companyId)
+      );
+      
+      // Allow write (create/update/delete): only admin/supervisor/super_admin
+      allow write: if request.auth != null && (
+        isSuperAdmin() ||
+        (isCompanyAdminOrSupervisor() && 
+         request.resource.data.companyId != null &&
+         request.resource.data.companyId == getUserProfile().companyId)
+      );
+    }
+    
+    // Job Materials collection - materials used on jobs
+    match /jobMaterials/{jobMaterialId} {
+      // Allow read: all authenticated users (for job details and invoicing)
+      allow read: if request.auth != null;
+      
+      // Allow create: admin/technician/super_admin
+      allow create: if request.auth != null && (
+        isSuperAdmin() ||
+        isCompanyAdminOrSupervisor() ||
+        request.resource.data.technicianId == request.auth.uid
+      );
+      
+      // Allow update/delete: only admin/super_admin (technicians can't modify after creation)
+      allow update, delete: if request.auth != null && (
+        isSuperAdmin() ||
+        isCompanyAdminOrSupervisor()
+      );
+    }
   }
 }

@@ -17,7 +17,8 @@ import {
   EnvelopeIcon,
   DocumentArrowUpIcon,
   MagnifyingGlassIcon,
-  MapPinIcon
+  MapPinIcon,
+  BellIcon
 } from '@heroicons/react/24/outline';
 
 const Layout = ({ children }) => {
@@ -37,6 +38,7 @@ const Layout = ({ children }) => {
     { name: 'Jobs', href: '/jobs', icon: ClipboardDocumentListIcon },
     { name: 'Recurring Jobs', href: '/recurring-jobs', icon: ArrowPathIcon },
     { name: 'Team Tracking', href: '/team-tracking', icon: MapPinIcon, adminOnly: true },
+    { name: 'Notifications', href: '/notifications', icon: BellIcon, adminOnly: true },
     { name: 'Invoices', href: '/invoices', icon: ReceiptRefundIcon },
     { name: 'Calendar', href: '/calendar', icon: CalendarIcon },
     { name: 'Reports', href: '/reports', icon: ChartBarIcon },

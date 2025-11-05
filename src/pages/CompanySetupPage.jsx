@@ -376,9 +376,18 @@ const CompanySetupPage = () => {
       }
 
       if (result.success) {
-        setCompany(result.company);
+        // Reload company to get the updated data with all fields
+        const reloadResult = await CompanyService.getCompany(company ? company.id : result.companyId);
+        if (reloadResult.success) {
+          setCompany(reloadResult.company);
+          // Update selectedServices from the reloaded company data
+          setSelectedServices(reloadResult.company.services || []);
+        } else {
+          setCompany(result.company);
+        }
         toast.success(company ? 'Company updated successfully!' : 'Company created successfully!');
       } else {
+        console.error('Save failed:', result.error);
         toast.error(result.error);
       }
     } catch (error) {
@@ -426,13 +435,53 @@ const CompanySetupPage = () => {
     setIsLoading(false);
   };
 
-  const nextStep = () => {
+  const nextStep = async () => {
+    // Auto-save services when leaving the Services step (step 2)
+    if (currentStep === 2 && company) {
+      try {
+        const result = await CompanyService.updateCompany(company.id, {
+          services: selectedServices,
+          serviceCategories: serviceCategories
+        });
+        if (result.success) {
+          toast.success('Services saved automatically');
+        } else {
+          console.error('Auto-save failed:', result.error);
+          toast.error('Failed to save services: ' + result.error);
+        }
+      } catch (error) {
+        console.error('Error auto-saving services:', error);
+        toast.error('Error saving services: ' + error.message);
+        // Don't block navigation if auto-save fails
+      }
+    }
+    
     if (currentStep < steps.length) {
       setCurrentStep(currentStep + 1);
     }
   };
 
-  const prevStep = () => {
+  const prevStep = async () => {
+    // Auto-save services when leaving the Services step (step 2)
+    if (currentStep === 2 && company) {
+      try {
+        const result = await CompanyService.updateCompany(company.id, {
+          services: selectedServices,
+          serviceCategories: serviceCategories
+        });
+        if (result.success) {
+          toast.success('Services saved automatically');
+        } else {
+          console.error('Auto-save failed:', result.error);
+          toast.error('Failed to save services: ' + result.error);
+        }
+      } catch (error) {
+        console.error('Error auto-saving services:', error);
+        toast.error('Error saving services: ' + error.message);
+        // Don't block navigation if auto-save fails
+      }
+    }
+    
     if (currentStep > 1) {
       setCurrentStep(currentStep - 1);
     }

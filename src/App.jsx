@@ -25,6 +25,7 @@ import InvitationsPage from './pages/InvitationsPage';
 import BulkImportPage from './pages/BulkImportPage';
 import CompanySearchPage from './pages/CompanySearchPage';
 import TeamTrackingPage from './pages/TeamTrackingPage';
+import NotificationsPage from './pages/NotificationsPage';
 
 // Components
 import Layout from './components/Layout';
@@ -164,6 +165,14 @@ function App() {
                   <ProtectedRoute>
                     <Layout>
                       <TeamTrackingPage />
+                    </Layout>
+                  </ProtectedRoute>
+                } />
+                
+                <Route path="/notifications" element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <NotificationsPage />
                     </Layout>
                   </ProtectedRoute>
                 } />

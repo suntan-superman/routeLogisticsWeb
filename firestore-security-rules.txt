@@ -39,11 +39,11 @@ service cloud.firestore {
       // Allow read:
       // - Owner of the customer
       // - Super admin (can read all customers - check first to bypass company checks)
-      // - Company admin/supervisor for same company
+      // - Any user in the same company (companyId match) - field techs, admins, supervisors
       allow read: if request.auth != null && (
         isSuperAdmin() ||
         resource.data.userId == request.auth.uid ||
-        (isCompanyAdminOrSupervisor() && 
+        (resource.data.companyId != null &&
          resource.data.companyId == getUserProfile().companyId)
       );
       
@@ -128,10 +128,27 @@ service cloud.firestore {
     
     // Team Members collection - users can access if they own the company
     match /teamMembers/{teamMemberId} {
-      allow read, write: if request.auth != null && 
-        request.auth.uid == get(/databases/$(database)/documents/companies/$(resource.data.companyId)).data.ownerId;
-      allow create: if request.auth != null && 
-        request.auth.uid == get(/databases/$(database)/documents/companies/$(request.resource.data.companyId)).data.ownerId;
+      // Allow read: super admin or users viewing team members within their company
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        (resource.data.companyId != null &&
+         resource.data.companyId == getUserProfile().companyId)
+      );
+
+      // Allow create: inviter or super admin
+      allow create: if request.auth != null && (
+        isSuperAdmin() ||
+        request.auth.uid == request.resource.data.invitedBy
+      );
+
+      // Allow update/delete: inviter, company admin/supervisor of same company, or super admin
+      allow update, delete: if request.auth != null && (
+        isSuperAdmin() ||
+        resource.data.invitedBy == request.auth.uid ||
+        (isCompanyAdminOrSupervisor() &&
+         resource.data.companyId != null &&
+         resource.data.companyId == getUserProfile().companyId)
+      );
     }
     
     // Invitations collection - company admins and super admin can manage invitations

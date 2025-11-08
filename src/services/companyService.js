@@ -1,16 +1,17 @@
-import { 
-  collection, 
-  doc, 
-  getDoc, 
-  setDoc, 
-  updateDoc, 
-  getDocs, 
-  query, 
+import {
+  collection,
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  getDocs,
+  query,
   where,
   addDoc,
   deleteDoc
 } from 'firebase/firestore';
 import { db, auth } from './firebase';
+import InvitationService from './invitationService';
 
 class CompanyService {
   // Get current user ID
@@ -20,6 +21,68 @@ class CompanyService {
       throw new Error('No user is currently signed in');
     }
     return user.uid;
+  }
+
+  static getInvitationRole(role) {
+    const mapping = {
+      technician: 'field_tech',
+      field_tech: 'field_tech',
+      tech: 'field_tech',
+      manager: 'supervisor',
+      supervisor: 'supervisor',
+      admin: 'admin'
+    };
+
+    return mapping[role] || 'field_tech';
+  }
+
+  static getRoleDisplay(role) {
+    const labels = {
+      admin: 'Admin',
+      supervisor: 'Supervisor',
+      field_tech: 'Field Technician',
+      technician: 'Technician',
+      manager: 'Manager'
+    };
+
+    return labels[role] || role;
+  }
+
+  static async sendTeamMemberInvitationEmail(invitation) {
+    try {
+      const projectId = 'mi-factotum-field-service';
+      const sendInviteEmailUrl = `https://us-central1-${projectId}.cloudfunctions.net/sendInvitationEmail`;
+      const token = await auth.currentUser?.getIdToken();
+
+      if (!token) {
+        throw new Error('Authentication token unavailable for sending invitation email');
+      }
+
+      const response = await fetch(sendInviteEmailUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          invitationId: invitation.id,
+          email: invitation.email,
+          companyName: invitation.companyName,
+          invitationCode: invitation.invitationCode,
+          role: invitation.role,
+          expiresAt: invitation.expiresAt
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Invitation email request failed with status ${response.status}`);
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error sending invitation email:', error);
+      return false;
+    }
   }
 
   // Generate unique company code
@@ -635,7 +698,6 @@ class CompanyService {
     }
   }
 
-  // Add team member to company
   static async addTeamMember(companyId, userEmail, role = 'technician') {
     try {
       const userId = this.getCurrentUserId();
@@ -656,26 +718,177 @@ class CompanyService {
         };
       }
 
+      const normalizedEmail = userEmail.trim().toLowerCase();
+      const invitationRole = this.getInvitationRole(role);
+
+      // Check if a team member already exists for this email in the company
+      const existingTeamMemberQuery = query(
+        collection(db, 'teamMembers'),
+        where('companyId', '==', companyId),
+        where('email', '==', normalizedEmail)
+      );
+
+      const existingTeamMemberSnapshot = await getDocs(existingTeamMemberQuery);
+      if (!existingTeamMemberSnapshot.empty) {
+        return {
+          success: false,
+          error: 'A team member with this email already exists.'
+        };
+      }
+
+      const invitationResult = await InvitationService.createInvitation(
+        companyId,
+        normalizedEmail,
+        invitationRole,
+        userId
+      );
+
+      if (!invitationResult.success) {
+        return {
+          success: false,
+          error: invitationResult.error || 'Failed to create invitation'
+        };
+      }
+
+      const { invitation } = invitationResult;
+
       // Create team member record
+      const timestamp = new Date().toISOString();
       const teamMember = {
         companyId,
-        email: userEmail,
-        role,
+        email: normalizedEmail,
+        role: invitationRole,
+        roleDisplay: this.getRoleDisplay(invitationRole),
         invitedBy: userId,
         status: 'pending', // pending, active, inactive
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        invitationId: invitation.id,
+        invitationCode: invitation.invitationCode,
+        invitationExpiresAt: invitation.expiresAt,
+        emailSent: false,
+        createdAt: timestamp,
+        updatedAt: timestamp
       };
 
       const docRef = await addDoc(collection(db, 'teamMembers'), teamMember);
 
+      const emailSent = await this.sendTeamMemberInvitationEmail(invitation);
+
+      if (emailSent) {
+        await updateDoc(doc(db, 'teamMembers', docRef.id), {
+          emailSent: true,
+          emailSentAt: new Date().toISOString()
+        });
+      }
+
       return {
         success: true,
         teamMemberId: docRef.id,
-        teamMember: { id: docRef.id, ...teamMember }
+        teamMember: { id: docRef.id, ...teamMember, emailSent },
+        invitation,
+        emailSent
       };
     } catch (error) {
       console.error('Error adding team member:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  static async resendTeamMemberInvite(teamMemberId) {
+    try {
+      const userId = this.getCurrentUserId();
+      const user = auth.currentUser;
+      const isSuperAdmin = user?.email === 'sroy@worksidesoftware.com';
+
+      const teamMemberRef = doc(db, 'teamMembers', teamMemberId);
+      const teamMemberSnap = await getDoc(teamMemberRef);
+
+      if (!teamMemberSnap.exists()) {
+        return {
+          success: false,
+          error: 'Team member not found'
+        };
+      }
+
+      const teamMember = teamMemberSnap.data();
+      const companyResult = await this.getCompany(teamMember.companyId);
+
+      if (!companyResult.success) {
+        return companyResult;
+      }
+
+      if (!isSuperAdmin && companyResult.company.ownerId !== userId) {
+        return {
+          success: false,
+          error: 'Unauthorized to resend invitation for this team member'
+        };
+      }
+
+      if (teamMember.status && teamMember.status !== 'pending') {
+        return {
+          success: false,
+          error: 'Only pending team members can be resent invitations'
+        };
+      }
+
+      const invitationId = teamMember.invitationId;
+      let invitationResult = null;
+
+      if (invitationId) {
+        invitationResult = await InvitationService.refreshInvitation(invitationId);
+      }
+
+      if (!invitationResult || !invitationResult.success) {
+        invitationResult = await InvitationService.createInvitation(
+          teamMember.companyId,
+          teamMember.email,
+          teamMember.role,
+          userId
+        );
+      }
+
+      if (!invitationResult.success) {
+        return {
+          success: false,
+          error: invitationResult.error || 'Failed to refresh invitation'
+        };
+      }
+
+      const { invitation } = invitationResult;
+      const emailSent = await this.sendTeamMemberInvitationEmail(invitation);
+      const now = new Date().toISOString();
+
+      const updatePayload = {
+        invitationId: invitation.id,
+        invitationCode: invitation.invitationCode,
+        invitationExpiresAt: invitation.expiresAt,
+        status: 'pending',
+        updatedAt: now,
+        lastResentAt: now,
+      };
+
+      if (emailSent) {
+        updatePayload.emailSent = true;
+        updatePayload.emailSentAt = now;
+      }
+
+      await updateDoc(teamMemberRef, updatePayload);
+
+      return {
+        success: true,
+        teamMember: {
+          id: teamMemberId,
+          ...teamMember,
+          ...updatePayload,
+          emailSent: emailSent ? true : teamMember.emailSent,
+        },
+        invitation,
+        emailSent
+      };
+    } catch (error) {
+      console.error('Error resending team member invitation:', error);
       return {
         success: false,
         error: error.message

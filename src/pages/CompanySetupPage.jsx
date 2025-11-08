@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
@@ -114,6 +114,22 @@ const CompanySetupPage = () => {
     { id: 5, name: 'Branding', icon: PhotoIcon },
     { id: 6, name: 'Templates', icon: DocumentTextIcon }
   ];
+
+  const getRoleLabel = useCallback((role, roleDisplay) => {
+    if (roleDisplay) {
+      return roleDisplay;
+    }
+
+    const labels = {
+      admin: 'Admin',
+      supervisor: 'Supervisor',
+      field_tech: 'Field Technician',
+      technician: 'Technician',
+      manager: 'Manager'
+    };
+
+    return labels[role] || role;
+  }, []);
 
   useEffect(() => {
     // IMPORTANT: Only load company data if user is verified
@@ -407,13 +423,41 @@ const CompanySetupPage = () => {
       if (result.success) {
         setTeamMembers(prev => [...prev, result.teamMember]);
         setNewMemberEmail('');
-        toast.success('Team member invited successfully!');
+        if (result.emailSent) {
+          toast.success('Team member invited and email sent successfully!');
+        } else {
+          toast.success('Team member invited, but email could not be sent. Share the invitation code manually.');
+        }
       } else {
         toast.error(result.error);
       }
     } catch (error) {
       console.error('Error adding team member:', error);
       toast.error('Error adding team member');
+    }
+    setIsLoading(false);
+  };
+
+  const handleResendTeamMemberInvite = async (memberId) => {
+    setIsLoading(true);
+    try {
+      const result = await CompanyService.resendTeamMemberInvite(memberId);
+      if (result.success) {
+        setTeamMembers(prev => prev.map(member => (
+          member.id === memberId ? { ...member, ...result.teamMember } : member
+        )));
+
+        if (result.emailSent) {
+          toast.success('Invitation email resent successfully!');
+        } else {
+          toast.success('Invitation refreshed. Share the code manually if needed.');
+        }
+      } else {
+        toast.error(result.error || 'Failed to resend invitation');
+      }
+    } catch (error) {
+      console.error('Error resending team member invite:', error);
+      toast.error('Error resending invitation');
     }
     setIsLoading(false);
   };
@@ -1251,7 +1295,7 @@ const CompanySetupPage = () => {
                       </div>
                       <div className="ml-3">
                         <p className="text-sm font-medium text-gray-900">{member.email}</p>
-                        <p className="text-sm text-gray-500 capitalize">{member.role}</p>
+                        <p className="text-sm text-gray-500">{getRoleLabel(member.role, member.roleDisplay)}</p>
                       </div>
                     </div>
                     <div className="flex items-center space-x-2">
@@ -1262,6 +1306,21 @@ const CompanySetupPage = () => {
                       }`}>
                         {member.status}
                       </span>
+                      {member.invitationCode && (
+                        <span className="px-2 py-1 text-xs font-medium text-gray-500 bg-gray-100 rounded-full">
+                          Code: {member.invitationCode}
+                        </span>
+                      )}
+                      {member.status === 'pending' && (
+                        <button
+                          type="button"
+                          onClick={() => handleResendTeamMemberInvite(member.id)}
+                          className="text-primary-600 hover:text-primary-800 text-sm"
+                          disabled={isLoading}
+                        >
+                          Resend
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => handleRemoveTeamMember(member.id)}

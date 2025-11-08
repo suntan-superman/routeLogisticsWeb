@@ -3,23 +3,61 @@
  * Handles company invitations and team member onboarding
  */
 
-import { 
-  collection, 
-  addDoc, 
-  updateDoc, 
-  doc, 
-  getDoc, 
-  getDocs, 
-  query, 
-  where, 
+import {
+  collection,
+  addDoc,
+  updateDoc,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  where,
   orderBy,
   deleteDoc,
   Timestamp
 } from 'firebase/firestore';
-import { db } from './firebase';
-import CompanyService from './companyService';
+import { db, auth } from './firebase';
 
 class InvitationService {
+  static getCurrentUserId() {
+    const user = auth.currentUser;
+    if (!user) {
+      return null;
+    }
+    return user.uid;
+  }
+
+  static async getCompany(companyId) {
+    try {
+      if (!companyId) {
+        return {
+          success: false,
+          error: 'Company ID is required'
+        };
+      }
+
+      const companyDoc = await getDoc(doc(db, 'companies', companyId));
+
+      if (!companyDoc.exists()) {
+        return {
+          success: false,
+          error: 'Company not found'
+        };
+      }
+
+      return {
+        success: true,
+        company: { id: companyDoc.id, ...companyDoc.data() }
+      };
+    } catch (error) {
+      console.error('Error getting company:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
   // Generate unique invitation code
   static generateInvitationCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -33,9 +71,8 @@ class InvitationService {
   // Create an invitation
   static async createInvitation(companyId, email, role = 'field_tech', invitedBy) {
     try {
-      // Use invitedBy if provided, otherwise get from CompanyService
-      const userId = invitedBy || CompanyService.getCurrentUserId();
-      if (!userId) {
+      const currentUserId = invitedBy || this.getCurrentUserId();
+      if (!currentUserId) {
         return {
           success: false,
           error: 'No user is currently signed in'
@@ -43,13 +80,15 @@ class InvitationService {
       }
 
       // Verify user has permission to invite (must be company admin or super admin)
-      const company = await CompanyService.getCompany(companyId);
-      if (!company.success) {
+      const companyResult = await this.getCompany(companyId);
+      if (!companyResult.success) {
         return {
           success: false,
           error: 'Company not found'
         };
       }
+
+      const company = companyResult.company;
 
       // Check if invitation already exists for this email and company
       const existingInvitationsQuery = query(
@@ -72,11 +111,11 @@ class InvitationService {
 
       const invitationData = {
         companyId,
-        companyName: company.company.name,
+        companyName: company.name,
         email: email.toLowerCase(),
         role,
         invitationCode,
-        invitedBy,
+        invitedBy: currentUserId,
         status: 'pending',
         createdAt: new Date().toISOString(),
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() // 7 days
@@ -91,6 +130,57 @@ class InvitationService {
       };
     } catch (error) {
       console.error('Error creating invitation:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  static async refreshInvitation(invitationId, options = {}) {
+    try {
+      if (!invitationId) {
+        return {
+          success: false,
+          error: 'Invitation ID is required'
+        };
+      }
+
+      const invitationRef = doc(db, 'invitations', invitationId);
+      const invitationSnap = await getDoc(invitationRef);
+
+      if (!invitationSnap.exists()) {
+        return {
+          success: false,
+          error: 'Invitation not found'
+        };
+      }
+
+      const invitation = { id: invitationSnap.id, ...invitationSnap.data() };
+      const regenerateCode = options.regenerateCode !== false;
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      const updatedAt = now.toISOString();
+
+      const updatedData = {
+        expiresAt,
+        status: 'pending',
+        updatedAt,
+        resentAt: updatedAt,
+      };
+
+      if (regenerateCode) {
+        updatedData.invitationCode = this.generateInvitationCode();
+      }
+
+      await updateDoc(invitationRef, updatedData);
+
+      return {
+        success: true,
+        invitation: { ...invitation, ...updatedData }
+      };
+    } catch (error) {
+      console.error('Error refreshing invitation:', error);
       return {
         success: false,
         error: error.message
@@ -189,7 +279,7 @@ class InvitationService {
   // Get all invitations for a company
   static async getCompanyInvitations(companyId) {
     try {
-      const userId = CompanyService.getCurrentUserId();
+      const userId = this.getCurrentUserId();
       if (!userId) {
         return {
           success: false,
@@ -235,7 +325,7 @@ class InvitationService {
   // Cancel/delete invitation
   static async cancelInvitation(invitationId) {
     try {
-      const userId = CompanyService.getCurrentUserId();
+      const userId = this.getCurrentUserId();
       if (!userId) {
         return {
           success: false,
@@ -260,7 +350,7 @@ class InvitationService {
   // Resend invitation (update expiration)
   static async resendInvitation(invitationId) {
     try {
-      const userId = CompanyService.getCurrentUserId();
+      const userId = this.getCurrentUserId();
       if (!userId) {
         return {
           success: false,

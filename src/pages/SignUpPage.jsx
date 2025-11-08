@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import CompanyService from '../services/companyService';
 import { motion } from 'framer-motion';
@@ -46,25 +46,39 @@ const SignUpPage = () => {
   const [companyZipCode, setCompanyZipCode] = useState('');
   
   const { signup } = useAuth();
-  const navigate = useNavigate();
+  const location = useLocation();
 
   const [validatingCode, setValidatingCode] = useState(false);
   const [codeValidationMessage, setCodeValidationMessage] = useState('');
 
-  // Reset all form fields when component mounts
+  const parsedInviteParams = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    const code = params.get('code') || '';
+    const inviteRole = params.get('role') || '';
+
+    const normalizedCode = code.trim().toUpperCase();
+    const normalizedRole = inviteRole.trim().toLowerCase();
+
+    const allowedRoles = ['admin', 'supervisor', 'field_tech'];
+    return {
+      code: normalizedCode.length === 6 ? normalizedCode : '',
+      role: allowedRoles.includes(normalizedRole) ? normalizedRole : '',
+    };
+  }, [location.search]);
+
   useEffect(() => {
-    // Clear all form state when navigating to signup page
+    // Reset core form state on mount or when invite params change
     setName('');
     setEmail('');
     setPassword('');
     setConfirmPassword('');
     setStep(1);
-    setCompanyOption('new');
-    setCompanyCode('');
+    setCompanyOption(parsedInviteParams.code ? 'existing' : 'new');
+    setCompanyCode(parsedInviteParams.code || '');
     setCompanySearchTerm('');
     setSearchResults([]);
     setSelectedCompany(null);
-    setRole('field_tech');
+    setRole(parsedInviteParams.role || 'field_tech');
     setCompanyName('');
     setCompanyPhone('');
     setCompanyAddress('');
@@ -73,7 +87,7 @@ const SignUpPage = () => {
     setCompanyZipCode('');
     setCodeValidationMessage('');
     setValidatingCode(false);
-  }, []); // Run only on mount
+  }, [parsedInviteParams]);
 
   useEffect(() => {
     // Validate company code when it's 6 characters
@@ -139,9 +153,8 @@ const SignUpPage = () => {
       
       setStep(3); // Go to role selection
     } else {
-      // If creating new company, user must be admin
-      // Company name will be validated in Step 4
-      setRole('admin');
+      const nextRole = parsedInviteParams.role || 'admin';
+      setRole(nextRole);
       setStep(4); // Skip to company details
     }
   };

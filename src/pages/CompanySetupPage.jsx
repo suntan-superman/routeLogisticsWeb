@@ -26,7 +26,8 @@ import {
   ArrowDownTrayIcon,
   ArrowUpTrayIcon,
   MagnifyingGlassIcon,
-  PencilIcon
+  PencilIcon,
+  ClipboardDocumentIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 
@@ -130,6 +131,19 @@ const CompanySetupPage = () => {
 
     return labels[role] || role;
   }, []);
+
+  const handleCopyCompanyCode = useCallback(async () => {
+    if (!company?.code) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(company.code);
+      toast.success('Company code copied to clipboard');
+    } catch (error) {
+      toast.error('Unable to copy company code');
+    }
+  }, [company?.code]);
 
   useEffect(() => {
     // IMPORTANT: Only load company data if user is verified
@@ -1252,6 +1266,30 @@ const CompanySetupPage = () => {
               <p className="text-sm text-gray-600 mb-4">
                 Invite team members to join your company. They'll be able to access jobs and customers.
               </p>
+
+              {company?.code && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-green-900">Company code</p>
+                      <p className="text-2xl font-semibold text-green-800 tracking-[0.35em]">
+                        {company.code}
+                      </p>
+                      <p className="mt-1 text-xs text-green-700">
+                        Share this 6-character code with existing users. Invitation emails send an 8-character invitation code, where the first 6 characters match this company code.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopyCompanyCode}
+                      className="inline-flex items-center gap-2 self-start rounded-md border border-green-300 bg-white px-3 py-2 text-sm font-medium text-green-700 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-offset-2"
+                    >
+                      <ClipboardDocumentIcon className="h-4 w-4" />
+                      Copy code
+                    </button>
+                  </div>
+                </div>
+              )}
               
               <div className="bg-gray-50 p-4 rounded-lg mb-6">
                 <div className="flex gap-2 mb-3">

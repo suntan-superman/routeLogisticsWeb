@@ -112,6 +112,7 @@ class InvitationService {
       const invitationData = {
         companyId,
         companyName: company.name,
+        companyCode: company.code || '',
         email: email.toLowerCase(),
         role,
         invitationCode,

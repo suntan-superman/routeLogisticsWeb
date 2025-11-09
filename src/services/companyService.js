@@ -67,7 +67,9 @@ class CompanyService {
         body: JSON.stringify({
           invitationId: invitation.id,
           email: invitation.email,
+          companyId: invitation.companyId,
           companyName: invitation.companyName,
+          companyCode: invitation.companyCode,
           invitationCode: invitation.invitationCode,
           role: invitation.role,
           expiresAt: invitation.expiresAt

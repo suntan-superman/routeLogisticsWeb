@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import CompanyService from '../services/companyService';
+import InvitationService from '../services/invitationService';
 import { motion } from 'framer-motion';
 import { 
   BuildingOfficeIcon,
@@ -26,6 +27,10 @@ const SignUpPage = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [invitationCode, setInvitationCode] = useState('');
+  const [invitationDetails, setInvitationDetails] = useState(null);
+  const [invitationValidationMessage, setInvitationValidationMessage] = useState('');
+  const [isValidatingInvitation, setIsValidatingInvitation] = useState(false);
   
   // Step 2: Company selection
   const [companyOption, setCompanyOption] = useState('new'); // 'new' or 'existing'
@@ -53,28 +58,40 @@ const SignUpPage = () => {
 
   const parsedInviteParams = useMemo(() => {
     const params = new URLSearchParams(location.search);
-    const code = params.get('code') || '';
+    const rawCode = params.get('code') || '';
     const inviteRole = params.get('role') || '';
+    const inviteEmail = params.get('email') || '';
+    const inviteCompanyCode = params.get('companyCode') || '';
 
-    const normalizedCode = code.trim().toUpperCase();
+    const normalizedCode = rawCode.trim().toUpperCase();
     const normalizedRole = inviteRole.trim().toLowerCase();
+    const normalizedEmail = inviteEmail.trim();
+    const normalizedCompanyCode = inviteCompanyCode.trim().toUpperCase();
 
     const allowedRoles = ['admin', 'supervisor', 'field_tech'];
     return {
-      code: normalizedCode.length === 6 ? normalizedCode : '',
+      invitationCode: normalizedCode.length >= 6 ? normalizedCode : '',
       role: allowedRoles.includes(normalizedRole) ? normalizedRole : '',
+      email: normalizedEmail,
+      companyCode: normalizedCompanyCode.length === 6 ? normalizedCompanyCode : ''
     };
   }, [location.search]);
 
   useEffect(() => {
     // Reset core form state on mount or when invite params change
+    setStep(1);
     setName('');
-    setEmail('');
     setPassword('');
     setConfirmPassword('');
-    setStep(1);
-    setCompanyOption(parsedInviteParams.code ? 'existing' : 'new');
-    setCompanyCode(parsedInviteParams.code || '');
+
+    setInvitationCode(parsedInviteParams.invitationCode || '');
+    setInvitationDetails(null);
+    setInvitationValidationMessage('');
+    setIsValidatingInvitation(false);
+
+    setEmail(parsedInviteParams.email || '');
+    setCompanyOption(parsedInviteParams.invitationCode ? 'existing' : 'new');
+    setCompanyCode(parsedInviteParams.companyCode || '');
     setCompanySearchTerm('');
     setSearchResults([]);
     setSelectedCompany(null);
@@ -98,6 +115,72 @@ const SignUpPage = () => {
       setSelectedCompany(null);
     }
   }, [companyCode, companyOption]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const validateInvitationCode = async () => {
+      if (!invitationCode) {
+        if (isActive) {
+          setInvitationDetails(null);
+          setInvitationValidationMessage('');
+          setIsValidatingInvitation(false);
+        }
+        return;
+      }
+
+      setIsValidatingInvitation(true);
+      setInvitationValidationMessage('');
+
+      try {
+        const result = await InvitationService.getInvitationByCode(invitationCode);
+
+        if (!isActive) {
+          return;
+        }
+
+        if (result.success) {
+          const invite = result.invitation;
+          setInvitationDetails(invite);
+          setInvitationValidationMessage(`Invitation verified for ${invite.companyName}`);
+          setCompanyOption('existing');
+
+          if (!parsedInviteParams.email) {
+            setEmail(invite.email || '');
+          }
+
+          if (!parsedInviteParams.role && invite.role) {
+            setRole(invite.role);
+          }
+
+          const resolvedCompanyCode = parsedInviteParams.companyCode || invite.companyCode || '';
+          if (resolvedCompanyCode) {
+            setCompanyCode(resolvedCompanyCode.slice(0, 6));
+          }
+        } else {
+          setInvitationDetails(null);
+          setInvitationValidationMessage(result.error || 'Invitation not found or expired');
+        }
+      } catch (error) {
+        if (!isActive) {
+          return;
+        }
+
+        setInvitationDetails(null);
+        setInvitationValidationMessage('Unable to validate invitation code');
+      } finally {
+        if (isActive) {
+          setIsValidatingInvitation(false);
+        }
+      }
+    };
+
+    validateInvitationCode();
+
+    return () => {
+      isActive = false;
+    };
+  }, [invitationCode, parsedInviteParams.email, parsedInviteParams.companyCode, parsedInviteParams.role]);
 
   const validateCompanyCode = async () => {
     setValidatingCode(true);
@@ -231,6 +314,13 @@ const SignUpPage = () => {
           const joinResult = await CompanyService.joinCompanyByCode(userId, companyCode, role);
           
           if (joinResult.success) {
+            if (invitationCode) {
+              const acceptResult = await InvitationService.acceptInvitation(userId, invitationCode);
+              if (!acceptResult.success) {
+                toast.error(acceptResult.error || 'Failed to mark invitation as accepted');
+              }
+            }
+
             toast.success(`Successfully joined ${joinResult.company.name}!`);
             navigate('/verify-email', { 
               state: { email: signupResult.email } 
@@ -254,6 +344,15 @@ const SignUpPage = () => {
       setIsLoading(false);
     }
   };
+
+  const isStep1Complete = Boolean(
+    name.trim() &&
+    email.trim() &&
+    password &&
+    confirmPassword &&
+    password.length >= 6 &&
+    password === confirmPassword
+  );
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
@@ -304,6 +403,27 @@ const SignUpPage = () => {
                 Enter your basic information to get started
               </p>
             </div>
+
+            {invitationCode && (
+              <div
+                className={`rounded-md border p-3 text-sm ${
+                  invitationDetails
+                    ? 'border-green-200 bg-green-50 text-green-800'
+                    : invitationValidationMessage
+                      ? 'border-red-200 bg-red-50 text-red-700'
+                      : 'border-blue-200 bg-blue-50 text-blue-700'
+                }`}
+              >
+                {isValidatingInvitation ? (
+                  <span>Verifying invitation…</span>
+                ) : (
+                  <span>
+                    {invitationValidationMessage ||
+                      'Invitation detected. We will prefill your details after verification.'}
+                  </span>
+                )}
+              </div>
+            )}
 
             <div className="space-y-4">
               <div>
@@ -367,12 +487,16 @@ const SignUpPage = () => {
                   className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
                   placeholder="Confirm your password"
                 />
+                {password && confirmPassword && password !== confirmPassword && (
+                  <p className="mt-1 text-xs text-red-600">Passwords must match exactly.</p>
+                )}
               </div>
             </div>
 
             <button
               onClick={handleStep1Next}
-              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+              disabled={!isStep1Complete}
+              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               Continue
             </button>
@@ -445,6 +569,11 @@ const SignUpPage = () => {
                     <p className="mt-1 text-xs text-gray-500">
                       Ask your company administrator for the company code
                     </p>
+                    {invitationCode && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        Invitation codes are 8 characters and are used to validate your invite. The 6-character company code above links you to the correct company.
+                      </p>
+                    )}
                   </div>
                 </div>
               )}

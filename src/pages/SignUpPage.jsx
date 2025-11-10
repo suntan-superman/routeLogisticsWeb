@@ -51,6 +51,7 @@ const SignUpPage = () => {
   const [companyZipCode, setCompanyZipCode] = useState('');
   
   const { signup } = useAuth();
+  const navigate = useNavigate();
   const location = useLocation();
 
   const [validatingCode, setValidatingCode] = useState(false);

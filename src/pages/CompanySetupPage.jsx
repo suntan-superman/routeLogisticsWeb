@@ -33,7 +33,7 @@ import toast from 'react-hot-toast';
 
 const CompanySetupPage = () => {
   const { userProfile, updateUserProfile, isSuperAdmin, currentUser } = useAuth();
-  const { getEffectiveCompanyId } = useCompany();
+  const { getEffectiveCompanyId, activeCompany, refreshKey } = useCompany();
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [company, setCompany] = useState(null);
@@ -107,6 +107,8 @@ const CompanySetupPage = () => {
     active: true
   });
 
+  const effectiveCompanyId = getEffectiveCompanyId();
+
   const steps = [
     { id: 1, name: 'Basic Info', icon: BuildingOfficeIcon },
     { id: 2, name: 'Services', icon: CogIcon },
@@ -145,26 +147,49 @@ const CompanySetupPage = () => {
     }
   }, [company?.code]);
 
-  useEffect(() => {
-    // IMPORTANT: Only load company data if user is verified
-    // This prevents unverified users from accessing company setup
-    if (!currentUser) return;
-    
-    // Check if user is verified (super admin bypasses check)
-    const isSuperAdminUser = currentUser?.email === 'sroy@worksidesoftware.com';
-    if (!isSuperAdminUser && !currentUser.emailVerified) {
-      // User is not verified, don't load company data
+  const populateCompanyState = useCallback((companyRecord) => {
+    if (!companyRecord) {
       return;
     }
-    
+
+    setCompany(companyRecord);
+    setCompanyData({
+      name: companyRecord.name || '',
+      description: companyRecord.description || '',
+      address: companyRecord.address || '',
+      city: companyRecord.city || '',
+      state: companyRecord.state || '',
+      zipCode: companyRecord.zipCode || '',
+      phone: companyRecord.phone || '',
+      email: companyRecord.email || '',
+      website: companyRecord.website || '',
+      contactLink: companyRecord.contactLink || '',
+      logo: companyRecord.logo || '',
+      primaryColor: companyRecord.primaryColor || '#10b981',
+      secondaryColor: companyRecord.secondaryColor || '#6b7280'
+    });
+
+    setServiceCategories(companyRecord.serviceCategories || []);
+
+    const userServices = userProfile?.services || [];
+    const companyServices = companyRecord.services || [];
+    setSelectedServices(companyServices.length > 0 ? companyServices : userServices);
+  }, [userProfile?.services]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const isSuperAdminUser = currentUser?.email === 'sroy@worksidesoftware.com';
+    if (!isSuperAdminUser && !currentUser.emailVerified) {
+      return;
+    }
+
     loadCompanyData();
-    
-    // Check for pending company data from signup
+
     const pendingCompanyData = localStorage.getItem('pendingCompanyData');
     if (pendingCompanyData && !company?.id) {
       try {
         const companyData = JSON.parse(pendingCompanyData);
-        // Pre-fill company data from signup
         setCompanyData(prev => ({
           ...prev,
           name: companyData.name || prev.name,
@@ -175,21 +200,26 @@ const CompanySetupPage = () => {
           zipCode: companyData.zipCode || prev.zipCode,
           email: companyData.email || prev.email
         }));
-        
-        // Clear the pending data after using it
+
         localStorage.removeItem('pendingCompanyData');
       } catch (error) {
         console.error('Error parsing pending company data:', error);
       }
     }
-  }, [currentUser, isSuperAdmin]);
+  }, [currentUser, isSuperAdmin, effectiveCompanyId, refreshKey]);
+
+  useEffect(() => {
+    if (activeCompany && activeCompany.id === effectiveCompanyId) {
+      populateCompanyState(activeCompany);
+    }
+  }, [activeCompany, effectiveCompanyId, populateCompanyState]);
 
   // Load materials when on materials step
   useEffect(() => {
     if (currentStep === 3) {
       loadMaterials();
     }
-  }, [currentStep, company?.id, getEffectiveCompanyId]);
+  }, [currentStep, company?.id, effectiveCompanyId]);
 
   // Filter materials
   useEffect(() => {
@@ -335,46 +365,34 @@ const CompanySetupPage = () => {
   };
 
   const loadCompanyData = async () => {
-    if (!userProfile?.companyId) return;
-    
+    if (!effectiveCompanyId) {
+      setCompany(null);
+      setTeamMembers([]);
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const result = await CompanyService.getCompany(userProfile.companyId);
+      const result = await CompanyService.getCompany(effectiveCompanyId);
       if (result.success && !result.company.isAdminCompany && !result.company.isProtected) {
-        setCompany(result.company);
-        setCompanyData({
-          name: result.company.name || '',
-          description: result.company.description || '',
-          address: result.company.address || '',
-          city: result.company.city || '',
-          state: result.company.state || '',
-          zipCode: result.company.zipCode || '',
-          phone: result.company.phone || '',
-          email: result.company.email || '',
-          website: result.company.website || '',
-          contactLink: result.company.contactLink || '',
-          logo: result.company.logo || '',
-          primaryColor: result.company.primaryColor || '#10b981',
-          secondaryColor: result.company.secondaryColor || '#6b7280'
-        });
-        setServiceCategories(result.company.serviceCategories || []);
-        // Load individual services from company (matches mobile app structure)
-        // Mobile app stores services as an array of service strings
-        // Also check user profile services (mobile app stores them there)
-        const userServices = userProfile?.services || [];
-        const companyServices = result.company.services || [];
-        setSelectedServices(companyServices.length > 0 ? companyServices : userServices);
-        
-        // Load team members
-        const teamResult = await CompanyService.getTeamMembers(userProfile.companyId);
+        populateCompanyState(result.company);
+
+        const teamResult = await CompanyService.getTeamMembers(effectiveCompanyId);
         if (teamResult.success) {
           setTeamMembers(teamResult.teamMembers);
+        } else {
+          setTeamMembers([]);
         }
+      } else {
+        setCompany(null);
+        setTeamMembers([]);
       }
     } catch (error) {
       console.error('Error loading company data:', error);
+      setTeamMembers([]);
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   const handleInputChange = (field, value) => {
@@ -429,11 +447,12 @@ const CompanySetupPage = () => {
 
 
   const handleAddTeamMember = async () => {
-    if (!newMemberEmail.trim() || !company) return;
+    const companyId = company?.id || effectiveCompanyId;
+    if (!newMemberEmail.trim() || !companyId) return;
     
     setIsLoading(true);
     try {
-      const result = await CompanyService.addTeamMember(company.id, newMemberEmail, newMemberRole);
+      const result = await CompanyService.addTeamMember(companyId, newMemberEmail, newMemberRole);
       if (result.success) {
         setTeamMembers(prev => [...prev, result.teamMember]);
         setNewMemberEmail('');
@@ -547,7 +566,7 @@ const CompanySetupPage = () => {
 
   // Materials functions
   const loadMaterials = async () => {
-    const companyId = company?.id || getEffectiveCompanyId();
+    const companyId = company?.id || effectiveCompanyId;
     if (!companyId) {
       setMaterials([]);
       return;
@@ -654,7 +673,7 @@ const CompanySetupPage = () => {
       return;
     }
 
-    const companyId = company?.id || getEffectiveCompanyId();
+    const companyId = company?.id || effectiveCompanyId;
     if (!companyId) {
       toast.error('Company ID is required');
       return;
@@ -735,7 +754,7 @@ const CompanySetupPage = () => {
   };
 
   const handleImportDefaultMaterials = async () => {
-    const companyId = company?.id || getEffectiveCompanyId();
+    const companyId = company?.id || effectiveCompanyId;
     if (!companyId) {
       toast.error('Company ID is required');
       return;

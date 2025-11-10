@@ -18,6 +18,9 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from './firebase';
 
+const PROJECT_ID = 'mi-factotum-field-service';
+const FUNCTIONS_BASE_URL = `https://us-central1-${PROJECT_ID}.cloudfunctions.net`;
+
 class InvitationService {
   static getCurrentUserId() {
     const user = auth.currentUser;
@@ -56,6 +59,10 @@ class InvitationService {
         error: error.message
       };
     }
+  }
+
+  static getFunctionUrl(name) {
+    return `${FUNCTIONS_BASE_URL}/${name}`;
   }
 
   // Generate unique invitation code
@@ -131,6 +138,46 @@ class InvitationService {
       };
     } catch (error) {
       console.error('Error creating invitation:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  static async verifyInvitationCode(invitationCode) {
+    try {
+      const normalizedCode = (invitationCode || '').toString().trim().toUpperCase();
+      if (!normalizedCode) {
+        return {
+          success: false,
+          error: 'Invitation code is required'
+        };
+      }
+
+      const response = await fetch(this.getFunctionUrl('verifyInvitationCode'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ code: normalizedCode })
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        return {
+          success: false,
+          error: data.error || 'Failed to verify invitation code'
+        };
+      }
+
+      return {
+        success: true,
+        invitation: data.invitation
+      };
+    } catch (error) {
+      console.error('Error verifying invitation code via function:', error);
       return {
         success: false,
         error: error.message
@@ -238,35 +285,45 @@ class InvitationService {
   // Accept invitation (during signup)
   static async acceptInvitation(userId, invitationCode) {
     try {
-      const invitationResult = await this.getInvitationByCode(invitationCode);
-
-      if (!invitationResult.success) {
-        return invitationResult;
+      const user = auth.currentUser;
+      if (!user || user.uid !== userId) {
+        return {
+          success: false,
+          error: 'User is not authenticated'
+        };
       }
 
-      const invitation = invitationResult.invitation;
+      const normalizedCode = (invitationCode || '').toString().trim().toUpperCase();
+      if (!normalizedCode) {
+        return {
+          success: false,
+          error: 'Invitation code is required'
+        };
+      }
 
-      // Update user profile with company and role
-      await updateDoc(doc(db, 'users', userId), {
-        companyId: invitation.companyId,
-        role: invitation.role,
-        updatedAt: new Date().toISOString()
+      const token = await user.getIdToken();
+      const response = await fetch(this.getFunctionUrl('acceptInvitation'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ invitationCode: normalizedCode })
       });
 
-      // Mark invitation as accepted
-      await updateDoc(doc(db, 'invitations', invitation.id), {
-        status: 'accepted',
-        acceptedAt: new Date().toISOString(),
-        acceptedBy: userId
-      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        return {
+          success: false,
+          error: data.error || 'Failed to accept invitation'
+        };
+      }
 
       return {
         success: true,
-        company: {
-          id: invitation.companyId,
-          name: invitation.companyName
-        },
-        role: invitation.role
+        company: data.company,
+        role: data.role
       };
     } catch (error) {
       console.error('Error accepting invitation:', error);

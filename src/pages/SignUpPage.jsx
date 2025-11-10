@@ -133,7 +133,7 @@ const SignUpPage = () => {
       setInvitationValidationMessage('');
 
       try {
-        const result = await InvitationService.getInvitationByCode(invitationCode);
+        const result = await InvitationService.verifyInvitationCode(invitationCode);
 
         if (!isActive) {
           return;
@@ -145,7 +145,7 @@ const SignUpPage = () => {
           setInvitationValidationMessage(`Invitation verified for ${invite.companyName}`);
           setCompanyOption('existing');
 
-          if (!parsedInviteParams.email) {
+          if (!parsedInviteParams.email && invite.email) {
             setEmail(invite.email || '');
           }
 

@@ -20,6 +20,7 @@ import {
   MapPinIcon,
   BellIcon
 } from '@heroicons/react/24/outline';
+import { canAccessRoute } from '../utils/permissions';
 
 const Layout = ({ children }) => {
   const { userProfile, logout, isSuperAdmin } = useAuth();
@@ -47,8 +48,11 @@ const Layout = ({ children }) => {
   // Filter navigation based on user role
   const isAdmin = userProfile?.role === 'admin' || isSuperAdmin;
   const filteredNavigation = navigation.filter(item => {
+    if (!userProfile) return true;
+
     if (item.adminOnly && !isAdmin) return false;
-    return true;
+
+    return canAccessRoute(userProfile, item.href);
   });
 
   const isCurrentPath = (path) => {

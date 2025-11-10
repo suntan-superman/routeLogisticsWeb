@@ -1,7 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import JobManagementService from '../services/jobManagementService';
+import CompanyService from '../services/companyService';
+import { useAuth } from '../contexts/AuthContext';
+import { useCompany } from '../contexts/CompanyContext';
+import { canReassignJobs } from '../utils/permissions';
 import { 
   ClipboardDocumentListIcon, 
   PlusIcon,
@@ -23,6 +27,14 @@ import {
 import toast from 'react-hot-toast';
 
 const JobManagementPage = () => {
+  const { userProfile } = useAuth();
+  const { getEffectiveCompanyId, refreshKey } = useCompany();
+  const canTransferJobs = canReassignJobs(userProfile);
+  const companyIdForJobs = useMemo(
+    () => (typeof getEffectiveCompanyId === 'function' ? getEffectiveCompanyId() : null),
+    [getEffectiveCompanyId, refreshKey, userProfile?.companyId]
+  );
+
   const [jobs, setJobs] = useState([]);
   const [filteredJobs, setFilteredJobs] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -56,6 +68,20 @@ const JobManagementPage = () => {
     cancellationReason: ''
   });
 
+  const [teamMembers, setTeamMembers] = useState([]);
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [selectedAssigneeId, setSelectedAssigneeId] = useState('');
+  const [isAssigning, setIsAssigning] = useState(false);
+
+  const activeTeamMembers = useMemo(
+    () =>
+      teamMembers.filter((member) => {
+        const status = (member.status || '').toLowerCase();
+        return status === '' || status === 'active';
+      }),
+    [teamMembers]
+  );
+
   useEffect(() => {
     loadJobs();
     loadStats();
@@ -64,6 +90,34 @@ const JobManagementPage = () => {
   useEffect(() => {
     filterAndSortJobs();
   }, [jobs, searchTerm, activeFilter, dateFilter, sortBy]);
+
+  useEffect(() => {
+    if (!canTransferJobs) {
+      setTeamMembers([]);
+      return;
+    }
+
+    if (!companyIdForJobs) {
+      setTeamMembers([]);
+      return;
+    }
+
+    const fetchTeamMembers = async () => {
+      try {
+        const result = await CompanyService.getTeamMembers(companyIdForJobs);
+        if (result.success) {
+          setTeamMembers(result.teamMembers || []);
+        } else if (result.error) {
+          toast.error(result.error);
+        }
+      } catch (error) {
+        console.error('Error loading team members:', error);
+        toast.error('Error loading team members');
+      }
+    };
+
+    fetchTeamMembers();
+  }, [canTransferJobs, companyIdForJobs]);
 
   const loadJobs = async () => {
     setIsLoading(true);
@@ -238,6 +292,81 @@ const JobManagementPage = () => {
       cancellationReason: job.cancellationReason || ''
     });
     setShowStatusModal(true);
+  };
+
+  const openAssignModal = (job) => {
+    setSelectedJob(job);
+    setSelectedAssigneeId(job.assignedTo || '');
+    setShowAssignModal(true);
+  };
+
+  const handleAssignJob = async () => {
+    if (!selectedJob) {
+      return;
+    }
+
+    if (!selectedAssigneeId) {
+      toast.error('Please select a team member');
+      return;
+    }
+
+    const member = activeTeamMembers.find((m) => m.id === selectedAssigneeId);
+
+    if (!member) {
+      toast.error('Selected team member is no longer available');
+      return;
+    }
+
+    const displayName =
+      member.name ||
+      member.fullName ||
+      member.roleDisplay ||
+      member.email ||
+      'Team Member';
+
+    setIsAssigning(true);
+    try {
+      const result = await JobManagementService.assignJob(
+        selectedJob.id,
+        member.id,
+        displayName
+      );
+
+      if (result.success) {
+        setJobs((prev) =>
+          prev.map((job) =>
+            job.id === selectedJob.id
+              ? {
+                  ...job,
+                  assignedTo: member.id,
+                  assignedToName:
+                    result.job?.assignedToName || displayName,
+                }
+              : job
+          )
+        );
+        setSelectedJob((prev) =>
+          prev
+            ? {
+                ...prev,
+                assignedTo: member.id,
+                assignedToName:
+                  result.job?.assignedToName || displayName,
+              }
+            : prev
+        );
+        toast.success(`Job reassigned to ${displayName}`);
+        setShowAssignModal(false);
+        setSelectedAssigneeId('');
+      } else {
+        toast.error(result.error || 'Failed to reassign job');
+      }
+    } catch (error) {
+      console.error('Error assigning job:', error);
+      toast.error('Error assigning job');
+    } finally {
+      setIsAssigning(false);
+    }
   };
 
   const exportJobs = async () => {
@@ -641,6 +770,15 @@ const JobManagementPage = () => {
                         >
                           <PencilIcon className="h-4 w-4" />
                         </button>
+                        {canTransferJobs && (
+                          <button
+                            onClick={() => openAssignModal(job)}
+                            className="text-emerald-600 hover:text-emerald-900"
+                            title="Assign to team member"
+                          >
+                            <UserIcon className="h-4 w-4" />
+                          </button>
+                        )}
                         <button
                           onClick={() => openStatusModal(job)}
                           className="text-blue-600 hover:text-blue-900"
@@ -921,6 +1059,91 @@ const JobManagementPage = () => {
                   className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isLoading ? 'Updating...' : 'Update Status'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {showAssignModal && selectedJob && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-full max-w-lg shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">Reassign Job</h3>
+                <button
+                  onClick={() => {
+                    setShowAssignModal(false);
+                    setSelectedAssigneeId('');
+                    setSelectedJob(null);
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <span className="sr-only">Close</span>
+                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="bg-gray-50 p-4 rounded-md">
+                  <p className="text-sm font-medium text-gray-700">Job</p>
+                  <p className="text-base text-gray-900">{selectedJob.serviceType || 'Service'}</p>
+                  <p className="text-sm text-gray-500">
+                    {formatDate(selectedJob.date)} at {formatTime(selectedJob.time)}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Assign to *</label>
+                  <select
+                    value={selectedAssigneeId}
+                    onChange={(e) => setSelectedAssigneeId(e.target.value)}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                  >
+                    <option value="">Select a team member</option>
+                    {activeTeamMembers.length === 0 && (
+                      <option value="" disabled>
+                        No active team members found
+                      </option>
+                    )}
+                    {activeTeamMembers.map((member) => {
+                      const label =
+                        member.name ||
+                        member.fullName ||
+                        member.roleDisplay ||
+                        member.email;
+                      return (
+                        <option key={member.id} value={member.id}>
+                          {label}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <p className="mt-2 text-xs text-gray-500">
+                    Only active team members can be assigned jobs.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-3 mt-6">
+                <button
+                  onClick={() => {
+                    setShowAssignModal(false);
+                    setSelectedAssigneeId('');
+                    setSelectedJob(null);
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAssignJob}
+                  disabled={isAssigning || activeTeamMembers.length === 0}
+                  className="px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isAssigning ? 'Assigning...' : 'Assign Job'}
                 </button>
               </div>
             </div>

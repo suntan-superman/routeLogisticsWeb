@@ -3,9 +3,10 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { auth } from '../services/firebase';
 import { reload } from 'firebase/auth';
+import { canAccessRoute, getDefaultRouteForRole } from '../utils/permissions';
 
 const ProtectedRoute = ({ children }) => {
-  const { currentUser, loading, needsCompanySetup, isSuperAdmin } = useAuth();
+  const { currentUser, userProfile, loading, needsCompanySetup } = useAuth();
   const location = useLocation();
   const [verificationChecked, setVerificationChecked] = useState(false);
 
@@ -51,6 +52,14 @@ const ProtectedRoute = ({ children }) => {
   // Allow access to company-setup page itself
   if (needsCompanySetup && location.pathname !== '/company-setup') {
     return <Navigate to="/company-setup" replace />;
+  }
+
+  // Role-based route access
+  if (!canAccessRoute(userProfile, location.pathname)) {
+    const fallback = getDefaultRouteForRole(userProfile);
+    if (location.pathname !== fallback) {
+      return <Navigate to={fallback} replace />;
+    }
   }
 
   return children;

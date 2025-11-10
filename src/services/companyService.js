@@ -208,6 +208,13 @@ class CompanyService {
   // Link user to company by code
   static async joinCompanyByCode(userId, companyCode, role = 'field_tech') {
     try {
+      if (!userId) {
+        return {
+          success: false,
+          error: 'User ID is required to join a company'
+        };
+      }
+
       const companyResult = await this.getCompanyByCode(companyCode);
       
       if (!companyResult.success) {
@@ -222,12 +229,36 @@ class CompanyService {
         };
       }
 
+      const userDocRef = doc(db, 'users', userId);
+      const userDocSnap = await getDoc(userDocRef);
+
+      if (!userDocSnap.exists()) {
+        return {
+          success: false,
+          error: 'User profile not found'
+        };
+      }
+
+      const userData = userDocSnap.data() || {};
+
+      if (userData.companyId && userData.companyId !== companyResult.company.id) {
+        return {
+          success: false,
+          error: 'This account is already associated with another company. Please contact your administrator to transfer access.'
+        };
+      }
+
       // Update user profile with company ID and role
-      await updateDoc(doc(db, 'users', userId), {
+      const updates = {
         companyId: companyResult.company.id,
-        role: role,
         updatedAt: new Date().toISOString()
-      });
+      };
+
+      if (role && userData.role !== role) {
+        updates.role = role;
+      }
+
+      await updateDoc(userDocRef, updates);
 
       return {
         success: true,
@@ -335,6 +366,14 @@ class CompanyService {
 
       const ownerUser = usersSnapshot.docs[0];
       const ownerId = ownerUser.id;
+      const ownerData = ownerUser.data() || {};
+
+      if (ownerData.companyId) {
+        return {
+          success: false,
+          error: 'This user already manages another company. Remove them from the existing company before assigning a new one.'
+        };
+      }
 
       // Generate unique company code
       let companyCode = this.generateCompanyCode();
@@ -736,6 +775,23 @@ class CompanyService {
           success: false,
           error: 'A team member with this email already exists.'
         };
+      }
+
+      // Check if user already belongs to another company
+      const existingUserQuery = query(
+        collection(db, 'users'),
+        where('email', '==', normalizedEmail)
+      );
+      const existingUserSnapshot = await getDocs(existingUserQuery);
+
+      if (!existingUserSnapshot.empty) {
+        const existingUserData = existingUserSnapshot.docs[0].data() || {};
+        if (existingUserData.companyId && existingUserData.companyId !== companyId) {
+          return {
+            success: false,
+            error: 'This email address is already associated with another company. Ask the user to be removed from their current company before inviting them here.'
+          };
+        }
       }
 
       const invitationResult = await InvitationService.createInvitation(

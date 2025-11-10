@@ -97,6 +97,23 @@ class InvitationService {
 
       const company = companyResult.company;
 
+      // Prevent inviting users who belong to another company
+      const usersQuery = query(
+        collection(db, 'users'),
+        where('email', '==', email.toLowerCase())
+      );
+      const usersSnapshot = await getDocs(usersQuery);
+
+      if (!usersSnapshot.empty) {
+        const existingUser = usersSnapshot.docs[0].data() || {};
+        if (existingUser.companyId && existingUser.companyId !== companyId) {
+          return {
+            success: false,
+            error: 'This email address is already associated with another company.'
+          };
+        }
+      }
+
       // Check if invitation already exists for this email and company
       const existingInvitationsQuery = query(
         collection(db, 'invitations'),

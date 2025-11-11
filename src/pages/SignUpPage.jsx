@@ -158,6 +158,15 @@ const SignUpPage = () => {
           if (resolvedCompanyCode) {
             setCompanyCode(resolvedCompanyCode.slice(0, 6));
           }
+
+          setSelectedCompany({
+            id: invite.companyId,
+            name: invite.companyName || '',
+            code: (invite.companyCode || '').slice(0, 6)
+          });
+          if (invite.companyName) {
+            setCodeValidationMessage(`Company found: ${invite.companyName}`);
+          }
         } else {
           setInvitationDetails(null);
           setInvitationValidationMessage(result.error || 'Invitation not found or expired');
@@ -224,6 +233,11 @@ const SignUpPage = () => {
   };
 
   const handleStep2Next = () => {
+    if (isInviteFlow) {
+      setStep(3);
+      return;
+    }
+
     if (companyOption === 'existing') {
       if (!companyCode || companyCode.length !== 6) {
         toast.error('Please enter a valid 6-character company code');
@@ -280,7 +294,7 @@ const SignUpPage = () => {
         zipCode: companyOption === 'new' ? companyZipCode : '',
         services: [],
         serviceCategories: [],
-        role: role
+        role: invitedRole || role
       };
 
       const signupResult = await signup(email, password, userData);
@@ -310,31 +324,36 @@ const SignUpPage = () => {
           state: { email: signupResult.email } 
         });
       } else {
-        // For existing company, link user via company code
-        if (companyCode) {
-          const joinResult = await CompanyService.joinCompanyByCode(userId, companyCode, role);
-          
-          if (joinResult.success) {
-            if (invitationCode) {
-              const acceptResult = await InvitationService.acceptInvitation(userId, invitationCode);
-              if (!acceptResult.success) {
-                toast.error(acceptResult.error || 'Failed to mark invitation as accepted');
-              }
-            }
+        if (invitationCode) {
+          const acceptResult = await InvitationService.acceptInvitation(userId, invitationCode);
+          if (!acceptResult.success) {
+            toast.error(acceptResult.error || 'Failed to accept invitation');
+          } else {
+            toast.success(
+              acceptResult.company?.name
+                ? `Welcome to ${acceptResult.company.name}!`
+                : 'Invitation accepted successfully.'
+            );
+          }
 
+          navigate('/verify-email', {
+            state: { email: signupResult.email }
+          });
+        } else if (companyCode) {
+          const joinResult = await CompanyService.joinCompanyByCode(userId, companyCode, role);
+
+          if (joinResult.success) {
             toast.success(`Successfully joined ${joinResult.company.name}!`);
-            navigate('/verify-email', { 
-              state: { email: signupResult.email } 
-            });
           } else {
             toast.error('Failed to join company: ' + joinResult.error);
-            navigate('/verify-email', { 
-              state: { email: signupResult.email } 
-            });
           }
+
+          navigate('/verify-email', {
+            state: { email: signupResult.email }
+          });
         } else {
-          navigate('/verify-email', { 
-            state: { email: signupResult.email } 
+          navigate('/verify-email', {
+            state: { email: signupResult.email }
           });
         }
       }
@@ -354,6 +373,10 @@ const SignUpPage = () => {
     password.length >= 6 &&
     password === confirmPassword
   );
+
+  const isInviteFlow = Boolean(invitationDetails);
+  const invitedRole = invitationDetails?.role || parsedInviteParams.role || role;
+  const emailLocked = Boolean(isInviteFlow && email);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
@@ -452,10 +475,16 @@ const SignUpPage = () => {
                   required
                   autoComplete="off"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                  placeholder="you@example.com"
+                  onChange={(e) => setEmail(e.target.value.trim())}
+                  disabled={emailLocked}
+                  className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm ${emailLocked ? 'bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed' : 'border-gray-300'}`}
+                  placeholder="john@example.com"
                 />
+                {emailLocked && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    This email is tied to your invitation and cannot be changed.
+                  </p>
+                )}
               </div>
 
               <div>
@@ -516,160 +545,237 @@ const SignUpPage = () => {
         {/* Step 2: Company Selection */}
         {step === 2 && (
           <div className="space-y-6">
-            <div>
-              <h2 className="text-3xl font-bold text-gray-900 text-center">
-                Company Association
-              </h2>
-              <p className="mt-2 text-center text-sm text-gray-600">
-                Join an existing company or create a new one
-              </p>
-            </div>
+            {isInviteFlow ? (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-3xl font-bold text-gray-900 text-center">
+                    Confirm Company
+                  </h2>
+                  <p className="mt-2 text-center text-sm text-gray-600">
+                    This invitation will connect you to {invitationDetails?.companyName || 'the selected company'}.
+                  </p>
+                </div>
 
-            <div className="space-y-4">
-              <div className="border rounded-lg p-4">
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="radio"
-                    name="companyOption"
-                    value="existing"
-                    checked={companyOption === 'existing'}
-                    onChange={(e) => setCompanyOption(e.target.value)}
-                    className="mr-3"
-                  />
-                  <div>
-                    <div className="font-medium text-gray-900">Join Existing Company</div>
-                    <div className="text-sm text-gray-500">Enter company code or search for your company</div>
-                  </div>
-                </label>
-              </div>
-
-              {companyOption === 'existing' && (
-                <div className="ml-8 space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Company Code
-                    </label>
-                    <input
-                      type="text"
-                      value={companyCode}
-                      onChange={(e) => setCompanyCode(e.target.value.toUpperCase().slice(0, 6))}
-                      maxLength={6}
-                      className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm uppercase"
-                      placeholder="Enter 6-character code"
-                    />
-                    {validatingCode && (
-                      <p className="mt-1 text-xs text-blue-600">Validating...</p>
-                    )}
-                    {codeValidationMessage && !validatingCode && (
-                      <p className={`mt-1 text-xs ${
-                        selectedCompany ? 'text-green-600' : 'text-red-600'
-                      }`}>
-                        {codeValidationMessage}
-                      </p>
-                    )}
-                    <p className="mt-1 text-xs text-gray-500">
-                      Ask your company administrator for the company code
-                    </p>
-                    {invitationCode && (
-                      <p className="mt-1 text-xs text-gray-500">
-                        Invitation codes are 8 characters and are used to validate your invite. The 6-character company code above links you to the correct company.
-                      </p>
-                    )}
+                <div className="border rounded-lg p-6 bg-gray-50">
+                  <p className="text-sm text-gray-500 uppercase tracking-wide">Company</p>
+                  <p className="text-lg font-semibold text-gray-900">{invitationDetails?.companyName || '—'}</p>
+                  <div className="mt-3 grid grid-cols-1 gap-2 text-sm text-gray-600">
+                    <div><span className="font-medium text-gray-700">Company Code:</span> {companyCode}</div>
+                    <div><span className="font-medium text-gray-700">Invited Email:</span> {invitationDetails?.email || email}</div>
+                    <div><span className="font-medium text-gray-700">Invitation Role:</span> {ROLE_OPTIONS.find((opt) => opt.value === invitedRole)?.label || 'Field Technician'}</div>
                   </div>
                 </div>
-              )}
 
-              <div className="border rounded-lg p-4">
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="radio"
-                    name="companyOption"
-                    value="new"
-                    checked={companyOption === 'new'}
-                    onChange={(e) => setCompanyOption(e.target.value)}
-                    className="mr-3"
-                  />
-                  <div>
-                    <div className="font-medium text-gray-900">Create New Company</div>
-                    <div className="text-sm text-gray-500">You'll be set as the company administrator</div>
-                  </div>
-                </label>
+                <div className="flex space-x-3">
+                  <button
+                    onClick={() => setStep(1)}
+                    className="flex-1 py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={handleStep2Next}
+                    className="flex-1 py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+                  >
+                    Continue
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-3xl font-bold text-gray-900 text-center">
+                    Company Association
+                  </h2>
+                  <p className="mt-2 text-center text-sm text-gray-600">
+                    Join an existing company or create a new one
+                  </p>
+                </div>
 
-            <div className="flex space-x-3">
-              <button
-                onClick={() => setStep(1)}
-                className="flex-1 py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-              >
-                Back
-              </button>
-              <button
-                onClick={handleStep2Next}
-                className="flex-1 py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
-              >
-                Continue
-              </button>
-            </div>
+                <div className="space-y-4">
+                  <div className="border rounded-lg p-4">
+                    <label className="flex items-center cursor-pointer">
+                      <input
+                        type="radio"
+                        name="companyOption"
+                        value="existing"
+                        checked={companyOption === 'existing'}
+                        onChange={(e) => setCompanyOption(e.target.value)}
+                        className="mr-3"
+                      />
+                      <div>
+                        <div className="font-medium text-gray-900">Join Existing Company</div>
+                        <div className="text-sm text-gray-500">Enter company code or search for your company</div>
+                      </div>
+                    </label>
+                  </div>
+
+                  {companyOption === 'existing' && (
+                    <div className="ml-8 space-y-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Company Code
+                        </label>
+                        <input
+                          type="text"
+                          value={companyCode}
+                          onChange={(e) => setCompanyCode(e.target.value.toUpperCase().slice(0, 6))}
+                          maxLength={6}
+                          className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm uppercase"
+                          placeholder="Enter 6-character code"
+                        />
+                        {validatingCode && (
+                          <p className="mt-1 text-xs text-blue-600">Validating...</p>
+                        )}
+                        {codeValidationMessage && !validatingCode && (
+                          <p className={`mt-1 text-xs ${
+                            selectedCompany ? 'text-green-600' : 'text-red-600'
+                          }`}>
+                            {codeValidationMessage}
+                          </p>
+                        )}
+                        <p className="mt-1 text-xs text-gray-500">
+                          Ask your company administrator for the company code
+                        </p>
+                        {invitationCode && (
+                          <p className="mt-1 text-xs text-gray-500">
+                            Invitation codes are 8 characters and are used to validate your invite. The 6-character company code above links you to the correct company.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="border rounded-lg p-4">
+                    <label className="flex items-center cursor-pointer">
+                      <input
+                        type="radio"
+                        name="companyOption"
+                        value="new"
+                        checked={companyOption === 'new'}
+                        onChange={(e) => setCompanyOption(e.target.value)}
+                        className="mr-3"
+                      />
+                      <div>
+                        <div className="font-medium text-gray-900">Create New Company</div>
+                        <div className="text-sm text-gray-500">You'll be set as the company administrator</div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex space-x-3">
+                  <button
+                    onClick={() => setStep(1)}
+                    className="flex-1 py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={handleStep2Next}
+                    className="flex-1 py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+                  >
+                    Continue
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {/* Step 3: Role Selection (only for existing company) */}
         {step === 3 && (
           <div className="space-y-6">
-            <div>
-              <h2 className="text-3xl font-bold text-gray-900 text-center">
-                Select Your Role
-              </h2>
-              <p className="mt-2 text-center text-sm text-gray-600">
-                Choose the role that best describes your position
-              </p>
-            </div>
-
-            <div className="space-y-3">
-              {ROLE_OPTIONS.map((option) => (
-                <div
-                  key={option.value}
-                  className={`border rounded-lg p-4 cursor-pointer transition-all ${
-                    role === option.value
-                      ? 'border-primary-500 bg-primary-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                  onClick={() => setRole(option.value)}
-                >
-                  <div className="flex items-start">
-                    <input
-                      type="radio"
-                      name="role"
-                      value={option.value}
-                      checked={role === option.value}
-                      onChange={() => setRole(option.value)}
-                      className="mt-1 mr-3"
-                    />
-                    <div className="flex-1">
-                      <div className="font-medium text-gray-900">{option.label}</div>
-                      <div className="text-sm text-gray-500 mt-1">{option.description}</div>
-                    </div>
-                  </div>
+            {isInviteFlow ? (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-3xl font-bold text-gray-900 text-center">
+                    Invitation Role
+                  </h2>
+                  <p className="mt-2 text-center text-sm text-gray-600">
+                    Your administrator has assigned your role. Review the details and continue.
+                  </p>
                 </div>
-              ))}
-            </div>
 
-            <div className="flex space-x-3">
-              <button
-                onClick={() => setStep(2)}
-                className="flex-1 py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-              >
-                Back
-              </button>
-              <button
-                onClick={handleStep3Next}
-                disabled={isLoading}
-                className="flex-1 py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50"
-              >
-                {isLoading ? 'Creating Account...' : 'Create Account'}
-              </button>
-            </div>
+                <div className="border border-primary-500 bg-primary-50 rounded-lg p-6">
+                  <div className="font-medium text-primary-700 uppercase text-xs tracking-wider">Assigned Role</div>
+                  <div className="mt-2 text-xl font-semibold text-gray-900">{ROLE_OPTIONS.find((option) => option.value === invitedRole)?.label || 'Field Technician'}</div>
+                  <p className="mt-2 text-sm text-gray-600">{ROLE_OPTIONS.find((option) => option.value === invitedRole)?.description}</p>
+                </div>
+
+                <div className="flex space-x-3">
+                  <button
+                    onClick={() => setStep(2)}
+                    className="flex-1 py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={handleStep3Next}
+                    disabled={isLoading}
+                    className="flex-1 py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50"
+                  >
+                    {isLoading ? 'Creating Account...' : 'Create Account'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <h2 className="text-3xl font-bold text-gray-900 text-center">
+                    Select Your Role
+                  </h2>
+                  <p className="mt-2 text-center text-sm text-gray-600">
+                    Choose the role that best describes your position
+                  </p>
+                </div>
+
+                <div className="space-y-3">
+                  {ROLE_OPTIONS.map((option) => (
+                    <div
+                      key={option.value}
+                      className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                        role === option.value
+                          ? 'border-primary-500 bg-primary-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                      onClick={() => setRole(option.value)}
+                    >
+                      <div className="flex items-start">
+                        <input
+                          type="radio"
+                          name="role"
+                          value={option.value}
+                          checked={role === option.value}
+                          onChange={() => setRole(option.value)}
+                          className="mt-1 mr-3"
+                        />
+                        <div className="flex-1">
+                          <div className="font-medium text-gray-900">{option.label}</div>
+                          <div className="text-sm text-gray-500 mt-1">{option.description}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex space-x-3">
+                  <button
+                    onClick={() => setStep(2)}
+                    className="flex-1 py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={handleStep3Next}
+                    disabled={isLoading}
+                    className="flex-1 py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50"
+                  >
+                    {isLoading ? 'Creating Account...' : 'Create Account'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
 

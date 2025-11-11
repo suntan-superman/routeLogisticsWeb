@@ -296,6 +296,17 @@ class InvitationService {
         };
       }
 
+      await auth.currentUser?.reload();
+
+      try {
+        const userDoc = await getDoc(doc(db, 'users', userId));
+        if (!userDoc.exists()) {
+          throw new Error('User profile not found after accepting invitation');
+        }
+      } catch (profileError) {
+        console.error('Error refreshing user profile after invitation acceptance:', profileError);
+      }
+
       return {
         success: true,
         company: data.company,

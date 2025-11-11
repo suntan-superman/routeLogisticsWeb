@@ -194,7 +194,7 @@ const ReportsPage = () => {
     <span className="text-sm text-gray-900">{props.jobs}</span>
   );
 
-  const trendsNoRecordsTemplate = () => (
+  const renderTrendsEmptyState = () => (
     <div className="py-8 text-center text-sm text-gray-500">
       No monthly trend data available for this range.
     </div>
@@ -446,46 +446,49 @@ const ReportsPage = () => {
             <CalendarIcon className="h-5 w-5 mr-2 text-indigo-500" />
             Monthly Trends
           </h3>
-          <GridComponent
-            id="monthlyTrendsGrid"
-            dataSource={analytics.monthlyTrends}
-            allowPaging
-            allowSorting
-            allowFiltering
-            allowSelection
-            allowExcelExport
-            filterSettings={trendsFilterSettings}
-            toolbar={trendsToolbarOptions}
-            toolbarClick={handleTrendsToolbarClick}
-            selectionSettings={{ type: 'Single' }}
-            pageSettings={trendsPageSettings}
-            height="420"
-            ref={trendsGridRef}
-            noRecordsTemplate={trendsNoRecordsTemplate}
-          >
-            <ColumnsDirective>
-              <ColumnDirective field="month" headerText="Month" width="160" />
-              <ColumnDirective
-                field="jobs"
-                headerText="Jobs"
-                width="120"
-                template={trendsJobsTemplate}
-              />
-              <ColumnDirective
-                field="completedJobs"
-                headerText="Completed"
-                width="140"
-                template={trendsCompletedTemplate}
-              />
-              <ColumnDirective
-                field="revenue"
-                headerText="Revenue"
-                width="160"
-                template={trendsRevenueTemplate}
-              />
-            </ColumnsDirective>
-            <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
-          </GridComponent>
+          {analytics.monthlyTrends.length === 0 ? (
+            renderTrendsEmptyState()
+          ) : (
+            <GridComponent
+              id="monthlyTrendsGrid"
+              dataSource={analytics.monthlyTrends}
+              allowPaging
+              allowSorting
+              allowFiltering
+              allowSelection
+              allowExcelExport
+              filterSettings={trendsFilterSettings}
+              toolbar={trendsToolbarOptions}
+              toolbarClick={handleTrendsToolbarClick}
+              selectionSettings={{ type: 'Single' }}
+              pageSettings={trendsPageSettings}
+              height="420"
+              ref={trendsGridRef}
+            >
+              <ColumnsDirective>
+                <ColumnDirective field="month" headerText="Month" width="160" />
+                <ColumnDirective
+                  field="jobs"
+                  headerText="Jobs"
+                  width="120"
+                  template={trendsJobsTemplate}
+                />
+                <ColumnDirective
+                  field="completedJobs"
+                  headerText="Completed"
+                  width="140"
+                  template={trendsCompletedTemplate}
+                />
+                <ColumnDirective
+                  field="revenue"
+                  headerText="Revenue"
+                  width="160"
+                  template={trendsRevenueTemplate}
+                />
+              </ColumnsDirective>
+              <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
+            </GridComponent>
+          )}
         </div>
       )}
 

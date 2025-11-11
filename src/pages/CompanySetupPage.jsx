@@ -12,6 +12,7 @@ import * as XLSX from 'xlsx';
 import { 
   BuildingOfficeIcon, 
   CheckCircleIcon,
+  UsersIcon,
   UserGroupIcon,
   CogIcon,
   DocumentTextIcon,
@@ -45,10 +46,18 @@ import {
   Resize,
   Inject
 } from '@syncfusion/ej2-react-grids';
+import { ROLE_OPTIONS, DEFAULT_ROLE } from '../constants/roles';
 
 const CompanySetupPage = () => {
   const { userProfile, updateUserProfile, isSuperAdmin, currentUser } = useAuth();
   const { getEffectiveCompanyId, activeCompany, refreshKey } = useCompany();
+  const PHOTO_RETENTION_OPTIONS = useMemo(() => ([
+    { value: 0, label: 'Keep indefinitely (manual cleanup)' },
+    { value: 30, label: '30 days (keep last month)' },
+    { value: 60, label: '60 days' },
+    { value: 90, label: '90 days' },
+    { value: 180, label: '180 days' }
+  ]), []);
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [company, setCompany] = useState(null);
@@ -107,13 +116,27 @@ const CompanySetupPage = () => {
     contactLink: '',
     logo: '',
     primaryColor: '#10b981',
-    secondaryColor: '#6b7280'
+    secondaryColor: '#6b7280',
+    photoRetentionDays: 0
   });
 
   const [serviceCategories, setServiceCategories] = useState([]); // For category selection
   const [selectedServices, setSelectedServices] = useState([]); // For individual service selection (matches mobile app)
+  const standardServiceSet = useMemo(() => {
+    const set = new Set();
+    SERVICE_CATEGORIES.forEach((category) => {
+      category.services.forEach((service) => set.add(service));
+    });
+    return set;
+  }, []);
+  const availableCustomServices = useMemo(() => {
+    const servicesSet = new Set();
+    (company?.services || []).forEach((service) => servicesSet.add(service));
+    selectedServices.forEach((service) => servicesSet.add(service));
+    return Array.from(servicesSet).filter((service) => !standardServiceSet.has(service));
+  }, [company?.services, selectedServices, standardServiceSet]);
   const [newMemberEmail, setNewMemberEmail] = useState('');
-  const [newMemberRole, setNewMemberRole] = useState('technician');
+  const [newMemberRole, setNewMemberRole] = useState(DEFAULT_ROLE);
   const [logoUploading, setLogoUploading] = useState(false);
   
   // Materials state
@@ -142,7 +165,55 @@ const CompanySetupPage = () => {
     active: true
   });
 
-  const effectiveCompanyId = getEffectiveCompanyId();
+const effectiveCompanyId = getEffectiveCompanyId();
+const [canManageTeamMembers, setCanManageTeamMembers] = useState(false);
+
+const determineTeamManagementAccess = useCallback(
+  (companyRecord) => {
+    if (isSuperAdmin) {
+      return true;
+    }
+
+    const role = (userProfile?.role || '').toLowerCase();
+    if (role === 'admin' || role === 'supervisor') {
+      return true;
+    }
+
+    const currentUserId = currentUser?.uid || userProfile?.id || null;
+    if (companyRecord?.ownerId && currentUserId && companyRecord.ownerId === currentUserId) {
+      return true;
+    }
+
+    return false;
+  },
+  [currentUser?.uid, isSuperAdmin, userProfile?.id, userProfile?.role]
+);
+
+// Materials functions
+const loadMaterials = useCallback(async () => {
+  const companyId = company?.id || effectiveCompanyId;
+  if (!companyId) {
+    setMaterials([]);
+    return;
+  }
+
+  setIsLoading(true);
+  try {
+    const result = await MaterialsService.getMaterials(companyId, userProfile);
+    if (result.success) {
+      setMaterials(result.materials || []);
+    } else {
+      toast.error(result.error || 'Failed to load materials');
+      setMaterials([]);
+    }
+  } catch (error) {
+    console.error('Error loading materials:', error);
+    toast.error('Error loading materials');
+    setMaterials([]);
+  } finally {
+    setIsLoading(false);
+  }
+}, [company?.id, effectiveCompanyId, userProfile]);
 
   const steps = [
     { id: 1, name: 'Basic Info', icon: BuildingOfficeIcon },
@@ -278,27 +349,33 @@ const CompanySetupPage = () => {
     );
   };
 
-  const teamActionsTemplate = (props) => (
-    <div className="flex items-center gap-3">
-      {props.status === 'pending' && (
+  const teamActionsTemplate = (props) => {
+    if (!canManageTeamMembers) {
+      return <span className="text-xs text-gray-400">View only</span>;
+    }
+
+    return (
+      <div className="flex items-center gap-3">
+        {props.status === 'pending' && (
+          <button
+            type="button"
+            onClick={() => handleResendTeamMemberInvite(props.id)}
+            disabled={isLoading}
+            className="text-primary-600 hover:text-primary-800 text-sm disabled:opacity-50"
+          >
+            Resend
+          </button>
+        )}
         <button
           type="button"
-          onClick={() => handleResendTeamMemberInvite(props.id)}
-          disabled={isLoading}
-          className="text-primary-600 hover:text-primary-800 text-sm disabled:opacity-50"
+          onClick={() => handleRemoveTeamMember(props.id)}
+          className="text-red-600 hover:text-red-800 text-sm"
         >
-          Resend
+          Remove
         </button>
-      )}
-      <button
-        type="button"
-        onClick={() => handleRemoveTeamMember(props.id)}
-        className="text-red-600 hover:text-red-800 text-sm"
-      >
-        Remove
-      </button>
-    </div>
-  );
+      </div>
+    );
+  };
 
   const teamInvitedOnTemplate = (props) => (
     <span className="text-sm text-gray-700">
@@ -306,10 +383,14 @@ const CompanySetupPage = () => {
     </span>
   );
 
-  const teamNoRecordsTemplate = () => (
+  const renderTeamEmptyState = () => (
     <div className="text-center py-10 space-y-2">
       <UsersIcon className="mx-auto h-10 w-10 text-gray-400" />
-      <p className="text-sm text-gray-600">No team members yet. Invite your first teammate above.</p>
+      <p className="text-sm text-gray-600">
+        {canManageTeamMembers
+          ? 'No team members yet. Invite your first teammate above.'
+          : 'No team members yet. Contact your administrator if you need teammates added.'}
+      </p>
     </div>
   );
 
@@ -385,12 +466,12 @@ const CompanySetupPage = () => {
     </div>
   );
 
-  const materialsNoRecordsTemplate = () => (
+  const renderMaterialsEmptyState = () => (
     <div className="text-center py-10 space-y-2">
       <WrenchScrewdriverIcon className="mx-auto h-10 w-10 text-gray-400" />
       <p className="text-sm text-gray-600">
         {materials.length === 0
-          ? 'No materials yet. Use “Add Material” to create your first item.'
+          ? 'No materials yet. Use "Add Material" to create your first item.'
           : 'No materials match your current filters.'}
       </p>
     </div>
@@ -474,7 +555,7 @@ const companyActionsTemplate = (props, handleDeactivateCompany, handleDeleteComp
   );
 };
 
-const companiesNoRecordsTemplate = () => (
+const renderCompaniesEmptyState = () => (
   <div className="text-center py-10 space-y-2">
     <BuildingOfficeIcon className="mx-auto h-10 w-10 text-gray-400" />
     <p className="text-sm text-gray-600">No companies found.</p>
@@ -513,47 +594,20 @@ const companiesNoRecordsTemplate = () => (
       contactLink: companyRecord.contactLink || '',
       logo: companyRecord.logo || '',
       primaryColor: companyRecord.primaryColor || '#10b981',
-      secondaryColor: companyRecord.secondaryColor || '#6b7280'
+      secondaryColor: companyRecord.secondaryColor || '#6b7280',
+      photoRetentionDays: typeof companyRecord.photoRetentionDays === 'number'
+        ? companyRecord.photoRetentionDays
+        : 0
     });
 
     setServiceCategories(companyRecord.serviceCategories || []);
 
     const userServices = userProfile?.services || [];
     const companyServices = companyRecord.services || [];
-    setSelectedServices(companyServices.length > 0 ? companyServices : userServices);
+    const servicesToApply = companyServices.length > 0 ? companyServices : userServices;
+    const uniqueServices = Array.from(new Set((servicesToApply || []).filter(Boolean)));
+    setSelectedServices(uniqueServices);
   }, [userProfile?.services]);
-
-  useEffect(() => {
-    if (!currentUser) return;
-
-    const isSuperAdminUser = currentUser?.email === 'sroy@worksidesoftware.com';
-    if (!isSuperAdminUser && !currentUser.emailVerified) {
-      return;
-    }
-
-    loadCompanyData();
-
-    const pendingCompanyData = localStorage.getItem('pendingCompanyData');
-    if (pendingCompanyData && !company?.id) {
-      try {
-        const companyData = JSON.parse(pendingCompanyData);
-        setCompanyData(prev => ({
-          ...prev,
-          name: companyData.name || prev.name,
-          phone: companyData.phone || prev.phone,
-          address: companyData.address || prev.address,
-          city: companyData.city || prev.city,
-          state: companyData.state || prev.state,
-          zipCode: companyData.zipCode || prev.zipCode,
-          email: companyData.email || prev.email
-        }));
-
-        localStorage.removeItem('pendingCompanyData');
-      } catch (error) {
-        console.error('Error parsing pending company data:', error);
-      }
-    }
-  }, [currentUser, isSuperAdmin, effectiveCompanyId, refreshKey]);
 
   useEffect(() => {
     if (activeCompany && activeCompany.id === effectiveCompanyId) {
@@ -566,7 +620,7 @@ const companiesNoRecordsTemplate = () => (
     if (currentStep === 3) {
       loadMaterials();
     }
-  }, [currentStep, company?.id, effectiveCompanyId]);
+  }, [currentStep, loadMaterials]);
 
   // Filter materials
   useEffect(() => {
@@ -724,10 +778,11 @@ const companiesNoRecordsTemplate = () => (
     }
   };
 
-  const loadCompanyData = async () => {
+  const loadCompanyData = useCallback(async () => {
     if (!effectiveCompanyId) {
       setCompany(null);
       setTeamMembers([]);
+      setCanManageTeamMembers(determineTeamManagementAccess(null));
       return;
     }
 
@@ -735,25 +790,71 @@ const companiesNoRecordsTemplate = () => (
     try {
       const result = await CompanyService.getCompany(effectiveCompanyId);
       if (result.success && !result.company.isAdminCompany && !result.company.isProtected) {
-        populateCompanyState(result.company);
+        const companyRecord = result.company;
+        populateCompanyState(companyRecord);
+
+        const updatedAccess = determineTeamManagementAccess(companyRecord);
+        setCanManageTeamMembers(updatedAccess);
 
         const teamResult = await CompanyService.getTeamMembers(effectiveCompanyId);
         if (teamResult.success) {
           setTeamMembers(teamResult.teamMembers);
+        } else if (teamResult.permissionDenied) {
+          setTeamMembers([]);
+          if (updatedAccess) {
+            console.warn('Permission denied while retrieving team members.');
+          }
         } else {
           setTeamMembers([]);
+          if (teamResult.error && updatedAccess) {
+            toast.error(teamResult.error);
+          }
         }
       } else {
         setCompany(null);
         setTeamMembers([]);
+        setCanManageTeamMembers(determineTeamManagementAccess(null));
       }
     } catch (error) {
       console.error('Error loading company data:', error);
       setTeamMembers([]);
+      setCanManageTeamMembers(determineTeamManagementAccess(null));
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [determineTeamManagementAccess, effectiveCompanyId, populateCompanyState]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const isSuperAdminUser = currentUser?.email === 'sroy@worksidesoftware.com';
+    if (!isSuperAdminUser && !currentUser.emailVerified) {
+      return;
+    }
+
+    loadCompanyData();
+
+    const pendingCompanyData = localStorage.getItem('pendingCompanyData');
+    if (pendingCompanyData && !company?.id) {
+      try {
+        const companyData = JSON.parse(pendingCompanyData);
+        setCompanyData(prev => ({
+          ...prev,
+          name: companyData.name || prev.name,
+          phone: companyData.phone || prev.phone,
+          address: companyData.address || prev.address,
+          city: companyData.city || prev.city,
+          state: companyData.state || prev.state,
+          zipCode: companyData.zipCode || prev.zipCode,
+          email: companyData.email || prev.email
+        }));
+
+        localStorage.removeItem('pendingCompanyData');
+      } catch (error) {
+        console.error('Error parsing pending company data:', error);
+      }
+    }
+  }, [currentUser, isSuperAdmin, effectiveCompanyId, refreshKey, loadCompanyData, company?.id]);
 
   const handleInputChange = (field, value) => {
     setCompanyData(prev => ({
@@ -766,8 +867,14 @@ const companiesNoRecordsTemplate = () => (
     setIsLoading(true);
     try {
       let result;
+      const normalizedRetention = Number.isFinite(Number(companyData.photoRetentionDays))
+        ? Number(companyData.photoRetentionDays)
+        : 0;
+      const sanitizedRetention = Math.max(0, Math.min(365, Math.round(normalizedRetention)));
+
       const dataToSave = {
         ...companyData,
+        photoRetentionDays: sanitizedRetention,
         serviceCategories: serviceCategories, // Category names for filtering/display
         services: selectedServices // Individual services (matches mobile app)
       };
@@ -809,6 +916,16 @@ const companiesNoRecordsTemplate = () => (
   const handleAddTeamMember = async () => {
     const companyId = company?.id || effectiveCompanyId;
     if (!newMemberEmail.trim() || !companyId) return;
+    console.log('[CompanySetupPage] Inviting team member', {
+      companyId,
+      email: newMemberEmail.trim(),
+      selectedRole: newMemberRole
+    });
+    
+    if (!canManageTeamMembers) {
+      toast.error('You do not have permission to invite team members.');
+      return;
+    }
     
     setIsLoading(true);
     try {
@@ -816,6 +933,7 @@ const companiesNoRecordsTemplate = () => (
       if (result.success) {
         setTeamMembers(prev => [...prev, result.teamMember]);
         setNewMemberEmail('');
+        setNewMemberRole(DEFAULT_ROLE);
         if (result.emailSent) {
           toast.success('Team member invited and email sent successfully!');
         } else {
@@ -832,6 +950,10 @@ const companiesNoRecordsTemplate = () => (
   };
 
   const handleResendTeamMemberInvite = async (memberId) => {
+    if (!canManageTeamMembers) {
+      toast.error('You do not have permission to resend invitations.');
+      return;
+    }
     setIsLoading(true);
     try {
       const result = await CompanyService.resendTeamMemberInvite(memberId);
@@ -856,6 +978,10 @@ const companiesNoRecordsTemplate = () => (
   };
 
   const handleRemoveTeamMember = async (memberId) => {
+    if (!canManageTeamMembers) {
+      toast.error('You do not have permission to remove team members.');
+      return;
+    }
     setIsLoading(true);
     try {
       const result = await CompanyService.removeTeamMember(memberId);
@@ -921,32 +1047,6 @@ const companiesNoRecordsTemplate = () => (
     
     if (currentStep > 1) {
       setCurrentStep(currentStep - 1);
-    }
-  };
-
-  // Materials functions
-  const loadMaterials = async () => {
-    const companyId = company?.id || effectiveCompanyId;
-    if (!companyId) {
-      setMaterials([]);
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const result = await MaterialsService.getMaterials(companyId, userProfile);
-      if (result.success) {
-        setMaterials(result.materials || []);
-      } else {
-        toast.error(result.error || 'Failed to load materials');
-        setMaterials([]);
-      }
-    } catch (error) {
-      console.error('Error loading materials:', error);
-      toast.error('Error loading materials');
-      setMaterials([]);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -1448,6 +1548,61 @@ const companiesNoRecordsTemplate = () => (
                     </div>
                   );
                 })}
+                {availableCustomServices.length > 0 && (
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="flex items-center justify-between bg-gray-50 px-4 py-3">
+                      <div>
+                        <h4 className="text-sm font-medium text-gray-900">Custom Services</h4>
+                        <p className="text-xs text-gray-500">
+                          Imported or company-specific services that are not part of the standard catalog.
+                        </p>
+                      </div>
+                      <span className="text-xs text-gray-500">
+                        {availableCustomServices.length} {availableCustomServices.length === 1 ? 'service' : 'services'}
+                      </span>
+                    </div>
+                    <div className="bg-white px-4 py-3 space-y-2">
+                      {availableCustomServices.map((service, idx) => {
+                        const isServiceSelected = selectedServices.includes(service);
+                        return (
+                          <div key={`${service}-${idx}`} className="flex items-center justify-between border border-gray-100 rounded-md px-3 py-2">
+                            <div className="flex items-center">
+                              <input
+                                type="checkbox"
+                                id={`custom-service-${idx}`}
+                                checked={isServiceSelected}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedServices(prev =>
+                                      prev.includes(service) ? prev : [...prev, service]
+                                    );
+                                  } else {
+                                    setSelectedServices(prev => prev.filter(s => s !== service));
+                                  }
+                                }}
+                                className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                              />
+                              <label
+                                htmlFor={`custom-service-${idx}`}
+                                className="ml-3 text-sm text-gray-800"
+                              >
+                                {service}
+                              </label>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedServices(prev => prev.filter(s => s !== service))}
+                              disabled={!isServiceSelected}
+                              className={`text-xs ${isServiceSelected ? 'text-gray-500 hover:text-red-500' : 'text-gray-300 cursor-not-allowed'}`}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 
                 {serviceCategories.length === 0 && (
                   <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
@@ -1566,84 +1721,87 @@ const companiesNoRecordsTemplate = () => (
               </div>
 
               <div className="bg-white border border-gray-200 rounded-lg">
-                <GridComponent
-                  id="materialsGrid"
-                  dataSource={filteredMaterials}
-                  allowPaging
-                  allowSorting
-                  allowFiltering
-                  allowSelection
-                  allowExcelExport
-                  filterSettings={materialsFilterSettings}
-                  toolbar={materialsToolbarOptions}
-                  toolbarClick={handleMaterialsToolbarClick}
-                  selectionSettings={{ type: 'Single' }}
-                  pageSettings={materialsPageSettings}
-                  height="480"
-                  ref={materialsGridRef}
-                  noRecordsTemplate={materialsNoRecordsTemplate}
-                >
-                  <ColumnsDirective>
-                    <ColumnDirective
-                      field="name"
-                      headerText="Material"
-                      width="250"
-                      template={materialNameTemplate}
-                    />
-                    <ColumnDirective
-                      field="category"
-                      headerText="Category"
-                      width="180"
-                      template={materialCategoryTemplate}
-                    />
-                    <ColumnDirective
-                      field="supplier"
-                      headerText="Supplier"
-                      width="200"
-                      template={materialSupplierTemplate}
-                    />
-                    <ColumnDirective
-                      field="quantityInStock"
-                      headerText="In Stock"
-                      width="140"
-                      template={materialStockTemplate}
-                      textAlign="Right"
-                    />
-                    <ColumnDirective
-                      field="retailPrice"
-                      headerText="Price"
-                      width="140"
-                      template={materialPricingTemplate}
-                      textAlign="Right"
-                    />
-                    <ColumnDirective
-                      field="reorderThreshold"
-                      headerText="Reorder"
-                      width="120"
-                      textAlign="Right"
-                      template={(props) => (
-                        <span className="text-sm text-gray-800">
-                          {props.reorderThreshold ?? 0}
-                        </span>
-                      )}
-                    />
-                    <ColumnDirective
-                      field="active"
-                      headerText="Status"
-                      width="130"
-                      template={materialActiveTemplate}
-                      allowFiltering={false}
-                    />
-                    <ColumnDirective
-                      headerText="Actions"
-                      width="150"
-                      template={materialActionsTemplate}
-                      allowFiltering={false}
-                      allowSorting={false}
-                    />
-                  </ColumnsDirective>
-                  <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
-                </GridComponent>
+                {filteredMaterials.length === 0 ? (
+                  renderMaterialsEmptyState()
+                ) : (
+                  <GridComponent
+                    id="materialsGrid"
+                    dataSource={filteredMaterials}
+                    allowPaging
+                    allowSorting
+                    allowFiltering
+                    allowSelection
+                    allowExcelExport
+                    filterSettings={materialsFilterSettings}
+                    toolbar={materialsToolbarOptions}
+                    toolbarClick={handleMaterialsToolbarClick}
+                    selectionSettings={{ type: 'Single' }}
+                    pageSettings={materialsPageSettings}
+                    height="480"
+                    ref={materialsGridRef}
+                  >
+                    <ColumnsDirective>
+                      <ColumnDirective
+                        field="name"
+                        headerText="Material"
+                        width="250"
+                        template={materialNameTemplate}
+                      />
+                      <ColumnDirective
+                        field="category"
+                        headerText="Category"
+                        width="180"
+                        template={materialCategoryTemplate}
+                      />
+                      <ColumnDirective
+                        field="supplier"
+                        headerText="Supplier"
+                        width="200"
+                        template={materialSupplierTemplate}
+                      />
+                      <ColumnDirective
+                        field="quantityInStock"
+                        headerText="In Stock"
+                        width="140"
+                        template={materialStockTemplate}
+                        textAlign="Right"
+                      />
+                      <ColumnDirective
+                        field="retailPrice"
+                        headerText="Price"
+                        width="140"
+                        template={materialPricingTemplate}
+                        textAlign="Right"
+                      />
+                      <ColumnDirective
+                        field="reorderThreshold"
+                        headerText="Reorder"
+                        width="120"
+                        textAlign="Right"
+                        template={(props) => (
+                          <span className="text-sm text-gray-800">
+                            {props.reorderThreshold ?? 0}
+                          </span>
+                        )}
+                      />
+                      <ColumnDirective
+                        field="active"
+                        headerText="Status"
+                        width="130"
+                        template={materialActiveTemplate}
+                        allowFiltering={false}
+                      />
+                      <ColumnDirective
+                        headerText="Actions"
+                        width="150"
+                        template={materialActionsTemplate}
+                        allowFiltering={false}
+                        allowSorting={false}
+                      />
+                    </ColumnsDirective>
+                    <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
+                  </GridComponent>
+                )}
               </div>
             </div>
           </div>
@@ -1682,95 +1840,109 @@ const companiesNoRecordsTemplate = () => (
                 </div>
               )}
               
-              <div className="bg-gray-50 p-4 rounded-lg mb-6">
-                <div className="flex gap-2 mb-3">
-                  <input
-                    type="email"
-                    value={newMemberEmail}
-                    onChange={(e) => setNewMemberEmail(e.target.value)}
-                    className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                    placeholder="Enter email address"
-                  />
-                  <select
-                    value={newMemberRole}
-                    onChange={(e) => setNewMemberRole(e.target.value)}
-                    className="rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                  >
-                    <option value="technician">Technician</option>
-                    <option value="manager">Manager</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                  <button
-                    type="button"
-                    onClick={handleAddTeamMember}
-                    disabled={!newMemberEmail.trim() || isLoading}
-                    className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Invite
-                  </button>
+              {canManageTeamMembers ? (
+                <div className="bg-gray-50 p-4 rounded-lg mb-6">
+                  <div className="flex gap-2 mb-3">
+                    <input
+                      type="email"
+                      value={newMemberEmail}
+                      onChange={(e) => setNewMemberEmail(e.target.value)}
+                      className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      placeholder="Enter email address"
+                    />
+                    <select
+                      value={newMemberRole}
+                      onChange={(e) => setNewMemberRole(e.target.value)}
+                      className="rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    >
+                      {ROLE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleAddTeamMember}
+                      disabled={!newMemberEmail.trim() || isLoading}
+                      className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Invite
+                    </button>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="mb-6 rounded-lg border border-yellow-200 bg-yellow-50 p-4">
+                  <p className="text-sm text-yellow-800">
+                    You can view your team roster here. Only company owners, admins, or managers can send new invitations.
+                    Please contact one of them if you need to add someone.
+                  </p>
+                </div>
+              )}
 
               <div className="bg-white border border-gray-200 rounded-lg">
-                <GridComponent
-                  id="teamMembersGrid"
-                  dataSource={teamMembers}
-                  allowPaging
-                  allowSorting
-                  allowFiltering
-                  allowSelection
-                  allowExcelExport
-                  filterSettings={teamFilterSettings}
-                  toolbar={teamToolbarOptions}
-                  toolbarClick={handleTeamToolbarClick}
-                  selectionSettings={{ type: 'Single' }}
-                  pageSettings={teamPageSettings}
-                  height="420"
-                  ref={teamGridRef}
-                  noRecordsTemplate={teamNoRecordsTemplate}
-                >
-                  <ColumnsDirective>
-                    <ColumnDirective
-                      field="email"
-                      headerText="Team Member"
-                      width="260"
-                      template={teamMemberNameTemplate}
-                    />
-                    <ColumnDirective
-                      field="role"
-                      headerText="Role"
-                      width="140"
-                      template={teamRoleTemplate}
-                    />
-                    <ColumnDirective
-                      field="status"
-                      headerText="Status"
-                      width="130"
-                      template={teamStatusTemplate}
-                      allowSorting={false}
-                    />
-                    <ColumnDirective
-                      field="invitationCode"
-                      headerText="Invitation"
-                      width="170"
-                      template={teamInvitationTemplate}
-                    />
-                    <ColumnDirective
-                      field="createdAt"
-                      headerText="Invited On"
-                      width="160"
-                      template={teamInvitedOnTemplate}
-                    />
-                    <ColumnDirective
-                      headerText="Actions"
-                      width="160"
-                      template={teamActionsTemplate}
-                      allowFiltering={false}
-                      allowSorting={false}
-                    />
-                  </ColumnsDirective>
-                  <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
-                </GridComponent>
+                {teamMembers.length === 0 ? (
+                  renderTeamEmptyState()
+                ) : (
+                  <GridComponent
+                    id="teamMembersGrid"
+                    dataSource={teamMembers}
+                    allowPaging
+                    allowSorting
+                    allowFiltering
+                    allowSelection
+                    allowExcelExport
+                    filterSettings={teamFilterSettings}
+                    toolbar={teamToolbarOptions}
+                    toolbarClick={handleTeamToolbarClick}
+                    selectionSettings={{ type: 'Single' }}
+                    pageSettings={teamPageSettings}
+                    height="420"
+                    ref={teamGridRef}
+                  >
+                    <ColumnsDirective>
+                      <ColumnDirective
+                        field="email"
+                        headerText="Team Member"
+                        width="260"
+                        template={teamMemberNameTemplate}
+                      />
+                      <ColumnDirective
+                        field="role"
+                        headerText="Role"
+                        width="140"
+                        template={teamRoleTemplate}
+                      />
+                      <ColumnDirective
+                        field="status"
+                        headerText="Status"
+                        width="130"
+                        template={teamStatusTemplate}
+                        allowSorting={false}
+                      />
+                      <ColumnDirective
+                        field="invitationCode"
+                        headerText="Invitation"
+                        width="170"
+                        template={teamInvitationTemplate}
+                      />
+                      <ColumnDirective
+                        field="createdAt"
+                        headerText="Invited On"
+                        width="160"
+                        template={teamInvitedOnTemplate}
+                      />
+                      <ColumnDirective
+                        headerText="Actions"
+                        width="160"
+                        template={teamActionsTemplate}
+                        allowFiltering={false}
+                        allowSorting={false}
+                      />
+                    </ColumnsDirective>
+                    <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
+                  </GridComponent>
+                )}
               </div>
             </div>
           </div>
@@ -1832,6 +2004,46 @@ const companiesNoRecordsTemplate = () => (
                   isUploading={logoUploading}
                   onUploadingChange={setLogoUploading}
                 />
+              </div>
+            </div>
+
+            <div className="border-t border-gray-200 pt-6 mt-8">
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Photo Retention & Privacy</h3>
+              <p className="text-sm text-gray-600 mb-4">
+                Control how long job photos are retained before automatic cleanup. We recommend choosing the shortest
+                window that meets your compliance requirements to minimize storage costs.
+              </p>
+
+              <div className="grid gap-6 sm:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Automatic retention policy</label>
+                  <select
+                    value={String(companyData.photoRetentionDays ?? 0)}
+                    onChange={(event) => {
+                      const value = parseInt(event.target.value, 10);
+                      handleInputChange('photoRetentionDays', Number.isNaN(value) ? 0 : value);
+                    }}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                  >
+                    {PHOTO_RETENTION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-2 text-xs text-gray-500">
+                    Photos older than the selected window are exported to your audit log and removed from storage during
+                    the nightly retention sweep. Administrators can override or download photos at any time.
+                  </p>
+                </div>
+
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <h4 className="text-sm font-medium text-gray-800 mb-2">Coming soon: automated exports</h4>
+                  <p className="text-xs text-gray-600 leading-5">
+                    We're preparing a "Download & purge now" action and a scheduled archive drop so you can offload
+                    photos before removal. Your retention clock will respect this policy immediately.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -2266,65 +2478,68 @@ const companiesNoRecordsTemplate = () => (
                 </div>
 
                 <div className="mt-4">
-                  <GridComponent
-                    id="companiesGrid"
-                    dataSource={allCompanies}
-                    allowPaging
-                    allowSorting
-                    allowFiltering
-                    allowSelection
-                    allowExcelExport
-                    filterSettings={companiesFilterSettings}
-                    toolbar={companiesToolbarOptions}
-                    toolbarClick={handleCompaniesToolbarClick}
-                    selectionSettings={{ type: 'Single' }}
-                    pageSettings={companiesPageSettings}
-                    height="480"
-                    ref={companiesGridRef}
-                    noRecordsTemplate={companiesNoRecordsTemplate}
-                  >
-                    <ColumnsDirective>
-                      <ColumnDirective
-                        field="name"
-                        headerText="Company"
-                        width="220"
-                        template={companyNameTemplate}
-                      />
-                      <ColumnDirective
-                        field="ownerName"
-                        headerText="Owner"
-                        width="220"
-                        template={companyOwnerTemplate}
-                      />
-                      <ColumnDirective
-                        field="code"
-                        headerText="Code"
-                        width="140"
-                        template={companyCodeTemplate}
-                      />
-                      <ColumnDirective
-                        field="isActive"
-                        headerText="Status"
-                        width="130"
-                        template={companyStatusTemplate}
-                        allowFiltering={false}
-                      />
-                      <ColumnDirective
-                        field="createdAt"
-                        headerText="Created"
-                        width="150"
-                        template={(props) => companyCreatedTemplate(props, formatDateValue)}
-                      />
-                      <ColumnDirective
-                        headerText="Actions"
-                        width="160"
-                        template={(props) => companyActionsTemplate(props, handleDeactivateCompany, handleDeleteCompany)}
-                        allowFiltering={false}
-                        allowSorting={false}
-                      />
-                    </ColumnsDirective>
-                    <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
-                  </GridComponent>
+                  {allCompanies.length === 0 ? (
+                    renderCompaniesEmptyState()
+                  ) : (
+                    <GridComponent
+                      id="companiesGrid"
+                      dataSource={allCompanies}
+                      allowPaging
+                      allowSorting
+                      allowFiltering
+                      allowSelection
+                      allowExcelExport
+                      filterSettings={companiesFilterSettings}
+                      toolbar={companiesToolbarOptions}
+                      toolbarClick={handleCompaniesToolbarClick}
+                      selectionSettings={{ type: 'Single' }}
+                      pageSettings={companiesPageSettings}
+                      height="480"
+                      ref={companiesGridRef}
+                    >
+                      <ColumnsDirective>
+                        <ColumnDirective
+                          field="name"
+                          headerText="Company"
+                          width="220"
+                          template={companyNameTemplate}
+                        />
+                        <ColumnDirective
+                          field="ownerName"
+                          headerText="Owner"
+                          width="220"
+                          template={companyOwnerTemplate}
+                        />
+                        <ColumnDirective
+                          field="code"
+                          headerText="Code"
+                          width="140"
+                          template={companyCodeTemplate}
+                        />
+                        <ColumnDirective
+                          field="isActive"
+                          headerText="Status"
+                          width="130"
+                          template={companyStatusTemplate}
+                          allowFiltering={false}
+                        />
+                        <ColumnDirective
+                          field="createdAt"
+                          headerText="Created"
+                          width="150"
+                          template={(props) => companyCreatedTemplate(props, formatDateValue)}
+                        />
+                        <ColumnDirective
+                          headerText="Actions"
+                          width="160"
+                          template={(props) => companyActionsTemplate(props, handleDeactivateCompany, handleDeleteCompany)}
+                          allowFiltering={false}
+                          allowSorting={false}
+                        />
+                      </ColumnsDirective>
+                      <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
+                    </GridComponent>
+                  )}
                 </div>
               </div>
             </div>

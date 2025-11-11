@@ -638,7 +638,7 @@ const CustomerManagementPage = () => {
     </div>
   );
 
-  const noRecordsTemplate = () => (
+  const renderNoCustomerState = () => (
     <div className="text-center py-12 space-y-3">
       <UsersIcon className="mx-auto h-12 w-12 text-gray-400" />
       <h3 className="text-sm font-medium text-gray-900">No customers found</h3>
@@ -649,7 +649,7 @@ const CustomerManagementPage = () => {
         <button
           type="button"
           onClick={() => setShowAddModal(true)}
-            className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700"
+          className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700"
         >
           <PlusIcon className="h-4 w-4 mr-2" />
           Add Customer
@@ -925,69 +925,72 @@ const CustomerManagementPage = () => {
           </div>
         ) : (
           <div className="px-2 pb-4">
-            <GridComponent
-              id="customersGrid"
-              dataSource={filteredCustomers}
-              allowPaging
-              allowSorting
-              allowFiltering
-              allowSelection
-              allowExcelExport
-              allowPdfExport
-              allowResizing
-              filterSettings={gridFilterSettings}
-              toolbar={toolbarOptions}
-              toolbarClick={handleToolbarClick}
-              selectionSettings={{ type: 'Single' }}
-              pageSettings={pageSettings}
-              height="600"
-              ref={gridRef}
-              noRecordsTemplate={noRecordsTemplate}
-            >
-              <ColumnsDirective>
-                <ColumnDirective
-                  field="name"
-                  headerText="Customer"
-                  width="250"
-                  template={customerNameTemplate}
-                />
-                <ColumnDirective
-                  field="email"
-                  headerText="Contact"
-                  width="220"
-                  template={contactTemplate}
-                />
-                <ColumnDirective
-                  field="address"
-                  headerText="Location"
-                  width="260"
-                  template={locationTemplate}
-                />
-                <ColumnDirective
-                  field="totalSpent"
-                  headerText="Total Spent"
-                  width="140"
-                  textAlign="Right"
-                  template={totalSpentTemplate}
-                  format="C2"
-                />
-                <ColumnDirective
-                  field="isActive"
-                  headerText="Status"
-                  width="120"
-                  template={activeStatusTemplate}
-                  allowFiltering={false}
-                />
-                <ColumnDirective
-                  headerText="Actions"
-                  width="160"
-                  template={actionsTemplate}
-                  allowFiltering={false}
-                  allowSorting={false}
-                />
-              </ColumnsDirective>
-              <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, PdfExport, Selection, Search, Resize]} />
-            </GridComponent>
+            {filteredCustomers.length === 0 ? (
+              renderNoCustomerState()
+            ) : (
+              <GridComponent
+                id="customersGrid"
+                dataSource={filteredCustomers}
+                allowPaging
+                allowSorting
+                allowFiltering
+                allowSelection
+                allowExcelExport
+                allowPdfExport
+                allowResizing
+                filterSettings={gridFilterSettings}
+                toolbar={toolbarOptions}
+                toolbarClick={handleToolbarClick}
+                selectionSettings={{ type: 'Single' }}
+                pageSettings={pageSettings}
+                height="600"
+                ref={gridRef}
+              >
+                <ColumnsDirective>
+                  <ColumnDirective
+                    field="name"
+                    headerText="Customer"
+                    width="250"
+                    template={customerNameTemplate}
+                  />
+                  <ColumnDirective
+                    field="email"
+                    headerText="Contact"
+                    width="220"
+                    template={contactTemplate}
+                  />
+                  <ColumnDirective
+                    field="address"
+                    headerText="Location"
+                    width="260"
+                    template={locationTemplate}
+                  />
+                  <ColumnDirective
+                    field="totalSpent"
+                    headerText="Total Spent"
+                    width="140"
+                    textAlign="Right"
+                    template={totalSpentTemplate}
+                    format="C2"
+                  />
+                  <ColumnDirective
+                    field="isActive"
+                    headerText="Status"
+                    width="120"
+                    template={activeStatusTemplate}
+                    allowFiltering={false}
+                  />
+                  <ColumnDirective
+                    headerText="Actions"
+                    width="160"
+                    template={actionsTemplate}
+                    allowFiltering={false}
+                    allowSorting={false}
+                  />
+                </ColumnsDirective>
+                <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, PdfExport, Selection, Search, Resize]} />
+              </GridComponent>
+            )}
           </div>
         )}
       </div>

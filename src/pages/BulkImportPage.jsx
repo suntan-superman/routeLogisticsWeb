@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useRef, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
 import CompanyService from '../services/companyService';
@@ -19,7 +19,6 @@ import {
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
-import { SERVICE_CATEGORIES } from '../constants/serviceCategories';
 
 const ROLE_OPTIONS = {
   'admin': 'admin',
@@ -47,7 +46,7 @@ const BulkImportPage = () => {
   const previewPageSettings = useMemo(() => ({ pageSize: 5, pageSizes: [5, 10, 25] }), []);
   const previewFilterSettings = useMemo(() => ({ type: 'Excel' }), []);
 
-  const onDrop = React.useCallback((acceptedFiles) => {
+  const onDrop = useCallback((acceptedFiles) => {
     if (acceptedFiles.length > 0) {
       const selectedFile = acceptedFiles[0];
       setFile(selectedFile);
@@ -1181,45 +1180,46 @@ const BulkImportPage = () => {
               <p className="text-sm font-medium text-gray-700 mb-2">
                 Preview (Row 1-5 of {preview.totalRows} total):
               </p>
-              <GridComponent
-                id="bulkPreviewGrid"
-                dataSource={preview.rows.map((row, index) => ({
-                  rowNumber: index + 2,
-                  ...row
-                }))}
-                allowPaging
-                allowSorting
-                allowFiltering
-                allowSelection
-                allowExcelExport
-                filterSettings={previewFilterSettings}
-                toolbar={previewToolbarOptions}
-                toolbarClick={(args) => {
-                  if (!previewGridRef.current) return;
-                  if ((args.item?.id || '').includes('_excelexport')) {
-                    previewGridRef.current.excelExport({
-                      fileName: `import-preview-${activeTab}-${new Date().toISOString().split('T')[0]}.xlsx`
-                    });
-                  }
-                }}
-                selectionSettings={{ type: 'Single' }}
-                pageSettings={previewPageSettings}
-                height="280"
-                ref={previewGridRef}
-                noRecordsTemplate={() => (
-                  <div className="py-6 text-center text-xs text-gray-500">
-                    No preview data available.
-                  </div>
-                )}
-              >
-                <ColumnsDirective>
-                  <ColumnDirective field="rowNumber" headerText="Row #" width="90" />
-                  {preview.headers.map((header) => (
-                    <ColumnDirective key={header} field={header} headerText={header} width="160" />
-                  ))}
-                </ColumnsDirective>
-                <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
-              </GridComponent>
+              {preview.rows.length > 0 ? (
+                <GridComponent
+                  id="bulkPreviewGrid"
+                  dataSource={preview.rows.map((row, index) => ({
+                    rowNumber: index + 2,
+                    ...row
+                  }))}
+                  allowPaging
+                  allowSorting
+                  allowFiltering
+                  allowSelection
+                  allowExcelExport
+                  filterSettings={previewFilterSettings}
+                  toolbar={previewToolbarOptions}
+                  toolbarClick={(args) => {
+                    if (!previewGridRef.current) return;
+                    if ((args.item?.id || '').includes('_excelexport')) {
+                      previewGridRef.current.excelExport({
+                        fileName: `import-preview-${activeTab}-${new Date().toISOString().split('T')[0]}.xlsx`
+                      });
+                    }
+                  }}
+                  selectionSettings={{ type: 'Single' }}
+                  pageSettings={previewPageSettings}
+                  height="280"
+                  ref={previewGridRef}
+                >
+                  <ColumnsDirective>
+                    <ColumnDirective field="rowNumber" headerText="Row #" width="90" />
+                    {preview.headers.map((header) => (
+                      <ColumnDirective key={header} field={header} headerText={header} width="160" />
+                    ))}
+                  </ColumnsDirective>
+                  <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
+                </GridComponent>
+              ) : (
+                <div className="py-6 text-center text-xs text-gray-500">
+                  No preview data available.
+                </div>
+              )}
             </div>
           )}
 

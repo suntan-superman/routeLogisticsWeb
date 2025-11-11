@@ -1,12 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuthSafe } from '../contexts/AuthContext';
 import { auth } from '../services/firebase';
 import { reload } from 'firebase/auth';
 import { canAccessRoute, getDefaultRouteForRole } from '../utils/permissions';
 
 const ProtectedRoute = ({ children }) => {
-  const { currentUser, userProfile, loading, needsCompanySetup } = useAuth();
+  const authContext = useAuthSafe();
+  const currentUser = authContext?.currentUser || null;
+  const userProfile = authContext?.userProfile || null;
+  const loading = authContext?.loading ?? true;
+  const needsCompanySetup = authContext?.needsCompanySetup ?? false;
   const location = useLocation();
   const [verificationChecked, setVerificationChecked] = useState(false);
 
@@ -25,6 +29,14 @@ const ProtectedRoute = ({ children }) => {
       setVerificationChecked(true);
     }
   }, [currentUser, loading]);
+
+  if (!authContext) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
+      </div>
+    );
+  }
 
   if (loading || !verificationChecked) {
     return (

@@ -1,6 +1,11 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useCompany } from '../contexts/CompanyContext';
+import CompanyService from '../services/companyService';
+import CustomerService from '../services/customerService';
+import JobManagementService from '../services/jobManagementService';
+import ReportingService from '../services/reportingService';
 import { motion } from 'framer-motion';
 import { 
   BuildingOfficeIcon, 
@@ -13,6 +18,139 @@ import {
 
 const HomePage = () => {
   const { userProfile } = useAuth();
+  const { activeCompany, refreshKey } = useCompany();
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState(null);
+  const [stats, setStats] = useState({
+    totalCustomers: null,
+    activeJobs: null,
+    monthlyRevenue: null,
+    teamMembers: null,
+  });
+
+  useEffect(() => {
+    const companyId = activeCompany?.id || userProfile?.companyId || null;
+
+    if (!companyId) {
+      setStats({
+        totalCustomers: 0,
+        activeJobs: 0,
+        monthlyRevenue: 0,
+        teamMembers: 0,
+      });
+      setStatsLoading(false);
+      return;
+    }
+
+    let isCancelled = false;
+
+    const loadStats = async () => {
+      setStatsLoading(true);
+      setStatsError(null);
+      try {
+        const includeTeamMetrics =
+          userProfile?.role === 'admin' ||
+          userProfile?.role === 'super_admin' ||
+          userProfile?.role === 'supervisor';
+
+        const [
+          customerStatsResult,
+          jobStatsResult,
+          analyticsResult,
+          teamResult
+        ] = await Promise.all([
+          CustomerService.getCustomerStats(userProfile, companyId),
+          JobManagementService.getJobStats(),
+          ReportingService.getBusinessAnalytics('month'),
+          includeTeamMetrics
+            ? CompanyService.getTeamMembers(companyId).catch(() => ({
+                success: false,
+                teamMembers: [],
+              }))
+            : Promise.resolve({ success: false, teamMembers: [] })
+        ]);
+
+        if (isCancelled) {
+          return;
+        }
+
+        const totals = {
+          totalCustomers: customerStatsResult.success
+            ? customerStatsResult.stats.totalCustomers || 0
+            : 0,
+          activeJobs: jobStatsResult.success
+            ? (jobStatsResult.stats.inProgressJobs || 0) + (jobStatsResult.stats.scheduledJobs || 0)
+            : 0,
+          monthlyRevenue: analyticsResult.success
+            ? analyticsResult.analytics.totalRevenue || 0
+            : (jobStatsResult.success ? jobStatsResult.stats.totalRevenue || 0 : 0),
+          teamMembers: teamResult.success
+            ? teamResult.teamMembers.length || 0
+            : includeTeamMetrics
+              ? 1
+              : null
+        };
+
+        setStats(totals);
+
+        if (!customerStatsResult.success || !jobStatsResult.success || !analyticsResult.success) {
+          const errors = [
+            customerStatsResult.success ? null : customerStatsResult.error,
+            jobStatsResult.success ? null : jobStatsResult.error,
+            analyticsResult.success ? null : analyticsResult.error
+          ].filter(Boolean);
+          if (errors.length) {
+            setStatsError(errors[0]);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading dashboard stats:', error);
+        if (!isCancelled) {
+          const message =
+            error.code === 'permission-denied'
+              ? 'You do not have permission to view company-wide metrics.'
+              : error.message || 'Failed to load dashboard metrics.';
+          setStatsError(message);
+        }
+      } finally {
+        if (!isCancelled) {
+          setStatsLoading(false);
+        }
+      }
+    };
+
+    loadStats();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeCompany?.id, refreshKey, userProfile?.companyId]);
+
+  const formattedStats = useMemo(() => {
+    const formatNumber = (value) => {
+      if (statsLoading) return '…';
+      if (value === null || value === undefined) return '0';
+      return value.toLocaleString();
+    };
+
+    const formatCurrency = (value) => {
+      if (statsLoading) return '…';
+      if (!value) return '$0';
+      return value.toLocaleString(undefined, {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      });
+    };
+
+    return {
+      totalCustomers: formatNumber(stats.totalCustomers),
+      activeJobs: formatNumber(stats.activeJobs),
+      monthlyRevenue: formatCurrency(stats.monthlyRevenue),
+      teamMembers: formatNumber(stats.teamMembers),
+    };
+  }, [stats, statsLoading]);
 
   const quickActions = [
     {
@@ -38,11 +176,11 @@ const HomePage = () => {
     },
   ];
 
-  const stats = [
-    { name: 'Total Customers', value: '0', icon: UsersIcon },
-    { name: 'Active Jobs', value: '0', icon: ClockIcon },
-    { name: 'Monthly Revenue', value: '$0', icon: CurrencyDollarIcon },
-    { name: 'Estimate Templates', value: '0', icon: DocumentTextIcon },
+  const statCards = [
+    { name: 'Total Customers', value: formattedStats.totalCustomers, icon: UsersIcon },
+    { name: 'Active Jobs', value: formattedStats.activeJobs, icon: ClockIcon },
+    { name: 'Revenue This Month', value: formattedStats.monthlyRevenue, icon: CurrencyDollarIcon },
+    { name: 'Team Members', value: formattedStats.teamMembers, icon: BuildingOfficeIcon },
   ];
 
   return (
@@ -72,13 +210,18 @@ const HomePage = () => {
       </motion.div>
 
       {/* Stats Grid */}
+      {statsError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md px-4 py-3">
+          {statsError}
+        </div>
+      )}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay: 0.1 }}
         className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4"
       >
-        {stats.map((stat, index) => {
+        {statCards.map((stat) => {
           const Icon = stat.icon;
           return (
             <div

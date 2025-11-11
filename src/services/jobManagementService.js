@@ -122,6 +122,207 @@ class JobManagementService {
     }
   }
 
+  static sanitizeNumber(value) {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : null;
+    }
+    if (typeof value === 'string') {
+      const parsed = parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  }
+
+  static parseDurationMinutes(rawValue, fallback = 60) {
+    if (!rawValue) {
+      return fallback;
+    }
+
+    if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
+      return rawValue;
+    }
+
+    if (typeof rawValue !== 'string') {
+      return fallback;
+    }
+
+    const value = rawValue.trim().toLowerCase();
+    const numberMatch = value.match(/([\d.,]+)/);
+    if (!numberMatch) {
+      return fallback;
+    }
+
+    const numeric = parseFloat(numberMatch[1].replace(',', ''));
+    if (!Number.isFinite(numeric)) {
+      return fallback;
+    }
+
+    if (value.includes('min')) {
+      return Math.max(5, Math.round(numeric));
+    }
+
+    if (value.includes('hour') || value.includes('hr')) {
+      return Math.max(5, Math.round(numeric * 60));
+    }
+
+    if (numeric <= 10 && !value.includes(':')) {
+      return Math.max(5, Math.round(numeric * 60));
+    }
+
+    return Math.max(5, Math.round(numeric));
+  }
+
+  static parseTimeToDate(dateString, timeString) {
+    if (!dateString) {
+      return null;
+    }
+
+    const baseDate = new Date(`${dateString}T00:00:00`);
+    if (Number.isNaN(baseDate.getTime())) {
+      return null;
+    }
+
+    if (!timeString) {
+      return baseDate;
+    }
+
+    const trimmed = timeString.trim();
+    const match = trimmed.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+
+    if (!match) {
+      const parsed = new Date(`${dateString}T${trimmed}`);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed;
+      }
+      return baseDate;
+    }
+
+    let hours = parseInt(match[1], 10);
+    const minutes = match[2] ? parseInt(match[2], 10) : 0;
+    const meridiem = match[3] ? match[3].toUpperCase() : null;
+
+    if (meridiem) {
+      if (meridiem === 'AM' && hours === 12) {
+        hours = 0;
+      }
+      if (meridiem === 'PM' && hours < 12) {
+        hours += 12;
+      }
+    }
+
+    const adjusted = new Date(baseDate);
+    adjusted.setHours(hours, minutes, 0, 0);
+    return adjusted;
+  }
+
+  static async checkTechnicianAvailability(technicianId, date, time, durationMinutes = 60, excludeJobId = null) {
+    if (!technicianId || !date || !time) {
+      return { hasConflict: false, conflicts: [] };
+    }
+
+    try {
+      const newStart = this.parseTimeToDate(date, time);
+      if (!newStart) {
+        return { hasConflict: false, conflicts: [] };
+      }
+
+      const querySnapshot = await getDocs(
+        query(
+          collection(db, 'jobs'),
+          where('assignedTo', '==', technicianId),
+          where('date', '==', date)
+        )
+      );
+
+      const bufferMinutes = 15;
+      const newEnd = new Date(newStart.getTime() + (durationMinutes + bufferMinutes) * 60000);
+
+      const conflicts = [];
+
+      querySnapshot.forEach((docSnap) => {
+        if (excludeJobId && docSnap.id === excludeJobId) {
+          return;
+        }
+
+        const job = docSnap.data() || {};
+        const jobStart = this.parseTimeToDate(job.date || date, job.time || '09:00');
+        if (!jobStart) {
+          return;
+        }
+
+        const jobDuration =
+          this.parseDurationMinutes(job.duration, null) ||
+          this.parseDurationMinutes(job.estimatedDuration, null) ||
+          this.parseDurationMinutes(job.actualHours, null) ||
+          durationMinutes;
+
+        const jobEnd = new Date(jobStart.getTime() + (jobDuration + bufferMinutes) * 60000);
+
+        const overlap = newStart < jobEnd && newEnd > jobStart;
+        if (overlap) {
+          conflicts.push({
+            id: docSnap.id,
+            date: job.date,
+            time: job.time,
+            serviceType: job.serviceType,
+            customerName: job.customerName,
+          });
+        }
+      });
+
+      return {
+        hasConflict: conflicts.length > 0,
+        conflicts,
+      };
+    } catch (error) {
+      console.error('Error checking technician availability:', error);
+      return {
+        hasConflict: false,
+        conflicts: [],
+        error: error.message,
+      };
+    }
+  }
+
+  // Create job
+  static async createJob(jobData) {
+    try {
+      const userId = this.getCurrentUserId();
+      const nowIso = new Date().toISOString();
+
+      const sanitized = {
+        userId,
+        companyId: jobData.companyId || null,
+        customerId: jobData.customerId || null,
+        customerName: (jobData.customerName || '').trim(),
+        serviceType: (jobData.serviceType || '').trim(),
+        status: jobData.status || 'scheduled',
+        date: jobData.date || nowIso.split('T')[0],
+        time: jobData.time || '09:00',
+        duration: jobData.duration || '',
+        estimatedCost: this.sanitizeNumber(jobData.estimatedCost),
+        notes: jobData.notes || '',
+        assignedTo: jobData.assignedTo || null,
+        assignedToName: jobData.assignedToName || '',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+
+      const docRef = await addDoc(collection(db, 'jobs'), sanitized);
+
+      return {
+        success: true,
+        job: { id: docRef.id, ...sanitized },
+      };
+    } catch (error) {
+      console.error('Error creating job:', error);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  }
+
   // Update job
   static async updateJob(jobId, updates) {
     try {

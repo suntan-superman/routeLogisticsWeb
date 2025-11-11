@@ -31,10 +31,34 @@ class RecurringJobService {
   static async createRecurringJob(recurringJobData) {
     try {
       const userId = this.getCurrentUserId();
+      let companyId = recurringJobData.companyId || null;
+      let assignedTechnicianId = recurringJobData.assignedTechnicianId || null;
+      let assignedTechnicianName = recurringJobData.assignedTechnicianName || '';
+
+      if (!companyId || (assignedTechnicianId && !assignedTechnicianName)) {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', userId));
+          if (userDoc.exists()) {
+            const userData = userDoc.data() || {};
+            if (!companyId) {
+              companyId = userData.companyId || null;
+            }
+            if (assignedTechnicianId && !assignedTechnicianName) {
+              assignedTechnicianName =
+                userData.name || userData.fullName || userData.roleDisplay || userData.email || '';
+            }
+          }
+        } catch (error) {
+          console.warn('Unable to load user profile for recurring job creation:', error);
+        }
+      }
       
       const recurringJob = {
         ...recurringJobData,
         userId,
+        companyId: companyId || null,
+        assignedTechnicianId: assignedTechnicianId || null,
+        assignedTechnicianName: assignedTechnicianName || '',
         isActive: true,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
@@ -271,8 +295,35 @@ class RecurringJobService {
         return recurringJobResult;
       }
 
+      const existing = recurringJobResult.recurringJob || {};
+      let companyId = updates.companyId || existing.companyId || null;
+      let assignedTechnicianId =
+        updates.assignedTechnicianId !== undefined
+          ? updates.assignedTechnicianId
+          : existing.assignedTechnicianId || null;
+      let assignedTechnicianName =
+        updates.assignedTechnicianName !== undefined
+          ? updates.assignedTechnicianName
+          : existing.assignedTechnicianName || '';
+
+      if (!assignedTechnicianName && assignedTechnicianId) {
+        try {
+          const teamMemberDoc = await getDoc(doc(db, 'teamMembers', assignedTechnicianId));
+          if (teamMemberDoc.exists()) {
+            const data = teamMemberDoc.data() || {};
+            assignedTechnicianName =
+              data.name || data.fullName || data.roleDisplay || data.email || assignedTechnicianName;
+          }
+        } catch (error) {
+          console.warn('Unable to resolve technician name while updating recurring job:', error);
+        }
+      }
+
       const updatedData = {
         ...updates,
+        companyId,
+        assignedTechnicianId,
+        assignedTechnicianName,
         updatedAt: new Date().toISOString()
       };
 

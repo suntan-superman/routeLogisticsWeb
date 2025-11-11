@@ -64,6 +64,16 @@ const RecurringJobsPage = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedRecurringJob, setSelectedRecurringJob] = useState(null);
+  const [teamMembers, setTeamMembers] = useState([]);
+  const [teamMembersLoading, setTeamMembersLoading] = useState(false);
+  const isAssignedTechnicianMissing = useMemo(
+    () =>
+      Boolean(
+        formData.assignedTechnicianId &&
+          !teamMembers.some((member) => member.id === formData.assignedTechnicianId)
+      ),
+    [formData.assignedTechnicianId, teamMembers]
+  );
   
   const [formData, setFormData] = useState({
     customerId: '',
@@ -77,7 +87,9 @@ const RecurringJobsPage = () => {
     notes: '',
     startDate: '',
     endDate: '',
-    isActive: true
+    isActive: true,
+    assignedTechnicianId: '',
+    assignedTechnicianName: ''
   });
 
   const recurringGridRef = useRef(null);
@@ -89,6 +101,7 @@ const RecurringJobsPage = () => {
     loadRecurringJobs();
     loadCustomers();
     loadCompanyServices();
+    loadTeamMembers();
   }, [userProfile]);
 
   const loadRecurringJobs = async () => {
@@ -120,6 +133,36 @@ const RecurringJobsPage = () => {
     }
   };
 
+  const loadTeamMembers = async () => {
+    setTeamMembersLoading(true);
+    try {
+      const companyId = getEffectiveCompanyId();
+      if (!companyId) {
+        setTeamMembers([]);
+        return;
+      }
+      const result = await CompanyService.getTeamMembers(companyId);
+      if (result.success) {
+        const activeMembers = (result.teamMembers || []).filter((member) => {
+          const status = (member.status || '').toLowerCase();
+          return status === '' || status === 'active';
+        });
+        setTeamMembers(activeMembers);
+      } else {
+        setTeamMembers([]);
+        if (result.error) {
+          toast.error(result.error);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading team members:', error);
+      setTeamMembers([]);
+      toast.error('Failed to load team members');
+    } finally {
+      setTeamMembersLoading(false);
+    }
+  };
+
   const handleInputChange = (field, value) => {
     setFormData(prev => ({
       ...prev,
@@ -144,8 +187,20 @@ const RecurringJobsPage = () => {
 
     setIsLoading(true);
     try {
+      const companyId = getEffectiveCompanyId();
+      const assignedMember = teamMembers.find((m) => m.id === formData.assignedTechnicianId);
+
       const recurringJobData = {
         ...formData,
+        companyId: companyId || userProfile?.companyId || null,
+        assignedTechnicianId: formData.assignedTechnicianId || null,
+        assignedTechnicianName:
+          assignedMember?.name ||
+          assignedMember?.fullName ||
+          assignedMember?.roleDisplay ||
+          assignedMember?.email ||
+          formData.assignedTechnicianName ||
+          '',
         startDate: formData.startDate ? new Date(formData.startDate).toISOString() : null,
         endDate: formData.endDate ? new Date(formData.endDate).toISOString() : null,
         dayOfWeek: formData.dayOfWeek !== null && formData.dayOfWeek !== '' ? parseInt(formData.dayOfWeek) : null
@@ -173,8 +228,20 @@ const RecurringJobsPage = () => {
 
     setIsLoading(true);
     try {
+      const companyId = getEffectiveCompanyId();
+      const assignedMember = teamMembers.find((m) => m.id === formData.assignedTechnicianId);
+
       const updates = {
         ...formData,
+        companyId: companyId || userProfile?.companyId || null,
+        assignedTechnicianId: formData.assignedTechnicianId || null,
+        assignedTechnicianName:
+          assignedMember?.name ||
+          assignedMember?.fullName ||
+          assignedMember?.roleDisplay ||
+          assignedMember?.email ||
+          formData.assignedTechnicianName ||
+          '',
         startDate: formData.startDate ? new Date(formData.startDate).toISOString() : null,
         endDate: formData.endDate ? new Date(formData.endDate).toISOString() : null,
         dayOfWeek: formData.dayOfWeek !== null && formData.dayOfWeek !== '' ? parseInt(formData.dayOfWeek) : null
@@ -256,7 +323,9 @@ const RecurringJobsPage = () => {
       endDate: recurringJob.endDate 
         ? (recurringJob.endDate.toDate ? recurringJob.endDate.toDate().toISOString().split('T')[0] : recurringJob.endDate.split('T')[0])
         : '',
-      isActive: recurringJob.isActive !== undefined ? recurringJob.isActive : true
+      isActive: recurringJob.isActive !== undefined ? recurringJob.isActive : true,
+      assignedTechnicianId: recurringJob.assignedTechnicianId || '',
+      assignedTechnicianName: recurringJob.assignedTechnicianName || '',
     });
     setShowEditModal(true);
   };
@@ -274,7 +343,9 @@ const RecurringJobsPage = () => {
       notes: '',
       startDate: '',
       endDate: '',
-      isActive: true
+      isActive: true,
+      assignedTechnicianId: '',
+      assignedTechnicianName: ''
     });
   };
 
@@ -348,6 +419,10 @@ const RecurringJobsPage = () => {
     </div>
   );
 
+  const recurringTechnicianTemplate = (props) => (
+    <div className="text-sm text-gray-800">{props.assignedTechnicianName || 'Unassigned'}</div>
+  );
+
   const recurringStatusTemplate = (props) => (
     <span
       className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold ${
@@ -387,7 +462,7 @@ const RecurringJobsPage = () => {
     </div>
   );
 
-  const recurringNoRecordsTemplate = () => (
+  const renderRecurringEmptyState = () => (
     <div className="p-8 text-center space-y-3">
       <ArrowPathIcon className="h-12 w-12 text-gray-400 mx-auto" />
       <p className="text-gray-500">No recurring jobs found</p>
@@ -574,6 +649,46 @@ const RecurringJobsPage = () => {
                   </div>
                 </div>
 
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Assign Technician</label>
+                  <select
+                    value={formData.assignedTechnicianId}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      const member = teamMembers.find((m) => m.id === value);
+                      setFormData((prev) => ({
+                        ...prev,
+                        assignedTechnicianId: value,
+                        assignedTechnicianName:
+                          member?.name || member?.fullName || member?.roleDisplay || member?.email || '',
+                      }));
+                    }}
+                    disabled={teamMembersLoading || (teamMembers.length === 0 && !formData.assignedTechnicianId)}
+                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm disabled:bg-gray-100 disabled:text-gray-500"
+                  >
+                    <option value="">Unassigned</option>
+                    {isAssignedTechnicianMissing && (
+                      <option value={formData.assignedTechnicianId}>
+                        {formData.assignedTechnicianName || 'Assigned technician'}
+                      </option>
+                    )}
+                    {teamMembers.map((member) => {
+                      const label =
+                        member.name || member.fullName || member.roleDisplay || member.email || 'Unnamed member';
+                      return (
+                        <option key={member.id} value={member.id}>
+                          {label}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  {teamMembers.length === 0 && !teamMembersLoading && !formData.assignedTechnicianId && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      Add team members in Company Setup to enable technician assignments.
+                    </p>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
@@ -681,65 +796,74 @@ const RecurringJobsPage = () => {
           </div>
         ) : (
           <div className="px-3 pb-4">
-            <GridComponent
-              id="recurringJobsGrid"
-              dataSource={recurringJobs}
-              allowPaging
-              allowSorting
-              allowFiltering
-              allowSelection
-              allowExcelExport
-              filterSettings={recurringFilterSettings}
-              toolbar={recurringToolbarOptions}
-              toolbarClick={handleRecurringToolbarClick}
-              selectionSettings={{ type: 'Single' }}
-              pageSettings={recurringPageSettings}
-              height="520"
-              ref={recurringGridRef}
-              noRecordsTemplate={recurringNoRecordsTemplate}
-            >
-              <ColumnsDirective>
-                <ColumnDirective
-                  field="customerName"
-                  headerText="Customer"
-                  width="220"
-                  template={recurringCustomerTemplate}
-                />
-                <ColumnDirective
-                  field="serviceType"
-                  headerText="Service"
-                  width="200"
-                  template={recurringServiceTemplate}
-                />
-                <ColumnDirective
-                  field="frequency"
-                  headerText="Frequency"
-                  width="160"
-                  template={recurringFrequencyTemplate}
-                />
-                <ColumnDirective
-                  field="time"
-                  headerText="Schedule"
-                  width="200"
-                  template={recurringScheduleTemplate}
-                />
-                <ColumnDirective
-                  field="isActive"
-                  headerText="Status"
-                  width="120"
-                  template={recurringStatusTemplate}
-                  allowFiltering={false}
-                />
-                <ColumnDirective
-                  headerText="Actions"
-                  width="180"
-                  template={recurringActionsTemplate}
-                  allowFiltering={false}
-                  allowSorting={false}
-                />
-              </ColumnsDirective>
-              <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
-            </GridComponent>
+            {recurringJobs.length === 0 ? (
+              renderRecurringEmptyState()
+            ) : (
+              <GridComponent
+                id="recurringJobsGrid"
+                dataSource={recurringJobs}
+                allowPaging
+                allowSorting
+                allowFiltering
+                allowSelection
+                allowExcelExport
+                filterSettings={recurringFilterSettings}
+                toolbar={recurringToolbarOptions}
+                toolbarClick={handleRecurringToolbarClick}
+                selectionSettings={{ type: 'Single' }}
+                pageSettings={recurringPageSettings}
+                height="520"
+                ref={recurringGridRef}
+              >
+                <ColumnsDirective>
+                  <ColumnDirective
+                    field="customerName"
+                    headerText="Customer"
+                    width="220"
+                    template={recurringCustomerTemplate}
+                  />
+                  <ColumnDirective
+                    field="serviceType"
+                    headerText="Service"
+                    width="200"
+                    template={recurringServiceTemplate}
+                  />
+                  <ColumnDirective
+                    field="frequency"
+                    headerText="Frequency"
+                    width="160"
+                    template={recurringFrequencyTemplate}
+                  />
+                  <ColumnDirective
+                    field="time"
+                    headerText="Schedule"
+                    width="200"
+                    template={recurringScheduleTemplate}
+                  />
+                  <ColumnDirective
+                    field="assignedTechnicianName"
+                    headerText="Technician"
+                    width="180"
+                    template={recurringTechnicianTemplate}
+                  />
+                  <ColumnDirective
+                    field="isActive"
+                    headerText="Status"
+                    width="120"
+                    template={recurringStatusTemplate}
+                    allowFiltering={false}
+                  />
+                  <ColumnDirective
+                    headerText="Actions"
+                    width="180"
+                    template={recurringActionsTemplate}
+                    allowFiltering={false}
+                    allowSorting={false}
+                  />
+                </ColumnsDirective>
+                <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
+              </GridComponent>
+            )}
           </div>
         )}
       </div>

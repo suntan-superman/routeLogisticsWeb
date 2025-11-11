@@ -393,7 +393,7 @@ const InvoicePage = () => {
     </div>
   );
 
-  const invoicesNoRecordsTemplate = () => (
+  const renderInvoicesEmptyState = () => (
     <div className="p-8 text-center">
       <DocumentTextIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
       <p className="text-gray-500">No invoices found</p>
@@ -586,72 +586,75 @@ const InvoicePage = () => {
           </div>
         ) : (
           <div className="px-3 pb-4">
-            <GridComponent
-              id="invoicesGrid"
-              dataSource={filteredInvoices}
-              allowPaging
-              allowSorting
-              allowFiltering
-              allowSelection
-              allowExcelExport
-              filterSettings={invoicesFilterSettings}
-              toolbar={invoicesToolbarOptions}
-              toolbarClick={handleInvoicesToolbarClick}
-              selectionSettings={{ type: 'Single' }}
-              pageSettings={invoicesPageSettings}
-              height="520"
-              ref={invoicesGridRef}
-              noRecordsTemplate={invoicesNoRecordsTemplate}
-            >
-              <ColumnsDirective>
-                <ColumnDirective
-                  field="invoiceNumber"
-                  headerText="Invoice #"
-                  width="140"
-                  template={invoiceNumberTemplate}
-                />
-                <ColumnDirective
-                  field="customerName"
-                  headerText="Customer"
-                  width="220"
-                  template={invoiceCustomerTemplate}
-                />
-                <ColumnDirective
-                  field="invoiceDate"
-                  headerText="Date"
-                  width="140"
-                  template={invoiceDateTemplate}
-                />
-                <ColumnDirective
-                  field="dueDate"
-                  headerText="Due Date"
-                  width="140"
-                  template={invoiceDueTemplate}
-                />
-                <ColumnDirective
-                  field="total"
-                  headerText="Amount"
-                  width="130"
-                  template={invoiceAmountTemplate}
-                  textAlign="Right"
-                />
-                <ColumnDirective
-                  field="status"
-                  headerText="Status"
-                  width="140"
-                  template={invoiceStatusTemplate}
-                  allowFiltering={false}
-                />
-                <ColumnDirective
-                  headerText="Actions"
-                  width="200"
-                  template={invoiceActionsTemplate}
-                  allowFiltering={false}
-                  allowSorting={false}
-                />
-              </ColumnsDirective>
-              <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
-            </GridComponent>
+            {filteredInvoices.length === 0 ? (
+              renderInvoicesEmptyState()
+            ) : (
+              <GridComponent
+                id="invoicesGrid"
+                dataSource={filteredInvoices}
+                allowPaging
+                allowSorting
+                allowFiltering
+                allowSelection
+                allowExcelExport
+                filterSettings={invoicesFilterSettings}
+                toolbar={invoicesToolbarOptions}
+                toolbarClick={handleInvoicesToolbarClick}
+                selectionSettings={{ type: 'Single' }}
+                pageSettings={invoicesPageSettings}
+                height="520"
+                ref={invoicesGridRef}
+              >
+                <ColumnsDirective>
+                  <ColumnDirective
+                    field="invoiceNumber"
+                    headerText="Invoice #"
+                    width="140"
+                    template={invoiceNumberTemplate}
+                  />
+                  <ColumnDirective
+                    field="customerName"
+                    headerText="Customer"
+                    width="220"
+                    template={invoiceCustomerTemplate}
+                  />
+                  <ColumnDirective
+                    field="invoiceDate"
+                    headerText="Date"
+                    width="140"
+                    template={invoiceDateTemplate}
+                  />
+                  <ColumnDirective
+                    field="dueDate"
+                    headerText="Due Date"
+                    width="140"
+                    template={invoiceDueTemplate}
+                  />
+                  <ColumnDirective
+                    field="total"
+                    headerText="Amount"
+                    width="130"
+                    template={invoiceAmountTemplate}
+                    textAlign="Right"
+                  />
+                  <ColumnDirective
+                    field="status"
+                    headerText="Status"
+                    width="140"
+                    template={invoiceStatusTemplate}
+                    allowFiltering={false}
+                  />
+                  <ColumnDirective
+                    headerText="Actions"
+                    width="200"
+                    template={invoiceActionsTemplate}
+                    allowFiltering={false}
+                    allowSorting={false}
+                  />
+                </ColumnsDirective>
+                <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
+              </GridComponent>
+            )}
           </div>
         )}
       </div>

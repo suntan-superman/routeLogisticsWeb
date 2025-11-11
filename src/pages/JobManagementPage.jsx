@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import JobManagementService from '../services/jobManagementService';
 import CompanyService from '../services/companyService';
+import JobPhotoService from '../services/jobPhotoService';
+import CustomerService from '../services/customerService';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
 import { canReassignJobs } from '../utils/permissions';
@@ -54,9 +56,16 @@ const JobManagementPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [showViewModal, setShowViewModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
+  const [showJobModal, setShowJobModal] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
+  const [jobPhotos, setJobPhotos] = useState([]);
+  const [jobPhotosLoading, setJobPhotosLoading] = useState(false);
+  const [jobCustomers, setJobCustomers] = useState([]);
+  const [jobCustomersLoading, setJobCustomersLoading] = useState(false);
+  const [isEditingJob, setIsEditingJob] = useState(false);
+  const [isSavingJob, setIsSavingJob] = useState(false);
+  const [jobFormErrors, setJobFormErrors] = useState({});
   const [stats, setStats] = useState({
     totalJobs: 0,
     scheduledJobs: 0,
@@ -86,6 +95,23 @@ const JobManagementPage = () => {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedAssigneeId, setSelectedAssigneeId] = useState('');
   const [isAssigning, setIsAssigning] = useState(false);
+  const defaultJobForm = useMemo(
+    () => ({
+      customerId: '',
+      customerName: '',
+      serviceType: '',
+      status: 'scheduled',
+      date: new Date().toISOString().split('T')[0],
+      time: '09:00',
+      duration: '',
+      estimatedCost: '',
+      notes: '',
+      assignedTechnicianId: '',
+      assignedTechnicianName: '',
+    }),
+    []
+  );
+  const [jobFormData, setJobFormData] = useState(defaultJobForm);
 
   const activeTeamMembers = useMemo(
     () =>
@@ -95,11 +121,74 @@ const JobManagementPage = () => {
       }),
     [teamMembers]
   );
+  const isAssignedTechnicianMissing = useMemo(
+    () =>
+      Boolean(
+        jobFormData.assignedTechnicianId &&
+          !activeTeamMembers.some((member) => member.id === jobFormData.assignedTechnicianId)
+      ),
+    [jobFormData.assignedTechnicianId, activeTeamMembers]
+  );
 
   const jobsGridRef = useRef(null);
   const jobsToolbarOptions = useMemo(() => ['Search', 'ExcelExport'], []);
   const jobsPageSettings = useMemo(() => ({ pageSize: 25, pageSizes: [25, 50, 100, 200] }), []);
   const jobsFilterSettings = useMemo(() => ({ type: 'Excel' }), []);
+
+  const loadJobPhotos = useCallback(
+    async (job) => {
+      if (!job) {
+        setJobPhotos([]);
+        return;
+      }
+
+      const companyId = job.companyId || companyIdForJobs || userProfile?.companyId;
+      if (!companyId) {
+        setJobPhotos([]);
+        return;
+      }
+
+      setJobPhotosLoading(true);
+      try {
+        const result = await JobPhotoService.getJobPhotos(companyId, job.id);
+        if (result.success) {
+          setJobPhotos(result.photos || []);
+        } else {
+          setJobPhotos([]);
+          if (result.error) {
+            console.warn('Failed to load job photos:', result.error);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading job photos:', error);
+        setJobPhotos([]);
+      } finally {
+        setJobPhotosLoading(false);
+      }
+    },
+    [companyIdForJobs, userProfile?.companyId]
+  );
+
+  const loadJobCustomers = useCallback(async () => {
+    setJobCustomersLoading(true);
+    try {
+      const result = await CustomerService.getCustomers(200, null, {}, userProfile, companyIdForJobs);
+      if (result.success) {
+        setJobCustomers(result.customers || []);
+      } else {
+        setJobCustomers([]);
+        if (result.error) {
+          toast.error(result.error);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading job customers:', error);
+      setJobCustomers([]);
+      toast.error('Failed to load customers');
+    } finally {
+      setJobCustomersLoading(false);
+    }
+  }, [companyIdForJobs, userProfile]);
 
   useEffect(() => {
     loadJobs();
@@ -109,6 +198,12 @@ const JobManagementPage = () => {
   useEffect(() => {
     filterAndSortJobs();
   }, [jobs, searchTerm, activeFilter, dateFilter, sortBy]);
+
+  useEffect(() => {
+    if (showJobModal) {
+      loadJobCustomers();
+    }
+  }, [showJobModal, loadJobCustomers]);
 
   useEffect(() => {
     if (!canTransferJobs) {
@@ -126,12 +221,18 @@ const JobManagementPage = () => {
         const result = await CompanyService.getTeamMembers(companyIdForJobs);
         if (result.success) {
           setTeamMembers(result.teamMembers || []);
+        } else if (result.permissionDenied) {
+          setTeamMembers([]);
         } else if (result.error) {
           toast.error(result.error);
         }
       } catch (error) {
-        console.error('Error loading team members:', error);
-        toast.error('Error loading team members');
+        if (error?.code === 'permission-denied') {
+          setTeamMembers([]);
+        } else {
+          console.error('Error loading team members:', error);
+          toast.error('Error loading team members');
+        }
       }
     };
 
@@ -293,12 +394,49 @@ const JobManagementPage = () => {
 
   const openViewModal = (job) => {
     setSelectedJob(job);
+    setJobPhotos([]);
     setShowViewModal(true);
+    loadJobPhotos(job);
   };
+
+  const applyJobToForm = useCallback((job) => {
+    if (!job) {
+      setJobFormData({ ...defaultJobForm });
+      return;
+    }
+
+    setJobFormData({
+      customerId: job.customerId || '',
+      customerName: job.customerName || '',
+      serviceType: job.serviceType || '',
+      status: job.status || 'scheduled',
+      date: job.date || defaultJobForm.date,
+      time: job.time || defaultJobForm.time,
+      duration: job.duration || job.estimatedDuration || '',
+      estimatedCost: job.estimatedCost || job.totalCost || '',
+      notes: job.notes || '',
+      assignedTechnicianId: job.assignedTo || '',
+      assignedTechnicianName: job.assignedToName || '',
+    });
+  }, [defaultJobForm]);
 
   const openEditModal = (job) => {
     setSelectedJob(job);
-    setShowEditModal(true);
+    setIsEditingJob(true);
+    applyJobToForm(job);
+    setJobFormErrors({});
+    setShowJobModal(true);
+  };
+
+  const openCreateModal = () => {
+    setSelectedJob(null);
+    setIsEditingJob(false);
+    setJobFormErrors({});
+    setJobFormData({
+      ...defaultJobForm,
+      date: new Date().toISOString().split('T')[0],
+    });
+    setShowJobModal(true);
   };
 
   const openStatusModal = (job) => {
@@ -318,6 +456,19 @@ const JobManagementPage = () => {
     setSelectedAssigneeId(job.assignedTo || '');
     setShowAssignModal(true);
   };
+
+  const handleCopyPhotoLink = useCallback(async (url) => {
+    if (!url) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success('Photo link copied to clipboard');
+    } catch (error) {
+      console.error('Failed to copy photo link:', error);
+      toast.error('Unable to copy link');
+    }
+  }, []);
 
   const handleAssignJob = async () => {
     if (!selectedJob) {
@@ -465,6 +616,23 @@ const JobManagementPage = () => {
     });
   };
 
+  const formatDateTime = (value) => {
+    if (!value) {
+      return '';
+    }
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return '';
+    }
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+  };
+
   const getStatusIcon = (status) => {
     switch (status) {
       case 'scheduled':
@@ -602,13 +770,21 @@ const JobManagementPage = () => {
     </div>
   );
 
-  const jobsNoRecordsTemplate = () => (
-    <div className="text-center py-12">
+  const renderNoJobsState = () => (
+    <div className="text-center py-12 space-y-3">
       <ClipboardDocumentListIcon className="mx-auto h-12 w-12 text-gray-400" />
-      <h3 className="mt-2 text-sm font-medium text-gray-900">No jobs found</h3>
-      <p className="mt-1 text-sm text-gray-500">
-        {searchTerm ? 'Try adjusting your search terms.' : 'No jobs have been scheduled yet.'}
+      <h3 className="text-sm font-medium text-gray-900">No jobs found</h3>
+      <p className="text-sm text-gray-500">
+        {searchTerm ? 'Try adjusting your filters or search terms.' : 'Create your first job to get started.'}
       </p>
+      <button
+        type="button"
+        onClick={openCreateModal}
+        className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700"
+      >
+        <PlusIcon className="h-4 w-4 mr-2" />
+        Create Job
+      </button>
     </div>
   );
 
@@ -630,6 +806,13 @@ const JobManagementPage = () => {
             </div>
           </div>
           <div className="flex space-x-3">
+            <button
+              onClick={openCreateModal}
+              className="flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+            >
+              <PlusIcon className="h-4 w-4 mr-2" />
+              Create Job
+            </button>
             <button
               onClick={exportJobs}
               className="flex items-center px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
@@ -827,72 +1010,75 @@ const JobManagementPage = () => {
           </div>
         ) : (
           <div className="px-3 pb-4">
-            <GridComponent
-              id="jobsGrid"
-              dataSource={filteredJobs}
-              allowPaging
-              allowSorting
-              allowFiltering
-              allowSelection
-              allowExcelExport
-              filterSettings={jobsFilterSettings}
-              toolbar={jobsToolbarOptions}
-              toolbarClick={handleJobsToolbarClick}
-              selectionSettings={{ type: 'Single' }}
-              pageSettings={jobsPageSettings}
-              height="600"
-              ref={jobsGridRef}
-              noRecordsTemplate={jobsNoRecordsTemplate}
-            >
-              <ColumnsDirective>
-                <ColumnDirective
-                  field="serviceType"
-                  headerText="Job Details"
-                  width="260"
-                  template={jobDetailsTemplate}
-                />
-                <ColumnDirective
-                  field="customerName"
-                  headerText="Customer"
-                  width="200"
-                  template={jobCustomerTemplate}
-                />
-                <ColumnDirective
-                  field="date"
-                  headerText="Schedule"
-                  width="170"
-                  template={jobScheduleTemplate}
-                />
-                <ColumnDirective
-                  field="status"
-                  headerText="Status"
-                  width="140"
-                  template={jobStatusTemplate}
-                  allowFiltering={false}
-                />
-                <ColumnDirective
-                  field="assignedToName"
-                  headerText="Assigned To"
-                  width="160"
-                  template={jobAssignedTemplate}
-                />
-                <ColumnDirective
-                  field="totalCost"
-                  headerText="Cost"
-                  width="130"
-                  template={jobCostTemplate}
-                  textAlign="Right"
-                />
-                <ColumnDirective
-                  headerText="Actions"
-                  width="200"
-                  template={jobActionsTemplate}
-                  allowFiltering={false}
-                  allowSorting={false}
-                />
-              </ColumnsDirective>
-              <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
-            </GridComponent>
+            {filteredJobs.length === 0 ? (
+              renderNoJobsState()
+            ) : (
+              <GridComponent
+                id="jobsGrid"
+                dataSource={filteredJobs}
+                allowPaging
+                allowSorting
+                allowFiltering
+                allowSelection
+                allowExcelExport
+                filterSettings={jobsFilterSettings}
+                toolbar={jobsToolbarOptions}
+                toolbarClick={handleJobsToolbarClick}
+                selectionSettings={{ type: 'Single' }}
+                pageSettings={jobsPageSettings}
+                height="600"
+                ref={jobsGridRef}
+              >
+                <ColumnsDirective>
+                  <ColumnDirective
+                    field="serviceType"
+                    headerText="Job Details"
+                    width="260"
+                    template={jobDetailsTemplate}
+                  />
+                  <ColumnDirective
+                    field="customerName"
+                    headerText="Customer"
+                    width="200"
+                    template={jobCustomerTemplate}
+                  />
+                  <ColumnDirective
+                    field="date"
+                    headerText="Schedule"
+                    width="170"
+                    template={jobScheduleTemplate}
+                  />
+                  <ColumnDirective
+                    field="status"
+                    headerText="Status"
+                    width="140"
+                    template={jobStatusTemplate}
+                    allowFiltering={false}
+                  />
+                  <ColumnDirective
+                    field="assignedToName"
+                    headerText="Assigned To"
+                    width="160"
+                    template={jobAssignedTemplate}
+                  />
+                  <ColumnDirective
+                    field="totalCost"
+                    headerText="Cost"
+                    width="130"
+                    template={jobCostTemplate}
+                    textAlign="Right"
+                  />
+                  <ColumnDirective
+                    headerText="Actions"
+                    width="200"
+                    template={jobActionsTemplate}
+                    allowFiltering={false}
+                    allowSorting={false}
+                  />
+                </ColumnsDirective>
+                <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
+              </GridComponent>
+            )}
           </div>
         )}
       </div>
@@ -908,6 +1094,7 @@ const JobManagementPage = () => {
                   onClick={() => {
                     setShowViewModal(false);
                     setSelectedJob(null);
+                    setJobPhotos([]);
                   }}
                   className="text-gray-400 hover:text-gray-600"
                 >
@@ -991,6 +1178,98 @@ const JobManagementPage = () => {
                   </div>
                 )}
                 
+                <div className="border-t pt-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h5 className="text-sm font-medium text-gray-700">Job Photos</h5>
+                    {jobPhotos.length > 0 && (
+                      <span className="text-xs text-gray-500">{jobPhotos.length} photo{jobPhotos.length === 1 ? '' : 's'}</span>
+                    )}
+                  </div>
+
+                  {jobPhotosLoading ? (
+                    <div className="flex items-center justify-center py-6">
+                      <div className="h-6 w-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
+                      <span className="ml-3 text-sm text-gray-500">Loading photos…</span>
+                    </div>
+                  ) : jobPhotos.length === 0 ? (
+                    <div className="rounded-md bg-gray-50 border border-dashed border-gray-200 p-4">
+                      <p className="text-sm text-gray-500">No photos uploaded for this job yet.</p>
+                    </div>
+                  ) : (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {jobPhotos.map((photo) => (
+                        <div key={photo.id} className="border border-gray-200 rounded-lg overflow-hidden shadow-sm bg-white">
+                          <div className="aspect-video bg-gray-100">
+                            <img
+                              src={photo.downloadURL}
+                              alt={photo.note || 'Job photo'}
+                              className="h-full w-full object-cover"
+                            />
+                          </div>
+                          <div className="px-3 py-3 space-y-2">
+                            <p className="text-xs text-gray-500">
+                              Captured {formatDateTime(photo.capturedAt) || 'recently'}
+                            </p>
+                            <p className="text-xs text-gray-400">
+                              Uploaded {formatDateTime(photo.createdAt) || 'recently'}
+                            </p>
+                            {typeof photo.latitude === 'number' && typeof photo.longitude === 'number' && (
+                              <div className="flex items-center justify-between text-xs text-gray-600">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    window.open(
+                                      `https://maps.google.com/?q=${photo.latitude},${photo.longitude}`,
+                                      '_blank',
+                                      'noopener,noreferrer'
+                                    )
+                                  }
+                                  className="inline-flex items-center text-primary-600 hover:text-primary-700"
+                                >
+                                  <ArrowPathIcon className="h-4 w-4 mr-1" />
+                                  {photo.latitude.toFixed(4)}, {photo.longitude.toFixed(4)}
+                                </button>
+                                {typeof photo.locationAccuracy === 'number' && (
+                                  <span className="text-gray-400">
+                                    ± {Math.round(photo.locationAccuracy)} m
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            <div className="border-t border-gray-100 pt-2">
+                              <h6 className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                                Technician Note
+                              </h6>
+                              <p className="text-sm text-gray-700 leading-snug">
+                                {photo.note ? photo.note : 'None provided.'}
+                              </p>
+                            </div>
+                            <div className="flex items-center justify-between text-sm pt-1">
+                              <a
+                                href={photo.downloadURL}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center text-primary-600 hover:text-primary-700"
+                              >
+                                <ArrowDownTrayIcon className="h-4 w-4 mr-1" />
+                                Download
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyPhotoLink(photo.downloadURL)}
+                                className="inline-flex items-center text-gray-500 hover:text-gray-700"
+                              >
+                                <ClipboardDocumentListIcon className="h-4 w-4 mr-1" />
+                                Copy link
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                
                 {selectedJob.actualWorkDone && (
                   <div>
                     <h5 className="text-sm font-medium text-gray-700">Actual Work Done</h5>
@@ -1024,10 +1303,420 @@ const JobManagementPage = () => {
                   onClick={() => {
                     setShowViewModal(false);
                     openStatusModal(selectedJob);
+                    setJobPhotos([]);
                   }}
                   className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
                   Update Status
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showJobModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">
+                  {isEditingJob ? 'Edit Job' : 'Create Job'}
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowJobModal(false);
+                    setJobFormErrors({});
+                    setJobFormData({ ...defaultJobForm });
+                    if (!isEditingJob) {
+                      setSelectedJob(null);
+                    }
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <span className="sr-only">Close</span>
+                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Customer</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <select
+                        value={jobFormData.customerId}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          const selectedCustomer = jobCustomers.find((c) => c.id === value);
+                          setJobFormData((prev) => ({
+                            ...prev,
+                            customerId: value,
+                            customerName: selectedCustomer?.name || prev.customerName,
+                          }));
+                          setJobFormErrors((prev) => ({ ...prev, customerName: undefined }));
+                        }}
+                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      >
+                        <option value="">
+                          {jobCustomersLoading ? 'Loading customers...' : 'Select existing customer'}
+                        </option>
+                        {jobCustomers.map((customer) => (
+                          <option key={customer.id} value={customer.id}>
+                            {customer.name || customer.email || 'Unnamed customer'}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <input
+                        type="text"
+                        value={jobFormData.customerName}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setJobFormData((prev) => ({
+                            ...prev,
+                            customerName: value,
+                          }));
+                          setJobFormErrors((prev) => ({ ...prev, customerName: undefined }));
+                        }}
+                        placeholder="Customer name"
+                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      />
+                      {jobFormErrors.customerName && (
+                        <p className="mt-1 text-xs text-red-600">{jobFormErrors.customerName}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Service Type *</label>
+                  <input
+                    type="text"
+                    value={jobFormData.serviceType}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setJobFormData((prev) => ({
+                        ...prev,
+                        serviceType: value,
+                      }));
+                      setJobFormErrors((prev) => ({ ...prev, serviceType: undefined }));
+                    }}
+                    placeholder="e.g., HVAC maintenance"
+                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                  />
+                  {jobFormErrors.serviceType && (
+                    <p className="mt-1 text-xs text-red-600">{jobFormErrors.serviceType}</p>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                    <select
+                      value={jobFormData.status}
+                      onChange={(event) =>
+                        setJobFormData((prev) => ({
+                          ...prev,
+                          status: event.target.value || 'scheduled',
+                        }))
+                      }
+                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    >
+                      <option value="scheduled">Scheduled</option>
+                      <option value="in-progress">In Progress</option>
+                      <option value="completed">Completed</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Duration</label>
+                    <input
+                      type="text"
+                      value={jobFormData.duration}
+                      onChange={(event) =>
+                        setJobFormData((prev) => ({
+                          ...prev,
+                          duration: event.target.value,
+                        }))
+                      }
+                      placeholder="e.g., 2 hours"
+                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Assign Technician
+                  </label>
+                  <select
+                    value={jobFormData.assignedTechnicianId}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      const member = activeTeamMembers.find((m) => m.id === value);
+                      setJobFormData((prev) => ({
+                        ...prev,
+                        assignedTechnicianId: value,
+                        assignedTechnicianName:
+                          member?.name ||
+                          member?.fullName ||
+                          member?.roleDisplay ||
+                          member?.email ||
+                          '',
+                      }));
+                      setJobFormErrors((prev) => ({ ...prev, assignedTechnicianId: undefined }));
+                    }}
+                    disabled={activeTeamMembers.length === 0 && !jobFormData.assignedTechnicianId}
+                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm disabled:bg-gray-100 disabled:text-gray-500"
+                  >
+                    <option value="">Unassigned</option>
+                    {isAssignedTechnicianMissing && (
+                      <option value={jobFormData.assignedTechnicianId}>
+                        {jobFormData.assignedTechnicianName || 'Assigned technician'}
+                      </option>
+                    )}
+                    {activeTeamMembers.map((member) => {
+                      const label =
+                        member.name ||
+                        member.fullName ||
+                        member.roleDisplay ||
+                        member.email ||
+                        'Unnamed member';
+                      return (
+                        <option key={member.id} value={member.id}>
+                          {label}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  {activeTeamMembers.length === 0 && !jobFormData.assignedTechnicianId && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      No active team members available for assignment yet.
+                    </p>
+                  )}
+                  {jobFormErrors.assignedTechnicianId && (
+                    <p className="mt-1 text-xs text-red-600">{jobFormErrors.assignedTechnicianId}</p>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>
+                    <input
+                      type="date"
+                      value={jobFormData.date}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setJobFormData((prev) => ({ ...prev, date: value }));
+                        setJobFormErrors((prev) => ({ ...prev, date: undefined }));
+                      }}
+                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    />
+                    {jobFormErrors.date && <p className="mt-1 text-xs text-red-600">{jobFormErrors.date}</p>}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Time *</label>
+                    <input
+                      type="time"
+                      value={jobFormData.time}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setJobFormData((prev) => ({ ...prev, time: value }));
+                        setJobFormErrors((prev) => ({ ...prev, time: undefined }));
+                      }}
+                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    />
+                    {jobFormErrors.time && <p className="mt-1 text-xs text-red-600">{jobFormErrors.time}</p>}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Estimated Cost</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={jobFormData.estimatedCost}
+                      onChange={(event) =>
+                        setJobFormData((prev) => ({
+                          ...prev,
+                          estimatedCost: event.target.value,
+                        }))
+                      }
+                      placeholder="e.g., 250"
+                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                    <input
+                      type="text"
+                      value={jobFormData.notes}
+                      onChange={(event) =>
+                        setJobFormData((prev) => ({
+                          ...prev,
+                          notes: event.target.value,
+                        }))
+                      }
+                      placeholder="Additional instructions"
+                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-3 mt-6">
+                <button
+                  onClick={() => {
+                    setShowJobModal(false);
+                    setJobFormErrors({});
+                    setJobFormData({ ...defaultJobForm });
+                    if (!isEditingJob) {
+                      setSelectedJob(null);
+                    }
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    const errors = {};
+                    if (!(jobFormData.customerName || jobFormData.customerId)) {
+                      errors.customerName = 'Customer name is required.';
+                    }
+                    if (!jobFormData.serviceType || !jobFormData.serviceType.trim()) {
+                      errors.serviceType = 'Service type is required.';
+                    }
+                    if (!jobFormData.date) {
+                      errors.date = 'Date is required.';
+                    }
+                    if (!jobFormData.time) {
+                      errors.time = 'Time is required.';
+                    }
+                    setJobFormErrors(errors);
+                    if (Object.keys(errors).length > 0) {
+                      return;
+                    }
+
+                    setIsSavingJob(true);
+                    try {
+                      let assignedMember = null;
+                      if (jobFormData.assignedTechnicianId) {
+                        assignedMember = activeTeamMembers.find(
+                          (member) => member.id === jobFormData.assignedTechnicianId
+                        );
+                        if (!assignedMember && selectedJob?.assignedTo === jobFormData.assignedTechnicianId) {
+                          assignedMember = {
+                            id: selectedJob.assignedTo,
+                            name:
+                              selectedJob.assignedToName ||
+                              jobFormData.assignedTechnicianName ||
+                              'Assigned technician',
+                          };
+                        }
+
+                        const durationMinutes =
+                          JobManagementService.parseDurationMinutes(jobFormData.duration, null) ||
+                          JobManagementService.parseDurationMinutes(selectedJob?.duration, null) ||
+                          JobManagementService.parseDurationMinutes(
+                            selectedJob?.estimatedDuration || selectedJob?.actualHours,
+                            null
+                          ) ||
+                          60;
+
+                        const availability = await JobManagementService.checkTechnicianAvailability(
+                          jobFormData.assignedTechnicianId,
+                          jobFormData.date,
+                          jobFormData.time,
+                          durationMinutes,
+                          isEditingJob ? selectedJob?.id || null : null
+                        );
+
+                        if (availability?.error) {
+                          toast.error(availability.error);
+                          setIsSavingJob(false);
+                          return;
+                        }
+
+                        if (availability?.hasConflict) {
+                          const conflictSummary = availability.conflicts
+                            .map(
+                              (conflict) =>
+                                `${conflict.date || jobFormData.date} at ${conflict.time || 'unspecified'} ` +
+                                `(${conflict.serviceType || 'Job'}${conflict.customerName ? ` for ${conflict.customerName}` : ''
+                                })`
+                            )
+                            .join('; ');
+                          toast.error(
+                            `Scheduling conflict detected for ${assignedMember?.name || 'technician'
+                            }: ${conflictSummary}`
+                          );
+                          setJobFormErrors((prev) => ({
+                            ...prev,
+                            assignedTechnicianId: 'Technician is unavailable at this time.',
+                          }));
+                          setIsSavingJob(false);
+                          return;
+                        }
+                      }
+
+                      const payload = {
+                        customerId: jobFormData.customerId || null,
+                        customerName: jobFormData.customerName || '',
+                        serviceType: jobFormData.serviceType.trim(),
+                        status: jobFormData.status || 'scheduled',
+                        date: jobFormData.date,
+                        time: jobFormData.time,
+                        duration: jobFormData.duration || '',
+                        estimatedCost: jobFormData.estimatedCost
+                          ? Number.parseFloat(jobFormData.estimatedCost)
+                          : null,
+                        notes: jobFormData.notes || '',
+                        companyId: companyIdForJobs || userProfile?.companyId || null,
+                        assignedTo: jobFormData.assignedTechnicianId || null,
+                        assignedToName:
+                          assignedMember?.name ||
+                          assignedMember?.fullName ||
+                          assignedMember?.roleDisplay ||
+                          assignedMember?.email ||
+                          jobFormData.assignedTechnicianName ||
+                          '',
+                      };
+
+                      let result;
+                      if (isEditingJob && selectedJob?.id) {
+                        result = await JobManagementService.updateJob(selectedJob.id, payload);
+                      } else {
+                        result = await JobManagementService.createJob(payload);
+                      }
+
+                      if (result.success) {
+                        toast.success(isEditingJob ? 'Job updated successfully!' : 'Job created successfully!');
+                        setShowJobModal(false);
+                        setJobFormData({ ...defaultJobForm });
+                        setJobFormErrors({});
+                        setSelectedJob(null);
+                        await loadJobs();
+                      } else {
+                        toast.error(result.error || 'Failed to save job');
+                      }
+                    } catch (error) {
+                      console.error('Error saving job:', error);
+                      toast.error('Failed to save job');
+                    } finally {
+                      setIsSavingJob(false);
+                    }
+                  }}
+                  disabled={isSavingJob}
+                  className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isSavingJob ? 'Saving...' : isEditingJob ? 'Update Job' : 'Create Job'}
                 </button>
               </div>
             </div>

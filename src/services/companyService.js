@@ -48,6 +48,74 @@ class CompanyService {
     return labels[role] || role;
   }
 
+  static normalizeRetentionDays(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return 0;
+    }
+    return Math.max(0, Math.min(365, Math.round(numeric)));
+  }
+
+  static async hasTeamManagementPrivileges(companyId, companyRecord = null) {
+    try {
+      const userId = this.getCurrentUserId();
+      const user = auth.currentUser;
+      const isSuperAdmin = user?.email === 'sroy@worksidesoftware.com';
+
+      if (!companyId) {
+        return false;
+      }
+
+      if (isSuperAdmin) {
+        return true;
+      }
+
+      let company = companyRecord;
+      if (!company) {
+        const companyResult = await this.getCompany(companyId);
+        if (!companyResult.success) {
+          console.warn('[CompanyService.hasTeamManagementPrivileges] Unable to load company for privileges', {
+            companyId,
+            error: companyResult.error
+          });
+          return false;
+        }
+        company = companyResult.company;
+      }
+
+      if (company?.ownerId === userId) {
+        return true;
+      }
+
+      const userDoc = await getDoc(doc(db, 'users', userId));
+      if (!userDoc.exists()) {
+        console.warn('[CompanyService.hasTeamManagementPrivileges] User profile missing', { userId });
+        return false;
+      }
+
+      const userProfile = userDoc.data() || {};
+      const role = (userProfile.role || '').toLowerCase();
+      const sameCompany = userProfile.companyId === companyId;
+
+      console.log('[CompanyService.hasTeamManagementPrivileges]', {
+        userId,
+        role,
+        userCompanyId: userProfile.companyId,
+        targetCompanyId: companyId,
+        sameCompany
+      });
+
+      if (!sameCompany) {
+        return false;
+      }
+
+      return role === 'admin' || role === 'supervisor' || role === 'super_admin';
+    } catch (error) {
+      console.error('Error checking team management privileges:', error);
+      return false;
+    }
+  }
+
   static async claimPendingCompanyOwnership() {
     try {
       const projectId = 'mi-factotum-field-service';
@@ -167,6 +235,7 @@ class CompanyService {
       
       const company = {
         ...companyData,
+        photoRetentionDays: this.normalizeRetentionDays(companyData.photoRetentionDays),
         code: companyCode,
         ownerId: userId,
         createdAt: new Date().toISOString(),
@@ -448,8 +517,11 @@ class CompanyService {
       
       const nowIso = new Date().toISOString();
 
+      const retentionDays = this.normalizeRetentionDays(companyData.photoRetentionDays);
+
       const company = {
         ...companyData,
+        photoRetentionDays: retentionDays,
         code: companyCode,
         ownerId: ownerId || null,
         ownerPendingEmail: ownerStatus === 'invited' ? normalizedOwnerEmail : null,
@@ -529,12 +601,21 @@ class CompanyService {
   // Check company history (customers, jobs, invoices, estimates, etc.)
   static async checkCompanyHistory(companyId) {
     try {
+      const now = new Date();
+      const currentMonth = now.getMonth();
+      const currentYear = now.getFullYear();
+
       const history = {
         customers: 0,
         jobs: 0,
         invoices: 0,
         estimates: 0,
         teamMembers: 0,
+        jobsRevenue: 0,
+        jobsRevenueThisMonth: 0,
+        completedJobs: 0,
+        cancelledJobs: 0,
+        activeJobs: 0,
         total: 0
       };
 
@@ -574,7 +655,31 @@ class CompanyService {
             where('userId', 'in', batch)
           );
           const jobsSnapshot = await getDocs(jobsQuery);
-          jobsCount += jobsSnapshot.size;
+          jobsSnapshot.forEach((jobDoc) => {
+            jobsCount += 1;
+            const jobData = jobDoc.data() || {};
+            const status = (jobData.status || '').toLowerCase();
+            if (status === 'completed') {
+              history.completedJobs += 1;
+            } else if (status === 'cancelled') {
+              history.cancelledJobs += 1;
+            } else {
+              history.activeJobs += 1;
+            }
+
+            if (status === 'completed') {
+              const totalCost = parseFloat(jobData.totalCost);
+              if (!Number.isNaN(totalCost)) {
+                history.jobsRevenue += totalCost;
+                const jobDate = jobData.date ? new Date(jobData.date) : null;
+                if (jobDate && !Number.isNaN(jobDate.getTime())) {
+                  if (jobDate.getMonth() === currentMonth && jobDate.getFullYear() === currentYear) {
+                    history.jobsRevenueThisMonth += totalCost;
+                  }
+                }
+              }
+            }
+          });
         }
       }
       history.jobs = jobsCount;
@@ -814,9 +919,6 @@ class CompanyService {
   static async updateCompany(companyId, updates) {
     try {
       const userId = this.getCurrentUserId();
-      const user = auth.currentUser;
-      const isSuperAdmin = user?.email === 'sroy@worksidesoftware.com';
-      
       // Verify user owns the company (or is super admin)
       const companyResult = await this.getCompany(companyId);
       if (!companyResult.success) {
@@ -830,8 +932,13 @@ class CompanyService {
         };
       }
 
+      const updatesCopy = { ...updates };
+      if (Object.prototype.hasOwnProperty.call(updatesCopy, 'photoRetentionDays')) {
+        updatesCopy.photoRetentionDays = this.normalizeRetentionDays(updatesCopy.photoRetentionDays);
+      }
+
       const updatedData = {
-        ...updates,
+        ...updatesCopy,
         updatedAt: new Date().toISOString()
       };
 
@@ -863,101 +970,69 @@ class CompanyService {
         return companyResult;
       }
 
-      if (!isSuperAdmin && companyResult.company.ownerId !== userId) {
+      const hasPrivileges = await this.hasTeamManagementPrivileges(companyId, companyResult.company);
+      if (!hasPrivileges) {
         return {
           success: false,
-          error: 'Unauthorized to add team members'
+          error: 'You do not have permission to add team members for this company.'
         };
       }
 
       const normalizedEmail = userEmail.trim().toLowerCase();
       const invitationRole = this.getInvitationRole(role);
 
-      // Check if a team member already exists for this email in the company
-      const existingTeamMemberQuery = query(
-        collection(db, 'teamMembers'),
-        where('companyId', '==', companyId),
-        where('email', '==', normalizedEmail)
-      );
-
-      const existingTeamMemberSnapshot = await getDocs(existingTeamMemberQuery);
-      if (!existingTeamMemberSnapshot.empty) {
-        return {
-          success: false,
-          error: 'A team member with this email already exists.'
-        };
-      }
-
-      // Check if user already belongs to another company
-      const existingUserQuery = query(
-        collection(db, 'users'),
-        where('email', '==', normalizedEmail)
-      );
-      const existingUserSnapshot = await getDocs(existingUserQuery);
-
-      if (!existingUserSnapshot.empty) {
-        const existingUserData = existingUserSnapshot.docs[0].data() || {};
-        if (existingUserData.companyId && existingUserData.companyId !== companyId) {
-          return {
-            success: false,
-            error: 'This email address is already associated with another company. Ask the user to be removed from their current company before inviting them here.'
-          };
-        }
-      }
+      console.log('[CompanyService.addTeamMember] Attempting invitation', {
+        companyId,
+        normalizedEmail,
+        invitationRole,
+        invitedBy: userId
+      });
 
       const invitationResult = await InvitationService.createInvitation(
         companyId,
         normalizedEmail,
         invitationRole,
-        userId
+        userId,
+        { createTeamMember: true }
       );
 
       if (!invitationResult.success) {
+        console.warn('[CompanyService.addTeamMember] Invitation creation failed', invitationResult);
         return {
           success: false,
           error: invitationResult.error || 'Failed to create invitation'
         };
       }
 
-      const { invitation } = invitationResult;
+      const { invitation, teamMember } = invitationResult;
 
-      // Create team member record
-      const timestamp = new Date().toISOString();
-      const teamMember = {
-        companyId,
-        email: normalizedEmail,
-        role: invitationRole,
-        roleDisplay: this.getRoleDisplay(invitationRole),
-        invitedBy: userId,
-        status: 'pending', // pending, active, inactive
-        invitationId: invitation.id,
-        invitationCode: invitation.invitationCode,
-        invitationExpiresAt: invitation.expiresAt,
-        emailSent: false,
-        createdAt: timestamp,
-        updatedAt: timestamp
-      };
-
-      const docRef = await addDoc(collection(db, 'teamMembers'), teamMember);
+      if (!teamMember) {
+        return {
+          success: false,
+          error: 'Invitation created but team member could not be created.'
+        };
+      }
 
       const emailSent = await this.sendTeamMemberInvitationEmail(invitation);
 
       if (emailSent) {
-        await updateDoc(doc(db, 'teamMembers', docRef.id), {
+        await updateDoc(doc(db, 'teamMembers', teamMember.id), {
           emailSent: true,
           emailSentAt: new Date().toISOString()
         });
+        teamMember.emailSent = true;
+        teamMember.emailSentAt = new Date().toISOString();
       }
 
       return {
         success: true,
-        teamMemberId: docRef.id,
-        teamMember: { id: docRef.id, ...teamMember, emailSent },
+        teamMemberId: teamMember.id,
+        teamMember,
         invitation,
         emailSent
       };
     } catch (error) {
-      console.error('Error adding team member:', error);
+      console.error('Error adding team member:', error.code, error.message);
       return {
         success: false,
         error: error.message
@@ -968,8 +1043,6 @@ class CompanyService {
   static async resendTeamMemberInvite(teamMemberId) {
     try {
       const userId = this.getCurrentUserId();
-      const user = auth.currentUser;
-      const isSuperAdmin = user?.email === 'sroy@worksidesoftware.com';
 
       const teamMemberRef = doc(db, 'teamMembers', teamMemberId);
       const teamMemberSnap = await getDoc(teamMemberRef);
@@ -988,10 +1061,15 @@ class CompanyService {
         return companyResult;
       }
 
-      if (!isSuperAdmin && companyResult.company.ownerId !== userId) {
+      const hasPrivileges = await this.hasTeamManagementPrivileges(
+        teamMember.companyId,
+        companyResult.company
+      );
+
+      if (!hasPrivileges) {
         return {
           success: false,
-          error: 'Unauthorized to resend invitation for this team member'
+          error: 'You do not have permission to manage invitations for this team member.'
         };
       }
 
@@ -1002,11 +1080,10 @@ class CompanyService {
         };
       }
 
-      const invitationId = teamMember.invitationId;
       let invitationResult = null;
 
-      if (invitationId) {
-        invitationResult = await InvitationService.refreshInvitation(invitationId);
+      if (teamMember.invitationId) {
+        invitationResult = await InvitationService.refreshInvitation(teamMember.invitationId);
       }
 
       if (!invitationResult || !invitationResult.success) {
@@ -1075,20 +1152,102 @@ class CompanyService {
       
       const querySnapshot = await getDocs(q);
       const teamMembers = [];
-      
+      const teamMembersByEmail = new Map();
+      const teamMembersByUserId = new Map();
+
       querySnapshot.forEach((doc) => {
-        teamMembers.push({ id: doc.id, ...doc.data() });
+        const data = doc.data() || {};
+        const entry = { id: doc.id, ...data };
+        teamMembers.push(entry);
+        if (data.email) {
+          teamMembersByEmail.set(data.email.toLowerCase(), entry);
+        }
+        if (data.userId) {
+          teamMembersByUserId.set(data.userId, entry);
+        }
       });
+
+      // Fetch company to determine owner
+      const companyResult = await this.getCompany(companyId);
+      const ownerId = companyResult.success ? companyResult.company.ownerId : null;
+      const ownerEmail = companyResult.success ? (companyResult.company.ownerEmail || companyResult.company.email || null) : null;
+
+      // Fetch user profiles associated with the company
+      const usersQuery = query(
+        collection(db, 'users'),
+        where('companyId', '==', companyId)
+      );
+      const usersSnapshot = await getDocs(usersQuery);
+
+      usersSnapshot.forEach((userDoc) => {
+        const userData = userDoc.data() || {};
+        const email = (userData.email || '').toLowerCase();
+        const existingByUser = teamMembersByUserId.get(userDoc.id);
+        const existingByEmail = email ? teamMembersByEmail.get(email) : null;
+
+        const baseRecord = existingByUser || existingByEmail;
+        const enrichedMember = {
+          id: baseRecord?.id || `user-${userDoc.id}`,
+          userId: userDoc.id,
+          email: userData.email || baseRecord?.email || '',
+          name: userData.name || baseRecord?.name || userData.email || '',
+          phone: userData.phoneNumber || baseRecord?.phone || '',
+          role: userData.role || baseRecord?.role || 'field_tech',
+          roleDisplay: this.getRoleDisplay(userData.role || baseRecord?.role || 'field_tech'),
+          status: baseRecord?.status || 'active',
+          invitationId: baseRecord?.invitationId || null,
+          invitationCode: baseRecord?.invitationCode || null,
+          invitedBy: baseRecord?.invitedBy || null,
+          createdAt: baseRecord?.createdAt || userData.createdAt || null,
+          updatedAt: baseRecord?.updatedAt || userData.updatedAt || null,
+          emailSent: baseRecord?.emailSent ?? true,
+          emailSentAt: baseRecord?.emailSentAt || null,
+          isOwner: ownerId ? ownerId === userDoc.id : false,
+          fromUserProfile: true
+        };
+
+        if (baseRecord) {
+          // Merge data into existing record
+          Object.assign(baseRecord, enrichedMember);
+        } else {
+          teamMembers.push(enrichedMember);
+          if (email) {
+            teamMembersByEmail.set(email, enrichedMember);
+          }
+          teamMembersByUserId.set(userDoc.id, enrichedMember);
+        }
+      });
+
+      // Ensure owner appears even if no user profile query (e.g., pending)
+      if (ownerId && !teamMembersByUserId.has(ownerId)) {
+        const ownerRecord = teamMembers.find(member => member.invitedBy === ownerId) || null;
+        const ownerEntry = ownerRecord || {
+          id: `owner-${ownerId}`,
+          userId: ownerId,
+          email: ownerEmail || '',
+          role: 'admin',
+          status: 'active'
+        };
+        ownerEntry.roleDisplay = this.getRoleDisplay(ownerEntry.role || 'admin');
+        ownerEntry.isOwner = true;
+        if (!teamMembers.some(member => member.id === ownerEntry.id)) {
+          teamMembers.push(ownerEntry);
+        }
+      }
 
       return {
         success: true,
         teamMembers
       };
     } catch (error) {
-      console.error('Error getting team members:', error);
+      const permissionDenied = error?.code === 'permission-denied';
+      if (!permissionDenied) {
+        console.error('Error getting team members:', error);
+      }
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        permissionDenied
       };
     }
   }
@@ -1140,29 +1299,69 @@ class CompanyService {
   // Remove team member
   static async removeTeamMember(teamMemberId) {
     try {
-      const userId = this.getCurrentUserId();
       
-      // Get team member to verify permissions
-      const teamMemberDoc = await getDoc(doc(db, 'teamMembers', teamMemberId));
-      if (!teamMemberDoc.exists()) {
+      const teamMemberRef = doc(db, 'teamMembers', teamMemberId);
+      const teamMemberSnap = await getDoc(teamMemberRef);
+
+      if (!teamMemberSnap.exists()) {
         return {
           success: false,
           error: 'Team member not found'
         };
       }
 
-      const teamMember = teamMemberDoc.data();
+      const teamMember = teamMemberSnap.data();
       const companyResult = await this.getCompany(teamMember.companyId);
-      
-      if (!companyResult.success || companyResult.company.ownerId !== userId) {
+
+      if (!companyResult.success) {
+        return companyResult;
+      }
+
+      const hasPrivileges = await this.hasTeamManagementPrivileges(
+        teamMember.companyId,
+        companyResult.company
+      );
+
+      if (!hasPrivileges) {
         return {
           success: false,
-          error: 'Unauthorized to remove this team member'
+          error: 'You do not have permission to remove this team member.'
         };
       }
 
       await deleteDoc(doc(db, 'teamMembers', teamMemberId));
 
+      // Cleanup pending invitation so the email can be re-invited
+      const pendingInvitationIds = [];
+
+      if (teamMember.invitationId) {
+        pendingInvitationIds.push(teamMember.invitationId);
+      } else if (teamMember.email) {
+        try {
+          const invitationQuery = query(
+            collection(db, 'invitations'),
+            where('companyId', '==', teamMember.companyId),
+            where('email', '==', (teamMember.email || '').toLowerCase()),
+            where('status', '==', 'pending')
+          );
+
+          const invitationsSnapshot = await getDocs(invitationQuery);
+          invitationsSnapshot.forEach((snapshotDoc) => {
+            pendingInvitationIds.push(snapshotDoc.id);
+          });
+        } catch (lookupError) {
+          console.warn('[CompanyService.removeTeamMember] Unable to look up invitations for cleanup', lookupError);
+        }
+      }
+
+      await Promise.all(pendingInvitationIds.map(async (invitationId) => {
+        try {
+          await deleteDoc(doc(db, 'invitations', invitationId));
+        } catch (deleteError) {
+          console.warn('[CompanyService.removeTeamMember] Failed to delete invitation', { invitationId, error: deleteError });
+        }
+      }));
+ 
       return {
         success: true
       };

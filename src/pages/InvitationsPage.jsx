@@ -27,12 +27,8 @@ import {
   Resize,
   Inject
 } from '@syncfusion/ej2-react-grids';
-
-const ROLE_OPTIONS = [
-  { value: 'admin', label: 'Company Administrator' },
-  { value: 'supervisor', label: 'Supervisor' },
-  { value: 'field_tech', label: 'Field Technician' }
-];
+import { ROLE_COLORS } from '../utils/roleColors';
+import { ROLE_OPTIONS, DEFAULT_ROLE } from '../constants/roles';
 
 const InvitationsPage = () => {
   const { userProfile, isSuperAdmin } = useAuth();
@@ -43,7 +39,7 @@ const InvitationsPage = () => {
   const [showInviteModal, setShowInviteModal] = useState(false);
   
   const [newInviteEmail, setNewInviteEmail] = useState('');
-  const [newInviteRole, setNewInviteRole] = useState('field_tech');
+  const [newInviteRole, setNewInviteRole] = useState(DEFAULT_ROLE);
 
   const invitationsGridRef = useRef(null);
   const invitationsToolbarOptions = useMemo(() => ['Search', 'ExcelExport'], []);
@@ -116,7 +112,7 @@ const InvitationsPage = () => {
         await sendInvitationEmail(result.invitation);
         
         setNewInviteEmail('');
-        setNewInviteRole('field_tech');
+        setNewInviteRole(DEFAULT_ROLE);
         setShowInviteModal(false);
         loadInvitations(companyId);
       } else {
@@ -282,12 +278,6 @@ const InvitationsPage = () => {
     </div>
   );
 
-  const invitationsNoRecordsTemplate = () => (
-    <div className="p-8 text-center text-sm text-gray-500">
-      No invitations yet. Create your first invitation above.
-    </div>
-  );
-
   const getStatusBadge = (status, expiresAt) => {
     if (status === 'accepted') {
       return (
@@ -360,65 +350,70 @@ const InvitationsPage = () => {
           </div>
         ) : (
           <div className="px-3 pb-4">
-            <GridComponent
-              id="invitationsGrid"
-              dataSource={invitations}
-              allowPaging
-              allowSorting
-              allowFiltering
-              allowSelection
-              allowExcelExport
-              filterSettings={invitationsFilterSettings}
-              toolbar={invitationsToolbarOptions}
-              toolbarClick={handleInvitationsToolbarClick}
-              selectionSettings={{ type: 'Single' }}
-              pageSettings={invitationsPageSettings}
-              height="480"
-              ref={invitationsGridRef}
-              noRecordsTemplate={invitationsNoRecordsTemplate}
-            >
-              <ColumnsDirective>
-                <ColumnDirective
-                  field="email"
-                  headerText="Email"
-                  width="250"
-                  template={invitationEmailTemplate}
-                />
-                <ColumnDirective
-                  field="role"
-                  headerText="Role"
-                  width="200"
-                  template={invitationRoleTemplate}
-                />
-                <ColumnDirective
-                  field="invitationCode"
-                  headerText="Code"
-                  width="160"
-                  template={invitationCodeTemplate}
-                />
-                <ColumnDirective
-                  field="status"
-                  headerText="Status"
-                  width="150"
-                  template={invitationStatusTemplate}
-                  allowFiltering={false}
-                />
-                <ColumnDirective
-                  field="expiresAt"
-                  headerText="Expires"
-                  width="140"
-                  template={invitationExpiryTemplate}
-                />
-                <ColumnDirective
-                  headerText="Actions"
-                  width="160"
-                  template={invitationActionsTemplate}
-                  allowFiltering={false}
-                  allowSorting={false}
-                />
-              </ColumnsDirective>
-              <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
-            </GridComponent>
+            {!isLoading && invitations.length === 0 ? (
+              <div className="px-6 py-8 text-center text-sm text-gray-500">
+                No invitations yet. Create your first invitation above.
+              </div>
+            ) : (
+              <GridComponent
+                id="invitationsGrid"
+                dataSource={invitations}
+                allowPaging
+                allowSorting
+                allowFiltering
+                allowSelection
+                allowExcelExport
+                filterSettings={invitationsFilterSettings}
+                toolbar={invitationsToolbarOptions}
+                toolbarClick={handleInvitationsToolbarClick}
+                selectionSettings={{ type: 'Single' }}
+                pageSettings={invitationsPageSettings}
+                height="480"
+                ref={invitationsGridRef}
+              >
+                <ColumnsDirective>
+                  <ColumnDirective
+                    field="email"
+                    headerText="Email"
+                    width="250"
+                    template={invitationEmailTemplate}
+                  />
+                  <ColumnDirective
+                    field="role"
+                    headerText="Role"
+                    width="200"
+                    template={invitationRoleTemplate}
+                  />
+                  <ColumnDirective
+                    field="invitationCode"
+                    headerText="Code"
+                    width="160"
+                    template={invitationCodeTemplate}
+                  />
+                  <ColumnDirective
+                    field="status"
+                    headerText="Status"
+                    width="150"
+                    template={invitationStatusTemplate}
+                    allowFiltering={false}
+                  />
+                  <ColumnDirective
+                    field="expiresAt"
+                    headerText="Expires"
+                    width="140"
+                    template={invitationExpiryTemplate}
+                  />
+                  <ColumnDirective
+                    headerText="Actions"
+                    width="160"
+                    template={invitationActionsTemplate}
+                    allowFiltering={false}
+                    allowSorting={false}
+                  />
+                </ColumnsDirective>
+                <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
+              </GridComponent>
+            )}
           </div>
         )}
       </div>

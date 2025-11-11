@@ -5,7 +5,6 @@
 
 import {
   collection,
-  addDoc,
   updateDoc,
   doc,
   getDoc,
@@ -65,18 +64,8 @@ class InvitationService {
     return `${FUNCTIONS_BASE_URL}/${name}`;
   }
 
-  // Generate unique invitation code
-  static generateInvitationCode() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let code = '';
-    for (let i = 0; i < 8; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return code;
-  }
-
   // Create an invitation
-  static async createInvitation(companyId, email, role = 'field_tech', invitedBy) {
+  static async createInvitation(companyId, email, role = 'field_tech', invitedBy, options = {}) {
     try {
       const currentUserId = invitedBy || this.getCurrentUserId();
       if (!currentUserId) {
@@ -86,75 +75,45 @@ class InvitationService {
         };
       }
 
-      // Verify user has permission to invite (must be company admin or super admin)
-      const companyResult = await this.getCompany(companyId);
-      if (!companyResult.success) {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) {
         return {
           success: false,
-          error: 'Company not found'
+          error: 'Authentication token unavailable'
         };
       }
 
-      const company = companyResult.company;
+      const response = await fetch(this.getFunctionUrl('createCompanyInvitation'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          companyId,
+          email,
+          role,
+          createTeamMember: Boolean(options.createTeamMember)
+        })
+      });
 
-      // Prevent inviting users who belong to another company
-      const usersQuery = query(
-        collection(db, 'users'),
-        where('email', '==', email.toLowerCase())
-      );
-      const usersSnapshot = await getDocs(usersQuery);
+      const data = await response.json().catch(() => ({}));
 
-      if (!usersSnapshot.empty) {
-        const existingUser = usersSnapshot.docs[0].data() || {};
-        if (existingUser.companyId && existingUser.companyId !== companyId) {
-          return {
-            success: false,
-            error: 'This email address is already associated with another company.'
-          };
-        }
-      }
-
-      // Check if invitation already exists for this email and company
-      const existingInvitationsQuery = query(
-        collection(db, 'invitations'),
-        where('companyId', '==', companyId),
-        where('email', '==', email.toLowerCase()),
-        where('status', '==', 'pending')
-      );
-
-      const existingInvitations = await getDocs(existingInvitationsQuery);
-      if (!existingInvitations.empty) {
+      if (!response.ok || !data.success) {
         return {
           success: false,
-          error: 'An invitation already exists for this email'
+          error: data.error || 'Failed to create invitation'
         };
       }
-
-      // Generate invitation code
-      const invitationCode = this.generateInvitationCode();
-
-      const invitationData = {
-        companyId,
-        companyName: company.name,
-        companyCode: company.code || '',
-        email: email.toLowerCase(),
-        role,
-        invitationCode,
-        invitedBy: currentUserId,
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() // 7 days
-      };
-
-      const docRef = await addDoc(collection(db, 'invitations'), invitationData);
 
       return {
         success: true,
-        invitationId: docRef.id,
-        invitation: { id: docRef.id, ...invitationData }
+        invitationId: data.invitation?.id,
+        invitation: data.invitation,
+        teamMember: data.teamMember || null
       };
     } catch (error) {
-      console.error('Error creating invitation:', error);
+      console.error('Error creating invitation:', error.code, error.message);
       return {
         success: false,
         error: error.message

@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import CustomerService from '../services/customerService';
+import { geocodeAddress } from '../services/geocodingService';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
 import { canApproveCustomers, canEditCustomers } from '../utils/permissions';
@@ -21,6 +22,22 @@ import {
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import { formatPhoneNumber } from '../utils/phoneFormatter';
+import {
+  GridComponent,
+  ColumnsDirective,
+  ColumnDirective,
+  Page,
+  Toolbar,
+  Sort,
+  Filter,
+  ExcelExport,
+  PdfExport,
+  Selection,
+  Search,
+  Resize,
+  Inject
+} from '@syncfusion/ej2-react-grids';
+import { CheckBoxComponent } from '@syncfusion/ej2-react-buttons';
 
 const CustomerManagementPage = () => {
   const { userProfile, isSuperAdmin } = useAuth();
@@ -56,7 +73,9 @@ const CustomerManagementPage = () => {
     zipCode: '',
     notes: '',
     isActive: true,
-    emailConsent: false // Email consent for invoices
+    emailConsent: false, // Email consent for invoices
+    latitude: null,
+    longitude: null,
   });
 
   // Filter states
@@ -64,6 +83,10 @@ const CustomerManagementPage = () => {
   const [sortBy, setSortBy] = useState('name'); // name, createdAt, totalSpent
 
   const { refreshKey } = useCompany();
+
+  const buildFullAddress = (data) => {
+    return [data.address, data.city, data.state, data.zipCode].filter(Boolean).join(', ');
+  };
 
   useEffect(() => {
     loadCustomers();
@@ -79,7 +102,7 @@ const CustomerManagementPage = () => {
     setIsLoading(true);
     try {
       const companyId = getEffectiveCompanyId();
-      const result = await CustomerService.getCustomers(100, null, {}, userProfile, companyId);
+      const result = await CustomerService.getCustomers(1000, null, {}, userProfile, companyId);
       if (result.success) {
         setCustomers(result.customers);
       } else {
@@ -169,7 +192,10 @@ const CustomerManagementPage = () => {
   const handleInputChange = (field, value) => {
     setCustomerData(prev => ({
       ...prev,
-      [field]: value
+      [field]: value,
+      ...(field === 'address' || field === 'city' || field === 'state' || field === 'zipCode'
+        ? { latitude: null, longitude: null }
+        : {}),
     }));
   };
 
@@ -184,7 +210,9 @@ const CustomerManagementPage = () => {
       zipCode: '',
       notes: '',
       isActive: true,
-      emailConsent: false
+      emailConsent: false,
+      latitude: null,
+      longitude: null,
     });
   };
 
@@ -196,7 +224,29 @@ const CustomerManagementPage = () => {
 
     setIsLoading(true);
     try {
-      const result = await CustomerService.createCustomer(customerData, userProfile);
+      let { latitude, longitude } = customerData;
+
+      if (
+        (!latitude && latitude !== 0) ||
+        (!longitude && longitude !== 0)
+      ) {
+        const fullAddress = buildFullAddress(customerData);
+        if (fullAddress) {
+          const geocodeResult = await geocodeAddress(fullAddress);
+          if (geocodeResult.success) {
+            latitude = geocodeResult.latitude;
+            longitude = geocodeResult.longitude;
+          }
+        }
+      }
+
+      const payload = {
+        ...customerData,
+        latitude: typeof latitude === 'number' ? latitude : null,
+        longitude: typeof longitude === 'number' ? longitude : null,
+      };
+
+      const result = await CustomerService.createCustomer(payload, userProfile);
       if (result.success) {
         setCustomers(prev => [result.customer, ...prev]);
         setShowAddModal(false);
@@ -283,7 +333,29 @@ const CustomerManagementPage = () => {
 
     setIsLoading(true);
     try {
-      const result = await CustomerService.updateCustomer(selectedCustomer.id, customerData);
+      let { latitude, longitude } = customerData;
+
+      if (
+        (!latitude && latitude !== 0) ||
+        (!longitude && longitude !== 0)
+      ) {
+        const fullAddress = buildFullAddress(customerData);
+        if (fullAddress) {
+          const geocodeResult = await geocodeAddress(fullAddress);
+          if (geocodeResult.success) {
+            latitude = geocodeResult.latitude;
+            longitude = geocodeResult.longitude;
+          }
+        }
+      }
+
+      const payload = {
+        ...customerData,
+        latitude: typeof latitude === 'number' ? latitude : null,
+        longitude: typeof longitude === 'number' ? longitude : null,
+      };
+
+      const result = await CustomerService.updateCustomer(selectedCustomer.id, payload);
       if (result.success) {
         setCustomers(prev => prev.map(customer => 
           customer.id === selectedCustomer.id ? result.customer : customer
@@ -348,6 +420,21 @@ const CustomerManagementPage = () => {
 
   const openEditModal = (customer) => {
     setSelectedCustomer(customer);
+
+    const latitude =
+      typeof customer.latitude === 'number'
+        ? customer.latitude
+        : typeof customer.location?.latitude === 'number'
+        ? customer.location.latitude
+        : null;
+
+    const longitude =
+      typeof customer.longitude === 'number'
+        ? customer.longitude
+        : typeof customer.location?.longitude === 'number'
+        ? customer.location.longitude
+        : null;
+
     setCustomerData({
       name: customer.name || '',
       email: customer.email || '',
@@ -358,7 +445,9 @@ const CustomerManagementPage = () => {
       zipCode: customer.zipCode || '',
       notes: customer.notes || '',
       isActive: customer.isActive,
-      emailConsent: customer.emailConsent || false
+      emailConsent: customer.emailConsent || false,
+      latitude,
+      longitude,
     });
     setShowEditModal(true);
   };
@@ -368,26 +457,13 @@ const CustomerManagementPage = () => {
     setShowViewModal(true);
   };
 
-  const exportCustomers = async () => {
-    try {
-      const result = await CustomerService.exportCustomers();
-      if (result.success) {
-        const blob = new Blob([result.csvData], { type: 'text/csv' });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `customers-${new Date().toISOString().split('T')[0]}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-        toast.success('Customers exported successfully!');
-      } else {
-        toast.error(result.error);
-      }
-    } catch (error) {
-      console.error('Error exporting customers:', error);
-      toast.error('Error exporting customers');
+  const gridRef = useRef(null);
+
+  const handleGridExport = () => {
+    if (gridRef.current) {
+      gridRef.current.excelExport({
+        fileName: `customers-${new Date().toISOString().split('T')[0]}.xlsx`
+      });
     }
   };
 
@@ -405,6 +481,182 @@ const CustomerManagementPage = () => {
       day: 'numeric'
     });
   };
+
+  const toolbarOptions = ['Search', 'ExcelExport', 'CsvExport'];
+  const pageSettings = { pageSize: 50, pageSizes: [25, 50, 100, 200] };
+  const gridFilterSettings = { type: 'Excel' };
+
+  const handleToolbarClick = (args) => {
+    if (!gridRef.current) return;
+    const id = args.item?.id || '';
+    if (id.includes('_excelexport')) {
+      gridRef.current.excelExport({
+        fileName: `customers-${new Date().toISOString().split('T')[0]}.xlsx`
+      });
+    } else if (id.includes('_csvexport')) {
+      gridRef.current.csvExport({
+        fileName: `customers-${new Date().toISOString().split('T')[0]}.csv`
+      });
+    }
+  };
+
+  const customerNameTemplate = (props) => (
+    <div className="flex items-center">
+      <div className="flex-shrink-0 h-10 w-10">
+        <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center">
+          <span className="text-sm font-medium text-gray-700">
+            {(props.name?.charAt(0) || '?').toUpperCase()}
+          </span>
+        </div>
+      </div>
+      <div className="ml-4">
+        <div className="flex items-center gap-2">
+          <div className="text-sm font-medium text-gray-900">{props.name || 'Unnamed'}</div>
+          {props.status === 'pending' && (
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+              <ClockIcon className="w-3 h-3 mr-1" />
+              Pending
+            </span>
+          )}
+          {props.status === 'rejected' && (
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+              <XCircleIcon className="w-3 h-3 mr-1" />
+              Rejected
+            </span>
+          )}
+          {props.status === 'approved' && (
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+              <CheckCircleIcon className="w-3 h-3 mr-1" />
+              Approved
+            </span>
+          )}
+        </div>
+        <div className="text-xs text-gray-500">
+          {props.createdAt ? `Added ${formatDate(props.createdAt)}` : '—'}
+        </div>
+      </div>
+    </div>
+  );
+
+  const contactTemplate = (props) => (
+    <div>
+      <div className="text-sm text-gray-900">{props.email || '-'}</div>
+      <div className="text-sm text-gray-500">{props.phone || '-'}</div>
+    </div>
+  );
+
+  const locationTemplate = (props) => {
+    if (!props.address) {
+      return <div className="text-sm text-gray-500">-</div>;
+    }
+    return (
+      <div className="text-sm text-gray-900">
+        {[props.address, props.city, props.state, props.zipCode].filter(Boolean).join(', ')}
+      </div>
+    );
+  };
+
+  const totalSpentTemplate = (props) => (
+    <div className="text-sm text-gray-900 text-right">{formatCurrency(props.totalSpent)}</div>
+  );
+
+  const activeStatusTemplate = (props) => (
+    <span
+      className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+        props.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+      }`}
+    >
+      {props.isActive ? 'Active' : 'Inactive'}
+    </span>
+  );
+
+  const actionsTemplate = (props) => (
+    <div className="flex space-x-2">
+      <button
+        type="button"
+        onClick={() => openViewModal(props)}
+        className="text-primary-600 hover:text-primary-900"
+        title="View"
+      >
+        <EyeIcon className="h-4 w-4" />
+      </button>
+      {canEditCustomers(userProfile, props) && (
+        <button
+          type="button"
+          onClick={() => openEditModal(props)}
+          className="text-gray-600 hover:text-gray-900"
+          title="Edit"
+        >
+          <PencilIcon className="h-4 w-4" />
+        </button>
+      )}
+      {props.status === 'pending' && canApproveCustomers(userProfile) && (
+        <>
+          <button
+            type="button"
+            onClick={() => handleApproveCustomer(props.id)}
+            disabled={isLoading}
+            className="text-green-600 hover:text-green-900 disabled:opacity-50"
+            title="Approve"
+          >
+            <CheckCircleIcon className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedCustomer(props);
+              setShowRejectModal(true);
+            }}
+            disabled={isLoading}
+            className="text-red-600 hover:text-red-900 disabled:opacity-50"
+            title="Reject"
+          >
+            <XCircleIcon className="h-4 w-4" />
+          </button>
+        </>
+      )}
+      {canApproveCustomers(userProfile) && props.isActive && (
+        <button
+          type="button"
+          onClick={() => handleDeleteCustomer(props.id)}
+          className="text-red-600 hover:text-red-900"
+          title="Delete"
+        >
+          <TrashIcon className="h-4 w-4" />
+        </button>
+      )}
+      {!props.isActive && canApproveCustomers(userProfile) && (
+        <button
+          type="button"
+          onClick={() => handleRestoreCustomer(props.id)}
+          className="text-green-600 hover:text-green-900"
+          title="Restore"
+        >
+          Restore
+        </button>
+      )}
+    </div>
+  );
+
+  const noRecordsTemplate = () => (
+    <div className="text-center py-12 space-y-3">
+      <UsersIcon className="mx-auto h-12 w-12 text-gray-400" />
+      <h3 className="text-sm font-medium text-gray-900">No customers found</h3>
+      <p className="text-sm text-gray-500">
+        {searchTerm ? 'Try adjusting your search terms.' : 'Get started by adding your first customer.'}
+      </p>
+      {!searchTerm && (
+        <button
+          type="button"
+          onClick={() => setShowAddModal(true)}
+            className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700"
+        >
+          <PlusIcon className="h-4 w-4 mr-2" />
+          Add Customer
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <motion.div
@@ -425,8 +677,8 @@ const CustomerManagementPage = () => {
           </div>
           <div className="flex space-x-3">
             <button
-              onClick={exportCustomers}
-              className="flex items-center px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+              onClick={handleGridExport}
+            className="flex items-center px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
             >
               <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
               Export
@@ -662,172 +914,80 @@ const CustomerManagementPage = () => {
 
       {/* Customers Table */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-        <div className="px-6 py-4 border-b border-gray-200">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <h3 className="text-lg font-medium text-gray-900">
             Customers ({filteredCustomers.length})
           </h3>
         </div>
-        
         {isLoading ? (
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
           </div>
-        ) : filteredCustomers.length === 0 ? (
-          <div className="text-center py-12">
-            <UsersIcon className="mx-auto h-12 w-12 text-gray-400" />
-            <h3 className="mt-2 text-sm font-medium text-gray-900">No customers found</h3>
-            <p className="mt-1 text-sm text-gray-500">
-              {searchTerm ? 'Try adjusting your search terms.' : 'Get started by adding your first customer.'}
-            </p>
-            {!searchTerm && (
-              <div className="mt-6">
-                <button
-                  onClick={() => setShowAddModal(true)}
-                  className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700"
-                >
-                  <PlusIcon className="h-4 w-4 mr-2" />
-                  Add Customer
-                </button>
-              </div>
-            )}
-          </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Location</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Spent</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {filteredCustomers.map((customer) => (
-                  <tr key={customer.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <div className="flex-shrink-0 h-10 w-10">
-                          <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center">
-                            <span className="text-sm font-medium text-gray-700">
-                              {customer.name?.charAt(0)?.toUpperCase() || '?'}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="ml-4">
-                          <div className="flex items-center gap-2">
-                            <div className="text-sm font-medium text-gray-900">{customer.name || 'Unnamed'}</div>
-                            {customer.status === 'pending' && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
-                                <ClockIcon className="w-3 h-3 mr-1" />
-                                Pending
-                              </span>
-                            )}
-                            {customer.status === 'rejected' && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
-                                <XCircleIcon className="w-3 h-3 mr-1" />
-                                Rejected
-                              </span>
-                            )}
-                            {customer.status === 'approved' && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                                <CheckCircleIcon className="w-3 h-3 mr-1" />
-                                Approved
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-sm text-gray-500">Added {formatDate(customer.createdAt)}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{customer.email || '-'}</div>
-                      <div className="text-sm text-gray-500">{customer.phone || '-'}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {customer.address ? `${customer.address}, ${customer.city}, ${customer.state} ${customer.zipCode}` : '-'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {formatCurrency(customer.totalSpent)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        customer.isActive 
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {customer.isActive ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => openViewModal(customer)}
-                          className="text-primary-600 hover:text-primary-900"
-                          title="View"
-                        >
-                          <EyeIcon className="h-4 w-4" />
-                        </button>
-                        {canEditCustomers(userProfile, customer) && (
-                          <button
-                            onClick={() => openEditModal(customer)}
-                            className="text-gray-600 hover:text-gray-900"
-                            title="Edit"
-                          >
-                            <PencilIcon className="h-4 w-4" />
-                          </button>
-                        )}
-                        {customer.status === 'pending' && canApproveCustomers(userProfile) && (
-                          <>
-                            <button
-                              onClick={() => handleApproveCustomer(customer.id)}
-                              disabled={isLoading}
-                              className="text-green-600 hover:text-green-900 disabled:opacity-50"
-                              title="Approve"
-                            >
-                              <CheckCircleIcon className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => {
-                                setSelectedCustomer(customer);
-                                setShowRejectModal(true);
-                              }}
-                              disabled={isLoading}
-                              className="text-red-600 hover:text-red-900 disabled:opacity-50"
-                              title="Reject"
-                            >
-                              <XCircleIcon className="h-4 w-4" />
-                            </button>
-                          </>
-                        )}
-                        {canApproveCustomers(userProfile) && customer.isActive && (
-                          <button
-                            onClick={() => handleDeleteCustomer(customer.id)}
-                            className="text-red-600 hover:text-red-900"
-                            title="Delete"
-                          >
-                            <TrashIcon className="h-4 w-4" />
-                          </button>
-                        )}
-                        {!customer.isActive && canApproveCustomers(userProfile) && (
-                          <button
-                            onClick={() => handleRestoreCustomer(customer.id)}
-                            className="text-green-600 hover:text-green-900"
-                            title="Restore"
-                          >
-                            Restore
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="px-2 pb-4">
+            <GridComponent
+              id="customersGrid"
+              dataSource={filteredCustomers}
+              allowPaging
+              allowSorting
+              allowFiltering
+              allowSelection
+              allowExcelExport
+              allowPdfExport
+              allowResizing
+              filterSettings={gridFilterSettings}
+              toolbar={toolbarOptions}
+              toolbarClick={handleToolbarClick}
+              selectionSettings={{ type: 'Single' }}
+              pageSettings={pageSettings}
+              height="600"
+              ref={gridRef}
+              noRecordsTemplate={noRecordsTemplate}
+            >
+              <ColumnsDirective>
+                <ColumnDirective
+                  field="name"
+                  headerText="Customer"
+                  width="250"
+                  template={customerNameTemplate}
+                />
+                <ColumnDirective
+                  field="email"
+                  headerText="Contact"
+                  width="220"
+                  template={contactTemplate}
+                />
+                <ColumnDirective
+                  field="address"
+                  headerText="Location"
+                  width="260"
+                  template={locationTemplate}
+                />
+                <ColumnDirective
+                  field="totalSpent"
+                  headerText="Total Spent"
+                  width="140"
+                  textAlign="Right"
+                  template={totalSpentTemplate}
+                  format="C2"
+                />
+                <ColumnDirective
+                  field="isActive"
+                  headerText="Status"
+                  width="120"
+                  template={activeStatusTemplate}
+                  allowFiltering={false}
+                />
+                <ColumnDirective
+                  headerText="Actions"
+                  width="160"
+                  template={actionsTemplate}
+                  allowFiltering={false}
+                  allowSorting={false}
+                />
+              </ColumnsDirective>
+              <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, PdfExport, Selection, Search, Resize]} />
+            </GridComponent>
           </div>
         )}
       </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
 import CompanyService from '../services/companyService';
@@ -13,6 +13,20 @@ import {
   ClockIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import {
+  GridComponent,
+  ColumnsDirective,
+  ColumnDirective,
+  Page,
+  Toolbar,
+  Sort,
+  Filter,
+  ExcelExport,
+  Selection,
+  Search,
+  Resize,
+  Inject
+} from '@syncfusion/ej2-react-grids';
 
 const ROLE_OPTIONS = [
   { value: 'admin', label: 'Company Administrator' },
@@ -30,6 +44,11 @@ const InvitationsPage = () => {
   
   const [newInviteEmail, setNewInviteEmail] = useState('');
   const [newInviteRole, setNewInviteRole] = useState('field_tech');
+
+  const invitationsGridRef = useRef(null);
+  const invitationsToolbarOptions = useMemo(() => ['Search', 'ExcelExport'], []);
+  const invitationsPageSettings = useMemo(() => ({ pageSize: 25, pageSizes: [25, 50, 100, 200] }), []);
+  const invitationsFilterSettings = useMemo(() => ({ type: 'Excel' }), []);
 
   useEffect(() => {
     const companyId = getEffectiveCompanyId();
@@ -196,6 +215,79 @@ const InvitationsPage = () => {
     toast.success('Invitation code copied to clipboard!');
   };
 
+  const handleInvitationsToolbarClick = useCallback((args) => {
+    if (!invitationsGridRef.current) return;
+    const id = args.item?.id || '';
+    if (id.includes('_excelexport')) {
+      invitationsGridRef.current.excelExport({
+        fileName: `team-invitations-${new Date().toISOString().split('T')[0]}.xlsx`
+      });
+    }
+  }, []);
+
+  const invitationEmailTemplate = (props) => (
+    <div className="flex items-center">
+      <EnvelopeIcon className="h-5 w-5 text-gray-400 mr-2" />
+      <span className="text-sm font-medium text-gray-900">{props.email}</span>
+    </div>
+  );
+
+  const invitationRoleTemplate = (props) => (
+    <span className="text-sm text-gray-800">
+      {ROLE_OPTIONS.find((r) => r.value === props.role)?.label || props.role}
+    </span>
+  );
+
+  const invitationCodeTemplate = (props) => (
+    <button
+      type="button"
+      onClick={() => copyInvitationCode(props.invitationCode)}
+      className="font-mono text-primary-600 hover:text-primary-800 underline"
+      title="Click to copy"
+    >
+      {props.invitationCode}
+    </button>
+  );
+
+  const invitationStatusTemplate = (props) => getStatusBadge(props.status, props.expiresAt);
+
+  const invitationExpiryTemplate = (props) => (
+    <span className="text-sm text-gray-700">
+      {props.expiresAt ? new Date(props.expiresAt).toLocaleDateString() : '—'}
+    </span>
+  );
+
+  const invitationActionsTemplate = (props) => (
+    <div className="flex justify-end gap-3">
+      {props.status === 'pending' && (
+        <>
+          <button
+            type="button"
+            onClick={() => handleResendInvitation(props)}
+            className="text-primary-600 hover:text-primary-900"
+            title="Resend invitation"
+          >
+            <ArrowPathIcon className="w-5 h-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => handleCancelInvitation(props.id)}
+            className="text-red-600 hover:text-red-900"
+            title="Cancel invitation"
+          >
+            <XMarkIcon className="w-5 h-5" />
+          </button>
+        </>
+      )}
+    </div>
+  );
+
+  const invitationsNoRecordsTemplate = () => (
+    <div className="p-8 text-center text-sm text-gray-500">
+      No invitations yet. Create your first invitation above.
+    </div>
+  );
+
   const getStatusBadge = (status, expiresAt) => {
     if (status === 'accepted') {
       return (
@@ -262,91 +354,73 @@ const InvitationsPage = () => {
 
       {/* Invitations List */}
       <div className="bg-white shadow rounded-lg overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Email
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Role
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Code
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Status
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Expires
-              </th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {isLoading && invitations.length === 0 ? (
-              <tr>
-                <td colSpan="6" className="px-6 py-4 text-center text-sm text-gray-500">
-                  Loading invitations...
-                </td>
-              </tr>
-            ) : invitations.length === 0 ? (
-              <tr>
-                <td colSpan="6" className="px-6 py-4 text-center text-sm text-gray-500">
-                  No invitations yet. Create your first invitation above.
-                </td>
-              </tr>
-            ) : (
-              invitations.map((invitation) => (
-                <tr key={invitation.id}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {invitation.email}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {ROLE_OPTIONS.find(r => r.value === invitation.role)?.label || invitation.role}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    <button
-                      onClick={() => copyInvitationCode(invitation.invitationCode)}
-                      className="font-mono text-primary-600 hover:text-primary-800 underline"
-                      title="Click to copy"
-                    >
-                      {invitation.invitationCode}
-                    </button>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {getStatusBadge(invitation.status, invitation.expiresAt)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {new Date(invitation.expiresAt).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    {invitation.status === 'pending' && (
-                      <>
-                        <button
-                          onClick={() => handleResendInvitation(invitation)}
-                          className="text-primary-600 hover:text-primary-900 mr-4"
-                          title="Resend invitation"
-                        >
-                          <ArrowPathIcon className="w-5 h-5" />
-                        </button>
-                        <button
-                          onClick={() => handleCancelInvitation(invitation.id)}
-                          className="text-red-600 hover:text-red-900"
-                          title="Cancel invitation"
-                        >
-                          <XMarkIcon className="w-5 h-5" />
-                        </button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+        {isLoading && invitations.length === 0 ? (
+          <div className="px-6 py-8 text-center text-sm text-gray-500">
+            Loading invitations...
+          </div>
+        ) : (
+          <div className="px-3 pb-4">
+            <GridComponent
+              id="invitationsGrid"
+              dataSource={invitations}
+              allowPaging
+              allowSorting
+              allowFiltering
+              allowSelection
+              allowExcelExport
+              filterSettings={invitationsFilterSettings}
+              toolbar={invitationsToolbarOptions}
+              toolbarClick={handleInvitationsToolbarClick}
+              selectionSettings={{ type: 'Single' }}
+              pageSettings={invitationsPageSettings}
+              height="480"
+              ref={invitationsGridRef}
+              noRecordsTemplate={invitationsNoRecordsTemplate}
+            >
+              <ColumnsDirective>
+                <ColumnDirective
+                  field="email"
+                  headerText="Email"
+                  width="250"
+                  template={invitationEmailTemplate}
+                />
+                <ColumnDirective
+                  field="role"
+                  headerText="Role"
+                  width="200"
+                  template={invitationRoleTemplate}
+                />
+                <ColumnDirective
+                  field="invitationCode"
+                  headerText="Code"
+                  width="160"
+                  template={invitationCodeTemplate}
+                />
+                <ColumnDirective
+                  field="status"
+                  headerText="Status"
+                  width="150"
+                  template={invitationStatusTemplate}
+                  allowFiltering={false}
+                />
+                <ColumnDirective
+                  field="expiresAt"
+                  headerText="Expires"
+                  width="140"
+                  template={invitationExpiryTemplate}
+                />
+                <ColumnDirective
+                  headerText="Actions"
+                  width="160"
+                  template={invitationActionsTemplate}
+                  allowFiltering={false}
+                  allowSorting={false}
+                />
+              </ColumnsDirective>
+              <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
+            </GridComponent>
+          </div>
+        )}
       </div>
 
       {/* Invite Modal */}

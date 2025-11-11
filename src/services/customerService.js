@@ -54,9 +54,40 @@ class CustomerService {
       
       // Determine status based on role
       const status = getCustomerCreationStatus(userProfile);
+      const normalizedName = (customerData.name || '').toString().trim();
+      const normalizedEmail = (customerData.email || '').toString().trim();
+      const normalizedEmailLower = normalizedEmail.toLowerCase();
+      const normalizedPhone = (customerData.phone || '').toString().trim();
+      const normalizedAddress = (customerData.address || '').toString().trim();
+      const normalizedCity = (customerData.city || '').toString().trim();
+      const normalizedState = (customerData.state || '').toString().trim();
+      const normalizedZip = (customerData.zipCode || '').toString().trim();
+      const normalizedZipLower = normalizedZip.toLowerCase();
+      const normalizedNotes = (customerData.notes || '').toString().trim();
+      const normalizedEmailConsent = customerData.emailConsent === true || customerData.emailConsent === 'true';
+      const searchName = normalizedName.toLowerCase();
+      const searchEmail = normalizedEmailLower || '';
+      const companyId = userProfile?.companyId || null;
+      const searchEmailCompanyKey = companyId && searchEmail ? `${companyId}__${searchEmail}` : null;
+      const searchNameZipCompanyKey = companyId && searchName && normalizedZipLower
+        ? `${companyId}__${searchName}__${normalizedZipLower}`
+        : null;
+
+      const sanitizedCustomerData = {
+        ...customerData,
+        name: normalizedName,
+        email: normalizedEmailLower || '',
+        phone: normalizedPhone,
+        address: normalizedAddress,
+        city: normalizedCity,
+        state: normalizedState,
+        zipCode: normalizedZip,
+        notes: normalizedNotes,
+        emailConsent: normalizedEmailConsent
+      };
       
       const customer = {
-        ...customerData,
+        ...sanitizedCustomerData,
         userId,
         companyId: userProfile?.companyId || null,
         status: status, // 'approved' or 'pending'
@@ -70,7 +101,13 @@ class CustomerService {
         lastServiceDate: null,
         // Approval fields (set if approved)
         approvedBy: status === 'approved' ? userId : null,
-        approvedAt: status === 'approved' ? new Date().toISOString() : null
+        approvedAt: status === 'approved' ? new Date().toISOString() : null,
+        latitude: typeof customerData.latitude === 'number' ? customerData.latitude : null,
+        longitude: typeof customerData.longitude === 'number' ? customerData.longitude : null,
+        searchEmail: searchEmail || null,
+        searchName: searchName || null,
+        searchEmailCompanyKey: searchEmailCompanyKey || null,
+        searchNameZipCompanyKey: searchNameZipCompanyKey || null,
       };
 
       const docRef = await addDoc(collection(db, 'customers'), customer);
@@ -414,6 +451,68 @@ class CustomerService {
     }
   }
 
+  // Build duplicate lookup maps for customer imports
+  static async getCustomerDuplicateMaps(userProfile = null) {
+    try {
+      if (!userProfile) {
+        userProfile = await this.getCurrentUserProfile();
+      }
+
+      const companyId = userProfile?.companyId;
+      if (!companyId) {
+        return {
+          emailKeys: [],
+          nameZipKeys: []
+        };
+      }
+
+      const emailKeys = new Set();
+      const nameZipKeys = new Set();
+
+      const snapshot = await getDocs(
+        query(
+          collection(db, 'customers'),
+          where('companyId', '==', companyId)
+        )
+      );
+
+      snapshot.forEach((docRef) => {
+        const data = docRef.data() || {};
+
+        const normalizedEmailKey =
+          data.searchEmailCompanyKey ||
+          (data.companyId && (data.searchEmail || data.email)
+            ? `${data.companyId}__${(data.searchEmail || data.email || '').toLowerCase()}`
+            : null);
+
+        if (normalizedEmailKey) {
+          emailKeys.add(normalizedEmailKey);
+        }
+
+        const normalizedNameZipKey =
+          data.searchNameZipCompanyKey ||
+          (data.companyId && (data.searchName || data.name) && data.zipCode
+            ? `${data.companyId}__${(data.searchName || data.name || '').toLowerCase()}__${(data.zipCode || '').toLowerCase()}`
+            : null);
+
+        if (normalizedNameZipKey) {
+          nameZipKeys.add(normalizedNameZipKey);
+        }
+      });
+
+      return {
+        emailKeys: Array.from(emailKeys),
+        nameZipKeys: Array.from(nameZipKeys)
+      };
+    } catch (error) {
+      console.error('Error building customer duplicate maps:', error);
+      return {
+        emailKeys: [],
+        nameZipKeys: []
+      };
+    }
+  }
+
   // Get customer by ID (role-aware access)
   static async getCustomer(customerId, userProfile = null) {
     try {
@@ -476,8 +575,64 @@ class CustomerService {
         return customerResult;
       }
 
+      const sanitizedUpdates = { ...updates };
+
+      if (updates.name !== undefined) {
+        sanitizedUpdates.name = updates.name?.toString().trim() || '';
+      }
+      if (updates.email !== undefined) {
+        sanitizedUpdates.email = updates.email?.toString().trim().toLowerCase() || '';
+      }
+      if (updates.phone !== undefined) {
+        sanitizedUpdates.phone = updates.phone?.toString().trim() || '';
+      }
+      if (updates.address !== undefined) {
+        sanitizedUpdates.address = updates.address?.toString().trim() || '';
+      }
+      if (updates.city !== undefined) {
+        sanitizedUpdates.city = updates.city?.toString().trim() || '';
+      }
+      if (updates.state !== undefined) {
+        sanitizedUpdates.state = updates.state?.toString().trim() || '';
+      }
+      if (updates.zipCode !== undefined || updates.zipcode !== undefined) {
+        const zipValue = updates.zipCode ?? updates.zipcode;
+        sanitizedUpdates.zipCode = zipValue?.toString().trim() || '';
+      }
+      if (Object.prototype.hasOwnProperty.call(sanitizedUpdates, 'zipcode')) {
+        delete sanitizedUpdates.zipcode;
+      }
+      if (updates.notes !== undefined) {
+        sanitizedUpdates.notes = updates.notes?.toString().trim() || '';
+      }
+      if (updates.emailConsent !== undefined) {
+        sanitizedUpdates.emailConsent = updates.emailConsent === true || updates.emailConsent === 'true';
+      }
+
+      const finalName = (sanitizedUpdates.name ?? customerResult.customer.name ?? '').toString().trim();
+      const finalEmail = (sanitizedUpdates.email ?? customerResult.customer.email ?? '').toString().trim().toLowerCase();
+      const finalZip = (sanitizedUpdates.zipCode ?? customerResult.customer.zipCode ?? '').toString().trim();
+      const companyId = customerResult.customer.companyId || null;
+      const searchName = finalName.toLowerCase();
+      const searchEmail = finalEmail;
+      const searchEmailCompanyKey = companyId && searchEmail ? `${companyId}__${searchEmail}` : null;
+      const searchNameZipCompanyKey = companyId && searchName && finalZip
+        ? `${companyId}__${searchName}__${finalZip.toLowerCase()}`
+        : null;
+
+      sanitizedUpdates.searchEmail = searchEmail || null;
+      sanitizedUpdates.searchName = searchName || null;
+      sanitizedUpdates.searchEmailCompanyKey = searchEmailCompanyKey || null;
+      sanitizedUpdates.searchNameZipCompanyKey = searchNameZipCompanyKey || null;
+
       const updatedData = {
-        ...updates,
+        ...sanitizedUpdates,
+        latitude: updates.latitude === undefined
+          ? customerResult.customer.latitude ?? null
+          : (typeof updates.latitude === 'number' ? updates.latitude : null),
+        longitude: updates.longitude === undefined
+          ? customerResult.customer.longitude ?? null
+          : (typeof updates.longitude === 'number' ? updates.longitude : null),
         updatedAt: new Date().toISOString()
       };
 

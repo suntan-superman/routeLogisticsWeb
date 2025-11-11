@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import ReportingService from '../services/reportingService';
 import { 
@@ -14,6 +14,20 @@ import {
   PrinterIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import {
+  GridComponent,
+  ColumnsDirective,
+  ColumnDirective,
+  Page,
+  Toolbar,
+  Sort,
+  Filter,
+  ExcelExport,
+  Selection,
+  Search,
+  Resize,
+  Inject
+} from '@syncfusion/ej2-react-grids';
 
 const ReportsPage = () => {
   const [analytics, setAnalytics] = useState(null);
@@ -22,6 +36,10 @@ const ReportsPage = () => {
   const [selectedDateRange, setSelectedDateRange] = useState('month');
   const [selectedReportType, setSelectedReportType] = useState('comprehensive');
   const [showReportModal, setShowReportModal] = useState(false);
+  const trendsGridRef = useRef(null);
+  const trendsToolbarOptions = useMemo(() => ['Search', 'ExcelExport'], []);
+  const trendsPageSettings = useMemo(() => ({ pageSize: 12, pageSizes: [12, 24, 36] }), []);
+  const trendsFilterSettings = useMemo(() => ({ type: 'Excel' }), []);
 
   const dateRanges = [
     { value: 'week', label: 'Last 7 Days' },
@@ -153,6 +171,34 @@ const ReportsPage = () => {
   const formatPercentage = (value) => {
     return `${value.toFixed(1)}%`;
   };
+
+  const handleTrendsToolbarClick = useCallback((args) => {
+    if (!trendsGridRef.current) return;
+    const id = args.item?.id || '';
+    if (id.includes('_excelexport')) {
+      trendsGridRef.current.excelExport({
+        fileName: `monthly-trends-${new Date().toISOString().split('T')[0]}.xlsx`
+      });
+    }
+  }, []);
+
+  const trendsRevenueTemplate = (props) => (
+    <span className="text-sm text-gray-900">{formatCurrency(props.revenue)}</span>
+  );
+
+  const trendsCompletedTemplate = (props) => (
+    <span className="text-sm text-gray-900">{props.completedJobs}</span>
+  );
+
+  const trendsJobsTemplate = (props) => (
+    <span className="text-sm text-gray-900">{props.jobs}</span>
+  );
+
+  const trendsNoRecordsTemplate = () => (
+    <div className="py-8 text-center text-sm text-gray-500">
+      No monthly trend data available for this range.
+    </div>
+  );
 
   if (isLoading && !analytics) {
     return (
@@ -400,28 +446,46 @@ const ReportsPage = () => {
             <CalendarIcon className="h-5 w-5 mr-2 text-indigo-500" />
             Monthly Trends
           </h3>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Month</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Jobs</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Completed</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {analytics.monthlyTrends.map((trend, index) => (
-                  <tr key={index}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{trend.month}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{trend.jobs}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{trend.completedJobs}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(trend.revenue)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <GridComponent
+            id="monthlyTrendsGrid"
+            dataSource={analytics.monthlyTrends}
+            allowPaging
+            allowSorting
+            allowFiltering
+            allowSelection
+            allowExcelExport
+            filterSettings={trendsFilterSettings}
+            toolbar={trendsToolbarOptions}
+            toolbarClick={handleTrendsToolbarClick}
+            selectionSettings={{ type: 'Single' }}
+            pageSettings={trendsPageSettings}
+            height="420"
+            ref={trendsGridRef}
+            noRecordsTemplate={trendsNoRecordsTemplate}
+          >
+            <ColumnsDirective>
+              <ColumnDirective field="month" headerText="Month" width="160" />
+              <ColumnDirective
+                field="jobs"
+                headerText="Jobs"
+                width="120"
+                template={trendsJobsTemplate}
+              />
+              <ColumnDirective
+                field="completedJobs"
+                headerText="Completed"
+                width="140"
+                template={trendsCompletedTemplate}
+              />
+              <ColumnDirective
+                field="revenue"
+                headerText="Revenue"
+                width="160"
+                template={trendsRevenueTemplate}
+              />
+            </ColumnsDirective>
+            <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
+          </GridComponent>
         </div>
       )}
 

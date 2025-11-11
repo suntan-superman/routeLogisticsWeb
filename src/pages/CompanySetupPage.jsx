@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
@@ -30,6 +30,21 @@ import {
   ClipboardDocumentIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import { formatPhoneNumber } from '../utils/phoneFormatter';
+import {
+  GridComponent,
+  ColumnsDirective,
+  ColumnDirective,
+  Page,
+  Toolbar,
+  Sort,
+  Filter,
+  ExcelExport,
+  Selection,
+  Search,
+  Resize,
+  Inject
+} from '@syncfusion/ej2-react-grids';
 
 const CompanySetupPage = () => {
   const { userProfile, updateUserProfile, isSuperAdmin, currentUser } = useAuth();
@@ -38,6 +53,18 @@ const CompanySetupPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [company, setCompany] = useState(null);
   const [teamMembers, setTeamMembers] = useState([]);
+  const teamGridRef = useRef(null);
+  const teamToolbarOptions = useMemo(() => ['Search', 'ExcelExport'], []);
+  const teamPageSettings = useMemo(() => ({ pageSize: 25, pageSizes: [25, 50, 100, 200] }), []);
+  const teamFilterSettings = useMemo(() => ({ type: 'Excel' }), []);
+  const materialsGridRef = useRef(null);
+  const materialsToolbarOptions = useMemo(() => ['Search', 'ExcelExport'], []);
+  const materialsPageSettings = useMemo(() => ({ pageSize: 25, pageSizes: [25, 50, 100, 200] }), []);
+  const materialsFilterSettings = useMemo(() => ({ type: 'Excel' }), []);
+  const companiesGridRef = useRef(null);
+  const companiesToolbarOptions = useMemo(() => ['Search', 'ExcelExport'], []);
+  const companiesPageSettings = useMemo(() => ({ pageSize: 25, pageSizes: [25, 50, 100, 200] }), []);
+  const companiesFilterSettings = useMemo(() => ({ type: 'Excel' }), []);
   
   // Super admin company management states
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -57,6 +84,14 @@ const CompanySetupPage = () => {
     serviceCategories: [],
     services: []
   });
+
+  const isCreateCompanyFormValid = useMemo(() => {
+    const trimmedName = (newCompanyData.name || '').trim();
+    const trimmedOwnerEmail = (newCompanyData.ownerEmail || '').trim();
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    return Boolean(trimmedName && trimmedOwnerEmail && emailPattern.test(trimmedOwnerEmail));
+  }, [newCompanyData.name, newCompanyData.ownerEmail]);
 
   // Form states
   const [companyData, setCompanyData] = useState({
@@ -133,6 +168,318 @@ const CompanySetupPage = () => {
 
     return labels[role] || role;
   }, []);
+
+  const formatDateValue = useCallback((value, includeTime = false) => {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      ...(includeTime
+        ? { hour: 'numeric', minute: 'numeric' }
+        : {})
+    });
+  }, []);
+
+  const handleTeamToolbarClick = useCallback((args) => {
+    if (!teamGridRef.current) return;
+    const id = args.item?.id || '';
+    if (id.includes('_excelexport')) {
+      teamGridRef.current.excelExport({
+        fileName: `team-members-${new Date().toISOString().split('T')[0]}.xlsx`
+      });
+    }
+  }, []);
+
+  const handleMaterialsToolbarClick = useCallback((args) => {
+    if (!materialsGridRef.current) return;
+    const id = args.item?.id || '';
+    if (id.includes('_excelexport')) {
+      materialsGridRef.current.excelExport({
+        fileName: `materials-${new Date().toISOString().split('T')[0]}.xlsx`
+      });
+    }
+  }, []);
+
+  const handleCompaniesToolbarClick = useCallback((args) => {
+    if (!companiesGridRef.current) return;
+    const id = args.item?.id || '';
+    if (id.includes('_excelexport')) {
+      companiesGridRef.current.excelExport({
+        fileName: `companies-${new Date().toISOString().split('T')[0]}.xlsx`
+      });
+    }
+  }, []);
+
+  const formatCurrencyValue = useCallback((amount) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD'
+    }).format(amount || 0);
+  }, []);
+
+  const teamMemberNameTemplate = (props) => (
+    <div className="flex items-center">
+      <div className="flex-shrink-0">
+        <div className="h-9 w-9 bg-gray-200 rounded-full flex items-center justify-center">
+          <span className="text-gray-600 text-sm font-medium">
+            {(props.email?.charAt(0) || '?').toUpperCase()}
+          </span>
+        </div>
+      </div>
+      <div className="ml-3">
+        <div className="text-sm font-medium text-gray-900">{props.email}</div>
+        <div className="text-xs text-gray-500">
+          {props.createdAt ? `Invited ${formatDateValue(props.createdAt, true)}` : 'Pending invitation'}
+        </div>
+      </div>
+    </div>
+  );
+
+  const teamRoleTemplate = (props) => (
+    <span className="text-sm text-gray-900">
+      {getRoleLabel(props.role, props.roleDisplay)}
+    </span>
+  );
+
+  const teamStatusTemplate = (props) => {
+    const status = props.status || 'unknown';
+    const badgeClasses = {
+      active: 'bg-green-100 text-green-800',
+      pending: 'bg-yellow-100 text-yellow-800',
+      inactive: 'bg-gray-100 text-gray-800',
+      removed: 'bg-red-100 text-red-800'
+    };
+    return (
+      <span className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full ${badgeClasses[status] || 'bg-gray-100 text-gray-800'}`}>
+        {status.charAt(0).toUpperCase() + status.slice(1)}
+      </span>
+    );
+  };
+
+  const teamInvitationTemplate = (props) => {
+    if (!props.invitationCode) {
+      return <span className="text-xs text-gray-400">—</span>;
+    }
+
+    return (
+      <div className="flex flex-col gap-1">
+        <span className="text-xs font-mono bg-gray-100 px-2 py-1 rounded text-gray-700">
+          {props.invitationCode}
+        </span>
+        {props.invitationExpiresAt && (
+          <span className="text-[11px] text-gray-500">
+            Expires {formatDateValue(props.invitationExpiresAt)}
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  const teamActionsTemplate = (props) => (
+    <div className="flex items-center gap-3">
+      {props.status === 'pending' && (
+        <button
+          type="button"
+          onClick={() => handleResendTeamMemberInvite(props.id)}
+          disabled={isLoading}
+          className="text-primary-600 hover:text-primary-800 text-sm disabled:opacity-50"
+        >
+          Resend
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => handleRemoveTeamMember(props.id)}
+        className="text-red-600 hover:text-red-800 text-sm"
+      >
+        Remove
+      </button>
+    </div>
+  );
+
+  const teamInvitedOnTemplate = (props) => (
+    <span className="text-sm text-gray-700">
+      {props.createdAt ? formatDateValue(props.createdAt) : '—'}
+    </span>
+  );
+
+  const teamNoRecordsTemplate = () => (
+    <div className="text-center py-10 space-y-2">
+      <UsersIcon className="mx-auto h-10 w-10 text-gray-400" />
+      <p className="text-sm text-gray-600">No team members yet. Invite your first teammate above.</p>
+    </div>
+  );
+
+  const materialNameTemplate = (props) => (
+    <div>
+      <div className="text-sm font-medium text-gray-900">{props.name}</div>
+      {props.description && <div className="text-xs text-gray-500">{props.description}</div>}
+    </div>
+  );
+
+  const materialCategoryTemplate = (props) => (
+    <div className="text-sm text-gray-800">
+      {props.category || '-'}
+      {props.subcategory && (
+        <span className="text-xs text-gray-500 block">{props.subcategory}</span>
+      )}
+    </div>
+  );
+
+  const materialPricingTemplate = (props) => (
+    <div className="text-right space-y-1">
+      <div className="text-xs text-gray-500">Cost: {formatCurrencyValue(props.costPerUnit)}</div>
+      <div className="text-sm font-semibold text-gray-900">
+        {formatCurrencyValue(props.retailPrice)}
+      </div>
+    </div>
+  );
+
+  const materialStockTemplate = (props) => (
+    <div className="text-sm text-right text-gray-800">
+      {props.quantityInStock ?? 0}
+      {props.unit && <span className="text-xs text-gray-500 ml-1">{props.unit}</span>}
+    </div>
+  );
+
+  const materialActiveTemplate = (props) => (
+    <span
+      className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full ${
+        props.active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+      }`}
+    >
+      {props.active ? 'Active' : 'Inactive'}
+    </span>
+  );
+
+  const materialSupplierTemplate = (props) => (
+    <div className="text-sm text-gray-800">
+      {props.supplier || '-'}
+      {props.storageLocation && (
+        <span className="text-xs text-gray-500 block">{props.storageLocation}</span>
+      )}
+    </div>
+  );
+
+  const materialActionsTemplate = (props) => (
+    <div className="flex justify-end gap-2">
+      <button
+        type="button"
+        onClick={() => handleOpenMaterialModal(props)}
+        className="text-primary-600 hover:text-primary-900"
+        title="Edit"
+      >
+        <PencilIcon className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={() => handleDeleteMaterial(props.id)}
+        className="text-red-600 hover:text-red-900"
+        title="Delete"
+      >
+        <TrashIcon className="h-4 w-4" />
+      </button>
+    </div>
+  );
+
+  const materialsNoRecordsTemplate = () => (
+    <div className="text-center py-10 space-y-2">
+      <WrenchScrewdriverIcon className="mx-auto h-10 w-10 text-gray-400" />
+      <p className="text-sm text-gray-600">
+        {materials.length === 0
+          ? 'No materials yet. Use “Add Material” to create your first item.'
+          : 'No materials match your current filters.'}
+      </p>
+    </div>
+  );
+
+const companyProtectedBadge = (
+  <span
+    className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800"
+    title="Protected administrative company - cannot be deleted or deactivated"
+  >
+    Protected
+  </span>
+);
+
+const companyStatusBadge = (isActive) => (
+  <span
+    className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+      isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+    }`}
+  >
+    {isActive ? 'Active' : 'Inactive'}
+  </span>
+);
+
+const companyNameTemplate = (props) => (
+  <div className="space-y-1">
+    <div className="flex items-center gap-2">
+      <span className="text-sm font-medium text-gray-900">{props.name}</span>
+      {(props.isAdminCompany || props.isProtected) && companyProtectedBadge}
+    </div>
+    {props.email && <div className="text-xs text-gray-500">{props.email}</div>}
+  </div>
+);
+
+const companyOwnerTemplate = (props) => (
+  <div className="space-y-1">
+    <div className="text-sm text-gray-900">{props.ownerName || 'N/A'}</div>
+    {props.ownerEmail && <div className="text-xs text-gray-500">{props.ownerEmail}</div>}
+  </div>
+);
+
+const companyCodeTemplate = (props) => (
+  <code className="text-sm font-mono bg-gray-100 px-2 py-1 rounded">{props.code}</code>
+);
+
+const companyStatusTemplate = (props) => companyStatusBadge(props.isActive);
+
+const companyCreatedTemplate = (props, formatDateValue) => (
+  <span className="text-sm text-gray-700">
+    {props.createdAt ? formatDateValue(props.createdAt) : 'N/A'}
+  </span>
+);
+
+const companyActionsTemplate = (props, handleDeactivateCompany, handleDeleteCompany) => {
+  const isProtectedCompany = props.isAdminCompany || props.isProtected;
+  return (
+    <div className="flex justify-end gap-2">
+      <button
+        type="button"
+        onClick={() => !isProtectedCompany && handleDeactivateCompany(props.id, !props.isActive)}
+        className={`${
+          props.isActive ? 'text-yellow-600 hover:text-yellow-900' : 'text-green-600 hover:text-green-900'
+        } ${isProtectedCompany ? 'cursor-not-allowed text-gray-400 hover:text-gray-400' : ''}`}
+        title={props.isActive ? 'Deactivate' : 'Activate'}
+        disabled={isProtectedCompany}
+      >
+        <XCircleIcon className="w-5 h-5" />
+      </button>
+      <button
+        type="button"
+        onClick={() => !isProtectedCompany && handleDeleteCompany(props.id)}
+        className={`text-red-600 hover:text-red-900 ${
+          isProtectedCompany ? 'cursor-not-allowed text-gray-400 hover:text-gray-400' : ''
+        }`}
+        title="Delete"
+        disabled={isProtectedCompany}
+      >
+        <TrashIcon className="w-5 h-5" />
+      </button>
+    </div>
+  );
+};
+
+const companiesNoRecordsTemplate = () => (
+  <div className="text-center py-10 space-y-2">
+    <BuildingOfficeIcon className="mx-auto h-10 w-10 text-gray-400" />
+    <p className="text-sm text-gray-600">No companies found.</p>
+  </div>
+);
 
   const handleCopyCompanyCode = useCallback(async () => {
     if (!company?.code) {
@@ -294,7 +641,20 @@ const CompanySetupPage = () => {
       );
 
       if (result.success) {
-        toast.success(`Company created successfully! Company code: ${result.companyCode}`);
+        if (result.ownerStatus === 'invited') {
+          if (result.ownerInvitationEmailSent) {
+            toast.success(`Company created. Invitation email sent to ${result.ownerEmail}. Company code: ${result.companyCode}`);
+          } else {
+            toast.success(`Company created. Invitation for ${result.ownerEmail} is pending. Company code: ${result.companyCode}`);
+            if (result.ownerInvitationError) {
+              toast.error(`Invitation error: ${result.ownerInvitationError}`);
+            } else {
+              toast.info('Email delivery failed. Share the invitation code manually.');
+            }
+          }
+        } else {
+          toast.success(`Company created successfully! Company code: ${result.companyCode}`);
+        }
         setShowCreateModal(false);
         setShowConfirmModal(false);
         resetNewCompanyForm();
@@ -1205,73 +1565,85 @@ const CompanySetupPage = () => {
                 </select>
               </div>
 
-              {/* Materials Table */}
-              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost/Unit</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Price/Unit</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier</th>
-                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Active</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {isLoading ? (
-                        <tr>
-                          <td colSpan="8" className="px-4 py-8 text-center text-gray-500">
-                            <div className="flex justify-center">
-                              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-500"></div>
-                            </div>
-                          </td>
-                        </tr>
-                      ) : filteredMaterials.length === 0 ? (
-                        <tr>
-                          <td colSpan="8" className="px-4 py-8 text-center text-gray-500">
-                            {materials.length === 0 ? 'No materials added yet. Click "Add Material" to get started.' : 'No materials match your search criteria.'}
-                          </td>
-                        </tr>
-                      ) : (
-                        filteredMaterials.map((material) => (
-                          <tr key={material.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{material.name}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{material.category || '-'}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{material.unit || '-'}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 text-right">${(material.costPerUnit || 0).toFixed(2)}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900 text-right">${(material.retailPrice || 0).toFixed(2)}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{material.supplier || '-'}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-center">
-                              {material.active ? (
-                                <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">Active</span>
-                              ) : (
-                                <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">Inactive</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
-                              <button
-                                onClick={() => handleOpenMaterialModal(material)}
-                                className="text-primary-600 hover:text-primary-900 mr-3"
-                              >
-                                <PencilIcon className="h-4 w-4 inline" />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteMaterial(material.id)}
-                                className="text-red-600 hover:text-red-900"
-                              >
-                                <TrashIcon className="h-4 w-4 inline" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))
+              <div className="bg-white border border-gray-200 rounded-lg">
+                <GridComponent
+                  id="materialsGrid"
+                  dataSource={filteredMaterials}
+                  allowPaging
+                  allowSorting
+                  allowFiltering
+                  allowSelection
+                  allowExcelExport
+                  filterSettings={materialsFilterSettings}
+                  toolbar={materialsToolbarOptions}
+                  toolbarClick={handleMaterialsToolbarClick}
+                  selectionSettings={{ type: 'Single' }}
+                  pageSettings={materialsPageSettings}
+                  height="480"
+                  ref={materialsGridRef}
+                  noRecordsTemplate={materialsNoRecordsTemplate}
+                >
+                  <ColumnsDirective>
+                    <ColumnDirective
+                      field="name"
+                      headerText="Material"
+                      width="250"
+                      template={materialNameTemplate}
+                    />
+                    <ColumnDirective
+                      field="category"
+                      headerText="Category"
+                      width="180"
+                      template={materialCategoryTemplate}
+                    />
+                    <ColumnDirective
+                      field="supplier"
+                      headerText="Supplier"
+                      width="200"
+                      template={materialSupplierTemplate}
+                    />
+                    <ColumnDirective
+                      field="quantityInStock"
+                      headerText="In Stock"
+                      width="140"
+                      template={materialStockTemplate}
+                      textAlign="Right"
+                    />
+                    <ColumnDirective
+                      field="retailPrice"
+                      headerText="Price"
+                      width="140"
+                      template={materialPricingTemplate}
+                      textAlign="Right"
+                    />
+                    <ColumnDirective
+                      field="reorderThreshold"
+                      headerText="Reorder"
+                      width="120"
+                      textAlign="Right"
+                      template={(props) => (
+                        <span className="text-sm text-gray-800">
+                          {props.reorderThreshold ?? 0}
+                        </span>
                       )}
-                    </tbody>
-                  </table>
-                </div>
+                    />
+                    <ColumnDirective
+                      field="active"
+                      headerText="Status"
+                      width="130"
+                      template={materialActiveTemplate}
+                      allowFiltering={false}
+                    />
+                    <ColumnDirective
+                      headerText="Actions"
+                      width="150"
+                      template={materialActionsTemplate}
+                      allowFiltering={false}
+                      allowSorting={false}
+                    />
+                  </ColumnsDirective>
+                  <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
+                </GridComponent>
               </div>
             </div>
           </div>
@@ -1339,59 +1711,66 @@ const CompanySetupPage = () => {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                {teamMembers.map((member) => (
-                  <div key={member.id} className="flex items-center justify-between bg-white border border-gray-200 px-4 py-3 rounded-md">
-                    <div className="flex items-center">
-                      <div className="flex-shrink-0">
-                        <div className="h-8 w-8 bg-gray-300 rounded-full flex items-center justify-center">
-                          <span className="text-gray-600 text-sm font-medium">
-                            {member.email.charAt(0).toUpperCase()}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="ml-3">
-                        <p className="text-sm font-medium text-gray-900">{member.email}</p>
-                        <p className="text-sm text-gray-500">{getRoleLabel(member.role, member.roleDisplay)}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <span className={`px-2 py-1 text-xs rounded-full ${
-                        member.status === 'active' ? 'bg-green-100 text-green-800' :
-                        member.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                        {member.status}
-                      </span>
-                      {member.invitationCode && (
-                        <span className="px-2 py-1 text-xs font-medium text-gray-500 bg-gray-100 rounded-full">
-                          Code: {member.invitationCode}
-                        </span>
-                      )}
-                      {member.status === 'pending' && (
-                        <button
-                          type="button"
-                          onClick={() => handleResendTeamMemberInvite(member.id)}
-                          className="text-primary-600 hover:text-primary-800 text-sm"
-                          disabled={isLoading}
-                        >
-                          Resend
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveTeamMember(member.id)}
-                        className="text-red-600 hover:text-red-800 text-sm"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                
-                {teamMembers.length === 0 && (
-                  <p className="text-sm text-gray-500 italic">No team members added yet</p>
-                )}
+              <div className="bg-white border border-gray-200 rounded-lg">
+                <GridComponent
+                  id="teamMembersGrid"
+                  dataSource={teamMembers}
+                  allowPaging
+                  allowSorting
+                  allowFiltering
+                  allowSelection
+                  allowExcelExport
+                  filterSettings={teamFilterSettings}
+                  toolbar={teamToolbarOptions}
+                  toolbarClick={handleTeamToolbarClick}
+                  selectionSettings={{ type: 'Single' }}
+                  pageSettings={teamPageSettings}
+                  height="420"
+                  ref={teamGridRef}
+                  noRecordsTemplate={teamNoRecordsTemplate}
+                >
+                  <ColumnsDirective>
+                    <ColumnDirective
+                      field="email"
+                      headerText="Team Member"
+                      width="260"
+                      template={teamMemberNameTemplate}
+                    />
+                    <ColumnDirective
+                      field="role"
+                      headerText="Role"
+                      width="140"
+                      template={teamRoleTemplate}
+                    />
+                    <ColumnDirective
+                      field="status"
+                      headerText="Status"
+                      width="130"
+                      template={teamStatusTemplate}
+                      allowSorting={false}
+                    />
+                    <ColumnDirective
+                      field="invitationCode"
+                      headerText="Invitation"
+                      width="170"
+                      template={teamInvitationTemplate}
+                    />
+                    <ColumnDirective
+                      field="createdAt"
+                      headerText="Invited On"
+                      width="160"
+                      template={teamInvitedOnTemplate}
+                    />
+                    <ColumnDirective
+                      headerText="Actions"
+                      width="160"
+                      template={teamActionsTemplate}
+                      allowFiltering={false}
+                      allowSorting={false}
+                    />
+                  </ColumnsDirective>
+                  <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
+                </GridComponent>
               </div>
             </div>
           </div>
@@ -1681,7 +2060,9 @@ const CompanySetupPage = () => {
                           className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                           placeholder="owner@example.com"
                         />
-                        <p className="mt-1 text-xs text-gray-500">User must already have an account</p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          We&apos;ll invite this email to manage the company if they haven&apos;t signed up yet.
+                        </p>
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700">Company Name *</label>
@@ -1825,13 +2206,23 @@ const CompanySetupPage = () => {
                   {!showConfirmModal ? (
                     <button
                       onClick={() => {
-                        if (!newCompanyData.name || !newCompanyData.ownerEmail) {
-                          toast.error('Please fill in company name and owner email');
+                        const trimmedName = (newCompanyData.name || '').trim();
+                        const trimmedOwnerEmail = (newCompanyData.ownerEmail || '').trim();
+                        const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+                        if (!trimmedName || !trimmedOwnerEmail || !emailPattern.test(trimmedOwnerEmail)) {
+                          toast.error('Please provide a company name and valid owner email');
                           return;
                         }
+                        setNewCompanyData(prev => ({
+                          ...prev,
+                          name: trimmedName,
+                          ownerEmail: trimmedOwnerEmail
+                        }));
                         setShowConfirmModal(true);
                       }}
-                      className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+                      disabled={!isCreateCompanyFormValid}
+                      className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Continue to Review
                     </button>
@@ -1845,6 +2236,11 @@ const CompanySetupPage = () => {
                     </button>
                   )}
                 </div>
+                {!showConfirmModal && !isCreateCompanyFormValid && (
+                  <p className="mt-2 text-xs text-gray-500 text-right">
+                    Enter a company name and valid owner email to continue.
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -1870,105 +2266,65 @@ const CompanySetupPage = () => {
                 </div>
 
                 <div className="mt-4">
-                  {allCompanies.length === 0 ? (
-                    <p className="text-center text-gray-500 py-8">No companies found</p>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Owner</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Code</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                          {allCompanies.map((comp) => (
-                            <tr key={comp.id}>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <div className="flex items-center gap-2">
-                                  <div className="text-sm font-medium text-gray-900">{comp.name}</div>
-                                  {(comp.isAdminCompany || comp.isProtected) && (
-                                    <span 
-                                      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800"
-                                      title="Protected administrative company - cannot be deleted or deactivated"
-                                    >
-                                      Protected
-                                    </span>
-                                  )}
-                                </div>
-                                {comp.email && (
-                                  <div className="text-sm text-gray-500">{comp.email}</div>
-                                )}
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <div className="text-sm text-gray-900">{comp.ownerName || 'N/A'}</div>
-                                <div className="text-sm text-gray-500">{comp.ownerEmail || ''}</div>
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <code className="text-sm font-mono bg-gray-100 px-2 py-1 rounded">{comp.code}</code>
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                  comp.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                                }`}>
-                                  {comp.isActive ? 'Active' : 'Inactive'}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                {comp.createdAt ? new Date(comp.createdAt).toLocaleDateString() : 'N/A'}
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                <div className="flex justify-end gap-2">
-                                  {/* Deactivate/Activate button - disabled for protected companies */}
-                                  {!(comp.isAdminCompany || comp.isProtected) ? (
-                                    <button
-                                      onClick={() => handleDeactivateCompany(comp.id, !comp.isActive)}
-                                      className={`${
-                                        comp.isActive 
-                                          ? 'text-yellow-600 hover:text-yellow-900' 
-                                          : 'text-green-600 hover:text-green-900'
-                                      }`}
-                                      title={comp.isActive ? 'Deactivate' : 'Activate'}
-                                    >
-                                      <XCircleIcon className="w-5 h-5" />
-                                    </button>
-                                  ) : (
-                                    <span 
-                                      className="text-gray-400 cursor-not-allowed" 
-                                      title="Protected company - cannot be deactivated"
-                                    >
-                                      <XCircleIcon className="w-5 h-5" />
-                                    </span>
-                                  )}
-                                  {/* Delete button - hidden for protected companies */}
-                                  {!(comp.isAdminCompany || comp.isProtected) ? (
-                                    <button
-                                      onClick={() => handleDeleteCompany(comp.id)}
-                                      className="text-red-600 hover:text-red-900"
-                                      title="Delete"
-                                    >
-                                      <TrashIcon className="w-5 h-5" />
-                                    </button>
-                                  ) : (
-                                    <span 
-                                      className="text-gray-400 cursor-not-allowed" 
-                                      title="Protected company - cannot be deleted"
-                                    >
-                                      <TrashIcon className="w-5 h-5" />
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                  <GridComponent
+                    id="companiesGrid"
+                    dataSource={allCompanies}
+                    allowPaging
+                    allowSorting
+                    allowFiltering
+                    allowSelection
+                    allowExcelExport
+                    filterSettings={companiesFilterSettings}
+                    toolbar={companiesToolbarOptions}
+                    toolbarClick={handleCompaniesToolbarClick}
+                    selectionSettings={{ type: 'Single' }}
+                    pageSettings={companiesPageSettings}
+                    height="480"
+                    ref={companiesGridRef}
+                    noRecordsTemplate={companiesNoRecordsTemplate}
+                  >
+                    <ColumnsDirective>
+                      <ColumnDirective
+                        field="name"
+                        headerText="Company"
+                        width="220"
+                        template={companyNameTemplate}
+                      />
+                      <ColumnDirective
+                        field="ownerName"
+                        headerText="Owner"
+                        width="220"
+                        template={companyOwnerTemplate}
+                      />
+                      <ColumnDirective
+                        field="code"
+                        headerText="Code"
+                        width="140"
+                        template={companyCodeTemplate}
+                      />
+                      <ColumnDirective
+                        field="isActive"
+                        headerText="Status"
+                        width="130"
+                        template={companyStatusTemplate}
+                        allowFiltering={false}
+                      />
+                      <ColumnDirective
+                        field="createdAt"
+                        headerText="Created"
+                        width="150"
+                        template={(props) => companyCreatedTemplate(props, formatDateValue)}
+                      />
+                      <ColumnDirective
+                        headerText="Actions"
+                        width="160"
+                        template={(props) => companyActionsTemplate(props, handleDeactivateCompany, handleDeleteCompany)}
+                        allowFiltering={false}
+                        allowSorting={false}
+                      />
+                    </ColumnsDirective>
+                    <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
+                  </GridComponent>
                 </div>
               </div>
             </div>

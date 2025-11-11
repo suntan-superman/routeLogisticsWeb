@@ -48,6 +48,49 @@ class CompanyService {
     return labels[role] || role;
   }
 
+  static async claimPendingCompanyOwnership() {
+    try {
+      const projectId = 'mi-factotum-field-service';
+      const claimOwnershipUrl = `https://us-central1-${projectId}.cloudfunctions.net/claimCompanyOwnership`;
+      const token = await auth.currentUser?.getIdToken();
+
+      if (!token) {
+        return {
+          success: false,
+          error: 'Authentication token unavailable for claiming company ownership'
+        };
+      }
+
+      const response = await fetch(claimOwnershipUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        return {
+          success: false,
+          error: data.error || 'Failed to claim company ownership'
+        };
+      }
+
+      return {
+        success: true,
+        claimedCompanies: data.claimedCompanies || []
+      };
+    } catch (error) {
+      console.error('Error claiming company ownership:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
   static async sendTeamMemberInvitationEmail(invitation) {
     try {
       const projectId = 'mi-factotum-field-service';
@@ -339,7 +382,7 @@ class CompanyService {
   // Create company for super admin (for other users)
   static async createCompanyForUser(companyData, ownerEmail) {
     try {
-      const userId = this.getCurrentUserId();
+      const currentUserId = this.getCurrentUserId();
       const user = auth.currentUser;
       const isSuperAdmin = user?.email === 'sroy@worksidesoftware.com';
       
@@ -350,29 +393,38 @@ class CompanyService {
         };
       }
 
-      // Find user by email to get their userId
-      const usersQuery = query(
-        collection(db, 'users'),
-        where('email', '==', ownerEmail)
-      );
-      const usersSnapshot = await getDocs(usersQuery);
-      
-      if (usersSnapshot.empty) {
+      const normalizedOwnerEmail = (ownerEmail || '').trim().toLowerCase();
+      if (!normalizedOwnerEmail) {
         return {
           success: false,
-          error: 'User not found with email: ' + ownerEmail
+          error: 'Owner email is required'
         };
       }
 
-      const ownerUser = usersSnapshot.docs[0];
-      const ownerId = ownerUser.id;
-      const ownerData = ownerUser.data() || {};
+      // Find user by email to get their userId
+      const usersQuery = query(
+        collection(db, 'users'),
+        where('email', '==', normalizedOwnerEmail)
+      );
+      const usersSnapshot = await getDocs(usersQuery);
+      
+      let ownerId = null;
+      let ownerData = null;
+      let ownerStatus = 'existing';
 
-      if (ownerData.companyId) {
-        return {
-          success: false,
-          error: 'This user already manages another company. Remove them from the existing company before assigning a new one.'
-        };
+      if (!usersSnapshot.empty) {
+        const ownerUser = usersSnapshot.docs[0];
+        ownerId = ownerUser.id;
+        ownerData = ownerUser.data() || {};
+
+        if (ownerData.companyId) {
+          return {
+            success: false,
+            error: 'This user already manages another company. Remove them from the existing company before assigning a new one.'
+          };
+        }
+      } else {
+        ownerStatus = 'invited';
       }
 
       // Generate unique company code
@@ -394,31 +446,76 @@ class CompanyService {
         }
       }
       
+      const nowIso = new Date().toISOString();
+
       const company = {
         ...companyData,
         code: companyCode,
-        ownerId: ownerId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        ownerId: ownerId || null,
+        ownerPendingEmail: ownerStatus === 'invited' ? normalizedOwnerEmail : null,
+        createdAt: nowIso,
+        updatedAt: nowIso,
         isActive: true
       };
 
       // Add company to companies collection
       const docRef = await addDoc(collection(db, 'companies'), company);
       
-      // Update owner's user profile with company ID and admin role
-      await updateDoc(doc(db, 'users', ownerId), {
-        companyId: docRef.id,
-        role: 'admin',
-        updatedAt: new Date().toISOString()
-      });
+      let emailSent = false;
+      let invitationResult = null;
+
+      if (ownerId) {
+        // Update owner's user profile with company ID and admin role
+        await updateDoc(doc(db, 'users', ownerId), {
+          companyId: docRef.id,
+          role: 'admin',
+          updatedAt: new Date().toISOString()
+        });
+      } else {
+        invitationResult = await InvitationService.createInvitation(
+          docRef.id,
+          normalizedOwnerEmail,
+          'admin',
+          currentUserId
+        );
+
+        if (invitationResult.success) {
+          const { invitation } = invitationResult;
+          emailSent = await this.sendTeamMemberInvitationEmail(invitation);
+
+          await updateDoc(doc(db, 'companies', docRef.id), {
+            ownerInvitationId: invitation.id,
+            ownerInvitationCode: invitation.invitationCode,
+            ownerInvitationSentAt: emailSent ? new Date().toISOString() : null,
+            updatedAt: new Date().toISOString()
+          });
+        } else {
+          await updateDoc(doc(db, 'companies', docRef.id), {
+            ownerInvitationError: invitationResult.error || 'Failed to create owner invitation',
+            updatedAt: new Date().toISOString()
+          });
+        }
+      }
+
+      const responseCompany = {
+        id: docRef.id,
+        ...company
+      };
+
+      if (invitationResult?.success) {
+        responseCompany.ownerInvitationId = invitationResult.invitationId;
+        responseCompany.ownerInvitationCode = invitationResult.invitation.invitationCode;
+      }
 
       return {
         success: true,
         companyId: docRef.id,
-        companyCode: companyCode,
-        company: { id: docRef.id, ...company },
-        ownerEmail: ownerEmail
+        companyCode,
+        company: responseCompany,
+        ownerEmail: normalizedOwnerEmail,
+        ownerStatus,
+        ownerInvitationEmailSent: emailSent,
+        ownerInvitationError: invitationResult?.success ? null : invitationResult?.error || null
       };
     } catch (error) {
       console.error('Error creating company for user:', error);
@@ -573,11 +670,13 @@ class CompanyService {
 
       const ownerId = companyResult.company.ownerId;
 
-      // Remove companyId from owner's user profile
-      await updateDoc(doc(db, 'users', ownerId), {
-        companyId: null,
-        updatedAt: new Date().toISOString()
-      });
+      if (ownerId) {
+        // Remove companyId from owner's user profile
+        await updateDoc(doc(db, 'users', ownerId), {
+          companyId: null,
+          updatedAt: new Date().toISOString()
+        });
+      }
 
       // Delete company
       await deleteDoc(doc(db, 'companies', companyId));
@@ -670,14 +769,26 @@ class CompanyService {
       const companiesWithOwners = await Promise.all(
         companies.map(async (company) => {
           try {
-            const ownerDoc = await getDoc(doc(db, 'users', company.ownerId));
-            if (ownerDoc.exists()) {
+            if (company.ownerId) {
+              const ownerDoc = await getDoc(doc(db, 'users', company.ownerId));
+              if (ownerDoc.exists()) {
+                return {
+                  ...company,
+                  ownerEmail: ownerDoc.data().email || '',
+                  ownerName: ownerDoc.data().name || ''
+                };
+              }
+            }
+
+            if (company.ownerPendingEmail) {
               return {
                 ...company,
-                ownerEmail: ownerDoc.data().email || '',
-                ownerName: ownerDoc.data().name || ''
+                ownerEmail: company.ownerPendingEmail,
+                ownerName: company.ownerPendingEmail,
+                ownerPending: true
               };
             }
+
             return company;
           } catch (error) {
             return company;

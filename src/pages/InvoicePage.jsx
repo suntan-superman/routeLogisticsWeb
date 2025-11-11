@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import InvoiceService from '../services/invoiceService';
 import JobManagementService from '../services/jobManagementService';
@@ -16,6 +16,20 @@ import {
   XCircleIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import {
+  GridComponent,
+  ColumnsDirective,
+  ColumnDirective,
+  Page,
+  Toolbar,
+  Sort,
+  Filter,
+  ExcelExport,
+  Selection,
+  Search,
+  Resize,
+  Inject
+} from '@syncfusion/ej2-react-grids';
 
 const InvoicePage = () => {
   const [invoices, setInvoices] = useState([]);
@@ -37,6 +51,10 @@ const InvoicePage = () => {
     overdue: 0,
     totalRevenue: 0
   });
+  const invoicesGridRef = useRef(null);
+  const invoicesToolbarOptions = useMemo(() => ['Search', 'ExcelExport'], []);
+  const invoicesPageSettings = useMemo(() => ({ pageSize: 25, pageSizes: [25, 50, 100, 200] }), []);
+  const invoicesFilterSettings = useMemo(() => ({ type: 'Excel' }), []);
 
   // Filter states
   const [activeFilter, setActiveFilter] = useState('all'); // all, drafted, sent, paid, overdue
@@ -299,6 +317,96 @@ const InvoicePage = () => {
     );
   };
 
+  const handleInvoicesToolbarClick = useCallback((args) => {
+    if (!invoicesGridRef.current) return;
+    const id = args.item?.id || '';
+    if (id.includes('_excelexport')) {
+      invoicesGridRef.current.excelExport({
+        fileName: `invoices-${new Date().toISOString().split('T')[0]}.xlsx`
+      });
+    }
+  }, []);
+
+  const invoiceNumberTemplate = (props) => (
+    <span className="text-sm font-medium text-gray-900">#{props.invoiceNumber}</span>
+  );
+
+  const invoiceCustomerTemplate = (props) => (
+    <div className="space-y-1">
+      <div className="text-sm text-gray-900">{props.customerName}</div>
+      {props.customerEmail && <div className="text-xs text-gray-500">{props.customerEmail}</div>}
+    </div>
+  );
+
+  const invoiceDateTemplate = (props) => (
+    <span className="text-sm text-gray-800">{formatDate(props.invoiceDate)}</span>
+  );
+
+  const invoiceDueTemplate = (props) => (
+    <span className="text-sm text-gray-800">{formatDate(props.dueDate)}</span>
+  );
+
+  const invoiceAmountTemplate = (props) => (
+    <span className="text-sm font-semibold text-gray-900">{formatCurrency(props.total)}</span>
+  );
+
+  const invoiceStatusTemplate = (props) => getStatusBadge(props.status);
+
+  const invoiceActionsTemplate = (props) => (
+    <div className="flex items-center justify-end gap-2">
+      <button
+        type="button"
+        onClick={() => handlePreviewPDF(props)}
+        className="text-primary-600 hover:text-primary-900"
+        title="Preview"
+      >
+        <EyeIcon className="h-5 w-5" />
+      </button>
+      <button
+        type="button"
+        onClick={() => handleGeneratePDF(props)}
+        className="text-gray-600 hover:text-gray-900"
+        title="Download PDF"
+      >
+        <ArrowDownTrayIcon className="h-5 w-5" />
+      </button>
+      {props.status === 'drafted' && (
+        <button
+          type="button"
+          onClick={() => handleSendInvoice(props.id, false)}
+          className="text-blue-600 hover:text-blue-900"
+          title="Send Invoice"
+        >
+          <PaperAirplaneIcon className="h-5 w-5" />
+        </button>
+      )}
+      {(props.status === 'sent' || props.status === 'viewed') && (
+        <button
+          type="button"
+          onClick={() => handleSendInvoice(props.id, true)}
+          className="text-green-600 hover:text-green-900"
+          title="Resend Invoice"
+        >
+          <ArrowPathIcon className="h-5 w-5" />
+        </button>
+      )}
+    </div>
+  );
+
+  const invoicesNoRecordsTemplate = () => (
+    <div className="p-8 text-center">
+      <DocumentTextIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+      <p className="text-gray-500">No invoices found</p>
+      <button
+        type="button"
+        onClick={openCreateModal}
+        className="mt-4 text-primary-600 hover:text-primary-700 font-medium"
+      >
+        Create your first invoice
+      </button>
+    </div>
+  );
+
   const openCreateModal = () => {
     setShowCreateModal(true);
     loadCompletedJobs();
@@ -476,107 +584,74 @@ const InvoicePage = () => {
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
             <p className="mt-2 text-gray-500">Loading invoices...</p>
           </div>
-        ) : filteredInvoices.length === 0 ? (
-          <div className="p-8 text-center">
-            <DocumentTextIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-500">No invoices found</p>
-            <button
-              onClick={openCreateModal}
-              className="mt-4 text-primary-600 hover:text-primary-700 font-medium"
-            >
-              Create your first invoice
-            </button>
-          </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Invoice #
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Customer
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Date
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Due Date
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Amount
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {filteredInvoices.map((invoice) => (
-                  <tr key={invoice.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {invoice.invoiceNumber}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{invoice.customerName}</div>
-                      <div className="text-sm text-gray-500">{invoice.customerEmail}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {formatDate(invoice.invoiceDate)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {formatDate(invoice.dueDate)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {formatCurrency(invoice.total)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {getStatusBadge(invoice.status)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => handlePreviewPDF(invoice)}
-                          className="text-primary-600 hover:text-primary-900"
-                          title="Preview"
-                        >
-                          <EyeIcon className="h-5 w-5" />
-                        </button>
-                        <button
-                          onClick={() => handleGeneratePDF(invoice)}
-                          className="text-gray-600 hover:text-gray-900"
-                          title="Download PDF"
-                        >
-                          <ArrowDownTrayIcon className="h-5 w-5" />
-                        </button>
-                        {invoice.status === 'drafted' && (
-                          <button
-                            onClick={() => handleSendInvoice(invoice.id, false)}
-                            className="text-blue-600 hover:text-blue-900"
-                            title="Send Invoice"
-                          >
-                            <PaperAirplaneIcon className="h-5 w-5" />
-                          </button>
-                        )}
-                        {(invoice.status === 'sent' || invoice.status === 'viewed') && (
-                          <button
-                            onClick={() => handleSendInvoice(invoice.id, true)}
-                            className="text-green-600 hover:text-green-900"
-                            title="Resend Invoice"
-                          >
-                            <ArrowPathIcon className="h-5 w-5" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="px-3 pb-4">
+            <GridComponent
+              id="invoicesGrid"
+              dataSource={filteredInvoices}
+              allowPaging
+              allowSorting
+              allowFiltering
+              allowSelection
+              allowExcelExport
+              filterSettings={invoicesFilterSettings}
+              toolbar={invoicesToolbarOptions}
+              toolbarClick={handleInvoicesToolbarClick}
+              selectionSettings={{ type: 'Single' }}
+              pageSettings={invoicesPageSettings}
+              height="520"
+              ref={invoicesGridRef}
+              noRecordsTemplate={invoicesNoRecordsTemplate}
+            >
+              <ColumnsDirective>
+                <ColumnDirective
+                  field="invoiceNumber"
+                  headerText="Invoice #"
+                  width="140"
+                  template={invoiceNumberTemplate}
+                />
+                <ColumnDirective
+                  field="customerName"
+                  headerText="Customer"
+                  width="220"
+                  template={invoiceCustomerTemplate}
+                />
+                <ColumnDirective
+                  field="invoiceDate"
+                  headerText="Date"
+                  width="140"
+                  template={invoiceDateTemplate}
+                />
+                <ColumnDirective
+                  field="dueDate"
+                  headerText="Due Date"
+                  width="140"
+                  template={invoiceDueTemplate}
+                />
+                <ColumnDirective
+                  field="total"
+                  headerText="Amount"
+                  width="130"
+                  template={invoiceAmountTemplate}
+                  textAlign="Right"
+                />
+                <ColumnDirective
+                  field="status"
+                  headerText="Status"
+                  width="140"
+                  template={invoiceStatusTemplate}
+                  allowFiltering={false}
+                />
+                <ColumnDirective
+                  headerText="Actions"
+                  width="200"
+                  template={invoiceActionsTemplate}
+                  allowFiltering={false}
+                  allowSorting={false}
+                />
+              </ColumnsDirective>
+              <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
+            </GridComponent>
           </div>
         )}
       </div>

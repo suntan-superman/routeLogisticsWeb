@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import JobManagementService from '../services/jobManagementService';
@@ -25,6 +25,20 @@ import {
   ArrowPathIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import {
+  GridComponent,
+  ColumnsDirective,
+  ColumnDirective,
+  Page,
+  Toolbar,
+  Sort,
+  Filter,
+  ExcelExport,
+  Selection,
+  Search,
+  Resize,
+  Inject
+} from '@syncfusion/ej2-react-grids';
 
 const JobManagementPage = () => {
   const { userProfile } = useAuth();
@@ -81,6 +95,11 @@ const JobManagementPage = () => {
       }),
     [teamMembers]
   );
+
+  const jobsGridRef = useRef(null);
+  const jobsToolbarOptions = useMemo(() => ['Search', 'ExcelExport'], []);
+  const jobsPageSettings = useMemo(() => ({ pageSize: 25, pageSizes: [25, 50, 100, 200] }), []);
+  const jobsFilterSettings = useMemo(() => ({ type: 'Excel' }), []);
 
   useEffect(() => {
     loadJobs();
@@ -476,6 +495,123 @@ const JobManagementPage = () => {
     }
   };
 
+  const handleJobsToolbarClick = useCallback((args) => {
+    if (!jobsGridRef.current) return;
+    const id = args.item?.id || '';
+    if (id.includes('_excelexport')) {
+      jobsGridRef.current.excelExport({
+        fileName: `jobs-${new Date().toISOString().split('T')[0]}.xlsx`
+      });
+    }
+  }, []);
+
+  const jobDetailsTemplate = (props) => (
+    <div className="space-y-1">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium text-gray-900">{props.serviceType || 'Service'}</span>
+        {props.recurringJobId && (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+            <ArrowPathIcon className="h-3 w-3 mr-1" />
+            Recurring
+          </span>
+        )}
+      </div>
+      <div className="text-xs text-gray-500 flex items-center">
+        <MapPinIcon className="h-3 w-3 mr-1" />
+        {props.address || 'No address'}
+      </div>
+    </div>
+  );
+
+  const jobCustomerTemplate = (props) => (
+    <div className="space-y-1">
+      <div className="text-sm text-gray-900">{props.customerName || 'Unknown'}</div>
+      {props.customerPhone && <div className="text-xs text-gray-500">{props.customerPhone}</div>}
+    </div>
+  );
+
+  const jobScheduleTemplate = (props) => (
+    <div className="space-y-1">
+      <div className="text-sm text-gray-900">{formatDate(props.date)}</div>
+      <div className="text-xs text-gray-500 flex items-center">
+        <ClockIcon className="h-3 w-3 mr-1" />
+        {formatTime(props.time) || '—'}
+      </div>
+    </div>
+  );
+
+  const jobStatusTemplate = (props) => (
+    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(props.status)}`}>
+      {getStatusIcon(props.status)}
+      <span className="ml-1 capitalize">{props.status?.replace('-', ' ') || 'Unknown'}</span>
+    </span>
+  );
+
+  const jobAssignedTemplate = (props) => (
+    <span className="text-sm text-gray-900">{props.assignedToName || 'Unassigned'}</span>
+  );
+
+  const jobCostTemplate = (props) => (
+    <span className="text-sm font-semibold text-gray-900">{formatCurrency(props.totalCost)}</span>
+  );
+
+  const jobActionsTemplate = (props) => (
+    <div className="flex space-x-2">
+      <button
+        type="button"
+        onClick={() => openViewModal(props)}
+        className="text-primary-600 hover:text-primary-900"
+        title="View Job"
+      >
+        <EyeIcon className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={() => openEditModal(props)}
+        className="text-gray-600 hover:text-gray-900"
+        title="Edit Job"
+      >
+        <PencilIcon className="h-4 w-4" />
+      </button>
+      {canTransferJobs && (
+        <button
+          type="button"
+          onClick={() => openAssignModal(props)}
+          className="text-emerald-600 hover:text-emerald-900"
+          title="Assign to team member"
+        >
+          <UserIcon className="h-4 w-4" />
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => openStatusModal(props)}
+        className="text-blue-600 hover:text-blue-900"
+        title="Update Status"
+      >
+        <CheckCircleIcon className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={() => handleDeleteJob(props.id)}
+        className="text-red-600 hover:text-red-900"
+        title="Delete Job"
+      >
+        <TrashIcon className="h-4 w-4" />
+      </button>
+    </div>
+  );
+
+  const jobsNoRecordsTemplate = () => (
+    <div className="text-center py-12">
+      <ClipboardDocumentListIcon className="mx-auto h-12 w-12 text-gray-400" />
+      <h3 className="mt-2 text-sm font-medium text-gray-900">No jobs found</h3>
+      <p className="mt-1 text-sm text-gray-500">
+        {searchTerm ? 'Try adjusting your search terms.' : 'No jobs have been scheduled yet.'}
+      </p>
+    </div>
+  );
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -689,116 +825,74 @@ const JobManagementPage = () => {
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
           </div>
-        ) : filteredJobs.length === 0 ? (
-          <div className="text-center py-12">
-            <ClipboardDocumentListIcon className="mx-auto h-12 w-12 text-gray-400" />
-            <h3 className="mt-2 text-sm font-medium text-gray-900">No jobs found</h3>
-            <p className="mt-1 text-sm text-gray-500">
-              {searchTerm ? 'Try adjusting your search terms.' : 'No jobs have been scheduled yet.'}
-            </p>
-          </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Job Details</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Schedule</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned To</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {filteredJobs.map((job) => (
-                  <tr key={job.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div>
-                        <div className="text-sm font-medium text-gray-900 flex items-center">
-                          {job.serviceType || 'Service'}
-                          {job.recurringJobId && (
-                            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                              <ArrowPathIcon className="h-3 w-3 mr-1" />
-                              Recurring
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-sm text-gray-500 flex items-center">
-                          <MapPinIcon className="h-3 w-3 mr-1" />
-                          {job.address || 'No address'}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{job.customerName || 'Unknown'}</div>
-                      <div className="text-sm text-gray-500">{job.customerPhone || ''}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{formatDate(job.date)}</div>
-                      <div className="text-sm text-gray-500 flex items-center">
-                        <ClockIcon className="h-3 w-3 mr-1" />
-                        {formatTime(job.time)}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(job.status)}`}>
-                        {getStatusIcon(job.status)}
-                        <span className="ml-1 capitalize">{job.status?.replace('-', ' ')}</span>
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{job.assignedToName || 'Unassigned'}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {formatCurrency(job.totalCost)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => openViewModal(job)}
-                          className="text-primary-600 hover:text-primary-900"
-                          title="View Job"
-                        >
-                          <EyeIcon className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => openEditModal(job)}
-                          className="text-gray-600 hover:text-gray-900"
-                          title="Edit Job"
-                        >
-                          <PencilIcon className="h-4 w-4" />
-                        </button>
-                        {canTransferJobs && (
-                          <button
-                            onClick={() => openAssignModal(job)}
-                            className="text-emerald-600 hover:text-emerald-900"
-                            title="Assign to team member"
-                          >
-                            <UserIcon className="h-4 w-4" />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => openStatusModal(job)}
-                          className="text-blue-600 hover:text-blue-900"
-                          title="Update Status"
-                        >
-                          <CheckCircleIcon className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteJob(job.id)}
-                          className="text-red-600 hover:text-red-900"
-                          title="Delete Job"
-                        >
-                          <TrashIcon className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="px-3 pb-4">
+            <GridComponent
+              id="jobsGrid"
+              dataSource={filteredJobs}
+              allowPaging
+              allowSorting
+              allowFiltering
+              allowSelection
+              allowExcelExport
+              filterSettings={jobsFilterSettings}
+              toolbar={jobsToolbarOptions}
+              toolbarClick={handleJobsToolbarClick}
+              selectionSettings={{ type: 'Single' }}
+              pageSettings={jobsPageSettings}
+              height="600"
+              ref={jobsGridRef}
+              noRecordsTemplate={jobsNoRecordsTemplate}
+            >
+              <ColumnsDirective>
+                <ColumnDirective
+                  field="serviceType"
+                  headerText="Job Details"
+                  width="260"
+                  template={jobDetailsTemplate}
+                />
+                <ColumnDirective
+                  field="customerName"
+                  headerText="Customer"
+                  width="200"
+                  template={jobCustomerTemplate}
+                />
+                <ColumnDirective
+                  field="date"
+                  headerText="Schedule"
+                  width="170"
+                  template={jobScheduleTemplate}
+                />
+                <ColumnDirective
+                  field="status"
+                  headerText="Status"
+                  width="140"
+                  template={jobStatusTemplate}
+                  allowFiltering={false}
+                />
+                <ColumnDirective
+                  field="assignedToName"
+                  headerText="Assigned To"
+                  width="160"
+                  template={jobAssignedTemplate}
+                />
+                <ColumnDirective
+                  field="totalCost"
+                  headerText="Cost"
+                  width="130"
+                  template={jobCostTemplate}
+                  textAlign="Right"
+                />
+                <ColumnDirective
+                  headerText="Actions"
+                  width="200"
+                  template={jobActionsTemplate}
+                  allowFiltering={false}
+                  allowSorting={false}
+                />
+              </ColumnsDirective>
+              <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
+            </GridComponent>
           </div>
         )}
       </div>

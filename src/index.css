@@ -54,3 +54,28 @@ body {
 .btn-danger {
   @apply bg-red-500 hover:bg-red-600 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200;
 }
+
+/* Syncfusion pager active item - align with green theme */
+.e-pager .e-currentitem,
+.e-pager .e-currentitem:hover,
+.e-pager .e-currentitem:focus,
+.e-pager .e-currentitem:active {
+  background-color: #10b981 !important;
+  border-color: #10b981 !important;
+  color: #ffffff !important;
+}
+
+.e-pager .e-numericitem.e-currentitem {
+  border-radius: 6px;
+}
+
+/* Ensure pager hover states stay on-brand */
+.e-pager .e-numericitem:hover,
+.e-pager .e-numericitem:focus {
+  color: #0f766e !important;
+}
+
+/* Green accent for native checkboxes throughout the app */
+input[type='checkbox'] {
+  accent-color: #10b981;
+}

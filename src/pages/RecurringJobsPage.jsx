@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import RecurringJobService from '../services/recurringJobService';
 import CustomerService from '../services/customerService';
@@ -19,6 +19,20 @@ import {
   CogIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import {
+  GridComponent,
+  ColumnsDirective,
+  ColumnDirective,
+  Page,
+  Toolbar,
+  Sort,
+  Filter,
+  ExcelExport,
+  Selection,
+  Search,
+  Resize,
+  Inject
+} from '@syncfusion/ej2-react-grids';
 
 const FREQUENCY_OPTIONS = [
   { value: 'daily', label: 'Daily' },
@@ -65,6 +79,11 @@ const RecurringJobsPage = () => {
     endDate: '',
     isActive: true
   });
+
+  const recurringGridRef = useRef(null);
+  const recurringToolbarOptions = useMemo(() => ['Search', 'ExcelExport'], []);
+  const recurringPageSettings = useMemo(() => ({ pageSize: 25, pageSizes: [25, 50, 100, 200] }), []);
+  const recurringFilterSettings = useMemo(() => ({ type: 'Excel' }), []);
 
   useEffect(() => {
     loadRecurringJobs();
@@ -277,6 +296,113 @@ const RecurringJobsPage = () => {
     const option = FREQUENCY_OPTIONS.find(opt => opt.value === frequency);
     return option ? option.label : frequency;
   };
+
+  const handleRecurringToolbarClick = useCallback((args) => {
+    if (!recurringGridRef.current) return;
+    const id = args.item?.id || '';
+    if (id.includes('_excelexport')) {
+      recurringGridRef.current.excelExport({
+        fileName: `recurring-jobs-${new Date().toISOString().split('T')[0]}.xlsx`
+      });
+    }
+  }, []);
+
+  const recurringCustomerTemplate = (props) => (
+    <div className="flex items-center">
+      <UserIcon className="h-5 w-5 text-gray-400 mr-2" />
+      <div className="text-sm font-medium text-gray-900">{props.customerName || 'Unknown'}</div>
+    </div>
+  );
+
+  const recurringServiceTemplate = (props) => (
+    <div className="flex items-center">
+      <CogIcon className="h-5 w-5 text-gray-400 mr-2" />
+      <div className="text-sm text-gray-900">{props.serviceType || 'Service'}</div>
+    </div>
+  );
+
+  const recurringFrequencyTemplate = (props) => {
+    const frequencyLabel = getFrequencyLabel(props.frequency);
+    const dayOfWeekLabel =
+      props.dayOfWeek !== null && props.dayOfWeek !== undefined
+        ? DAY_OF_WEEK_OPTIONS.find((d) => d.value === props.dayOfWeek)?.label
+        : null;
+    return (
+      <div className="text-sm text-gray-800">
+        {frequencyLabel}
+        {dayOfWeekLabel && <span className="ml-1 text-xs text-gray-500">({dayOfWeekLabel})</span>}
+      </div>
+    );
+  };
+
+  const recurringScheduleTemplate = (props) => (
+    <div className="text-sm text-gray-800">
+      <div className="flex items-center">
+        <ClockIcon className="h-4 w-4 mr-1" />
+        {props.time || 'N/A'}
+      </div>
+      <div className="text-xs text-gray-500 mt-1">
+        {props.startDate ? `Starts: ${formatDate(props.startDate)}` : ''}
+        {props.endDate ? ` | Ends: ${formatDate(props.endDate)}` : ''}
+      </div>
+    </div>
+  );
+
+  const recurringStatusTemplate = (props) => (
+    <span
+      className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold ${
+        props.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+      }`}
+    >
+      {props.isActive ? 'Active' : 'Inactive'}
+    </span>
+  );
+
+  const recurringActionsTemplate = (props) => (
+    <div className="flex items-center justify-end gap-2">
+      <button
+        type="button"
+        onClick={() => handleToggleActive(props.id, props.isActive)}
+        className={props.isActive ? 'text-yellow-600 hover:text-yellow-900' : 'text-green-600 hover:text-green-900'}
+        title={props.isActive ? 'Deactivate' : 'Activate'}
+      >
+        {props.isActive ? <StopIcon className="h-5 w-5" /> : <PlayIcon className="h-5 w-5" />}
+      </button>
+      <button
+        type="button"
+        onClick={() => openEditModal(props)}
+        className="text-primary-600 hover:text-primary-900"
+        title="Edit"
+      >
+        <PencilIcon className="h-5 w-5" />
+      </button>
+      <button
+        type="button"
+        onClick={() => handleDeleteRecurringJob(props.id)}
+        className="text-red-600 hover:text-red-900"
+        title="Delete"
+      >
+        <TrashIcon className="h-5 w-5" />
+      </button>
+    </div>
+  );
+
+  const recurringNoRecordsTemplate = () => (
+    <div className="p-8 text-center space-y-3">
+      <ArrowPathIcon className="h-12 w-12 text-gray-400 mx-auto" />
+      <p className="text-gray-500">No recurring jobs found</p>
+      <button
+        type="button"
+        onClick={() => {
+          resetForm();
+          setShowCreateModal(true);
+        }}
+        className="mt-2 text-primary-600 hover:text-primary-700 font-medium"
+      >
+        Create your first recurring job
+      </button>
+    </div>
+  );
 
   const loadCompanyServices = async () => {
     try {
@@ -553,120 +679,67 @@ const RecurringJobsPage = () => {
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
             <p className="mt-2 text-gray-500">Loading recurring jobs...</p>
           </div>
-        ) : recurringJobs.length === 0 ? (
-          <div className="p-8 text-center">
-            <ArrowPathIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-500">No recurring jobs found</p>
-            <button
-              onClick={() => {
-                resetForm();
-                setShowCreateModal(true);
-              }}
-              className="mt-4 text-primary-600 hover:text-primary-700 font-medium"
-            >
-              Create your first recurring job
-            </button>
-          </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Customer
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Service
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Frequency
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Schedule
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {recurringJobs.map((recurringJob) => (
-                  <tr key={recurringJob.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <UserIcon className="h-5 w-5 text-gray-400 mr-2" />
-                        <div className="text-sm font-medium text-gray-900">{recurringJob.customerName}</div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <CogIcon className="h-5 w-5 text-gray-400 mr-2" />
-                        <div className="text-sm text-gray-900">{recurringJob.serviceType}</div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {getFrequencyLabel(recurringJob.frequency)}
-                      {recurringJob.dayOfWeek !== null && recurringJob.dayOfWeek !== undefined && (
-                        <span className="ml-1">
-                          ({DAY_OF_WEEK_OPTIONS.find(d => d.value === recurringJob.dayOfWeek)?.label || 'N/A'})
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <div className="flex items-center">
-                        <ClockIcon className="h-4 w-4 mr-1" />
-                        {recurringJob.time || 'N/A'}
-                      </div>
-                      <div className="text-xs text-gray-400 mt-1">
-                        {recurringJob.startDate ? `Starts: ${formatDate(recurringJob.startDate)}` : ''}
-                        {recurringJob.endDate ? ` | Ends: ${formatDate(recurringJob.endDate)}` : ''}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        recurringJob.isActive 
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {recurringJob.isActive ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => handleToggleActive(recurringJob.id, recurringJob.isActive)}
-                          className={`${recurringJob.isActive ? 'text-yellow-600 hover:text-yellow-900' : 'text-green-600 hover:text-green-900'}`}
-                          title={recurringJob.isActive ? 'Deactivate' : 'Activate'}
-                        >
-                          {recurringJob.isActive ? (
-                            <StopIcon className="h-5 w-5" />
-                          ) : (
-                            <PlayIcon className="h-5 w-5" />
-                          )}
-                        </button>
-                        <button
-                          onClick={() => openEditModal(recurringJob)}
-                          className="text-primary-600 hover:text-primary-900"
-                          title="Edit"
-                        >
-                          <PencilIcon className="h-5 w-5" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteRecurringJob(recurringJob.id)}
-                          className="text-red-600 hover:text-red-900"
-                          title="Delete"
-                        >
-                          <TrashIcon className="h-5 w-5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="px-3 pb-4">
+            <GridComponent
+              id="recurringJobsGrid"
+              dataSource={recurringJobs}
+              allowPaging
+              allowSorting
+              allowFiltering
+              allowSelection
+              allowExcelExport
+              filterSettings={recurringFilterSettings}
+              toolbar={recurringToolbarOptions}
+              toolbarClick={handleRecurringToolbarClick}
+              selectionSettings={{ type: 'Single' }}
+              pageSettings={recurringPageSettings}
+              height="520"
+              ref={recurringGridRef}
+              noRecordsTemplate={recurringNoRecordsTemplate}
+            >
+              <ColumnsDirective>
+                <ColumnDirective
+                  field="customerName"
+                  headerText="Customer"
+                  width="220"
+                  template={recurringCustomerTemplate}
+                />
+                <ColumnDirective
+                  field="serviceType"
+                  headerText="Service"
+                  width="200"
+                  template={recurringServiceTemplate}
+                />
+                <ColumnDirective
+                  field="frequency"
+                  headerText="Frequency"
+                  width="160"
+                  template={recurringFrequencyTemplate}
+                />
+                <ColumnDirective
+                  field="time"
+                  headerText="Schedule"
+                  width="200"
+                  template={recurringScheduleTemplate}
+                />
+                <ColumnDirective
+                  field="isActive"
+                  headerText="Status"
+                  width="120"
+                  template={recurringStatusTemplate}
+                  allowFiltering={false}
+                />
+                <ColumnDirective
+                  headerText="Actions"
+                  width="180"
+                  template={recurringActionsTemplate}
+                  allowFiltering={false}
+                  allowSorting={false}
+                />
+              </ColumnsDirective>
+              <Inject services={[Page, Toolbar, Sort, Filter, ExcelExport, Selection, Search, Resize]} />
+            </GridComponent>
           </div>
         )}
       </div>

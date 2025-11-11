@@ -250,6 +250,7 @@ class MaterialsService {
         costPerUnit: materialData.costPerUnit || 0,
         retailPrice: parseFloat(materialData.retailPrice) || 0,
         supplier: materialData.supplier?.trim() || '',
+        supplierSku: materialData.supplierSku?.trim() || '',
         reorderThreshold: materialData.reorderThreshold || 0,
         quantityInStock: materialData.quantityInStock || 0,
         storageLocation: materialData.storageLocation?.trim() || '',
@@ -257,6 +258,9 @@ class MaterialsService {
         barcode: materialData.barcode?.trim() || '',
         expirationDate: materialData.expirationDate || null,
         active: materialData.active !== undefined ? materialData.active : true,
+        taxable: materialData.taxable !== undefined ? materialData.taxable : false,
+        internalNotes: materialData.internalNotes?.trim() || '',
+        defaultMarkupPercent: materialData.defaultMarkupPercent || 0,
         companyId: effectiveCompanyId,
         createdAt: now,
         updatedAt: now,
@@ -347,11 +351,28 @@ class MaterialsService {
       if (updateData.category) updateData.category = updateData.category.trim();
       if (updateData.subcategory) updateData.subcategory = updateData.subcategory.trim();
       if (updateData.supplier) updateData.supplier = updateData.supplier.trim();
+      if (updateData.supplierSku) updateData.supplierSku = updateData.supplierSku.trim();
       if (updateData.storageLocation) updateData.storageLocation = updateData.storageLocation.trim();
+      if (updateData.internalNotes) updateData.internalNotes = updateData.internalNotes.trim();
       if (updateData.imageUrl) updateData.imageUrl = updateData.imageUrl.trim();
       if (updateData.barcode) updateData.barcode = updateData.barcode.trim();
       if (updateData.retailPrice !== undefined) updateData.retailPrice = parseFloat(updateData.retailPrice) || 0;
       if (updateData.costPerUnit !== undefined) updateData.costPerUnit = parseFloat(updateData.costPerUnit) || 0;
+      if (updateData.reorderThreshold !== undefined) updateData.reorderThreshold = parseFloat(updateData.reorderThreshold) || 0;
+      if (updateData.quantityInStock !== undefined) updateData.quantityInStock = parseFloat(updateData.quantityInStock) || 0;
+      if (updateData.defaultMarkupPercent !== undefined) updateData.defaultMarkupPercent = parseFloat(updateData.defaultMarkupPercent) || 0;
+      if (updateData.active !== undefined) {
+        if (typeof updateData.active === 'string') {
+          updateData.active = ['true', 'yes', '1', 'active'].includes(updateData.active.toLowerCase());
+        }
+        updateData.active = Boolean(updateData.active);
+      }
+      if (updateData.taxable !== undefined) {
+        if (typeof updateData.taxable === 'string') {
+          updateData.taxable = ['true', 'yes', '1', 'taxable'].includes(updateData.taxable.toLowerCase());
+        }
+        updateData.taxable = Boolean(updateData.taxable);
+      }
 
       await updateDoc(doc(db, 'materials', materialId), updateData);
 

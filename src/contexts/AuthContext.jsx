@@ -10,6 +10,7 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import toast from 'react-hot-toast';
+import CompanyService from '../services/companyService';
 
 const AuthContext = createContext();
 
@@ -150,14 +151,23 @@ export const AuthProvider = ({ children }) => {
       const user = userCredential.user;
       
       // Fetch user profile
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      const userDocRef = doc(db, 'users', user.uid);
+      const userDoc = await getDoc(userDocRef);
+      let profileData;
+
       if (userDoc.exists()) {
-        const profileData = userDoc.data();
+        profileData = userDoc.data();
         setUserProfile(profileData);
-        
-        // Check if user needs company setup (admin without company, except super admin)
+
         if (profileData.role === 'admin' && !profileData.companyId && email !== SUPER_ADMIN_EMAIL) {
-          // User will be redirected by ProtectedRoute
+          const claimResult = await CompanyService.claimPendingCompanyOwnership();
+          if (claimResult.success && claimResult.claimedCompanies?.length) {
+            const refreshedDoc = await getDoc(userDocRef);
+            if (refreshedDoc.exists()) {
+              profileData = refreshedDoc.data();
+              setUserProfile(profileData);
+            }
+          }
         }
       } else {
         // User profile doesn't exist, create minimal one
@@ -170,7 +180,17 @@ export const AuthProvider = ({ children }) => {
           createdAt: new Date().toISOString()
         };
         await setDoc(doc(db, 'users', user.uid), minimalProfile);
-        setUserProfile(minimalProfile);
+        let finalProfile = minimalProfile;
+
+        const claimResult = await CompanyService.claimPendingCompanyOwnership();
+        if (claimResult.success && claimResult.claimedCompanies?.length) {
+          const refreshedDoc = await getDoc(userDocRef);
+          if (refreshedDoc.exists()) {
+            finalProfile = refreshedDoc.data();
+          }
+        }
+
+        setUserProfile(finalProfile);
       }
       
       toast.success('Welcome back!');
@@ -251,9 +271,26 @@ export const AuthProvider = ({ children }) => {
       if (user) {
         // Fetch user profile when user signs in
         try {
-          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          const userDocRef = doc(db, 'users', user.uid);
+          const userDoc = await getDoc(userDocRef);
           if (userDoc.exists()) {
-            setUserProfile(userDoc.data());
+            const profileData = userDoc.data();
+
+            if (profileData.role === 'admin' && !profileData.companyId && user.email !== SUPER_ADMIN_EMAIL) {
+              const claimResult = await CompanyService.claimPendingCompanyOwnership();
+              if (claimResult.success && claimResult.claimedCompanies?.length) {
+                const refreshedDoc = await getDoc(userDocRef);
+                if (refreshedDoc.exists()) {
+                  setUserProfile(refreshedDoc.data());
+                  setLoading(false);
+                  return;
+                }
+              }
+            }
+
+            setUserProfile(profileData);
+          } else {
+            setUserProfile(null);
           }
         } catch (error) {
           console.error('Error fetching user profile:', error);

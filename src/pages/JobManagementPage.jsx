@@ -99,6 +99,8 @@ const JobManagementPage = () => {
     () => ({
       customerId: '',
       customerName: '',
+      customerPhone: '',
+      address: '',
       serviceType: '',
       status: 'scheduled',
       date: new Date().toISOString().split('T')[0],
@@ -408,6 +410,8 @@ const JobManagementPage = () => {
     setJobFormData({
       customerId: job.customerId || '',
       customerName: job.customerName || '',
+      customerPhone: job.customerPhone || '',
+      address: job.address || '',
       serviceType: job.serviceType || '',
       status: job.status || 'scheduled',
       date: job.date || defaultJobForm.date,
@@ -1355,6 +1359,8 @@ const JobManagementPage = () => {
                             ...prev,
                             customerId: value,
                             customerName: selectedCustomer?.name || prev.customerName,
+                            customerPhone: selectedCustomer?.phone || '',
+                            address: selectedCustomer?.address || '',
                           }));
                           setJobFormErrors((prev) => ({ ...prev, customerName: undefined }));
                         }}
@@ -1669,6 +1675,8 @@ const JobManagementPage = () => {
                       const payload = {
                         customerId: jobFormData.customerId || null,
                         customerName: jobFormData.customerName || '',
+                        customerPhone: jobFormData.customerPhone || '',
+                        address: jobFormData.address || '',
                         serviceType: jobFormData.serviceType.trim(),
                         status: jobFormData.status || 'scheduled',
                         date: jobFormData.date,
@@ -1703,6 +1711,7 @@ const JobManagementPage = () => {
                         setJobFormErrors({});
                         setSelectedJob(null);
                         await loadJobs();
+                        await loadStats(); // Recalculate stats after job creation/update
                       } else {
                         toast.error(result.error || 'Failed to save job');
                       }

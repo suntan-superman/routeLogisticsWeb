@@ -258,7 +258,7 @@ const CalendarPage = () => {
                 <div className="flex items-start justify-between">
                   <div>
                     <h4 className="text-xl font-semibold text-gray-900">{selectedJob.serviceType}</h4>
-                    <p className="text-gray-600">{selectedJob.customer?.name || 'Unknown Customer'}</p>
+                    <p className="text-gray-600">{selectedJob.customerName || selectedJob.customer?.name || 'Unknown Customer'}</p>
                   </div>
                   <div className="flex items-center space-x-2">
                     <span className={`px-3 py-1 rounded-full text-sm font-medium ${

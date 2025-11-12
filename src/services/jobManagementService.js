@@ -290,6 +290,11 @@ class JobManagementService {
       const userId = this.getCurrentUserId();
       const nowIso = new Date().toISOString();
 
+      console.log('=== JobManagementService.createJob ===');
+      console.log('Received jobData:', jobData);
+      console.log('jobData.customerPhone:', jobData.customerPhone);
+      console.log('jobData.address:', jobData.address);
+
       const sanitized = {
         userId,
         companyId: jobData.companyId || null,
@@ -309,6 +314,11 @@ class JobManagementService {
         createdAt: nowIso,
         updatedAt: nowIso,
       };
+
+      console.log('=== Sanitized data being saved ===');
+      console.log('sanitized:', sanitized);
+      console.log('sanitized.customerPhone:', sanitized.customerPhone);
+      console.log('sanitized.address:', sanitized.address);
 
       const docRef = await addDoc(collection(db, 'jobs'), sanitized);
 

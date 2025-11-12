@@ -1382,7 +1382,7 @@ const JobManagementPage = () => {
                           }));
                           setJobFormErrors((prev) => ({ ...prev, customerName: undefined }));
                         }}
-                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        className="block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 text-sm transition-colors"
                       >
                         <option value="">
                           {jobCustomersLoading ? 'Loading customers...' : 'Select existing customer'}
@@ -1426,7 +1426,7 @@ const JobManagementPage = () => {
                           setJobFormErrors((prev) => ({ ...prev, customerName: undefined }));
                         }}
                         placeholder="Customer name"
-                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        className="block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 text-sm transition-colors"
                       />
                       {jobFormErrors.customerName && (
                         <p className="mt-1 text-xs text-red-600">{jobFormErrors.customerName}</p>
@@ -1709,6 +1709,11 @@ const JobManagementPage = () => {
                         }
                       }
 
+                      console.log('=== JOB FORM DATA BEFORE PAYLOAD ===');
+                      console.log('jobFormData:', jobFormData);
+                      console.log('customerPhone:', jobFormData.customerPhone);
+                      console.log('address:', jobFormData.address);
+                      
                       const payload = {
                         customerId: jobFormData.customerId || null,
                         customerName: jobFormData.customerName || '',
@@ -1733,6 +1738,11 @@ const JobManagementPage = () => {
                           jobFormData.assignedTechnicianName ||
                           '',
                       };
+                      
+                      console.log('=== PAYLOAD BEING SENT ===');
+                      console.log('payload:', payload);
+                      console.log('payload.customerPhone:', payload.customerPhone);
+                      console.log('payload.address:', payload.address);
 
                       let result;
                       if (isEditingJob && selectedJob?.id) {

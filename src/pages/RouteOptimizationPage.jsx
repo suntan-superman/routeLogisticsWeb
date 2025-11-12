@@ -339,7 +339,7 @@ const RouteOptimizationPage = () => {
         >
           <div className="px-6 py-4 border-b border-gray-200">
             <h2 className="text-lg font-medium text-gray-900">
-              Jobs for {new Date(selectedDate).toLocaleDateString()}
+              Jobs for {new Date(selectedDate + 'T12:00:00').toLocaleDateString()}
             </h2>
             <p className="text-sm text-gray-500">
               {selectedJobs.length} of {jobs.length} selected

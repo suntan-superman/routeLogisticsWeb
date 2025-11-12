@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { ScheduleComponent, ViewsDirective, ViewDirective, Day, Week, WorkWeek, Month, Agenda, Inject, Resize, DragAndDrop } from '@syncfusion/ej2-react-schedule';
 import JobManagementService from '../services/jobManagementService';
 import CustomerService from '../services/customerService';
+import { useAuth } from '../contexts/AuthContext';
+import { useCompany } from '../contexts/CompanyContext';
 import { 
   CalendarIcon,
   ClockIcon,
@@ -16,6 +18,13 @@ import toast from 'react-hot-toast';
 import '../styles/syncfusion.css';
 
 const CalendarPage = () => {
+  const { userProfile } = useAuth();
+  const { getEffectiveCompanyId, refreshKey } = useCompany();
+  const companyIdForJobs = useMemo(
+    () => (typeof getEffectiveCompanyId === 'function' ? getEffectiveCompanyId() : null),
+    [getEffectiveCompanyId, refreshKey, userProfile?.companyId]
+  );
+
   const [scheduleData, setScheduleData] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -24,14 +33,20 @@ const CalendarPage = () => {
 
   useEffect(() => {
     loadJobsAndCustomers();
-  }, []);
+  }, [companyIdForJobs, userProfile]);
 
   const loadJobsAndCustomers = async () => {
     setIsLoading(true);
     try {
+      console.log('📅 Calendar loading jobs for:', { 
+        companyId: companyIdForJobs, 
+        userRole: userProfile?.role,
+        userId: userProfile?.uid 
+      });
+      
       const [jobsResult, customersResult] = await Promise.all([
-        JobManagementService.getJobs(),
-        CustomerService.getCustomers()
+        JobManagementService.getJobs(1000, null, {}, userProfile, companyIdForJobs),
+        CustomerService.getCustomers(1000, null, {}, userProfile, companyIdForJobs)
       ]);
 
       if (jobsResult.success && customersResult.success) {

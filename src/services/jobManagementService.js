@@ -27,19 +27,51 @@ class JobManagementService {
   }
 
   // Get all jobs for the current user's company
-  static async getJobs(limitCount = 50, lastDoc = null, filters = {}) {
+  static async getJobs(limitCount = 1000, lastDoc = null, filters = {}, userProfile = null, companyId = null) {
     try {
       const userId = this.getCurrentUserId();
       
-      // For now, we'll get jobs by userId (individual user)
-      // Later this can be expanded to get jobs by companyId
-      let q = query(
-        collection(db, 'jobs'),
-        where('userId', '==', userId),
-        orderBy('date', 'desc'),
-        orderBy('time', 'desc'),
-        limit(limitCount)
-      );
+      // Use provided companyId or fall back to userProfile companyId
+      const effectiveCompanyId = companyId || userProfile?.companyId;
+      
+      // Build query based on role and company
+      let q;
+      
+      // Super admin: can access all jobs if no companyId specified, otherwise filter by company
+      if (userProfile?.role === 'super_admin') {
+        if (effectiveCompanyId) {
+          // Super admin viewing specific company's jobs
+          q = query(
+            collection(db, 'jobs'),
+            where('companyId', '==', effectiveCompanyId),
+            orderBy('date', 'desc'),
+            limit(limitCount)
+          );
+        } else {
+          // Super admin without company selection - get all jobs (or user's own)
+          q = query(
+            collection(db, 'jobs'),
+            orderBy('date', 'desc'),
+            limit(limitCount)
+          );
+        }
+      } else if (effectiveCompanyId) {
+        // Regular users with company: get all company jobs
+        q = query(
+          collection(db, 'jobs'),
+          where('companyId', '==', effectiveCompanyId),
+          orderBy('date', 'desc'),
+          limit(limitCount)
+        );
+      } else {
+        // Fallback to userId for users without company
+        q = query(
+          collection(db, 'jobs'),
+          where('userId', '==', userId),
+          orderBy('date', 'desc'),
+          limit(limitCount)
+        );
+      }
 
       if (lastDoc) {
         q = query(q, startAfter(lastDoc));

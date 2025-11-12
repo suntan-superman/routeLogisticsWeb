@@ -244,7 +244,7 @@ const JobManagementPage = () => {
   useEffect(() => {
     loadJobs();
     loadStats();
-  }, []);
+  }, [companyIdForJobs, userProfile]);
 
   useEffect(() => {
     filterAndSortJobs();
@@ -293,7 +293,7 @@ const JobManagementPage = () => {
   const loadJobs = async () => {
     setIsLoading(true);
     try {
-      const result = await JobManagementService.getJobs();
+      const result = await JobManagementService.getJobs(1000, null, {}, userProfile, companyIdForJobs);
       if (result.success) {
         setJobs(result.jobs);
       } else {

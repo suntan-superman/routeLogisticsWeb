@@ -6,6 +6,7 @@ import CompanyService from '../services/companyService';
 import CustomerService from '../services/customerService';
 import JobManagementService from '../services/jobManagementService';
 import ReportingService from '../services/reportingService';
+import TechnicianDashboard from '../components/TechnicianDashboard';
 import { motion } from 'framer-motion';
 import { 
   BuildingOfficeIcon, 
@@ -182,6 +183,24 @@ const HomePage = () => {
     { name: 'Revenue This Month', value: formattedStats.monthlyRevenue, icon: CurrencyDollarIcon },
     { name: 'Team Members', value: formattedStats.teamMembers, icon: BuildingOfficeIcon },
   ];
+
+  // Show technician-specific dashboard for field techs
+  const isFieldTech = userProfile?.role === 'field_tech' || userProfile?.role === 'technician';
+  const isCustomer = userProfile?.role === 'customer' || !userProfile?.role || userProfile?.role === '';
+  
+  if (isFieldTech) {
+    return <TechnicianDashboard userProfile={userProfile} />;
+  }
+
+  // Redirect customers to their portal
+  if (isCustomer) {
+    window.location.href = '/customer-portal';
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-gray-500">Redirecting to your customer portal...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

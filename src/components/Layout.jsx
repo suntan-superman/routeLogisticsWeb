@@ -38,6 +38,7 @@ const Layout = ({ children }) => {
     { name: 'Estimate Templates', href: '/estimate-templates', icon: DocumentTextIcon },
     { name: 'Jobs', href: '/jobs', icon: ClipboardDocumentListIcon },
     { name: 'Recurring Jobs', href: '/recurring-jobs', icon: ArrowPathIcon },
+    { name: 'Route Optimization', href: '/route-optimization', icon: MapPinIcon, adminOnly: true },
     { name: 'Team Tracking', href: '/team-tracking', icon: MapPinIcon, adminOnly: true },
     { name: 'Notifications', href: '/notifications', icon: BellIcon, adminOnly: true },
     { name: 'Invoices', href: '/invoices', icon: ReceiptRefundIcon },

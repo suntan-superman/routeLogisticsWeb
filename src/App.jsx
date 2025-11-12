@@ -7,6 +7,7 @@ import { HelmetProvider } from 'react-helmet-async';
 // Contexts
 import { AuthProvider } from './contexts/AuthContext';
 import { CompanyProvider } from './contexts/CompanyContext';
+import { CustomerPortalProvider } from './contexts/CustomerPortalContext';
 
 // Pages
 import HomePage from './pages/HomePage';
@@ -26,6 +27,8 @@ import BulkImportPage from './pages/BulkImportPage';
 import CompanySearchPage from './pages/CompanySearchPage';
 import TeamTrackingPage from './pages/TeamTrackingPage';
 import NotificationsPage from './pages/NotificationsPage';
+import RouteOptimizationPage from './pages/RouteOptimizationPage';
+import CustomerPortalPage from './pages/CustomerPortalPage';
 
 // Components
 import Layout from './components/Layout';
@@ -51,12 +54,13 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <CompanyProvider>
-            <Router
-              future={{
-                v7_startTransition: true,
-                v7_relativeSplatPath: true
-              }}
-            >
+            <CustomerPortalProvider>
+              <Router
+                future={{
+                  v7_startTransition: true,
+                  v7_relativeSplatPath: true
+                }}
+              >
             <div className="min-h-screen bg-gray-50">
               <Routes>
                 {/* Public Routes */}
@@ -177,6 +181,20 @@ function App() {
                   </ProtectedRoute>
                 } />
                 
+                <Route path="/route-optimization" element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <RouteOptimizationPage />
+                    </Layout>
+                  </ProtectedRoute>
+                } />
+                
+                <Route path="/customer-portal" element={
+                  <ProtectedRoute>
+                    <CustomerPortalPage />
+                  </ProtectedRoute>
+                } />
+                
                 {/* Redirect any unknown routes to home */}
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
@@ -204,6 +222,7 @@ function App() {
               />
             </div>
           </Router>
+            </CustomerPortalProvider>
           </CompanyProvider>
         </AuthProvider>
       </QueryClientProvider>

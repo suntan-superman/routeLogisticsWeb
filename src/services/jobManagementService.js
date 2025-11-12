@@ -295,6 +295,8 @@ class JobManagementService {
         companyId: jobData.companyId || null,
         customerId: jobData.customerId || null,
         customerName: (jobData.customerName || '').trim(),
+        customerPhone: (jobData.customerPhone || '').trim(),
+        address: (jobData.address || '').trim(),
         serviceType: (jobData.serviceType || '').trim(),
         status: jobData.status || 'scheduled',
         date: jobData.date || nowIso.split('T')[0],

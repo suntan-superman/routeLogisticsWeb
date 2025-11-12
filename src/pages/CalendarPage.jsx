@@ -42,11 +42,13 @@ const CalendarPage = () => {
         const scheduleEvents = jobs.map(job => {
           const customer = customersData.find(c => c.id === job.customerId);
           const startDate = new Date(`${job.date}T${job.time}`);
-          const endDate = new Date(startDate.getTime() + (parseFloat(job.estimatedDuration) || 2) * 60 * 60 * 1000);
+          // Use job.duration first, fallback to estimatedDuration, then default to 1 hour
+          const durationHours = parseFloat(job.duration) || parseFloat(job.estimatedDuration) || 1;
+          const endDate = new Date(startDate.getTime() + durationHours * 60 * 60 * 1000);
 
           return {
             Id: job.id,
-            Subject: `${job.serviceType} - ${customer?.name || 'Unknown Customer'}`,
+            Subject: `${job.serviceType} - ${job.customerName || customer?.name || 'Unknown Customer'}`,
             StartTime: startDate,
             EndTime: endDate,
             Location: job.address || customer?.address || 'Location TBD',

@@ -258,12 +258,16 @@ const SignUpPage = () => {
   };
 
   const handleStep3Next = () => {
+    if (isInviteFlow) {
+      handleSignUp();
+      return;
+    }
+
     if (!role) {
       toast.error('Please select a role');
       return;
     }
 
-    // If admin creating new company, go to company details
     if (companyOption === 'new') {
       setStep(4);
     } else {
@@ -317,45 +321,43 @@ const SignUpPage = () => {
       const userId = signupResult.user?.uid;
 
       // If creating new company, store data for later (after email verification)
-      if (companyOption === 'new') {
+      if (!isInviteFlow && companyOption === 'new') {
         // Company will be created after email verification in Company Setup
         // Data is already stored in localStorage by signup function
         navigate('/verify-email', { 
           state: { email: signupResult.email } 
         });
-      } else {
-        if (invitationCode) {
-          const acceptResult = await InvitationService.acceptInvitation(userId, invitationCode);
-          if (!acceptResult.success) {
-            toast.error(acceptResult.error || 'Failed to accept invitation');
-          } else {
-            toast.success(
-              acceptResult.company?.name
-                ? `Welcome to ${acceptResult.company.name}!`
-                : 'Invitation accepted successfully.'
-            );
-          }
-
-          navigate('/verify-email', {
-            state: { email: signupResult.email }
-          });
-        } else if (companyCode) {
-          const joinResult = await CompanyService.joinCompanyByCode(userId, companyCode, role);
-
-          if (joinResult.success) {
-            toast.success(`Successfully joined ${joinResult.company.name}!`);
-          } else {
-            toast.error('Failed to join company: ' + joinResult.error);
-          }
-
-          navigate('/verify-email', {
-            state: { email: signupResult.email }
-          });
+      } else if (invitationCode) {
+        const acceptResult = await InvitationService.acceptInvitation(userId, invitationCode);
+        if (!acceptResult.success) {
+          toast.error(acceptResult.error || 'Failed to accept invitation');
         } else {
-          navigate('/verify-email', {
-            state: { email: signupResult.email }
-          });
+          toast.success(
+            acceptResult.company?.name
+              ? `Welcome to ${acceptResult.company.name}!`
+              : 'Invitation accepted successfully.'
+          );
         }
+
+        navigate('/verify-email', {
+          state: { email: signupResult.email }
+        });
+      } else if (companyCode) {
+        const joinResult = await CompanyService.joinCompanyByCode(userId, companyCode, role);
+
+        if (joinResult.success) {
+          toast.success(`Successfully joined ${joinResult.company.name}!`);
+        } else {
+          toast.error('Failed to join company: ' + joinResult.error);
+        }
+
+        navigate('/verify-email', {
+          state: { email: signupResult.email }
+        });
+      } else {
+        navigate('/verify-email', {
+          state: { email: signupResult.email }
+        });
       }
     } catch (error) {
       console.error('Signup error:', error);
@@ -374,7 +376,8 @@ const SignUpPage = () => {
     password === confirmPassword
   );
 
-  const isInviteFlow = Boolean(invitationDetails);
+  const hasInviteParams = Boolean(parsedInviteParams.invitationCode);
+  const isInviteFlow = Boolean(invitationDetails) || hasInviteParams;
   const invitedRole = invitationDetails?.role || parsedInviteParams.role || role;
   const emailLocked = Boolean(isInviteFlow && email);
 
@@ -476,8 +479,8 @@ const SignUpPage = () => {
                   autoComplete="off"
                   value={email}
                   onChange={(e) => setEmail(e.target.value.trim())}
-                  disabled={emailLocked}
-                  className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm ${emailLocked ? 'bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed' : 'border-gray-300'}`}
+                  disabled={emailLocked || hasInviteParams}
+                  className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm ${emailLocked || hasInviteParams ? 'bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed' : 'border-gray-300'}`}
                   placeholder="john@example.com"
                 />
                 {emailLocked && (

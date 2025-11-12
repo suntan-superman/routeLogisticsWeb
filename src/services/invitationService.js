@@ -289,6 +289,12 @@ class InvitationService {
 
       const data = await response.json().catch(() => ({}));
 
+      console.log('[InvitationService.acceptInvitation] Response', {
+        status: response.status,
+        ok: response.ok,
+        body: data
+      });
+
       if (!response.ok) {
         return {
           success: false,
@@ -303,6 +309,7 @@ class InvitationService {
         if (!userDoc.exists()) {
           throw new Error('User profile not found after accepting invitation');
         }
+        console.log('[InvitationService.acceptInvitation] User profile after acceptance', userDoc.data());
       } catch (profileError) {
         console.error('Error refreshing user profile after invitation acceptance:', profileError);
       }

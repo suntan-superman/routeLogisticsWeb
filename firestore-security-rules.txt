@@ -84,12 +84,50 @@ service cloud.firestore {
       );
     }
     
-    // Jobs collection - users can only access their own jobs
+    // Jobs collection - company-based access
     match /jobs/{jobId} {
-      allow read, write: if request.auth != null && 
-        request.auth.uid == resource.data.userId;
+      // Allow read:
+      // - Super admin can read all jobs
+      // - Users can read jobs in their company
+      // - Users can read jobs they created
+      // - Users can read jobs assigned to them
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        (resource.data.companyId != null &&
+         resource.data.companyId == getUserProfile().companyId) ||
+        resource.data.userId == request.auth.uid ||
+        resource.data.assignedTo == request.auth.uid
+      );
+      
+      // Allow create: authenticated users creating jobs for their company
       allow create: if request.auth != null && 
-        request.auth.uid == request.resource.data.userId;
+        request.auth.uid == request.resource.data.userId &&
+        (isSuperAdmin() ||
+         request.resource.data.companyId == getUserProfile().companyId);
+      
+      // Allow update:
+      // - Super admin
+      // - Job creator
+      // - Assigned technician (can update status, notes, etc.)
+      // - Company admins/supervisors
+      allow update: if request.auth != null && (
+        isSuperAdmin() ||
+        resource.data.userId == request.auth.uid ||
+        resource.data.assignedTo == request.auth.uid ||
+        (isCompanyAdminOrSupervisor() &&
+         resource.data.companyId == getUserProfile().companyId)
+      );
+      
+      // Allow delete:
+      // - Super admin
+      // - Job creator
+      // - Company admins/supervisors
+      allow delete: if request.auth != null && (
+        isSuperAdmin() ||
+        resource.data.userId == request.auth.uid ||
+        (isCompanyAdminOrSupervisor() &&
+         resource.data.companyId == getUserProfile().companyId)
+      );
     }
     
     // Appointments collection - users can only access their own appointments

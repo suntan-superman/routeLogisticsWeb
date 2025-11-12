@@ -695,16 +695,16 @@ const CustomerManagementPage = () => {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <div className="bg-white overflow-hidden shadow-sm rounded-lg border border-gray-200">
-          <div className="p-5">
+          <div className="p-3">
             <div className="flex items-center">
               <div className="flex-shrink-0">
-                <UsersIcon className="h-6 w-6 text-primary-500" />
+                <UsersIcon className="h-5 w-5 text-primary-500" />
               </div>
-              <div className="ml-5 w-0 flex-1">
+              <div className="ml-3 w-0 flex-1">
                 <dl>
-                  <dt className="text-sm font-medium text-gray-500 truncate">Total Customers</dt>
+                  <dt className="text-xs font-medium text-gray-500 truncate">Total Customers</dt>
                   <dd className="text-lg font-medium text-gray-900">{stats.totalCustomers}</dd>
                 </dl>
               </div>
@@ -713,14 +713,14 @@ const CustomerManagementPage = () => {
         </div>
 
         <div className="bg-white overflow-hidden shadow-sm rounded-lg border border-gray-200">
-          <div className="p-5">
+          <div className="p-3">
             <div className="flex items-center">
               <div className="flex-shrink-0">
-                <div className="h-6 w-6 bg-green-500 rounded-full"></div>
+                <div className="h-5 w-5 bg-green-500 rounded-full"></div>
               </div>
-              <div className="ml-5 w-0 flex-1">
+              <div className="ml-3 w-0 flex-1">
                 <dl>
-                  <dt className="text-sm font-medium text-gray-500 truncate">Active Customers</dt>
+                  <dt className="text-xs font-medium text-gray-500 truncate">Active Customers</dt>
                   <dd className="text-lg font-medium text-gray-900">{stats.activeCustomers}</dd>
                 </dl>
               </div>
@@ -729,14 +729,14 @@ const CustomerManagementPage = () => {
         </div>
 
         <div className="bg-white overflow-hidden shadow-sm rounded-lg border border-gray-200">
-          <div className="p-5">
+          <div className="p-3">
             <div className="flex items-center">
               <div className="flex-shrink-0">
-                <div className="h-6 w-6 bg-gray-400 rounded-full"></div>
+                <div className="h-5 w-5 bg-gray-400 rounded-full"></div>
               </div>
-              <div className="ml-5 w-0 flex-1">
+              <div className="ml-3 w-0 flex-1">
                 <dl>
-                  <dt className="text-sm font-medium text-gray-500 truncate">Inactive Customers</dt>
+                  <dt className="text-xs font-medium text-gray-500 truncate">Inactive Customers</dt>
                   <dd className="text-lg font-medium text-gray-900">{stats.inactiveCustomers}</dd>
                 </dl>
               </div>
@@ -745,14 +745,14 @@ const CustomerManagementPage = () => {
         </div>
 
         <div className="bg-white overflow-hidden shadow-sm rounded-lg border border-gray-200">
-          <div className="p-5">
+          <div className="p-3">
             <div className="flex items-center">
               <div className="flex-shrink-0">
-                <div className="h-6 w-6 bg-green-600 rounded-full"></div>
+                <div className="h-5 w-5 bg-green-600 rounded-full"></div>
               </div>
-              <div className="ml-5 w-0 flex-1">
+              <div className="ml-3 w-0 flex-1">
                 <dl>
-                  <dt className="text-sm font-medium text-gray-500 truncate">Total Revenue</dt>
+                  <dt className="text-xs font-medium text-gray-500 truncate">Total Revenue</dt>
                   <dd className="text-lg font-medium text-gray-900">{formatCurrency(stats.totalRevenue)}</dd>
                 </dl>
               </div>
@@ -762,14 +762,14 @@ const CustomerManagementPage = () => {
 
         {canApproveCustomers(userProfile) && (
           <div className="bg-white overflow-hidden shadow-sm rounded-lg border-2 border-yellow-400">
-            <div className="p-5">
+            <div className="p-3">
               <div className="flex items-center">
                 <div className="flex-shrink-0">
-                  <ClockIcon className="h-6 w-6 text-yellow-600" />
+                  <ClockIcon className="h-5 w-5 text-yellow-600" />
                 </div>
-                <div className="ml-5 w-0 flex-1">
+                <div className="ml-3 w-0 flex-1">
                   <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">Pending Approval</dt>
+                    <dt className="text-xs font-medium text-gray-500 truncate">Pending Approval</dt>
                     <dd className="text-lg font-medium text-gray-900">
                       {stats.pendingCustomers}
                       {stats.pendingCustomers > 0 && (

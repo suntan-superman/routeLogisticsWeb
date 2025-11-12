@@ -567,7 +567,7 @@ const RecurringJobsPage = () => {
                   <select
                     value={formData.customerId}
                     onChange={(e) => handleCustomerSelect(e.target.value)}
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                   >
                     <option value="">-- Select Customer --</option>
                     {customers.map(customer => (
@@ -581,7 +581,7 @@ const RecurringJobsPage = () => {
                   <select
                     value={formData.serviceType}
                     onChange={(e) => handleInputChange('serviceType', e.target.value)}
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                   >
                     <option value="">-- Select Service --</option>
                     {availableServices.length > 0 ? (
@@ -600,7 +600,7 @@ const RecurringJobsPage = () => {
                     <select
                       value={formData.frequency}
                       onChange={(e) => handleInputChange('frequency', e.target.value)}
-                      className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     >
                       {FREQUENCY_OPTIONS.map(option => (
                         <option key={option.value} value={option.value}>{option.label}</option>
@@ -614,7 +614,7 @@ const RecurringJobsPage = () => {
                       <select
                         value={formData.dayOfWeek || ''}
                         onChange={(e) => handleInputChange('dayOfWeek', e.target.value || null)}
-                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        className="w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       >
                         <option value="">Any Day</option>
                         {DAY_OF_WEEK_OPTIONS.map(option => (
@@ -633,7 +633,7 @@ const RecurringJobsPage = () => {
                       value={formData.time}
                       onChange={(e) => handleInputChange('time', e.target.value)}
                       placeholder="09:00 AM"
-                      className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     />
                   </div>
 
@@ -644,7 +644,7 @@ const RecurringJobsPage = () => {
                       value={formData.duration}
                       onChange={(e) => handleInputChange('duration', e.target.value)}
                       placeholder="2"
-                      className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     />
                   </div>
                 </div>
@@ -664,7 +664,7 @@ const RecurringJobsPage = () => {
                       }));
                     }}
                     disabled={teamMembersLoading || (teamMembers.length === 0 && !formData.assignedTechnicianId)}
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm disabled:bg-gray-100 disabled:text-gray-500"
+                    className="w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm disabled:bg-gray-100 disabled:text-gray-500"
                   >
                     <option value="">Unassigned</option>
                     {isAssignedTechnicianMissing && (
@@ -696,7 +696,7 @@ const RecurringJobsPage = () => {
                       type="date"
                       value={formData.startDate}
                       onChange={(e) => handleInputChange('startDate', e.target.value)}
-                      className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     />
                   </div>
 
@@ -706,7 +706,7 @@ const RecurringJobsPage = () => {
                       type="date"
                       value={formData.endDate}
                       onChange={(e) => handleInputChange('endDate', e.target.value)}
-                      className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     />
                   </div>
                 </div>
@@ -718,7 +718,7 @@ const RecurringJobsPage = () => {
                     value={formData.estimatedCost}
                     onChange={(e) => handleInputChange('estimatedCost', e.target.value)}
                     placeholder="0.00"
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                   />
                 </div>
 
@@ -728,7 +728,7 @@ const RecurringJobsPage = () => {
                     value={formData.notes}
                     onChange={(e) => handleInputChange('notes', e.target.value)}
                     rows={3}
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="Additional notes for recurring jobs..."
                   />
                 </div>

@@ -264,7 +264,7 @@ const TeamTrackingPage = () => {
             
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
                   Technician
                 </label>
                 <select
@@ -286,7 +286,7 @@ const TeamTrackingPage = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
                   Start Date
                 </label>
                 <input
@@ -298,7 +298,7 @@ const TeamTrackingPage = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
                   End Date
                 </label>
                 <input

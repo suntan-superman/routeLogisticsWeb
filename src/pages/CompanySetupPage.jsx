@@ -28,6 +28,7 @@ import {
   ArrowUpTrayIcon,
   MagnifyingGlassIcon,
   PencilIcon,
+  ArrowPathIcon,
   ClipboardDocumentIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
@@ -1311,7 +1312,7 @@ const renderCompaniesEmptyState = () => (
                     type="text"
                     value={companyData.name}
                     onChange={(e) => handleInputChange('name', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="Enter company name"
                   />
                 </div>
@@ -1325,7 +1326,7 @@ const renderCompaniesEmptyState = () => (
                       handleInputChange('phone', formatted);
                     }}
                     maxLength={14}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="(555) 123-4567"
                   />
                 </div>
@@ -1335,7 +1336,7 @@ const renderCompaniesEmptyState = () => (
                     value={companyData.description}
                     onChange={(e) => handleInputChange('description', e.target.value)}
                     rows={3}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="Brief description of your company and services"
                   />
                 </div>
@@ -1345,7 +1346,7 @@ const renderCompaniesEmptyState = () => (
                     type="email"
                     value={companyData.email}
                     onChange={(e) => handleInputChange('email', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="company@example.com"
                   />
                 </div>
@@ -1355,7 +1356,7 @@ const renderCompaniesEmptyState = () => (
                     type="url"
                     value={companyData.website}
                     onChange={(e) => handleInputChange('website', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="https://www.example.com"
                   />
                 </div>
@@ -1370,7 +1371,7 @@ const renderCompaniesEmptyState = () => (
                     type="url"
                     value={companyData.contactLink}
                     onChange={(e) => handleInputChange('contactLink', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="https://www.example.com/contact or mailto:contact@example.com"
                   />
                   <p className="mt-1 text-xs text-gray-500">
@@ -1389,7 +1390,7 @@ const renderCompaniesEmptyState = () => (
                     type="text"
                     value={companyData.address}
                     onChange={(e) => handleInputChange('address', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="123 Main Street"
                   />
                 </div>
@@ -1399,7 +1400,7 @@ const renderCompaniesEmptyState = () => (
                     type="text"
                     value={companyData.city}
                     onChange={(e) => handleInputChange('city', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="Bakersfield"
                   />
                 </div>
@@ -1409,7 +1410,7 @@ const renderCompaniesEmptyState = () => (
                     type="text"
                     value={companyData.state}
                     onChange={(e) => handleInputChange('state', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="CA"
                   />
                 </div>
@@ -1419,7 +1420,7 @@ const renderCompaniesEmptyState = () => (
                     type="text"
                     value={companyData.zipCode}
                     onChange={(e) => handleInputChange('zipCode', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="93311"
                   />
                 </div>
@@ -1704,14 +1705,14 @@ const renderCompaniesEmptyState = () => (
                       value={materialsSearchTerm}
                       onChange={(e) => setMaterialsSearchTerm(e.target.value)}
                       placeholder="Search materials..."
-                      className="pl-10 w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="pl-10 w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     />
                   </div>
                 </div>
                 <select
                   value={materialsCategoryFilter}
                   onChange={(e) => setMaterialsCategoryFilter(e.target.value)}
-                  className="rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                  className="px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                 >
                   <option value="all">All Categories</option>
                   {getMaterialCategories().map(cat => (
@@ -1811,10 +1812,24 @@ const renderCompaniesEmptyState = () => (
         return (
           <div className="space-y-6">
             <div>
-              <h3 className="text-lg font-medium text-gray-900 mb-4">Team Members</h3>
-              <p className="text-sm text-gray-600 mb-4">
-                Invite team members to join your company. They'll be able to access jobs and customers.
-              </p>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-medium text-gray-900">Team Members</h3>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Invite team members to join your company. They'll be able to access jobs and customers.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => loadCompanyData()}
+                  disabled={isLoading}
+                  className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50"
+                  title="Refresh team members list"
+                >
+                  <ArrowPathIcon className={`h-5 w-5 ${isLoading ? 'animate-spin' : ''}`} />
+                  <span className="ml-2 hidden sm:inline">Refresh</span>
+                </button>
+              </div>
 
               {company?.code && (
                 <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
@@ -1847,13 +1862,13 @@ const renderCompaniesEmptyState = () => (
                       type="email"
                       value={newMemberEmail}
                       onChange={(e) => setNewMemberEmail(e.target.value)}
-                      className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="Enter email address"
                     />
                     <select
                       value={newMemberRole}
                       onChange={(e) => setNewMemberRole(e.target.value)}
-                      className="rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     >
                       {ROLE_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
@@ -1971,7 +1986,7 @@ const renderCompaniesEmptyState = () => (
                       type="text"
                       value={companyData.primaryColor}
                       onChange={(e) => handleInputChange('primaryColor', e.target.value)}
-                      className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     />
                   </div>
                 </div>
@@ -1989,7 +2004,7 @@ const renderCompaniesEmptyState = () => (
                       type="text"
                       value={companyData.secondaryColor}
                       onChange={(e) => handleInputChange('secondaryColor', e.target.value)}
-                      className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     />
                   </div>
                 </div>
@@ -2023,7 +2038,7 @@ const renderCompaniesEmptyState = () => (
                       const value = parseInt(event.target.value, 10);
                       handleInputChange('photoRetentionDays', Number.isNaN(value) ? 0 : value);
                     }}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                   >
                     {PHOTO_RETENTION_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -2269,7 +2284,7 @@ const renderCompaniesEmptyState = () => (
                           type="email"
                           value={newCompanyData.ownerEmail}
                           onChange={(e) => setNewCompanyData(prev => ({ ...prev, ownerEmail: e.target.value }))}
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                           placeholder="owner@example.com"
                         />
                         <p className="mt-1 text-xs text-gray-500">
@@ -2282,7 +2297,7 @@ const renderCompaniesEmptyState = () => (
                           type="text"
                           value={newCompanyData.name}
                           onChange={(e) => setNewCompanyData(prev => ({ ...prev, name: e.target.value }))}
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                           placeholder="Company Name"
                         />
                       </div>
@@ -2296,7 +2311,7 @@ const renderCompaniesEmptyState = () => (
                             setNewCompanyData(prev => ({ ...prev, phone: formatted }));
                           }}
                           maxLength={14}
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                           placeholder="(555) 123-4567"
                         />
                       </div>
@@ -2306,7 +2321,7 @@ const renderCompaniesEmptyState = () => (
                           type="email"
                           value={newCompanyData.email}
                           onChange={(e) => setNewCompanyData(prev => ({ ...prev, email: e.target.value }))}
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                           placeholder="company@example.com"
                         />
                       </div>
@@ -2316,7 +2331,7 @@ const renderCompaniesEmptyState = () => (
                           value={newCompanyData.description}
                           onChange={(e) => setNewCompanyData(prev => ({ ...prev, description: e.target.value }))}
                           rows={2}
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                           placeholder="Brief company description"
                         />
                       </div>
@@ -2326,7 +2341,7 @@ const renderCompaniesEmptyState = () => (
                           type="text"
                           value={newCompanyData.address}
                           onChange={(e) => setNewCompanyData(prev => ({ ...prev, address: e.target.value }))}
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                           placeholder="123 Main Street"
                         />
                       </div>
@@ -2336,7 +2351,7 @@ const renderCompaniesEmptyState = () => (
                           type="text"
                           value={newCompanyData.city}
                           onChange={(e) => setNewCompanyData(prev => ({ ...prev, city: e.target.value }))}
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                           placeholder="Bakersfield"
                         />
                       </div>
@@ -2346,7 +2361,7 @@ const renderCompaniesEmptyState = () => (
                           type="text"
                           value={newCompanyData.state}
                           onChange={(e) => setNewCompanyData(prev => ({ ...prev, state: e.target.value }))}
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                           placeholder="CA"
                         />
                       </div>
@@ -2356,7 +2371,7 @@ const renderCompaniesEmptyState = () => (
                           type="text"
                           value={newCompanyData.zipCode}
                           onChange={(e) => setNewCompanyData(prev => ({ ...prev, zipCode: e.target.value }))}
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                           placeholder="93311"
                         />
                       </div>
@@ -2581,7 +2596,7 @@ const renderCompaniesEmptyState = () => (
                         type="text"
                         value={materialData.name}
                         onChange={(e) => handleMaterialInputChange('name', e.target.value)}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                         placeholder="e.g., Chlorine Tablets"
                       />
                     </div>
@@ -2591,7 +2606,7 @@ const renderCompaniesEmptyState = () => (
                         value={materialData.description}
                         onChange={(e) => handleMaterialInputChange('description', e.target.value)}
                         rows={2}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                         placeholder="Detailed notes for internal use"
                       />
                     </div>
@@ -2601,7 +2616,7 @@ const renderCompaniesEmptyState = () => (
                         type="text"
                         value={materialData.category}
                         onChange={(e) => handleMaterialInputChange('category', e.target.value)}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                         placeholder="e.g., Pool Chemicals"
                       />
                     </div>
@@ -2611,7 +2626,7 @@ const renderCompaniesEmptyState = () => (
                         type="text"
                         value={materialData.subcategory}
                         onChange={(e) => handleMaterialInputChange('subcategory', e.target.value)}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                         placeholder="e.g., Liquid"
                       />
                     </div>
@@ -2621,7 +2636,7 @@ const renderCompaniesEmptyState = () => (
                         type="text"
                         value={materialData.unit}
                         onChange={(e) => handleMaterialInputChange('unit', e.target.value)}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                         placeholder="e.g., bucket (50 lbs)"
                       />
                     </div>
@@ -2632,7 +2647,7 @@ const renderCompaniesEmptyState = () => (
                         step="0.01"
                         value={materialData.retailPrice}
                         onChange={(e) => handleMaterialInputChange('retailPrice', parseFloat(e.target.value) || 0)}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                         placeholder="0.00"
                       />
                     </div>
@@ -2643,7 +2658,7 @@ const renderCompaniesEmptyState = () => (
                         step="0.01"
                         value={materialData.costPerUnit}
                         onChange={(e) => handleMaterialInputChange('costPerUnit', parseFloat(e.target.value) || 0)}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                         placeholder="0.00"
                       />
                     </div>
@@ -2653,7 +2668,7 @@ const renderCompaniesEmptyState = () => (
                         type="text"
                         value={materialData.supplier}
                         onChange={(e) => handleMaterialInputChange('supplier', e.target.value)}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                         placeholder="Preferred supplier/vendor"
                       />
                     </div>
@@ -2663,7 +2678,7 @@ const renderCompaniesEmptyState = () => (
                         type="text"
                         value={materialData.storageLocation}
                         onChange={(e) => handleMaterialInputChange('storageLocation', e.target.value)}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                         placeholder="Truck, warehouse, etc."
                       />
                     </div>
@@ -2673,7 +2688,7 @@ const renderCompaniesEmptyState = () => (
                         type="text"
                         value={materialData.barcode}
                         onChange={(e) => handleMaterialInputChange('barcode', e.target.value)}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                         placeholder="Optional"
                       />
                     </div>

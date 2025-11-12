@@ -268,7 +268,7 @@ const NotificationsPage = () => {
           <div className="space-y-4">
             {/* Title */}
             <div>
-              <label htmlFor="notification-title" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="notification-title" className="block text-sm font-medium text-gray-700 mb-1.5">
                 Title <span className="text-red-500">*</span>
               </label>
               <input
@@ -284,7 +284,7 @@ const NotificationsPage = () => {
 
             {/* Body/Message */}
             <div>
-              <label htmlFor="notification-body" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="notification-body" className="block text-sm font-medium text-gray-700 mb-1.5">
                 Message <span className="text-red-500">*</span>
               </label>
               <textarea
@@ -301,7 +301,7 @@ const NotificationsPage = () => {
 
             {/* Optional: Screen Navigation */}
             <div>
-              <label htmlFor="notification-screen" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="notification-screen" className="block text-sm font-medium text-gray-700 mb-1.5">
                 Open Screen (Optional)
               </label>
               <select

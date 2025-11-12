@@ -1023,7 +1023,7 @@ const CustomerManagementPage = () => {
                     type="text"
                     value={customerData.name}
                     onChange={(e) => handleInputChange('name', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="Enter customer name"
                   />
                 </div>
@@ -1035,7 +1035,7 @@ const CustomerManagementPage = () => {
                       type="email"
                       value={customerData.email}
                       onChange={(e) => handleInputChange('email', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="email@example.com"
                     />
                   </div>
@@ -1049,7 +1049,7 @@ const CustomerManagementPage = () => {
                         handleInputChange('phone', formatted);
                       }}
                       maxLength={14}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="(555) 123-4567"
                     />
                   </div>
@@ -1061,7 +1061,7 @@ const CustomerManagementPage = () => {
                     type="text"
                     value={customerData.address}
                     onChange={(e) => handleInputChange('address', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="123 Main Street"
                   />
                 </div>
@@ -1073,7 +1073,7 @@ const CustomerManagementPage = () => {
                       type="text"
                       value={customerData.city}
                       onChange={(e) => handleInputChange('city', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="Bakersfield"
                     />
                   </div>
@@ -1083,7 +1083,7 @@ const CustomerManagementPage = () => {
                       type="text"
                       value={customerData.state}
                       onChange={(e) => handleInputChange('state', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="CA"
                     />
                   </div>
@@ -1093,7 +1093,7 @@ const CustomerManagementPage = () => {
                       type="text"
                       value={customerData.zipCode}
                       onChange={(e) => handleInputChange('zipCode', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="93311"
                     />
                   </div>
@@ -1105,7 +1105,7 @@ const CustomerManagementPage = () => {
                     value={customerData.notes}
                     onChange={(e) => handleInputChange('notes', e.target.value)}
                     rows={3}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="Additional notes about this customer..."
                   />
                 </div>
@@ -1176,7 +1176,7 @@ const CustomerManagementPage = () => {
                     type="text"
                     value={customerData.name}
                     onChange={(e) => handleInputChange('name', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="Enter customer name"
                   />
                 </div>
@@ -1188,7 +1188,7 @@ const CustomerManagementPage = () => {
                       type="email"
                       value={customerData.email}
                       onChange={(e) => handleInputChange('email', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="email@example.com"
                     />
                   </div>
@@ -1202,7 +1202,7 @@ const CustomerManagementPage = () => {
                         handleInputChange('phone', formatted);
                       }}
                       maxLength={14}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="(555) 123-4567"
                     />
                   </div>
@@ -1214,7 +1214,7 @@ const CustomerManagementPage = () => {
                     type="text"
                     value={customerData.address}
                     onChange={(e) => handleInputChange('address', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="123 Main Street"
                   />
                 </div>
@@ -1226,7 +1226,7 @@ const CustomerManagementPage = () => {
                       type="text"
                       value={customerData.city}
                       onChange={(e) => handleInputChange('city', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="Bakersfield"
                     />
                   </div>
@@ -1236,7 +1236,7 @@ const CustomerManagementPage = () => {
                       type="text"
                       value={customerData.state}
                       onChange={(e) => handleInputChange('state', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="CA"
                     />
                   </div>
@@ -1246,7 +1246,7 @@ const CustomerManagementPage = () => {
                       type="text"
                       value={customerData.zipCode}
                       onChange={(e) => handleInputChange('zipCode', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="93311"
                     />
                   </div>
@@ -1258,7 +1258,7 @@ const CustomerManagementPage = () => {
                     value={customerData.notes}
                     onChange={(e) => handleInputChange('notes', e.target.value)}
                     rows={3}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="Additional notes about this customer..."
                   />
                 </div>
@@ -1351,7 +1351,7 @@ const CustomerManagementPage = () => {
                     value={rejectionReason}
                     onChange={(e) => setRejectionReason(e.target.value)}
                     rows={3}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="Enter reason for rejection..."
                   />
                 </div>

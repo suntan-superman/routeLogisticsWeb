@@ -547,7 +547,7 @@ const InvoicePage = () => {
                 placeholder="Search invoices..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                className="pl-10 w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
               />
             </div>
           </div>
@@ -555,7 +555,7 @@ const InvoicePage = () => {
             <select
               value={activeFilter}
               onChange={(e) => setActiveFilter(e.target.value)}
-              className="rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+              className="px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
             >
               <option value="all">All Status</option>
               <option value="drafted">Drafted</option>
@@ -567,7 +567,7 @@ const InvoicePage = () => {
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
-              className="rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+              className="px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
             >
               <option value="date">Sort by Date</option>
               <option value="amount">Sort by Amount</option>
@@ -691,7 +691,7 @@ const InvoicePage = () => {
                           const job = completedJobs.find(j => j.id === e.target.value);
                           setSelectedJob(job);
                         }}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       >
                         <option value="">-- Select a job --</option>
                         {completedJobs.map(job => (
@@ -731,7 +731,7 @@ const InvoicePage = () => {
                         <select
                           value={invoiceData.paymentTerms}
                           onChange={(e) => setInvoiceData(prev => ({ ...prev, paymentTerms: e.target.value }))}
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                         >
                           <option value="dueOnReceipt">Due on Receipt</option>
                           <option value="net15">Net 15</option>
@@ -753,7 +753,7 @@ const InvoicePage = () => {
                               const rate = parseFloat(e.target.value) || 0;
                               setInvoiceData(prev => ({ ...prev, taxRate: rate }));
                             }}
-                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                            className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                           />
                         </div>
                         <div>
@@ -773,7 +773,7 @@ const InvoicePage = () => {
                           value={invoiceData.notes}
                           onChange={(e) => setInvoiceData(prev => ({ ...prev, notes: e.target.value }))}
                           rows={3}
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                           placeholder="Additional notes for the invoice..."
                         />
                       </div>

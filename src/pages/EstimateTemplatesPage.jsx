@@ -518,7 +518,7 @@ const EstimateTemplatesPage = () => {
                       type="text"
                       value={templateData.name}
                       onChange={(e) => handleInputChange('name', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="e.g., Pool Maintenance"
                     />
                   </div>
@@ -528,7 +528,7 @@ const EstimateTemplatesPage = () => {
                       type="text"
                       value={templateData.serviceType}
                       onChange={(e) => handleInputChange('serviceType', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="e.g., Pool Maintenance"
                     />
                   </div>
@@ -540,7 +540,7 @@ const EstimateTemplatesPage = () => {
                     value={templateData.description}
                     onChange={(e) => handleInputChange('description', e.target.value)}
                     rows={2}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="Brief description of the service..."
                   />
                 </div>
@@ -551,7 +551,7 @@ const EstimateTemplatesPage = () => {
                     value={templateData.scopeOfWork}
                     onChange={(e) => handleInputChange('scopeOfWork', e.target.value)}
                     rows={4}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="• Service item 1\n• Service item 2\n• Service item 3"
                   />
                 </div>
@@ -562,7 +562,7 @@ const EstimateTemplatesPage = () => {
                     value={templateData.materials}
                     onChange={(e) => handleInputChange('materials', e.target.value)}
                     rows={3}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="• Material 1\n• Material 2\n• Material 3"
                   />
                 </div>
@@ -575,7 +575,7 @@ const EstimateTemplatesPage = () => {
                       step="0.5"
                       value={templateData.laborHours}
                       onChange={(e) => handleInputChange('laborHours', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="2.5"
                     />
                   </div>
@@ -586,7 +586,7 @@ const EstimateTemplatesPage = () => {
                       step="0.01"
                       value={templateData.laborRate}
                       onChange={(e) => handleInputChange('laborRate', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="75.00"
                     />
                   </div>
@@ -597,7 +597,7 @@ const EstimateTemplatesPage = () => {
                       step="0.01"
                       value={templateData.materialCost}
                       onChange={(e) => handleInputChange('materialCost', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="150.00"
                     />
                   </div>
@@ -610,7 +610,7 @@ const EstimateTemplatesPage = () => {
                     step="0.01"
                     value={templateData.totalCost}
                     onChange={(e) => handleInputChange('totalCost', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="300.00"
                   />
                 </div>
@@ -621,7 +621,7 @@ const EstimateTemplatesPage = () => {
                     value={templateData.notes}
                     onChange={(e) => handleInputChange('notes', e.target.value)}
                     rows={3}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="Additional notes or special instructions..."
                   />
                 </div>
@@ -632,7 +632,7 @@ const EstimateTemplatesPage = () => {
                     value={templateData.terms}
                     onChange={(e) => handleInputChange('terms', e.target.value)}
                     rows={2}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="Payment terms, warranty information, etc."
                   />
                 </div>
@@ -643,7 +643,7 @@ const EstimateTemplatesPage = () => {
                     type="number"
                     value={templateData.validityDays}
                     onChange={(e) => handleInputChange('validityDays', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="30"
                   />
                 </div>
@@ -702,7 +702,7 @@ const EstimateTemplatesPage = () => {
                       type="text"
                       value={templateData.name}
                       onChange={(e) => handleInputChange('name', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="e.g., Pool Maintenance"
                     />
                   </div>
@@ -712,7 +712,7 @@ const EstimateTemplatesPage = () => {
                       type="text"
                       value={templateData.serviceType}
                       onChange={(e) => handleInputChange('serviceType', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="e.g., Pool Maintenance"
                     />
                   </div>
@@ -724,7 +724,7 @@ const EstimateTemplatesPage = () => {
                     value={templateData.description}
                     onChange={(e) => handleInputChange('description', e.target.value)}
                     rows={2}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="Brief description of the service..."
                   />
                 </div>
@@ -735,7 +735,7 @@ const EstimateTemplatesPage = () => {
                     value={templateData.scopeOfWork}
                     onChange={(e) => handleInputChange('scopeOfWork', e.target.value)}
                     rows={4}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="• Service item 1\n• Service item 2\n• Service item 3"
                   />
                 </div>
@@ -746,7 +746,7 @@ const EstimateTemplatesPage = () => {
                     value={templateData.materials}
                     onChange={(e) => handleInputChange('materials', e.target.value)}
                     rows={3}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="• Material 1\n• Material 2\n• Material 3"
                   />
                 </div>
@@ -759,7 +759,7 @@ const EstimateTemplatesPage = () => {
                       step="0.5"
                       value={templateData.laborHours}
                       onChange={(e) => handleInputChange('laborHours', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="2.5"
                     />
                   </div>
@@ -770,7 +770,7 @@ const EstimateTemplatesPage = () => {
                       step="0.01"
                       value={templateData.laborRate}
                       onChange={(e) => handleInputChange('laborRate', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="75.00"
                     />
                   </div>
@@ -781,7 +781,7 @@ const EstimateTemplatesPage = () => {
                       step="0.01"
                       value={templateData.materialCost}
                       onChange={(e) => handleInputChange('materialCost', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                       placeholder="150.00"
                     />
                   </div>
@@ -794,7 +794,7 @@ const EstimateTemplatesPage = () => {
                     step="0.01"
                     value={templateData.totalCost}
                     onChange={(e) => handleInputChange('totalCost', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="300.00"
                   />
                 </div>
@@ -805,7 +805,7 @@ const EstimateTemplatesPage = () => {
                     value={templateData.notes}
                     onChange={(e) => handleInputChange('notes', e.target.value)}
                     rows={3}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="Additional notes or special instructions..."
                   />
                 </div>
@@ -816,7 +816,7 @@ const EstimateTemplatesPage = () => {
                     value={templateData.terms}
                     onChange={(e) => handleInputChange('terms', e.target.value)}
                     rows={2}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="Payment terms, warranty information, etc."
                   />
                 </div>
@@ -827,7 +827,7 @@ const EstimateTemplatesPage = () => {
                     type="number"
                     value={templateData.validityDays}
                     onChange={(e) => handleInputChange('validityDays', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
                     placeholder="30"
                   />
                 </div>

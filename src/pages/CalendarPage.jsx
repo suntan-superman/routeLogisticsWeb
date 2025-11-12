@@ -160,7 +160,8 @@ const CalendarPage = () => {
   };
 
   const formatDate = (date) => {
-    return new Date(date).toLocaleDateString('en-US', {
+    // Add time component to prevent timezone offset issues
+    return new Date(date + 'T12:00:00').toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',

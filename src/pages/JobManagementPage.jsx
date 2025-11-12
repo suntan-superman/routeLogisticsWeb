@@ -1355,12 +1355,30 @@ const JobManagementPage = () => {
                         onChange={(event) => {
                           const value = event.target.value;
                           const selectedCustomer = jobCustomers.find((c) => c.id === value);
+                          console.log('Selected customer:', selectedCustomer);
+                          console.log('Customer phone:', selectedCustomer?.phone);
+                          console.log('Customer address:', selectedCustomer?.address);
+                          
+                          // Build full address from customer data
+                          let fullAddress = selectedCustomer?.address || '';
+                          if (selectedCustomer?.city) {
+                            fullAddress += (fullAddress ? ', ' : '') + selectedCustomer.city;
+                          }
+                          if (selectedCustomer?.state) {
+                            fullAddress += (fullAddress ? ', ' : '') + selectedCustomer.state;
+                          }
+                          if (selectedCustomer?.zipCode) {
+                            fullAddress += (fullAddress ? ' ' : '') + selectedCustomer.zipCode;
+                          }
+                          
+                          console.log('Full address:', fullAddress);
+                          
                           setJobFormData((prev) => ({
                             ...prev,
                             customerId: value,
                             customerName: selectedCustomer?.name || prev.customerName,
                             customerPhone: selectedCustomer?.phone || '',
-                            address: selectedCustomer?.address || '',
+                            address: fullAddress,
                           }));
                           setJobFormErrors((prev) => ({ ...prev, customerName: undefined }));
                         }}
@@ -1369,11 +1387,30 @@ const JobManagementPage = () => {
                         <option value="">
                           {jobCustomersLoading ? 'Loading customers...' : 'Select existing customer'}
                         </option>
-                        {jobCustomers.map((customer) => (
-                          <option key={customer.id} value={customer.id}>
-                            {customer.name || customer.email || 'Unnamed customer'}
-                          </option>
-                        ))}
+                        {jobCustomers.map((customer) => {
+                          // Build display name with additional info to help identify duplicates
+                          let displayName = customer.name || customer.email || 'Unnamed customer';
+                          const additionalInfo = [];
+                          
+                          if (customer.phone) {
+                            additionalInfo.push(customer.phone);
+                          }
+                          if (customer.address) {
+                            additionalInfo.push(customer.address);
+                          } else if (customer.city) {
+                            additionalInfo.push(customer.city);
+                          }
+                          
+                          if (additionalInfo.length > 0) {
+                            displayName += ` - ${additionalInfo.join(' • ')}`;
+                          }
+                          
+                          return (
+                            <option key={customer.id} value={customer.id}>
+                              {displayName}
+                            </option>
+                          );
+                        })}
                       </select>
                     </div>
                     <div>

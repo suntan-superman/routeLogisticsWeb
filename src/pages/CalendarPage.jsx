@@ -41,7 +41,12 @@ const CalendarPage = () => {
         // Transform jobs data for Syncfusion Schedule
         const scheduleEvents = jobs.map(job => {
           const customer = customersData.find(c => c.id === job.customerId);
-          const startDate = new Date(`${job.date}T${job.time}`);
+          
+          // Parse date and time with proper timezone handling
+          const [year, month, day] = job.date.split('-').map(Number);
+          const [hours, minutes] = (job.time || '09:00').split(':').map(Number);
+          const startDate = new Date(year, month - 1, day, hours, minutes);
+          
           // Use job.duration first, fallback to estimatedDuration, then default to 1 hour
           const durationHours = parseFloat(job.duration) || parseFloat(job.estimatedDuration) || 1;
           const endDate = new Date(startDate.getTime() + durationHours * 60 * 60 * 1000);
@@ -64,11 +69,16 @@ const CalendarPage = () => {
             JobData: {
               ...job,
               customer: customer,
+              customerName: job.customerName,
+              customerPhone: job.customerPhone,
+              address: job.address,
+              duration: job.duration,
               status: job.status,
-              totalCost: job.totalCost,
-              estimatedDuration: job.estimatedDuration,
+              totalCost: job.totalCost || job.estimatedCost,
+              estimatedDuration: job.estimatedDuration || job.duration,
               actualHours: job.actualHours,
               assignedTo: job.assignedTo,
+              assignedToName: job.assignedToName,
               priority: job.priority || 'medium'
             }
           };
@@ -293,9 +303,9 @@ const CalendarPage = () => {
                       <UserIcon className="h-5 w-5 text-gray-400 mr-3" />
                       <div>
                         <p className="text-sm font-medium text-gray-900">Customer</p>
-                        <p className="text-sm text-gray-600">{selectedJob.customer?.name || 'Unknown'}</p>
-                        {selectedJob.customer?.phone && (
-                          <p className="text-xs text-gray-500">{selectedJob.customer.phone}</p>
+                        <p className="text-sm text-gray-600">{selectedJob.customerName || selectedJob.customer?.name || 'Unknown'}</p>
+                        {(selectedJob.customerPhone || selectedJob.customer?.phone) && (
+                          <p className="text-xs text-gray-500">{selectedJob.customerPhone || selectedJob.customer.phone}</p>
                         )}
                       </div>
                     </div>
@@ -311,12 +321,12 @@ const CalendarPage = () => {
 
                 {/* Additional Details */}
                 <div className="space-y-4">
-                  {selectedJob.estimatedDuration && (
+                  {(selectedJob.duration || selectedJob.estimatedDuration) && (
                     <div className="flex items-center">
                       <ClockIcon className="h-5 w-5 text-gray-400 mr-3" />
                       <div>
-                        <p className="text-sm font-medium text-gray-900">Estimated Duration</p>
-                        <p className="text-sm text-gray-600">{selectedJob.estimatedDuration} hours</p>
+                        <p className="text-sm font-medium text-gray-900">Duration</p>
+                        <p className="text-sm text-gray-600">{selectedJob.duration || selectedJob.estimatedDuration} hour{(selectedJob.duration || selectedJob.estimatedDuration) != 1 ? 's' : ''}</p>
                       </div>
                     </div>
                   )}
@@ -331,12 +341,12 @@ const CalendarPage = () => {
                     </div>
                   )}
 
-                  {selectedJob.assignedTo && (
+                  {(selectedJob.assignedToName || selectedJob.assignedTo) && (
                     <div className="flex items-center">
                       <UserIcon className="h-5 w-5 text-gray-400 mr-3" />
                       <div>
                         <p className="text-sm font-medium text-gray-900">Assigned To</p>
-                        <p className="text-sm text-gray-600">{selectedJob.assignedTo}</p>
+                        <p className="text-sm text-gray-600">{selectedJob.assignedToName || selectedJob.assignedTo}</p>
                       </div>
                     </div>
                   )}

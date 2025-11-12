@@ -11,9 +11,6 @@ import {
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import { formatPhoneNumber } from '../utils/phoneFormatter';
-import { doc, setDoc } from 'firebase/firestore';
-import { serverTimestamp } from 'firebase/firestore';
-import { db } from '../services/firebase';
 
 const ROLE_OPTIONS = [
   { value: 'admin', label: 'Company Administrator', description: 'Full access to manage company settings, customers, jobs, and team' },
@@ -301,8 +298,12 @@ const SignUpPage = () => {
         zipCode: companyOption === 'new' ? companyZipCode : '',
         services: [],
         serviceCategories: [],
-        role: invitedRole || role
+        role: invitedRole || role,
+        companyId: invitationDetails?.companyId || null,
+        joinedViaInvitation: Boolean(invitationDetails?.companyId)
       };
+
+      console.log('[SignUpPage.handleSignUp] Creating user with companyId:', userData.companyId);
 
       const signupResult = await signup(email, password, userData);
 
@@ -331,23 +332,6 @@ const SignUpPage = () => {
           state: { email: signupResult.email } 
         });
       } else if (invitationCode) {
-        try {
-          if (invitationDetails?.companyId) {
-            await setDoc(
-              doc(db, 'users', userId),
-              {
-                companyId: invitationDetails.companyId,
-                role: invitedRole,
-                joinedViaInvitation: true,
-                updatedAt: serverTimestamp()
-              },
-              { merge: true }
-            );
-          }
-        } catch (profileError) {
-          console.error('Failed to apply company to user profile', profileError);
-        }
-
         const acceptResult = await InvitationService.acceptInvitation(userId, invitationCode);
         if (!acceptResult.success) {
           toast.error(acceptResult.error || 'Failed to accept invitation');

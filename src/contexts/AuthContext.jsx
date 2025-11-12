@@ -81,12 +81,14 @@ export const AuthProvider = ({ children }) => {
         smsNotifications: false,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        companyId: null, // Will be set when company is created
+        companyId: userData.companyId || null, // Accept companyId from userData if provided (for invitations)
         role: userData.role || 'admin', // Use provided role or default to admin
-        emailVerified: false // Track verification status
+        emailVerified: false, // Track verification status
+        joinedViaInvitation: userData.joinedViaInvitation || false
       };
 
       await setDoc(doc(db, 'users', user.uid), userProfileData);
+      console.log('[AuthContext.signup] User profile created with companyId:', userProfileData.companyId);
       
       // Store signup data temporarily for pre-filling Company Setup
       if (userData.businessName || userData.address || userData.phoneNumber) {

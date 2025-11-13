@@ -17,6 +17,7 @@ import EmailVerificationPage from './pages/EmailVerificationPage';
 import CompanySetupPage from './pages/CompanySetupPage';
 import CustomerManagementPage from './pages/CustomerManagementPage';
 import EstimateTemplatesPage from './pages/EstimateTemplatesPage';
+import EstimatesPage from './pages/EstimatesPage';
 import JobManagementPage from './pages/JobManagementPage';
 import ReportsPage from './pages/ReportsPage';
 import CalendarPage from './pages/CalendarPage';
@@ -29,6 +30,7 @@ import TeamTrackingPage from './pages/TeamTrackingPage';
 import NotificationsPage from './pages/NotificationsPage';
 import RouteOptimizationPage from './pages/RouteOptimizationPage';
 import CustomerPortalPage from './pages/CustomerPortalPage';
+import LocationSettingsPage from './pages/LocationSettingsPage';
 
 // Components
 import Layout from './components/Layout';
@@ -97,6 +99,14 @@ function App() {
                   <ProtectedRoute>
                     <Layout>
                       <EstimateTemplatesPage />
+                    </Layout>
+                  </ProtectedRoute>
+                } />
+                
+                <Route path="/estimates" element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <EstimatesPage />
                     </Layout>
                   </ProtectedRoute>
                 } />
@@ -185,6 +195,14 @@ function App() {
                   <ProtectedRoute>
                     <Layout>
                       <RouteOptimizationPage />
+                    </Layout>
+                  </ProtectedRoute>
+                } />
+                
+                <Route path="/location-settings" element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <LocationSettingsPage />
                     </Layout>
                   </ProtectedRoute>
                 } />

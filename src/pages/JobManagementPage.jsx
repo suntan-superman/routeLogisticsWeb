@@ -8,6 +8,7 @@ import CustomerService from '../services/customerService';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
 import { canReassignJobs } from '../utils/permissions';
+import { parseDate, formatDate as formatDateHelper } from '../utils/dateHelpers';
 import { 
   ClipboardDocumentListIcon, 
   PlusIcon,
@@ -95,6 +96,7 @@ const JobManagementPage = () => {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedAssigneeId, setSelectedAssigneeId] = useState('');
   const [isAssigning, setIsAssigning] = useState(false);
+  const [serviceOptions, setServiceOptions] = useState([]);
   const defaultJobForm = useMemo(
     () => ({
       customerId: '',
@@ -253,8 +255,15 @@ const JobManagementPage = () => {
   useEffect(() => {
     if (showJobModal) {
       loadJobCustomers();
+      loadCompanyServices();
     }
   }, [showJobModal, loadJobCustomers]);
+
+  useEffect(() => {
+    if (showJobModal) {
+      loadCompanyServices();
+    }
+  }, [companyIdForJobs]);
 
   useEffect(() => {
     if (!canTransferJobs) {
@@ -317,6 +326,28 @@ const JobManagementPage = () => {
     }
   };
 
+  const loadCompanyServices = async () => {
+    try {
+      const effectiveCompanyId = companyIdForJobs || userProfile?.companyId;
+      if (!effectiveCompanyId) {
+        setServiceOptions([]);
+        return;
+      }
+
+      const result = await CompanyService.getCompany(effectiveCompanyId);
+      if (result.success && result.company && result.company.services) {
+        // Sort services alphabetically
+        const sorted = [...(result.company.services || [])].sort();
+        setServiceOptions(sorted);
+      } else {
+        setServiceOptions([]);
+      }
+    } catch (error) {
+      console.error('Error loading company services:', error);
+      setServiceOptions([]);
+    }
+  };
+
   const filterAndSortJobs = () => {
     let filtered = [...jobs];
 
@@ -348,7 +379,7 @@ const JobManagementPage = () => {
       const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
       filtered = filtered.filter(job => {
-        const jobDate = new Date(job.date);
+        const jobDate = parseDate(job.date);
         
         switch (dateFilter) {
           case 'today':
@@ -367,8 +398,8 @@ const JobManagementPage = () => {
     filtered.sort((a, b) => {
       switch (sortBy) {
         case 'date':
-          const dateA = new Date(a.date);
-          const dateB = new Date(b.date);
+          const dateA = parseDate(a.date);
+          const dateB = parseDate(b.date);
           if (dateA.getTime() === dateB.getTime()) {
             return (a.time || '').localeCompare(b.time || '');
           }
@@ -653,11 +684,7 @@ const JobManagementPage = () => {
   };
 
   const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
+    return formatDateHelper(dateString);
   };
 
   const formatTime = (timeString) => {
@@ -1486,20 +1513,64 @@ const JobManagementPage = () => {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Service Type *</label>
-                  <input
-                    type="text"
-                    value={jobFormData.serviceType}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      setJobFormData((prev) => ({
-                        ...prev,
-                        serviceType: value,
-                      }));
-                      setJobFormErrors((prev) => ({ ...prev, serviceType: undefined }));
-                    }}
-                    placeholder="e.g., HVAC maintenance"
-                    className="block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 text-sm transition-colors"
-                  />
+                  {serviceOptions.length > 0 ? (
+                    <>
+                      <select
+                        value={jobFormData.serviceType === '__custom__' ? '__custom__' : jobFormData.serviceType}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (value === '__custom__') {
+                            // Show custom input prompt
+                            const customService = prompt('Enter custom service type:');
+                            if (customService && customService.trim()) {
+                              setJobFormData((prev) => ({
+                                ...prev,
+                                serviceType: customService.trim(),
+                              }));
+                            }
+                            // Reset select to empty
+                            event.target.value = '';
+                          } else {
+                            setJobFormData((prev) => ({
+                              ...prev,
+                              serviceType: value,
+                            }));
+                          }
+                          setJobFormErrors((prev) => ({ ...prev, serviceType: undefined }));
+                        }}
+                        className="block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 text-sm transition-colors bg-white"
+                      >
+                        <option value="">Select a service type...</option>
+                        {serviceOptions.map((service) => (
+                          <option key={service} value={service}>
+                            {service}
+                          </option>
+                        ))}
+                        <option disabled>──────────────</option>
+                        <option value="__custom__">+ Enter Custom Service</option>
+                      </select>
+                      {jobFormData.serviceType && !serviceOptions.includes(jobFormData.serviceType) && (
+                        <p className="mt-2 text-xs text-amber-600">
+                          📝 Custom: "{jobFormData.serviceType}"
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <input
+                      type="text"
+                      value={jobFormData.serviceType}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setJobFormData((prev) => ({
+                          ...prev,
+                          serviceType: value,
+                        }));
+                        setJobFormErrors((prev) => ({ ...prev, serviceType: undefined }));
+                      }}
+                      placeholder="Enter service type (no services configured)"
+                      className="block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 text-sm transition-colors"
+                    />
+                  )}
                   {jobFormErrors.serviceType && (
                     <p className="mt-1 text-xs text-red-600">{jobFormErrors.serviceType}</p>
                   )}

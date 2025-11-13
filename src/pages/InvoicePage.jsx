@@ -16,6 +16,7 @@ import {
   XCircleIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import { parseDate, formatDate as formatDateHelper } from '../utils/dateHelpers';
 import {
   GridComponent,
   ColumnsDirective,
@@ -139,7 +140,7 @@ const InvoicePage = () => {
     filtered.sort((a, b) => {
       switch (sortBy) {
         case 'date':
-          return new Date(b.invoiceDate) - new Date(a.invoiceDate);
+          return parseDate(b.invoiceDate) - parseDate(a.invoiceDate);
         case 'amount':
           return (b.total || 0) - (a.total || 0);
         case 'status':
@@ -287,13 +288,7 @@ const InvoicePage = () => {
   };
 
   const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
+    return formatDateHelper(dateString);
   };
 
   const getStatusBadge = (status) => {

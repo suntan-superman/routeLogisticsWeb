@@ -35,6 +35,7 @@ const Layout = ({ children }) => {
     { name: 'Bulk Import', href: '/bulk-import', icon: DocumentArrowUpIcon, adminOnly: true },
     { name: 'Company Search', href: '/company-search', icon: MagnifyingGlassIcon },
     { name: 'Customers', href: '/customers', icon: UsersIcon },
+    { name: 'Estimates', href: '/estimates', icon: DocumentTextIcon },
     { name: 'Estimate Templates', href: '/estimate-templates', icon: DocumentTextIcon },
     { name: 'Jobs', href: '/jobs', icon: ClipboardDocumentListIcon },
     { name: 'Recurring Jobs', href: '/recurring-jobs', icon: ArrowPathIcon },

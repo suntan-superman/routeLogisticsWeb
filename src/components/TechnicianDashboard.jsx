@@ -11,6 +11,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { db } from '../services/firebase';
 import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { parseDate, formatDateShort, formatDateLong } from '../utils/dateHelpers';
 
 const TechnicianDashboard = ({ userProfile }) => {
   const [loading, setLoading] = useState(true);
@@ -132,8 +133,7 @@ const TechnicianDashboard = ({ userProfile }) => {
   };
 
   const formatDate = (dateStr) => {
-    const date = new Date(dateStr + 'T00:00:00');
-    return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    return formatDateShort(dateStr);
   };
 
   if (loading) {
@@ -270,7 +270,7 @@ const TechnicianDashboard = ({ userProfile }) => {
         <div className="px-6 py-4 border-b border-gray-200">
           <h2 className="text-lg font-medium text-gray-900">Today's Schedule</h2>
           <p className="text-sm text-gray-500">
-            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+            {formatDateLong(new Date())}
           </p>
         </div>
         <div className="p-6">

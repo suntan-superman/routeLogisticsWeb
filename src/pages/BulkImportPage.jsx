@@ -111,6 +111,17 @@ const BulkImportPage = () => {
 
   // Download template based on active tab
   const downloadTemplate = () => {
+    // For materials, download the CSV file directly from public folder
+    if (activeTab === 'materials') {
+      const link = document.createElement('a');
+      link.href = '/import-templates/materials_import_template.csv';
+      link.download = 'materials_import_template.csv';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+
     let template = [];
     let filename = '';
     let sheetName = '';
@@ -153,26 +164,7 @@ const BulkImportPage = () => {
         sheetName = 'Services';
         break;
       case 'materials':
-        template = [
-          {
-            'Material Name': 'Termidor SC (78 oz)',
-            'Service Description': 'Termiticide & ant control concentrate',
-            'Category Name': 'Chemicals',
-            Subcategory: 'Termiticides',
-            Unit: 'bottle (78 oz)',
-            'Cost Per Unit': '145.00',
-            'Retail Price': '229.00',
-            Supplier: 'Univar Solutions',
-            'Supplier SKU': 'TERM-SC-78',
-            'Reorder Threshold': '4',
-            'Quantity In Stock': '12',
-            'Storage Location': 'Warehouse A - Shelf C',
-            Active: 'true',
-            'Internal Notes': 'Dilute 0.8 oz/gallon; PPE required'
-          }
-        ];
-        filename = 'materials_import_template.xlsx';
-        sheetName = 'Materials';
+        // Handled separately above (CSV download)
         break;
     }
 

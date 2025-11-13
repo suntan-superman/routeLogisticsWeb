@@ -146,12 +146,49 @@ service cloud.firestore {
         request.auth.uid == request.resource.data.userId;
     }
     
-    // Estimates collection - users can only access their own estimates
+    // Estimates collection - users can access their own estimates or company estimates
     match /estimates/{estimateId} {
-      allow read, write: if request.auth != null && 
-        request.auth.uid == resource.data.userId;
+      allow read: if request.auth != null && (
+        request.auth.uid == resource.data.userId ||
+        isSuperAdmin() ||
+        (resource.data.companyId != null && 
+         resource.data.companyId == getUserProfile().companyId)
+      );
+      
       allow create: if request.auth != null && 
-        request.auth.uid == request.resource.data.userId;
+        request.auth.uid == request.resource.data.userId &&
+        (request.resource.data.companyId == null || 
+         request.resource.data.companyId == getUserProfile().companyId);
+      
+      allow update, delete: if request.auth != null && (
+        request.auth.uid == resource.data.userId ||
+        isSuperAdmin() ||
+        (isCompanyAdminOrSupervisor() && 
+         resource.data.companyId != null && 
+         resource.data.companyId == getUserProfile().companyId)
+      );
+    }
+    
+    // Estimate Materials collection (linked materials for estimates)
+    match /estimateMaterials/{estimateMaterialId} {
+      // Allow read/write if user owns the parent estimate or is in the same company
+      allow read: if request.auth != null && (
+        get(/databases/$(database)/documents/estimates/$(resource.data.estimateId)).data.userId == request.auth.uid ||
+        (get(/databases/$(database)/documents/estimates/$(resource.data.estimateId)).data.companyId != null &&
+         get(/databases/$(database)/documents/estimates/$(resource.data.estimateId)).data.companyId == getUserProfile().companyId)
+      );
+      
+      allow create: if request.auth != null && (
+        get(/databases/$(database)/documents/estimates/$(request.resource.data.estimateId)).data.userId == request.auth.uid ||
+        (get(/databases/$(database)/documents/estimates/$(request.resource.data.estimateId)).data.companyId != null &&
+         get(/databases/$(database)/documents/estimates/$(request.resource.data.estimateId)).data.companyId == getUserProfile().companyId)
+      );
+      
+      allow update, delete: if request.auth != null && (
+        get(/databases/$(database)/documents/estimates/$(resource.data.estimateId)).data.userId == request.auth.uid ||
+        (get(/databases/$(database)/documents/estimates/$(resource.data.estimateId)).data.companyId != null &&
+         get(/databases/$(database)/documents/estimates/$(resource.data.estimateId)).data.companyId == getUserProfile().companyId)
+      );
     }
     
     // Companies collection
@@ -481,6 +518,95 @@ service cloud.firestore {
             resource.data.uploadedBy == request.auth.uid ||
             isCompanyAdminOrSupervisor()
           )
+        )
+      );
+    }
+    
+    // Location tracking collection - technician location data
+    // Only admins/supervisors in same company can read
+    // Technicians can only read their own data
+    match /locations/{locationId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        (
+          isCompanyAdminOrSupervisor() &&
+          resource.data.companyId != null &&
+          resource.data.companyId == getUserProfile().companyId
+        ) ||
+        request.auth.uid == resource.data.userId
+      );
+      
+      // Only Cloud Functions can write (via server)
+      allow write: if false;
+    }
+    
+    // Work Sessions collection - tracks when technicians are working
+    match /workSessions/{sessionId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        (
+          isCompanyAdminOrSupervisor() &&
+          resource.data.companyId != null &&
+          resource.data.companyId == getUserProfile().companyId
+        ) ||
+        request.auth.uid == resource.data.userId
+      );
+      
+      // Only Cloud Functions can write
+      allow write: if false;
+    }
+    
+    // Technician Location Settings - per-company tracking configuration
+    match /technicianLocationSettings/{companyId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        (
+          isCompanyAdminOrSupervisor() &&
+          companyId == getUserProfile().companyId
+        ) ||
+        (
+          companyId == getUserProfile().companyId
+        )
+      );
+      
+      allow write: if request.auth != null && (
+        isSuperAdmin() ||
+        (
+          isCompanyOwner(companyId) ||
+          (
+            isCompanyAdminOrSupervisor() &&
+            companyId == getUserProfile().companyId
+          )
+        )
+      );
+    }
+    
+    // Technician Schedule Exceptions - sick days, vacation, off days, overtime
+    match /technicianScheduleExceptions/{exceptionId} {
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        (
+          isCompanyAdminOrSupervisor() &&
+          resource.data.companyId != null &&
+          resource.data.companyId == getUserProfile().companyId
+        )
+      );
+      
+      allow create, update: if request.auth != null && (
+        isSuperAdmin() ||
+        (
+          isCompanyAdminOrSupervisor() &&
+          request.resource.data.companyId != null &&
+          request.resource.data.companyId == getUserProfile().companyId
+        )
+      );
+      
+      allow delete: if request.auth != null && (
+        isSuperAdmin() ||
+        (
+          isCompanyAdminOrSupervisor() &&
+          resource.data.companyId != null &&
+          resource.data.companyId == getUserProfile().companyId
         )
       );
     }

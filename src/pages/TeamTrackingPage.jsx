@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
 import LocationService from '../services/locationService';
+import LocationSettingsService from '../services/locationSettingsService';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { GoogleMap, Marker, Polyline, useJsApiLoader } from '@react-google-maps/api';
@@ -12,6 +13,7 @@ import {
   CalendarIcon,
   ArrowPathIcon,
   ChartBarIcon,
+  Cog6ToothIcon,
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 
@@ -55,6 +57,19 @@ const TeamTrackingPage = () => {
   const [stats, setStats] = useState(null);
   const [mapCenter, setMapCenter] = useState(defaultCenter);
   const [mapZoom, setMapZoom] = useState(12);
+  const [showLocationSettings, setShowLocationSettings] = useState(false);
+  const [settings, setSettings] = useState(null);
+  const [exceptions, setExceptions] = useState([]);
+  const [editingSettings, setEditingSettings] = useState(null);
+  const [showExceptionForm, setShowExceptionForm] = useState(false);
+  const [newException, setNewException] = useState({
+    type: 'sick_day',
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: new Date().toISOString().split('T')[0],
+    description: '',
+    userId: '',
+  });
+  const [settingsLoading, setSettingsLoading] = useState(false);
 
   useEffect(() => {
     loadTeamMembers();
@@ -65,6 +80,13 @@ const TeamTrackingPage = () => {
       return () => clearInterval(interval);
     }
   }, [viewMode, getEffectiveCompanyId()]);
+
+  // Load location settings when modal opens
+  useEffect(() => {
+    if (showLocationSettings) {
+      loadLocationSettings();
+    }
+  }, [showLocationSettings]);
 
   useEffect(() => {
     if (selectedUserId && startDate && endDate && viewMode === 'route') {
@@ -218,13 +240,109 @@ const TeamTrackingPage = () => {
     });
   };
 
+  const loadLocationSettings = async () => {
+    try {
+      setSettingsLoading(true);
+      const companyId = getEffectiveCompanyId() || userProfile?.companyId;
+      if (!companyId) return;
+
+      const result = await LocationSettingsService.getCompanySettings(companyId);
+      if (result) {
+        setEditingSettings({ ...result });
+      }
+
+      const exceptionsResult = await LocationSettingsService.getTechnicianExceptions(companyId);
+      setExceptions(exceptionsResult || []);
+    } catch (error) {
+      console.error('Error loading location settings:', error);
+      toast.error('Failed to load location settings');
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    try {
+      const companyId = getEffectiveCompanyId() || userProfile?.companyId;
+      if (!companyId) return;
+
+      await LocationSettingsService.saveCompanySettings(companyId, editingSettings);
+      toast.success('Location settings saved successfully');
+      setShowLocationSettings(false);
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      toast.error('Failed to save location settings');
+    }
+  };
+
+  const handleAddException = async () => {
+    try {
+      const companyId = getEffectiveCompanyId() || userProfile?.companyId;
+      if (!companyId || !newException.userId) {
+        toast.error('Please select a technician');
+        return;
+      }
+
+      await LocationSettingsService.addTechnicianException({
+        ...newException,
+        companyId,
+      });
+
+      toast.success('Exception added successfully');
+      setNewException({
+        type: 'sick_day',
+        startDate: new Date().toISOString().split('T')[0],
+        endDate: new Date().toISOString().split('T')[0],
+        description: '',
+        userId: '',
+      });
+      setShowExceptionForm(false);
+      await loadLocationSettings();
+    } catch (error) {
+      console.error('Error adding exception:', error);
+      toast.error('Failed to add exception');
+    }
+  };
+
+  const handleDeleteException = async (exceptionId) => {
+    if (!window.confirm('Are you sure you want to delete this exception?')) return;
+
+    try {
+      await LocationSettingsService.deleteTechnicianException(exceptionId);
+      toast.success('Exception deleted successfully');
+      await loadLocationSettings();
+    } catch (error) {
+      console.error('Error deleting exception:', error);
+      toast.error('Failed to delete exception');
+    }
+  };
+
+  const getExceptionTypeLabel = (type) => {
+    const labels = {
+      sick_day: '🤒 Sick Day',
+      vacation: '🏖️ Vacation',
+      off_day: '📅 Off Day',
+      overtime: '⏰ Overtime',
+    };
+    return labels[type] || type;
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Team GPS Tracking</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          View technician routes and current locations
-        </p>
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Team GPS Tracking</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            View technician routes and current locations
+          </p>
+        </div>
+        <button
+          onClick={() => setShowLocationSettings(true)}
+          className="inline-flex items-center px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 shadow-sm transition-colors"
+        >
+          <Cog6ToothIcon className="w-5 h-5 mr-2" />
+          Settings
+        </button>
       </div>
 
       {/* Mode Toggle */}
@@ -274,7 +392,7 @@ const TeamTrackingPage = () => {
                     setSelectedUserId(e.target.value);
                     setSelectedUserName(selected?.name || '');
                   }}
-                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
+                  className="block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 text-sm transition-colors bg-white"
                 >
                   <option value="">Select technician...</option>
                   {teamMembers.map((member) => (
@@ -579,6 +697,294 @@ const TeamTrackingPage = () => {
               <p className="text-gray-500">No technicians currently have active location tracking</p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Location Settings Modal */}
+      {showLocationSettings && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative my-8 mx-auto w-full max-w-2xl bg-white rounded-lg shadow-xl">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-medium text-gray-900 flex items-center">
+                <Cog6ToothIcon className="w-5 h-5 mr-2 text-primary-600" />
+                Location Tracking Settings
+              </h3>
+              <button
+                onClick={() => setShowLocationSettings(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="px-6 py-4 max-h-96 overflow-y-auto">
+              {settingsLoading ? (
+                <div className="flex justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* Business Settings */}
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-900 mb-4">Business Settings</h4>
+                    <div className="space-y-4">
+                      <div className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={editingSettings?.autoTrackingEnabled || false}
+                          onChange={(e) => setEditingSettings({
+                            ...editingSettings,
+                            autoTrackingEnabled: e.target.checked
+                          })}
+                          className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                        />
+                        <label className="ml-3 text-sm font-medium text-gray-700">
+                          Enable Automatic Location Tracking
+                        </label>
+                      </div>
+
+                      {editingSettings?.autoTrackingEnabled && (
+                        <>
+                          <div className="grid grid-cols-2 gap-4 pl-7">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">
+                                Business Hours Start
+                              </label>
+                              <input
+                                type="time"
+                                value={editingSettings?.businessHoursStart || '08:00'}
+                                onChange={(e) => setEditingSettings({
+                                  ...editingSettings,
+                                  businessHoursStart: e.target.value
+                                })}
+                                className="block w-full px-3 py-2 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">
+                                Business Hours End
+                              </label>
+                              <input
+                                type="time"
+                                value={editingSettings?.businessHoursEnd || '17:00'}
+                                onChange={(e) => setEditingSettings({
+                                  ...editingSettings,
+                                  businessHoursEnd: e.target.value
+                                })}
+                                className="block w-full px-3 py-2 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 text-sm"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="pl-7">
+                            <label className="block text-xs font-medium text-gray-700 mb-2">
+                              Work Days
+                            </label>
+                            <div className="grid grid-cols-2 gap-2">
+                              {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => (
+                                <label key={day} className="flex items-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={(editingSettings?.workDays || []).includes(day)}
+                                    onChange={(e) => {
+                                      const workDays = editingSettings?.workDays || [];
+                                      if (e.target.checked) {
+                                        setEditingSettings({
+                                          ...editingSettings,
+                                          workDays: [...workDays, day]
+                                        });
+                                      } else {
+                                        setEditingSettings({
+                                          ...editingSettings,
+                                          workDays: workDays.filter(d => d !== day)
+                                        });
+                                      }
+                                    }}
+                                    className="h-3 w-3 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                                  />
+                                  <span className="ml-2 text-xs text-gray-600">{day}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="pl-7">
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              Data Retention (days)
+                            </label>
+                            <input
+                              type="number"
+                              min="7"
+                              max="365"
+                              value={editingSettings?.retentionDays || 30}
+                              onChange={(e) => setEditingSettings({
+                                ...editingSettings,
+                                retentionDays: parseInt(e.target.value)
+                              })}
+                              className="block w-full px-3 py-2 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 text-sm"
+                            />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Schedule Exceptions */}
+                  <div className="border-t border-gray-200 pt-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-sm font-medium text-gray-900">Schedule Exceptions</h4>
+                      <button
+                        onClick={() => setShowExceptionForm(!showExceptionForm)}
+                        className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-primary-50 text-primary-700 hover:bg-primary-100 transition-colors"
+                      >
+                        + Add Exception
+                      </button>
+                    </div>
+
+                    {showExceptionForm && (
+                      <div className="bg-gray-50 p-3 rounded-lg mb-3 space-y-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                            Technician
+                          </label>
+                          <select
+                            value={newException.userId}
+                            onChange={(e) => setNewException({ ...newException, userId: e.target.value })}
+                            className="block w-full px-3 py-2 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 text-sm"
+                          >
+                            <option value="">Select technician...</option>
+                            {teamMembers.map((member) => (
+                              <option key={member.userId} value={member.userId}>
+                                {member.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                            Exception Type
+                          </label>
+                          <select
+                            value={newException.type}
+                            onChange={(e) => setNewException({ ...newException, type: e.target.value })}
+                            className="block w-full px-3 py-2 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 text-sm"
+                          >
+                            <option value="sick_day">🤒 Sick Day</option>
+                            <option value="vacation">🏖️ Vacation</option>
+                            <option value="off_day">📅 Off Day</option>
+                            <option value="overtime">⏰ Overtime</option>
+                          </select>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              Start Date
+                            </label>
+                            <input
+                              type="date"
+                              value={newException.startDate}
+                              onChange={(e) => setNewException({ ...newException, startDate: e.target.value })}
+                              className="block w-full px-3 py-2 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              End Date
+                            </label>
+                            <input
+                              type="date"
+                              value={newException.endDate}
+                              onChange={(e) => setNewException({ ...newException, endDate: e.target.value })}
+                              className="block w-full px-3 py-2 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 text-sm"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                            Description (optional)
+                          </label>
+                          <input
+                            type="text"
+                            value={newException.description}
+                            onChange={(e) => setNewException({ ...newException, description: e.target.value })}
+                            placeholder="e.g., Annual vacation, doctor appointment"
+                            className="block w-full px-3 py-2 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 text-sm"
+                          />
+                        </div>
+
+                        <div className="flex gap-2 justify-end pt-2">
+                          <button
+                            onClick={() => setShowExceptionForm(false)}
+                            className="px-3 py-1.5 rounded text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={handleAddException}
+                            className="px-3 py-1.5 rounded text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 transition-colors"
+                          >
+                            Add
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {exceptions.length > 0 ? (
+                      <div className="space-y-2">
+                        {exceptions.map((exception) => (
+                          <div key={exception.id} className="flex items-start justify-between p-2 bg-gray-50 rounded text-xs">
+                            <div className="flex-1">
+                              <div className="font-medium text-gray-900">
+                                {teamMembers.find(m => m.userId === exception.userId)?.name || 'Unknown Technician'}
+                              </div>
+                              <div className="text-gray-600 mt-0.5">
+                                {getExceptionTypeLabel(exception.type)} • {exception.startDate} to {exception.endDate}
+                              </div>
+                              {exception.description && (
+                                <div className="text-gray-500 mt-0.5">{exception.description}</div>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => handleDeleteException(exception.id)}
+                              className="text-red-600 hover:text-red-700 font-medium ml-2"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-500 py-2">No exceptions scheduled</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50">
+              <button
+                onClick={() => setShowLocationSettings(false)}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveSettings}
+                disabled={settingsLoading}
+                className="px-4 py-2 rounded-lg bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 disabled:opacity-50 transition-colors"
+              >
+                Save Settings
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

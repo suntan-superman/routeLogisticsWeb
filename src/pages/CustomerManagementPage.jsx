@@ -5,6 +5,7 @@ import { geocodeAddress } from '../services/geocodingService';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
 import { canApproveCustomers, canEditCustomers } from '../utils/permissions';
+import { formatDate as formatDateHelper } from '../utils/dateHelpers';
 import { 
   UsersIcon, 
   PlusIcon,
@@ -178,7 +179,7 @@ const CustomerManagementPage = () => {
         case 'name':
           return (a.name || '').localeCompare(b.name || '');
         case 'createdAt':
-          return new Date(b.createdAt) - new Date(a.createdAt);
+          return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
         case 'totalSpent':
           return (b.totalSpent || 0) - (a.totalSpent || 0);
         default:
@@ -475,11 +476,7 @@ const CustomerManagementPage = () => {
   };
 
   const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
+    return formatDateHelper(dateString);
   };
 
   const toolbarOptions = ['Search', 'ExcelExport', 'CsvExport'];

@@ -27,6 +27,7 @@ const SignUpPage = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [isCustomer, setIsCustomer] = useState(false); // Customer portal vs staff/admin
   const [invitationCode, setInvitationCode] = useState('');
   const [invitationDetails, setInvitationDetails] = useState(null);
   const [invitationValidationMessage, setInvitationValidationMessage] = useState('');
@@ -84,6 +85,7 @@ const SignUpPage = () => {
     setName('');
     setPassword('');
     setConfirmPassword('');
+    setIsCustomer(false); // Reset to staff/admin by default
 
     setInvitationCode(parsedInviteParams.invitationCode || '');
     setInvitationDetails(null);
@@ -229,6 +231,13 @@ const SignUpPage = () => {
       return;
     }
 
+    // If customer, proceed directly to sign up (skip company association)
+    if (isCustomer) {
+      handleSignUp();
+      return;
+    }
+
+    // Otherwise, proceed to company association
     setStep(2);
   };
 
@@ -527,6 +536,24 @@ const SignUpPage = () => {
                 {password && confirmPassword && password !== confirmPassword && (
                   <p className="mt-1 text-xs text-red-600">Passwords must match exactly.</p>
                 )}
+              </div>
+
+              {/* Customer Checkbox */}
+              <div className="border-t border-gray-200 pt-4">
+                <label className="flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isCustomer}
+                    onChange={(e) => setIsCustomer(e.target.checked)}
+                    className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                  />
+                  <span className="ml-3 text-sm text-gray-700">
+                    <span className="font-medium">I am a customer</span>
+                    <span className="text-gray-600 block text-xs mt-1">
+                      Check this if you're signing up to view jobs, invoices, and manage services through the customer portal
+                    </span>
+                  </span>
+                </label>
               </div>
             </div>
 

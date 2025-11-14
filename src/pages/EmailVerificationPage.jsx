@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { auth } from '../services/firebase';
+import { auth, db } from '../services/firebase';
 import { sendEmailVerification, reload, applyActionCode, confirmPasswordReset, verifyPasswordResetCode } from 'firebase/auth';
+import { getDoc, doc } from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   EnvelopeIcon,
@@ -54,13 +55,27 @@ const EmailVerificationPage = () => {
         if (currentUser.emailVerified) {
           toast.success('Email verified! Redirecting...');
           
-          // Check if user needs company setup
+          // Check user's role to determine redirect destination
+          try {
+            const userDocSnap = await getDoc(doc(db, 'users', currentUser.uid));
+            const userRole = userDocSnap.data()?.role;
+            
+            // If user has no role, they're a customer - send to customer portal
+            if (!userRole) {
+              navigate('/customer-portal/dashboard');
+              return;
+            }
+          } catch (err) {
+            console.error('Error checking user role:', err);
+          }
+          
+          // Check if user needs company setup (for admins/techs creating new company)
           const pendingCompanyData = localStorage.getItem('pendingCompanyData');
           if (pendingCompanyData) {
             // User signed up with new company - redirect to company setup
             navigate('/company-setup');
           } else {
-            // User signed up with existing company or no company - go to home
+            // User signed up with existing company or as field tech - go to home
             navigate('/');
           }
         }
@@ -88,6 +103,20 @@ const EmailVerificationPage = () => {
       const currentUser = auth.currentUser;
       if (currentUser) {
         await reload(currentUser);
+      }
+      
+      // Check user's role to determine redirect destination
+      try {
+        const userDocSnap = await getDoc(doc(db, 'users', currentUser.uid));
+        const userRole = userDocSnap.data()?.role;
+        
+        // If user has no role, they're a customer - send to customer portal
+        if (!userRole) {
+          navigate('/customer-portal/dashboard', { replace: true });
+          return;
+        }
+      } catch (err) {
+        console.error('Error checking user role:', err);
       }
       
       // Check if user has pending company data (new company signup)

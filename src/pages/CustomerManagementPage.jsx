@@ -995,7 +995,7 @@ const CustomerManagementPage = () => {
       {/* Add Customer Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+          <div className="relative top-20 mx-auto p-5 border w-[576px] shadow-lg rounded-md bg-white">
             <div className="mt-3">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium text-gray-900">Add New Customer</h3>
@@ -1014,18 +1014,18 @@ const CustomerManagementPage = () => {
               </div>
               
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Name *</label>
-                  <input
-                    type="text"
-                    value={customerData.name}
-                    onChange={(e) => handleInputChange('name', e.target.value)}
-                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
-                    placeholder="Enter customer name"
-                  />
-                </div>
-                
+                {/* Row 1: Name and Email */}
                 <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Name *</label>
+                    <input
+                      type="text"
+                      value={customerData.name}
+                      onChange={(e) => handleInputChange('name', e.target.value)}
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
+                      placeholder="Enter customer name"
+                    />
+                  </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Email</label>
                     <input
@@ -1036,22 +1036,25 @@ const CustomerManagementPage = () => {
                       placeholder="email@example.com"
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Phone</label>
-                    <input
-                      type="tel"
-                      value={customerData.phone}
-                      onChange={(e) => {
-                        const formatted = formatPhoneNumber(e.target.value);
-                        handleInputChange('phone', formatted);
-                      }}
-                      maxLength={14}
-                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
-                      placeholder="(555) 123-4567"
-                    />
-                  </div>
                 </div>
-                
+
+                {/* Row 2: Phone (full width) */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Phone</label>
+                  <input
+                    type="tel"
+                    value={customerData.phone}
+                    onChange={(e) => {
+                      const formatted = formatPhoneNumber(e.target.value);
+                      handleInputChange('phone', formatted);
+                    }}
+                    maxLength={14}
+                    className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
+                    placeholder="(555) 123-4567"
+                  />
+                </div>
+
+                {/* Row 3: Address (full width) */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Address</label>
                   <input
@@ -1062,7 +1065,8 @@ const CustomerManagementPage = () => {
                     placeholder="123 Main Street"
                   />
                 </div>
-                
+
+                {/* Row 4: City, State, ZIP */}
                 <div className="grid grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700">City</label>
@@ -1095,7 +1099,8 @@ const CustomerManagementPage = () => {
                     />
                   </div>
                 </div>
-                
+
+                {/* Row 5: Notes (full width) */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Notes</label>
                   <textarea
@@ -1107,7 +1112,8 @@ const CustomerManagementPage = () => {
                   />
                 </div>
 
-                <div className="flex items-center">
+                {/* Row 6: Email Consent Checkbox */}
+                <div className="flex items-center pt-2">
                   <input
                     type="checkbox"
                     id="emailConsent"

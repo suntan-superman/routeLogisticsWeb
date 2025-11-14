@@ -32,9 +32,19 @@ import RouteOptimizationPage from './pages/RouteOptimizationPage';
 import CustomerPortalPage from './pages/CustomerPortalPage';
 import LocationSettingsPage from './pages/LocationSettingsPage';
 
+// Customer Portal Pages
+import CustomerPortalLoginPage from './pages/customer-portal/LoginPage';
+import CustomerPortalDashboardPage from './pages/customer-portal/DashboardPage';
+import CustomerPortalJobsPage from './pages/customer-portal/JobsPage';
+import CustomerPortalInvoicesPage from './pages/customer-portal/InvoicesPage';
+import CustomerPortalCompanyPage from './pages/customer-portal/CompanyDetailPage';
+import CustomerPortalProfilePage from './pages/customer-portal/ProfilePage';
+
 // Components
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
+import CustomerPortalProtectedRoute from './components/CustomerPortalProtectedRoute';
+import CustomerPortalLayout from './layouts/CustomerPortalLayout';
 
 // Register Syncfusion license - import from license file
 import './syncfusion-license';
@@ -207,11 +217,51 @@ function App() {
                   </ProtectedRoute>
                 } />
                 
-                <Route path="/customer-portal" element={
-                  <ProtectedRoute>
-                    <CustomerPortalPage />
-                  </ProtectedRoute>
+                {/* Customer Portal Routes */}
+                <Route path="/customer-portal/login" element={<CustomerPortalLoginPage />} />
+                
+                <Route path="/customer-portal/dashboard" element={
+                  <CustomerPortalProtectedRoute>
+                    <CustomerPortalLayout>
+                      <CustomerPortalDashboardPage />
+                    </CustomerPortalLayout>
+                  </CustomerPortalProtectedRoute>
                 } />
+                
+                <Route path="/customer-portal/jobs" element={
+                  <CustomerPortalProtectedRoute>
+                    <CustomerPortalLayout>
+                      <CustomerPortalJobsPage />
+                    </CustomerPortalLayout>
+                  </CustomerPortalProtectedRoute>
+                } />
+                
+                <Route path="/customer-portal/invoices" element={
+                  <CustomerPortalProtectedRoute>
+                    <CustomerPortalLayout>
+                      <CustomerPortalInvoicesPage />
+                    </CustomerPortalLayout>
+                  </CustomerPortalProtectedRoute>
+                } />
+                
+                <Route path="/customer-portal/company" element={
+                  <CustomerPortalProtectedRoute>
+                    <CustomerPortalLayout>
+                      <CustomerPortalCompanyPage />
+                    </CustomerPortalLayout>
+                  </CustomerPortalProtectedRoute>
+                } />
+                
+                <Route path="/customer-portal/profile" element={
+                  <CustomerPortalProtectedRoute>
+                    <CustomerPortalLayout>
+                      <CustomerPortalProfilePage />
+                    </CustomerPortalLayout>
+                  </CustomerPortalProtectedRoute>
+                } />
+                
+                {/* Redirect /customer-portal to /customer-portal/dashboard */}
+                <Route path="/customer-portal" element={<Navigate to="/customer-portal/dashboard" replace />} />
                 
                 {/* Redirect any unknown routes to home */}
                 <Route path="*" element={<Navigate to="/" replace />} />

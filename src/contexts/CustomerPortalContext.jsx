@@ -1,117 +1,217 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { useAuth } from './AuthContext';
-import CustomerPortalService from '../services/customerPortalService';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import CustomerAuthService from '../services/customerAuthService';
 
+/**
+ * Customer Portal Context
+ * Manages authentication state, customer profile, and company selection for portal
+ */
 const CustomerPortalContext = createContext();
 
-export const useCustomerPortal = () => {
-  const context = useContext(CustomerPortalContext);
-  if (!context) {
-    throw new Error('useCustomerPortal must be used within a CustomerPortalProvider');
-  }
-  return context;
-};
-
 export const CustomerPortalProvider = ({ children }) => {
-  const { currentUser, userProfile } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [companies, setCompanies] = useState([]);
-  const [activeCompany, setActiveCompany] = useState(null);
-  const [customerRecord, setCustomerRecord] = useState(null);
+  const [customer, setCustomer] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedCompanyId, setSelectedCompanyId] = useState(null);
+  const [notifications, setNotifications] = useState([]);
 
-  // Check if user is a customer (not admin/tech)
-  const isCustomer = () => {
-    if (!userProfile) return false;
-    const role = (userProfile.role || '').toLowerCase();
-    return role === 'customer' || role === '' || !role;
-  };
-
-  // Load customer companies on mount or when user changes
+  // Initialize auth state on mount
   useEffect(() => {
-    if (!currentUser?.email || !isCustomer()) {
-      setLoading(false);
-      return;
-    }
-
-    const loadCustomerCompanies = async () => {
-      setLoading(true);
+    const unsubscribe = CustomerAuthService.onAuthStateChanged(async (user) => {
       try {
-        const result = await CustomerPortalService.findCustomerCompanies(currentUser.email);
-        
-        if (result.success) {
-          setCompanies(result.companies || []);
-          
-          // Auto-select if only one company
-          if (result.companies && result.companies.length === 1) {
-            setActiveCompany(result.companies[0]);
-            
-            // Load customer record
-            if (result.companies[0].customerId) {
-              const customerResult = await CustomerPortalService.getCustomerDetails(
-                result.companies[0].customerId
-              );
-              if (customerResult.success) {
-                setCustomerRecord(customerResult.customer);
-              }
-            }
-          } else if (result.companies && result.companies.length > 1) {
-            // Check localStorage for last selected company
-            const lastCompanyId = localStorage.getItem('lastCustomerCompanyId');
-            const lastCompany = result.companies.find(c => c.id === lastCompanyId);
-            
-            if (lastCompany) {
-              setActiveCompany(lastCompany);
-              
-              if (lastCompany.customerId) {
-                const customerResult = await CustomerPortalService.getCustomerDetails(
-                  lastCompany.customerId
-                );
-                if (customerResult.success) {
-                  setCustomerRecord(customerResult.customer);
-                }
-              }
-            }
+        if (user) {
+          // User is authenticated
+          const profile = await CustomerAuthService.getCustomerProfile(user.uid);
+          setCustomer({
+            id: user.uid,
+            email: user.email,
+            ...profile
+          });
+          setIsAuthenticated(true);
+
+          // Set default selected company to first one
+          if (profile?.companies?.length > 0) {
+            setSelectedCompanyId(profile.companies[0]);
           }
+        } else {
+          // User is not authenticated
+          setCustomer(null);
+          setIsAuthenticated(false);
+          setSelectedCompanyId(null);
         }
-      } catch (error) {
-        console.error('Error loading customer companies:', error);
+      } catch (err) {
+        console.error('Error handling auth state change:', err);
+        setError(err.message);
       } finally {
-        setLoading(false);
+        setIsLoading(false);
       }
-    };
+    });
 
-    loadCustomerCompanies();
-  }, [currentUser?.email, userProfile?.role]);
+    return () => unsubscribe();
+  }, []);
 
-  // Switch active company
-  const switchCompany = async (company) => {
-    setActiveCompany(company);
-    localStorage.setItem('lastCustomerCompanyId', company.id);
-    
-    // Load customer record for this company
-    if (company.customerId) {
-      try {
-        const customerResult = await CustomerPortalService.getCustomerDetails(
-          company.customerId
-        );
-        if (customerResult.success) {
-          setCustomerRecord(customerResult.customer);
-        }
-      } catch (error) {
-        console.error('Error loading customer record:', error);
+  // Request OTP
+  const requestOTP = useCallback(async (email) => {
+    try {
+      setError(null);
+      setIsLoading(true);
+      const result = await CustomerAuthService.requestOTP(email);
+      
+      if (!result.success) {
+        setError(result.error);
+        return result;
       }
+
+      return result;
+    } catch (err) {
+      const message = err.message || 'Failed to request OTP';
+      setError(message);
+      return { success: false, error: message };
+    } finally {
+      setIsLoading(false);
     }
-  };
+  }, []);
 
+  // Verify OTP and login
+  const verifyOTPAndLogin = useCallback(async (email, otp) => {
+    try {
+      setError(null);
+      setIsLoading(true);
+      const result = await CustomerAuthService.verifyOTP(email, otp);
+      
+      if (!result.success) {
+        setError(result.error);
+        return result;
+      }
+
+      // Profile will be set by auth state change listener
+      return result;
+    } catch (err) {
+      const message = err.message || 'Failed to verify OTP';
+      setError(message);
+      return { success: false, error: message };
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // Logout
+  const logout = useCallback(async () => {
+    try {
+      setError(null);
+      const result = await CustomerAuthService.signOut();
+      
+      if (result.success) {
+        setCustomer(null);
+        setIsAuthenticated(false);
+        setSelectedCompanyId(null);
+        setNotifications([]);
+      } else {
+        setError(result.error);
+      }
+
+      return result;
+    } catch (err) {
+      const message = err.message || 'Failed to logout';
+      setError(message);
+      return { success: false, error: message };
+    }
+  }, []);
+
+  // Update profile
+  const updateProfile = useCallback(async (updates) => {
+    try {
+      if (!customer?.id) {
+        throw new Error('No customer logged in');
+      }
+
+      setError(null);
+      const result = await CustomerAuthService.updateCustomerProfile(customer.id, updates);
+      
+      if (result.success) {
+        // Update local state
+        setCustomer(prev => ({
+          ...prev,
+          ...updates
+        }));
+      } else {
+        setError(result.error);
+      }
+
+      return result;
+    } catch (err) {
+      const message = err.message || 'Failed to update profile';
+      setError(message);
+      return { success: false, error: message };
+    }
+  }, [customer?.id]);
+
+  // Change selected company
+  const selectCompany = useCallback((companyId) => {
+    if (customer?.companies?.includes(companyId)) {
+      setSelectedCompanyId(companyId);
+      return true;
+    }
+    return false;
+  }, [customer?.companies]);
+
+  // Validate session
+  const validateSession = useCallback(async () => {
+    try {
+      const result = await CustomerAuthService.validateSession();
+      
+      if (!result.valid) {
+        setIsAuthenticated(false);
+        setCustomer(null);
+        setError(result.reason);
+        return false;
+      }
+
+      return true;
+    } catch (err) {
+      console.error('Error validating session:', err);
+      return false;
+    }
+  }, []);
+
+  // Extend session
+  const extendSession = useCallback(() => {
+    return CustomerAuthService.extendSession();
+  }, []);
+
+  // Get companies list with labels
+  const companiesList = customer?.companies || [];
+
+  // Value object
   const value = {
-    loading,
-    companies,
-    activeCompany,
-    customerRecord,
-    isCustomer: isCustomer(),
-    hasMultipleCompanies: companies.length > 1,
-    hasNoCompanies: companies.length === 0,
-    switchCompany
+    // State
+    customer,
+    isAuthenticated,
+    isLoading,
+    error,
+    selectedCompanyId,
+    notifications,
+    companiesList,
+
+    // Auth methods
+    requestOTP,
+    verifyOTPAndLogin,
+    logout,
+
+    // Profile methods
+    updateProfile,
+
+    // Company methods
+    selectCompany,
+
+    // Session methods
+    validateSession,
+    extendSession,
+
+    // Utils
+    isCustomerPortalUser: isAuthenticated && customer?.id,
+    customerEmail: customer?.email,
+    customerName: customer?.name,
   };
 
   return (
@@ -121,9 +221,17 @@ export const CustomerPortalProvider = ({ children }) => {
   );
 };
 
-// Safe version that doesn't throw during initialization
-export const useCustomerPortalSafe = () => {
+/**
+ * Hook to use Customer Portal Context
+ */
+export const useCustomerPortal = () => {
   const context = useContext(CustomerPortalContext);
+  
+  if (!context) {
+    throw new Error('useCustomerPortal must be used within CustomerPortalProvider');
+  }
+
   return context;
 };
 
+export default CustomerPortalContext;

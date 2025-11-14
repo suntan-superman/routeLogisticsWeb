@@ -5,6 +5,8 @@ import JobManagementService from '../services/jobManagementService';
 import CompanyService from '../services/companyService';
 import JobPhotoService from '../services/jobPhotoService';
 import CustomerService from '../services/customerService';
+import PhotoService from '../services/photoService';
+import PhotoGallery from '../components/PhotoGallery';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
 import { canReassignJobs } from '../utils/permissions';
@@ -156,7 +158,20 @@ const JobManagementPage = () => {
       try {
         const result = await JobPhotoService.getJobPhotos(companyId, job.id);
         if (result.success) {
-          setJobPhotos(result.photos || []);
+          // Transform photos to match PhotoGallery component format
+          const transformedPhotos = (result.photos || []).map(photo => ({
+            id: photo.id,
+            url: photo.downloadURL || photo.url,
+            fileName: photo.fileName || `photo-${photo.id}.jpg`,
+            capturedAt: photo.capturedAt,
+            uploadedAt: photo.uploadedAt || photo.createdAt,
+            latitude: photo.latitude,
+            longitude: photo.longitude,
+            locationAccuracy: photo.locationAccuracy,
+            notes: photo.note || photo.notes,
+            storagePath: photo.storagePath
+          }));
+          setJobPhotos(transformedPhotos);
         } else {
           setJobPhotos([]);
           if (result.error) {
@@ -1259,95 +1274,20 @@ const JobManagementPage = () => {
                 )}
                 
                 <div className="border-t pt-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <h5 className="text-sm font-medium text-gray-700">Job Photos</h5>
-                    {jobPhotos.length > 0 && (
-                      <span className="text-xs text-gray-500">{jobPhotos.length} photo{jobPhotos.length === 1 ? '' : 's'}</span>
-                    )}
-                  </div>
-
-                  {jobPhotosLoading ? (
-                    <div className="flex items-center justify-center py-6">
-                      <div className="h-6 w-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
-                      <span className="ml-3 text-sm text-gray-500">Loading photos…</span>
-                    </div>
-                  ) : jobPhotos.length === 0 ? (
-                    <div className="rounded-md bg-gray-50 border border-dashed border-gray-200 p-4">
-                      <p className="text-sm text-gray-500">No photos uploaded for this job yet.</p>
-                    </div>
-                  ) : (
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      {jobPhotos.map((photo) => (
-                        <div key={photo.id} className="border border-gray-200 rounded-lg overflow-hidden shadow-sm bg-white">
-                          <div className="aspect-video bg-gray-100">
-                            <img
-                              src={photo.downloadURL}
-                              alt={photo.note || 'Job photo'}
-                              className="h-full w-full object-cover"
-                            />
-                          </div>
-                          <div className="px-3 py-3 space-y-2">
-                            <p className="text-xs text-gray-500">
-                              Captured {formatDateTime(photo.capturedAt) || 'recently'}
-                            </p>
-                            <p className="text-xs text-gray-400">
-                              Uploaded {formatDateTime(photo.createdAt) || 'recently'}
-                            </p>
-                            {typeof photo.latitude === 'number' && typeof photo.longitude === 'number' && (
-                              <div className="flex items-center justify-between text-xs text-gray-600">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    window.open(
-                                      `https://maps.google.com/?q=${photo.latitude},${photo.longitude}`,
-                                      '_blank',
-                                      'noopener,noreferrer'
-                                    )
-                                  }
-                                  className="inline-flex items-center text-primary-600 hover:text-primary-700"
-                                >
-                                  <ArrowPathIcon className="h-4 w-4 mr-1" />
-                                  {photo.latitude.toFixed(4)}, {photo.longitude.toFixed(4)}
-                                </button>
-                                {typeof photo.locationAccuracy === 'number' && (
-                                  <span className="text-gray-400">
-                                    ± {Math.round(photo.locationAccuracy)} m
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                            <div className="border-t border-gray-100 pt-2">
-                              <h6 className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                                Technician Note
-                              </h6>
-                              <p className="text-sm text-gray-700 leading-snug">
-                                {photo.note ? photo.note : 'None provided.'}
-                              </p>
-                            </div>
-                            <div className="flex items-center justify-between text-sm pt-1">
-                              <a
-                                href={photo.downloadURL}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center text-primary-600 hover:text-primary-700"
-                              >
-                                <ArrowDownTrayIcon className="h-4 w-4 mr-1" />
-                                Download
-                              </a>
-                              <button
-                                type="button"
-                                onClick={() => handleCopyPhotoLink(photo.downloadURL)}
-                                className="inline-flex items-center text-gray-500 hover:text-gray-700"
-                              >
-                                <ClipboardDocumentListIcon className="h-4 w-4 mr-1" />
-                                Copy link
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <PhotoGallery 
+                    jobId={selectedJob.id}
+                    photos={jobPhotos}
+                    onDeletePhoto={async (photoId) => {
+                      const result = await PhotoService.deletePhoto(photoId);
+                      if (result.success) {
+                        setJobPhotos(prev => prev.filter(p => p.id !== photoId));
+                      } else {
+                        throw new Error(result.error);
+                      }
+                    }}
+                    isLoading={jobPhotosLoading}
+                    readOnly={false}
+                  />
                 </div>
                 
                 {selectedJob.actualWorkDone && (

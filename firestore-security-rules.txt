@@ -610,5 +610,49 @@ service cloud.firestore {
         )
       );
     }
+    
+    // ========================================
+    // CUSTOMER PORTAL COLLECTIONS
+    // ========================================
+    
+    // Customer profiles for portal (cloud function managed)
+    match /portalCustomers/{customerId} {
+      allow read: if request.auth != null && request.auth.uid == customerId;
+      allow update: if request.auth != null && 
+                       request.auth.uid == customerId &&
+                       !("companies" in request.resource.data);
+    }
+    
+    // Customer jobs visible in portal (read-only for customers)
+    match /customerJobs/{jobId} {
+      allow read: if request.auth != null && 
+                     resource.data.customerId == request.auth.uid &&
+                     resource.data.companyId in getCustomerCompanies();
+      allow create, update, delete: if false;
+    }
+    
+    // Customer invoices visible in portal (read-only for customers)
+    match /customerInvoices/{invoiceId} {
+      allow read: if request.auth != null && 
+                     resource.data.customerId == request.auth.uid &&
+                     resource.data.companyId in getCustomerCompanies();
+      allow create, update, delete: if false;
+    }
+    
+    // Customer notifications
+    match /customerNotifications/{notificationId} {
+      allow read: if request.auth != null && 
+                     resource.data.customerId == request.auth.uid;
+      allow update: if request.auth != null && 
+                       resource.data.customerId == request.auth.uid &&
+                       (request.resource.data.read == true ||
+                        request.resource.data.readAt != null);
+      allow create, delete: if false;
+    }
+    
+    // Helper function to get customer's companies
+    function getCustomerCompanies() {
+      return get(/databases/$(database)/documents/portalCustomers/$(request.auth.uid)).data.companies;
+    }
   }
 }

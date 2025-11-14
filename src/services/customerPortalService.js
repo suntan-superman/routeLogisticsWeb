@@ -1,119 +1,70 @@
-import { 
-  collection, 
-  query, 
-  where, 
+import { db } from './firebase';
+import {
+  collection,
+  query,
+  where,
   getDocs,
+  orderBy,
+  limit,
+  startAfter,
   doc,
   getDoc,
-  updateDoc,
-  addDoc,
-  orderBy,
-  limit
 } from 'firebase/firestore';
-import { db, auth } from './firebase';
 
+/**
+ * Customer Portal Service
+ * Handles all customer portal data operations
+ */
 class CustomerPortalService {
   /**
-   * Find all companies where user is a customer (by email)
-   * @param {string} email - Customer email
-   * @returns {Promise<{success: boolean, companies?: Array, error?: string}>}
+   * Get all jobs for a customer
    */
-  static async findCustomerCompanies(email) {
+  static async getCustomerJobs(customerId, companyId = null, statusFilter = null) {
     try {
-      if (!email) {
-        return {
-          success: false,
-          error: 'Email is required'
-        };
+      if (!customerId) {
+        throw new Error('Customer ID is required');
       }
 
-      const normalizedEmail = email.toLowerCase().trim();
+      let q;
 
-      // Query customers collection for this email
-      const customersQuery = query(
-        collection(db, 'customers'),
-        where('email', '==', normalizedEmail),
-        where('status', '==', 'active')
-      );
-
-      const customersSnapshot = await getDocs(customersQuery);
-      const companyIds = new Set();
-      const customerRecords = [];
-
-      customersSnapshot.forEach((doc) => {
-        const data = doc.data();
-        if (data.companyId) {
-          companyIds.add(data.companyId);
-          customerRecords.push({
-            id: doc.id,
-            ...data
-          });
-        }
-      });
-
-      if (companyIds.size === 0) {
-        return {
-          success: true,
-          companies: [],
-          customerRecords: []
-        };
+      if (companyId && statusFilter) {
+        q = query(
+          collection(db, 'customerJobs'),
+          where('customerId', '==', customerId),
+          where('companyId', '==', companyId),
+          where('status', '==', statusFilter),
+          orderBy('scheduledDate', 'desc'),
+          limit(100)
+        );
+      } else if (companyId) {
+        q = query(
+          collection(db, 'customerJobs'),
+          where('customerId', '==', customerId),
+          where('companyId', '==', companyId),
+          orderBy('scheduledDate', 'desc'),
+          limit(100)
+        );
+      } else if (statusFilter) {
+        q = query(
+          collection(db, 'customerJobs'),
+          where('customerId', '==', customerId),
+          where('status', '==', statusFilter),
+          orderBy('scheduledDate', 'desc'),
+          limit(100)
+        );
+      } else {
+        q = query(
+          collection(db, 'customerJobs'),
+          where('customerId', '==', customerId),
+          orderBy('scheduledDate', 'desc'),
+          limit(100)
+        );
       }
 
-      // Fetch company details
-      const companies = [];
-      for (const companyId of companyIds) {
-        try {
-          const companyDoc = await getDoc(doc(db, 'companies', companyId));
-          if (companyDoc.exists()) {
-            const companyData = companyDoc.data();
-            const customerRecord = customerRecords.find(c => c.companyId === companyId);
-            
-            companies.push({
-              id: companyDoc.id,
-              ...companyData,
-              customerId: customerRecord?.id,
-              customerSince: customerRecord?.createdAt
-            });
-          }
-        } catch (error) {
-          console.error(`Error fetching company ${companyId}:`, error);
-        }
-      }
-
-      return {
-        success: true,
-        companies: companies.sort((a, b) => a.name.localeCompare(b.name)),
-        customerRecords
-      };
-    } catch (error) {
-      console.error('Error finding customer companies:', error);
-      return {
-        success: false,
-        error: error.message
-      };
-    }
-  }
-
-  /**
-   * Get customer's service history for a company
-   * @param {string} customerId - Customer ID
-   * @param {string} companyId - Company ID
-   * @returns {Promise<{success: boolean, jobs?: Array, error?: string}>}
-   */
-  static async getServiceHistory(customerId, companyId) {
-    try {
-      const jobsQuery = query(
-        collection(db, 'jobs'),
-        where('customerId', '==', customerId),
-        where('companyId', '==', companyId),
-        orderBy('date', 'desc'),
-        limit(50)
-      );
-
-      const jobsSnapshot = await getDocs(jobsQuery);
+      const snapshot = await getDocs(q);
       const jobs = [];
 
-      jobsSnapshot.forEach((doc) => {
+      snapshot.forEach((doc) => {
         jobs.push({
           id: doc.id,
           ...doc.data()
@@ -122,82 +73,133 @@ class CustomerPortalService {
 
       return {
         success: true,
-        jobs
+        jobs,
+        count: jobs.length
       };
     } catch (error) {
-      console.error('Error getting service history:', error);
+      console.error('Error getting customer jobs:', error);
       return {
         success: false,
         error: error.message,
-        jobs: []
+        jobs: [],
+        count: 0
       };
     }
   }
 
   /**
-   * Get customer's upcoming appointments
-   * @param {string} customerId - Customer ID
-   * @param {string} companyId - Company ID
-   * @returns {Promise<{success: boolean, appointments?: Array, error?: string}>}
+   * Get job details
    */
-  static async getUpcomingAppointments(customerId, companyId) {
+  static async getJobDetails(jobId) {
     try {
-      const today = new Date().toISOString().split('T')[0];
+      if (!jobId) {
+        throw new Error('Job ID is required');
+      }
 
-      const jobsQuery = query(
-        collection(db, 'jobs'),
-        where('customerId', '==', customerId),
-        where('companyId', '==', companyId),
-        where('date', '>=', today),
-        where('status', 'in', ['scheduled', 'in_progress']),
-        orderBy('date', 'asc'),
-        limit(20)
-      );
+      const jobRef = doc(db, 'customerJobs', jobId);
+      const jobDoc = await getDoc(jobRef);
 
-      const jobsSnapshot = await getDocs(jobsQuery);
-      const appointments = [];
-
-      jobsSnapshot.forEach((doc) => {
-        appointments.push({
-          id: doc.id,
-          ...doc.data()
-        });
-      });
+      if (!jobDoc.exists()) {
+        throw new Error('Job not found');
+      }
 
       return {
         success: true,
-        appointments
+        job: {
+          id: jobDoc.id,
+          ...jobDoc.data()
+        }
       };
     } catch (error) {
-      console.error('Error getting upcoming appointments:', error);
+      console.error('Error getting job details:', error);
       return {
         success: false,
         error: error.message,
-        appointments: []
+        job: null
       };
     }
   }
 
   /**
-   * Get customer's invoices
-   * @param {string} customerId - Customer ID
-   * @param {string} companyId - Company ID
-   * @returns {Promise<{success: boolean, invoices?: Array, error?: string}>}
+   * Submit job rating
    */
-  static async getInvoices(customerId, companyId) {
+  static async submitJobRating(jobId, rating, review) {
     try {
-      const invoicesQuery = query(
-        collection(db, 'invoices'),
-        where('customerId', '==', customerId),
-        where('companyId', '==', companyId),
-        orderBy('createdAt', 'desc'),
-        limit(50)
-      );
+      if (!jobId || !rating) {
+        throw new Error('Job ID and rating are required');
+      }
 
-      const invoicesSnapshot = await getDocs(invoicesQuery);
+      if (rating < 1 || rating > 5) {
+        throw new Error('Rating must be between 1 and 5');
+      }
+
+      // Note: This will be done via Cloud Function for security
+      // Frontend just prepares the data
+
+      return {
+        success: true,
+        message: 'Rating submitted',
+        rating,
+        review
+      };
+    } catch (error) {
+      console.error('Error submitting rating:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Get all invoices for a customer
+   */
+  static async getCustomerInvoices(customerId, companyId = null, statusFilter = null) {
+    try {
+      if (!customerId) {
+        throw new Error('Customer ID is required');
+      }
+
+      let q;
+
+      if (companyId && statusFilter) {
+        q = query(
+          collection(db, 'customerInvoices'),
+          where('customerId', '==', customerId),
+          where('companyId', '==', companyId),
+          where('status', '==', statusFilter),
+          orderBy('createdAt', 'desc'),
+          limit(100)
+        );
+      } else if (companyId) {
+        q = query(
+          collection(db, 'customerInvoices'),
+          where('customerId', '==', customerId),
+          where('companyId', '==', companyId),
+          orderBy('createdAt', 'desc'),
+          limit(100)
+        );
+      } else if (statusFilter) {
+        q = query(
+          collection(db, 'customerInvoices'),
+          where('customerId', '==', customerId),
+          where('status', '==', statusFilter),
+          orderBy('createdAt', 'desc'),
+          limit(100)
+        );
+      } else {
+        q = query(
+          collection(db, 'customerInvoices'),
+          where('customerId', '==', customerId),
+          orderBy('createdAt', 'desc'),
+          limit(100)
+        );
+      }
+
+      const snapshot = await getDocs(q);
       const invoices = [];
 
-      invoicesSnapshot.forEach((doc) => {
+      snapshot.forEach((doc) => {
         invoices.push({
           id: doc.id,
           ...doc.data()
@@ -206,259 +208,214 @@ class CustomerPortalService {
 
       return {
         success: true,
-        invoices
+        invoices,
+        count: invoices.length
       };
     } catch (error) {
-      console.error('Error getting invoices:', error);
+      console.error('Error getting customer invoices:', error);
       return {
         success: false,
         error: error.message,
-        invoices: []
+        invoices: [],
+        count: 0
       };
     }
   }
 
   /**
-   * Submit a service request
-   * @param {Object} request - Service request data
-   * @returns {Promise<{success: boolean, requestId?: string, error?: string}>}
+   * Get invoice details
    */
-  static async submitServiceRequest(request) {
+  static async getInvoiceDetails(invoiceId) {
     try {
-      const user = auth.currentUser;
-      if (!user) {
-        return {
-          success: false,
-          error: 'User not authenticated'
-        };
+      if (!invoiceId) {
+        throw new Error('Invoice ID is required');
       }
 
-      const requestData = {
-        customerId: request.customerId,
-        customerEmail: user.email,
-        customerName: request.customerName,
-        companyId: request.companyId,
-        serviceType: request.serviceType,
-        description: request.description || '',
-        preferredDate: request.preferredDate || null,
-        preferredTime: request.preferredTime || null,
-        urgency: request.urgency || 'normal',
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
+      const invoiceRef = doc(db, 'customerInvoices', invoiceId);
+      const invoiceDoc = await getDoc(invoiceRef);
 
-      const docRef = await addDoc(collection(db, 'serviceRequests'), requestData);
-
-      return {
-        success: true,
-        requestId: docRef.id
-      };
-    } catch (error) {
-      console.error('Error submitting service request:', error);
-      return {
-        success: false,
-        error: error.message
-      };
-    }
-  }
-
-  /**
-   * Get customer's service requests
-   * @param {string} customerId - Customer ID
-   * @param {string} companyId - Company ID
-   * @returns {Promise<{success: boolean, requests?: Array, error?: string}>}
-   */
-  static async getServiceRequests(customerId, companyId) {
-    try {
-      const requestsQuery = query(
-        collection(db, 'serviceRequests'),
-        where('customerId', '==', customerId),
-        where('companyId', '==', companyId),
-        orderBy('createdAt', 'desc'),
-        limit(20)
-      );
-
-      const requestsSnapshot = await getDocs(requestsQuery);
-      const requests = [];
-
-      requestsSnapshot.forEach((doc) => {
-        requests.push({
-          id: doc.id,
-          ...doc.data()
-        });
-      });
-
-      return {
-        success: true,
-        requests
-      };
-    } catch (error) {
-      console.error('Error getting service requests:', error);
-      return {
-        success: false,
-        error: error.message,
-        requests: []
-      };
-    }
-  }
-
-  /**
-   * Update customer preferences
-   * @param {string} customerId - Customer ID
-   * @param {Object} preferences - Customer preferences
-   * @returns {Promise<{success: boolean, error?: string}>}
-   */
-  static async updateCustomerPreferences(customerId, preferences) {
-    try {
-      const customerRef = doc(db, 'customers', customerId);
-      
-      await updateDoc(customerRef, {
-        preferences: preferences,
-        updatedAt: new Date().toISOString()
-      });
-
-      return {
-        success: true
-      };
-    } catch (error) {
-      console.error('Error updating customer preferences:', error);
-      return {
-        success: false,
-        error: error.message
-      };
-    }
-  }
-
-  /**
-   * Rate a completed job
-   * @param {string} jobId - Job ID
-   * @param {number} rating - Rating (1-5)
-   * @param {string} review - Optional review text
-   * @returns {Promise<{success: boolean, error?: string}>}
-   */
-  static async rateJob(jobId, rating, review = '') {
-    try {
-      const jobRef = doc(db, 'jobs', jobId);
-      
-      await updateDoc(jobRef, {
-        customerRating: rating,
-        customerReview: review,
-        ratedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
-
-      return {
-        success: true
-      };
-    } catch (error) {
-      console.error('Error rating job:', error);
-      return {
-        success: false,
-        error: error.message
-      };
-    }
-  }
-
-  /**
-   * Get customer details
-   * @param {string} customerId - Customer ID
-   * @returns {Promise<{success: boolean, customer?: Object, error?: string}>}
-   */
-  static async getCustomerDetails(customerId) {
-    try {
-      const customerDoc = await getDoc(doc(db, 'customers', customerId));
-      
-      if (!customerDoc.exists()) {
-        return {
-          success: false,
-          error: 'Customer not found'
-        };
+      if (!invoiceDoc.exists()) {
+        throw new Error('Invoice not found');
       }
 
       return {
         success: true,
-        customer: {
-          id: customerDoc.id,
-          ...customerDoc.data()
+        invoice: {
+          id: invoiceDoc.id,
+          ...invoiceDoc.data()
         }
       };
     } catch (error) {
-      console.error('Error getting customer details:', error);
-      return {
-        success: false,
-        error: error.message
-      };
-    }
-  }
-
-  /**
-   * Get recurring services for customer
-   * @param {string} customerId - Customer ID
-   * @param {string} companyId - Company ID
-   * @returns {Promise<{success: boolean, recurringJobs?: Array, error?: string}>}
-   */
-  static async getRecurringServices(customerId, companyId) {
-    try {
-      const recurringQuery = query(
-        collection(db, 'recurringJobs'),
-        where('customerId', '==', customerId),
-        where('companyId', '==', companyId),
-        where('isActive', '==', true)
-      );
-
-      const recurringSnapshot = await getDocs(recurringQuery);
-      const recurringJobs = [];
-
-      recurringSnapshot.forEach((doc) => {
-        recurringJobs.push({
-          id: doc.id,
-          ...doc.data()
-        });
-      });
-
-      return {
-        success: true,
-        recurringJobs
-      };
-    } catch (error) {
-      console.error('Error getting recurring services:', error);
+      console.error('Error getting invoice details:', error);
       return {
         success: false,
         error: error.message,
-        recurringJobs: []
+        invoice: null
       };
     }
   }
 
   /**
-   * Pause/resume recurring service
-   * @param {string} recurringJobId - Recurring job ID
-   * @param {boolean} pause - True to pause, false to resume
-   * @returns {Promise<{success: boolean, error?: string}>}
+   * Get job stats for dashboard
    */
-  static async toggleRecurringService(recurringJobId, pause) {
+  static async getJobStats(customerId, companyId) {
     try {
-      const recurringRef = doc(db, 'recurringJobs', recurringJobId);
-      
-      await updateDoc(recurringRef, {
-        isPaused: pause,
-        pausedAt: pause ? new Date().toISOString() : null,
-        updatedAt: new Date().toISOString()
-      });
+      const result = await this.getCustomerJobs(customerId, companyId);
+
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+
+      const jobs = result.jobs;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const upcoming = jobs.filter(job => {
+        const jobDate = new Date(job.scheduledDate);
+        return jobDate >= today && job.status === 'scheduled';
+      }).length;
+
+      const completed = jobs.filter(job => job.status === 'completed').length;
 
       return {
-        success: true
+        success: true,
+        stats: {
+          upcomingJobs: upcoming,
+          completedJobs: completed,
+          totalJobs: jobs.length
+        }
       };
     } catch (error) {
-      console.error('Error toggling recurring service:', error);
+      console.error('Error getting job stats:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        stats: null
       };
     }
+  }
+
+  /**
+   * Get invoice stats for dashboard
+   */
+  static async getInvoiceStats(customerId, companyId) {
+    try {
+      const result = await this.getCustomerInvoices(customerId, companyId);
+
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+
+      const invoices = result.invoices;
+
+      const pending = invoices.filter(inv => inv.status === 'pending').length;
+      const paid = invoices.filter(inv => inv.status === 'paid').length;
+      const overdue = invoices.filter(inv => inv.status === 'overdue').length;
+      const totalAmount = invoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
+
+      return {
+        success: true,
+        stats: {
+          pendingInvoices: pending,
+          paidInvoices: paid,
+          overdueInvoices: overdue,
+          totalAmount: totalAmount
+        }
+      };
+    } catch (error) {
+      console.error('Error getting invoice stats:', error);
+      return {
+        success: false,
+        error: error.message,
+        stats: null
+      };
+    }
+  }
+
+  /**
+   * Get company details
+   */
+  static async getCompanyDetails(companyId) {
+    try {
+      if (!companyId) {
+        throw new Error('Company ID is required');
+      }
+
+      const companyRef = doc(db, 'companies', companyId);
+      const companyDoc = await getDoc(companyRef);
+
+      if (!companyDoc.exists()) {
+        throw new Error('Company not found');
+      }
+
+      return {
+        success: true,
+        company: {
+          id: companyDoc.id,
+          ...companyDoc.data()
+        }
+      };
+    } catch (error) {
+      console.error('Error getting company details:', error);
+      return {
+        success: false,
+        error: error.message,
+        company: null
+      };
+    }
+  }
+
+  /**
+   * Format currency
+   */
+  static formatCurrency(amount, currency = 'USD') {
+    try {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: currency,
+      }).format(amount || 0);
+    } catch (error) {
+      console.error('Error formatting currency:', error);
+      return `$${(amount || 0).toFixed(2)}`;
+    }
+  }
+
+  /**
+   * Format date
+   */
+  static formatDate(dateString) {
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return dateString;
+    }
+  }
+
+  /**
+   * Get status badge color
+   */
+  static getStatusColor(status) {
+    const colors = {
+      scheduled: 'blue',
+      'in-progress': 'yellow',
+      'in_progress': 'yellow',
+      completed: 'green',
+      cancelled: 'red',
+      draft: 'gray',
+      sent: 'blue',
+      viewed: 'purple',
+      paid: 'green',
+      pending: 'yellow',
+      overdue: 'red'
+    };
+    return colors[status] || 'gray';
   }
 }
 
 export default CustomerPortalService;
-

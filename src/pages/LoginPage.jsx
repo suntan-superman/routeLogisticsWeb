@@ -103,7 +103,7 @@ const LoginPage = () => {
             </button>
           </div>
 
-          <div className="text-center">
+          <div className="text-center space-y-3">
             <p className="text-sm text-gray-600">
               Don't have an account?{' '}
               <Link
@@ -113,6 +113,12 @@ const LoginPage = () => {
                 Sign up here
               </Link>
             </p>
+            
+            <div className="pt-3 border-t border-gray-200">
+              <p className="text-sm text-gray-600">
+                <span className="font-medium">Customer?</span> Sign up with the "I am a customer" checkbox to access your service portal.
+              </p>
+            </div>
           </div>
           
           <div className="text-center mt-4">

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useCustomerPortal } from '../../contexts/CustomerPortalContext';
+import { useAuthSafe } from '../../contexts/AuthContext';
 import CustomerPortalService from '../../services/customerPortalService';
 import {
   BuildingOfficeIcon,
@@ -9,25 +10,39 @@ import {
   GlobeAltIcon,
   StarIcon,
   SparklesIcon,
-  CheckCircleIcon
+  CheckCircleIcon,
+  ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 
 const CompanyDetailPage = () => {
   const { selectedCompanyId } = useCustomerPortal();
+  const authContext = useAuthSafe();
+  const userProfile = authContext?.userProfile || null;
+  
+  const effectiveCompanyId = selectedCompanyId || userProfile?.companyId;
   const [company, setCompany] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    loadCompanyDetails();
-  }, [selectedCompanyId]);
+    if (effectiveCompanyId) {
+      loadCompanyDetails();
+    } else {
+      setIsLoading(false);
+    }
+  }, [effectiveCompanyId]);
 
   const loadCompanyDetails = async () => {
+    if (!effectiveCompanyId) {
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     try {
-      const result = await CustomerPortalService.getCompanyDetails(selectedCompanyId);
+      const result = await CustomerPortalService.getCompanyDetails(effectiveCompanyId);
 
       if (result.success) {
         setCompany(result.company);
@@ -64,6 +79,30 @@ const CompanyDetailPage = () => {
             <div className="w-12 h-12 border-4 border-green-200 border-t-green-600 rounded-full animate-spin" />
           </div>
           <p className="mt-4 text-gray-600 font-medium">Loading company details...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show warning if no company ID
+  if (!effectiveCompanyId) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Company Details</h1>
+          <p className="mt-1 text-sm text-gray-600">
+            Information about your service provider
+          </p>
+        </div>
+        
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 flex items-start gap-3">
+          <ExclamationTriangleIcon className="w-6 h-6 text-yellow-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <h3 className="text-sm font-semibold text-yellow-900">No Service Company Associated</h3>
+            <p className="mt-1 text-sm text-yellow-700">
+              You haven't been associated with a service company yet. Once a company adds you as a customer, their details will appear here.
+            </p>
+          </div>
         </div>
       </div>
     );

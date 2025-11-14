@@ -50,6 +50,11 @@ const ProtectedRoute = ({ children }) => {
     return <Navigate to="/login" replace />;
   }
 
+  // Redirect customers to customer portal
+  if (userProfile?.role === 'customer') {
+    return <Navigate to="/customer-portal/dashboard" replace />;
+  }
+
   // Check email verification (except for super admin)
   // IMPORTANT: Block ALL protected routes if email is not verified
   const isSuperAdminUser = currentUser?.email === 'sroy@worksidesoftware.com';

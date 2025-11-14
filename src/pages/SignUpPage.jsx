@@ -297,6 +297,18 @@ const SignUpPage = () => {
     setIsLoading(true);
     try {
       // Create user account first
+      // Determine the correct role
+      let userRole;
+      if (isCustomer) {
+        userRole = 'customer';
+      } else if (invitationDetails?.role) {
+        userRole = invitationDetails.role;
+      } else if (parsedInviteParams.role) {
+        userRole = parsedInviteParams.role;
+      } else {
+        userRole = role;
+      }
+
       const userData = {
         name,
         phoneNumber: companyOption === 'new' ? companyPhone : '',
@@ -307,7 +319,7 @@ const SignUpPage = () => {
         zipCode: companyOption === 'new' ? companyZipCode : '',
         services: [],
         serviceCategories: [],
-        role: invitedRole || role,
+        role: userRole,
         companyId: invitationDetails?.companyId || null,
         joinedViaInvitation: Boolean(invitationDetails?.companyId)
       };

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useCustomerPortal } from '../../contexts/CustomerPortalContext';
+import { useAuthSafe } from '../../contexts/AuthContext';
 import CustomerPortalService from '../../services/customerPortalService';
 import { 
   DocumentTextIcon,
@@ -9,12 +10,20 @@ import {
   ClockIcon,
   XMarkIcon,
   ArrowDownTrayIcon,
-  MagnifyingGlassIcon
+  MagnifyingGlassIcon,
+  ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 
 const InvoicesPage = () => {
   const { customer, selectedCompanyId } = useCustomerPortal();
+  const authContext = useAuthSafe();
+  const currentUser = authContext?.currentUser || null;
+  const userProfile = authContext?.userProfile || null;
+  
+  // Use customer from CustomerPortalContext if available, otherwise use userProfile from AuthContext
+  const customerData = customer || (userProfile?.role === 'customer' ? userProfile : null);
+  const effectiveCompanyId = selectedCompanyId || userProfile?.companyId;
   const [invoices, setInvoices] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -24,16 +33,23 @@ const InvoicesPage = () => {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
 
   useEffect(() => {
-    loadInvoices();
-  }, [selectedCompanyId, statusFilter]);
+    if (customerData?.id) {
+      loadInvoices();
+    }
+  }, [effectiveCompanyId, statusFilter, customerData?.id]);
 
   const loadInvoices = async () => {
+    if (!customerData?.id) {
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     try {
       const result = await CustomerPortalService.getCustomerInvoices(
-        customer.id,
-        selectedCompanyId,
+        customerData.id,
+        effectiveCompanyId,
         statusFilter === 'all' ? null : statusFilter
       );
 
@@ -100,6 +116,19 @@ const InvoicesPage = () => {
           View and manage your bills and payments
         </p>
       </div>
+
+      {/* No Company Warning */}
+      {!effectiveCompanyId && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-start gap-3">
+          <ExclamationTriangleIcon className="w-6 h-6 text-yellow-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <h3 className="text-sm font-semibold text-yellow-900">No Service Company Associated</h3>
+            <p className="mt-1 text-sm text-yellow-700">
+              You haven't been associated with a service company yet. Once a company adds you as a customer, your invoices will appear here.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Summary Cards */}
       {!isLoading && !error && invoices.length > 0 && (

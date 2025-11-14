@@ -60,8 +60,8 @@ const EmailVerificationPage = () => {
             const userDocSnap = await getDoc(doc(db, 'users', currentUser.uid));
             const userRole = userDocSnap.data()?.role;
             
-            // If user has no role, they're a customer - send to customer portal
-            if (!userRole) {
+            // If user is a customer, send to customer portal
+            if (userRole === 'customer') {
               navigate('/customer-portal/dashboard');
               return;
             }
@@ -110,8 +110,8 @@ const EmailVerificationPage = () => {
         const userDocSnap = await getDoc(doc(db, 'users', currentUser.uid));
         const userRole = userDocSnap.data()?.role;
         
-        // If user has no role, they're a customer - send to customer portal
-        if (!userRole) {
+        // If user is a customer, send to customer portal
+        if (userRole === 'customer') {
           navigate('/customer-portal/dashboard', { replace: true });
           return;
         }

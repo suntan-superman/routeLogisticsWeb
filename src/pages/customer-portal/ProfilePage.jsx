@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useCustomerPortal } from '../../contexts/CustomerPortalContext';
+import { useAuthSafe } from '../../contexts/AuthContext';
 import { 
   UserIcon, 
   BellIcon, 
@@ -8,49 +9,56 @@ import {
   PhoneIcon,
   MapPinIcon,
   CheckIcon,
-  XMarkIcon
+  XMarkIcon,
+  ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 
 const ProfilePage = () => {
   const { customer, updateCustomerProfile } = useCustomerPortal();
+  const authContext = useAuthSafe();
+  const currentUser = authContext?.currentUser || null;
+  const userProfile = authContext?.userProfile || null;
+  
+  // Use customer from CustomerPortalContext if available, otherwise use userProfile from AuthContext
+  const customerData = customer || (userProfile?.role === 'customer' ? userProfile : null);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState({
-    name: customer?.name || '',
-    email: customer?.email || '',
-    phone: customer?.phone || '',
-    address: customer?.address || '',
-    city: customer?.city || '',
-    state: customer?.state || '',
-    zipCode: customer?.zipCode || ''
+    name: customerData?.name || '',
+    email: customerData?.email || currentUser?.email || '',
+    phone: customerData?.phone || customerData?.phoneNumber || '',
+    address: customerData?.address || '',
+    city: customerData?.city || '',
+    state: customerData?.state || '',
+    zipCode: customerData?.zipCode || ''
   });
   const [notifications, setNotifications] = useState({
-    emailNotifications: customer?.emailNotifications !== false,
-    jobReminders: customer?.jobReminders !== false,
-    invoiceNotifications: customer?.invoiceNotifications !== false,
-    marketingEmails: customer?.marketingEmails === true
+    emailNotifications: customerData?.emailNotifications !== false,
+    jobReminders: customerData?.jobReminders !== false,
+    invoiceNotifications: customerData?.invoiceNotifications !== false,
+    marketingEmails: customerData?.marketingEmails === true
   });
 
   useEffect(() => {
-    if (customer) {
+    if (customerData) {
       setFormData({
-        name: customer.name || '',
-        email: customer.email || '',
-        phone: customer.phone || '',
-        address: customer.address || '',
-        city: customer.city || '',
-        state: customer.state || '',
-        zipCode: customer.zipCode || ''
+        name: customerData.name || '',
+        email: customerData.email || currentUser?.email || '',
+        phone: customerData.phone || customerData.phoneNumber || '',
+        address: customerData.address || '',
+        city: customerData.city || '',
+        state: customerData.state || '',
+        zipCode: customerData.zipCode || ''
       });
       setNotifications({
-        emailNotifications: customer.emailNotifications !== false,
-        jobReminders: customer.jobReminders !== false,
-        invoiceNotifications: customer.invoiceNotifications !== false,
-        marketingEmails: customer.marketingEmails === true
+        emailNotifications: customerData.emailNotifications !== false,
+        jobReminders: customerData.jobReminders !== false,
+        invoiceNotifications: customerData.invoiceNotifications !== false,
+        marketingEmails: customerData.marketingEmails === true
       });
     }
-  }, [customer]);
+  }, [customerData, currentUser]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -109,6 +117,9 @@ const ProfilePage = () => {
     }
   };
 
+  // Check if profile is incomplete
+  const isProfileIncomplete = !formData.phone || !formData.address || !formData.city || !formData.state || !formData.zipCode;
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -118,6 +129,33 @@ const ProfilePage = () => {
           Manage your account settings and preferences
         </p>
       </div>
+
+      {/* Incomplete Profile Warning */}
+      {isProfileIncomplete && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-start gap-3">
+          <ExclamationTriangleIcon className="w-6 h-6 text-yellow-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <h3 className="text-sm font-semibold text-yellow-900">Profile Incomplete</h3>
+            <p className="mt-1 text-sm text-yellow-700">
+              Please complete your profile information to help service providers serve you better. Missing: {[
+                !formData.phone && 'Phone',
+                !formData.address && 'Address',
+                !formData.city && 'City',
+                !formData.state && 'State',
+                !formData.zipCode && 'Zip Code'
+              ].filter(Boolean).join(', ')}.
+            </p>
+            {!isEditing && (
+              <button
+                onClick={() => setIsEditing(true)}
+                className="mt-2 text-sm font-medium text-yellow-900 underline hover:text-yellow-800"
+              >
+                Complete Profile Now
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Personal Information */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">

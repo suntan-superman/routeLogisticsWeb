@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCustomerPortal } from '../../contexts/CustomerPortalContext';
+import { useAuthSafe } from '../../contexts/AuthContext';
 import { 
   ArrowRightOnRectangleIcon,
   Cog6ToothIcon,
@@ -14,6 +15,12 @@ import toast from 'react-hot-toast';
 const DashboardPage = () => {
   const navigate = useNavigate();
   const { customer, logout, companiesList, selectedCompanyId, selectCompany, extendSession } = useCustomerPortal();
+  const authContext = useAuthSafe();
+  const currentUser = authContext?.currentUser || null;
+  const userProfile = authContext?.userProfile || null;
+  
+  // Use customer from CustomerPortalContext if available, otherwise use userProfile from AuthContext
+  const customerData = customer || (userProfile?.role === 'customer' ? userProfile : null);
   const [upcomingJobsCount, setUpcomingJobsCount] = useState(0);
   const [completedJobsCount, setCompletedJobsCount] = useState(0);
   const [pendingInvoicesCount, setPendingInvoicesCount] = useState(0);
@@ -56,15 +63,17 @@ const DashboardPage = () => {
 
   const handleLogout = async () => {
     try {
-      const result = await logout();
-      if (result.success) {
+      // Always use main auth logout (consolidated flow)
+      if (authContext?.signOut) {
+        await authContext.signOut();
         toast.success('Logged out successfully');
-        navigate('/customer-portal/login');
+        navigate('/login');
       } else {
-        toast.error(result.error || 'Failed to logout');
+        toast.error('Unable to logout');
       }
     } catch (error) {
-      toast.error('An error occurred');
+      console.error('Logout error:', error);
+      toast.error('An error occurred during logout');
     }
   };
 
@@ -76,10 +85,10 @@ const DashboardPage = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">
-                Welcome, {customer?.name || 'Customer'}!
+                Welcome, {customerData?.name || 'Customer'}!
               </h1>
               <p className="mt-1 text-sm text-gray-600">
-                {customer?.email}
+                {customerData?.email || currentUser?.email}
               </p>
             </div>
 
@@ -91,14 +100,6 @@ const DashboardPage = () => {
               >
                 <Cog6ToothIcon className="w-5 h-5" />
                 Settings
-              </button>
-
-              <button
-                onClick={handleLogout}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-50 text-red-700 text-sm font-medium hover:bg-red-100 transition-colors"
-              >
-                <ArrowRightOnRectangleIcon className="w-5 h-5" />
-                Logout
               </button>
             </div>
           </div>

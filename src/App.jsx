@@ -32,8 +32,7 @@ import RouteOptimizationPage from './pages/RouteOptimizationPage';
 import CustomerPortalPage from './pages/CustomerPortalPage';
 import LocationSettingsPage from './pages/LocationSettingsPage';
 
-// Customer Portal Pages
-import CustomerPortalLoginPage from './pages/customer-portal/LoginPage';
+// Customer Portal Pages (login uses main /login page)
 import CustomerPortalDashboardPage from './pages/customer-portal/DashboardPage';
 import CustomerPortalJobsPage from './pages/customer-portal/JobsPage';
 import CustomerPortalInvoicesPage from './pages/customer-portal/InvoicesPage';
@@ -217,8 +216,7 @@ function App() {
                   </ProtectedRoute>
                 } />
                 
-                {/* Customer Portal Routes */}
-                <Route path="/customer-portal/login" element={<CustomerPortalLoginPage />} />
+                {/* Customer Portal Routes - Use main /login instead of separate customer login */}
                 
                 <Route path="/customer-portal/dashboard" element={
                   <CustomerPortalProtectedRoute>

@@ -106,15 +106,32 @@ const InvitationsPage = () => {
       );
 
       if (result.success) {
-        toast.success('Invitation created successfully!');
-        
-        // Send email invitation
-        await sendInvitationEmail(result.invitation);
-        
-        setNewInviteEmail('');
-        setNewInviteRole(DEFAULT_ROLE);
-        setShowInviteModal(false);
-        loadInvitations(companyId);
+        if (result.existing) {
+          // Existing invitation found - offer to resend
+          toast('An invitation already exists for this email. Resending...', {
+            icon: 'ℹ️',
+            duration: 3000
+          });
+          
+          // Resend the existing invitation
+          await sendInvitationEmail(result.invitation);
+          
+          setNewInviteEmail('');
+          setNewInviteRole(DEFAULT_ROLE);
+          setShowInviteModal(false);
+          loadInvitations(companyId);
+        } else {
+          // New invitation created
+          toast.success('Invitation created successfully!');
+          
+          // Send email invitation
+          await sendInvitationEmail(result.invitation);
+          
+          setNewInviteEmail('');
+          setNewInviteRole(DEFAULT_ROLE);
+          setShowInviteModal(false);
+          loadInvitations(companyId);
+        }
       } else {
         toast.error(result.error || 'Failed to create invitation');
       }
@@ -159,7 +176,10 @@ const InvitationsPage = () => {
     } catch (error) {
       console.error('Error sending invitation email:', error);
       // Don't show error - invitation was created, just email failed
-      toast.info('Invitation created, but email sending failed. Share the code manually.');
+      toast('Invitation created, but email sending failed. Share the code manually.', {
+        icon: 'ℹ️',
+        duration: 5000
+      });
     }
   };
 

@@ -23,25 +23,43 @@ export default function SupportPage() {
     setIsSubmitting(true);
     setSubmitStatus(null);
 
-    // Create mailto link with form data
-    const subject = encodeURIComponent(formData.subject || 'Support Request');
-    const body = encodeURIComponent(
-      `Name: ${formData.name}\nEmail: ${formData.email}\n\nMessage:\n${formData.message}`
-    );
-    const mailtoLink = `mailto:support@route-logistics.com?subject=${subject}&body=${body}`;
-    
-    // Open email client
-    window.location.href = mailtoLink;
-    
-    // Show success message
-    setSubmitStatus('success');
-    setIsSubmitting(false);
-    
-    // Reset form after a delay
-    setTimeout(() => {
-      setFormData({ name: '', email: '', subject: '', message: '' });
-      setSubmitStatus(null);
-    }, 3000);
+    try {
+      const projectId = 'mi-factotum-field-service';
+      const functionUrl = `https://us-central1-${projectId}.cloudfunctions.net/submitSupportRequest`;
+      
+      const response = await fetch(functionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: formData.name,
+          email: formData.email,
+          subject: formData.subject,
+          message: formData.message
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        setSubmitStatus('success');
+        // Reset form
+        setFormData({ name: '', email: '', subject: '', message: '' });
+      } else {
+        setSubmitStatus('error');
+        console.error('Support request error:', data.error);
+      }
+    } catch (error) {
+      console.error('Error submitting support request:', error);
+      setSubmitStatus('error');
+    } finally {
+      setIsSubmitting(false);
+      // Clear status after 5 seconds
+      setTimeout(() => {
+        setSubmitStatus(null);
+      }, 5000);
+    }
   };
 
   const faqs = [
@@ -194,7 +212,12 @@ export default function SupportPage() {
             </div>
             {submitStatus === 'success' && (
               <div className="bg-green-50 border border-green-200 rounded-md p-3 text-sm text-green-800">
-                Your email client should open with your message. If it doesn't, please email us directly at support@route-logistics.com
+                ✓ Your support request has been submitted successfully! We've sent a confirmation email and will respond within 24 hours.
+              </div>
+            )}
+            {submitStatus === 'error' && (
+              <div className="bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-800">
+                ✗ There was an error submitting your request. Please try again or email us directly at support@route-logistics.com
               </div>
             )}
             <button

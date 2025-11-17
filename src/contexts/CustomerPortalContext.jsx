@@ -20,18 +20,28 @@ export const CustomerPortalProvider = ({ children }) => {
     const unsubscribe = CustomerAuthService.onAuthStateChanged(async (user) => {
       try {
         if (user) {
-          // User is authenticated
+          // User is authenticated - try to get customer profile
+          // This will return null if user is not a customer (permission denied)
           const profile = await CustomerAuthService.getCustomerProfile(user.uid);
-          setCustomer({
-            id: user.uid,
-            email: user.email,
-            ...profile
-          });
-          setIsAuthenticated(true);
+          
+          // Only set customer if profile exists (user is actually a customer)
+          if (profile) {
+            setCustomer({
+              id: user.uid,
+              email: user.email,
+              ...profile
+            });
+            setIsAuthenticated(true);
 
-          // Set default selected company to first one
-          if (profile?.companies?.length > 0) {
-            setSelectedCompanyId(profile.companies[0]);
+            // Set default selected company to first one
+            if (profile?.companies?.length > 0) {
+              setSelectedCompanyId(profile.companies[0]);
+            }
+          } else {
+            // User is authenticated but not a customer (e.g., tech/admin)
+            setCustomer(null);
+            setIsAuthenticated(false);
+            setSelectedCompanyId(null);
           }
         } else {
           // User is not authenticated
@@ -40,8 +50,15 @@ export const CustomerPortalProvider = ({ children }) => {
           setSelectedCompanyId(null);
         }
       } catch (err) {
-        console.error('Error handling auth state change:', err);
-        setError(err.message);
+        // Silently handle permission errors - expected for non-customer users
+        if (err.code === 'permission-denied' || err.message?.includes('Missing or insufficient permissions')) {
+          setCustomer(null);
+          setIsAuthenticated(false);
+          setSelectedCompanyId(null);
+        } else {
+          console.error('Error handling auth state change:', err);
+          setError(err.message);
+        }
       } finally {
         setIsLoading(false);
       }

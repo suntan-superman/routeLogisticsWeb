@@ -66,14 +66,6 @@ const RecurringJobsPage = () => {
   const [selectedRecurringJob, setSelectedRecurringJob] = useState(null);
   const [teamMembers, setTeamMembers] = useState([]);
   const [teamMembersLoading, setTeamMembersLoading] = useState(false);
-  const isAssignedTechnicianMissing = useMemo(
-    () =>
-      Boolean(
-        formData.assignedTechnicianId &&
-          !teamMembers.some((member) => member.id === formData.assignedTechnicianId)
-      ),
-    [formData.assignedTechnicianId, teamMembers]
-  );
   
   const [formData, setFormData] = useState({
     customerId: '',
@@ -91,6 +83,15 @@ const RecurringJobsPage = () => {
     assignedTechnicianId: '',
     assignedTechnicianName: ''
   });
+
+  const isAssignedTechnicianMissing = useMemo(
+    () =>
+      Boolean(
+        formData.assignedTechnicianId &&
+          !teamMembers.some((member) => member.id === formData.assignedTechnicianId)
+      ),
+    [formData.assignedTechnicianId, teamMembers]
+  );
 
   const recurringGridRef = useRef(null);
   const recurringToolbarOptions = useMemo(() => ['Search', 'ExcelExport'], []);

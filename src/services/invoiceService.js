@@ -19,6 +19,7 @@ import autoTable from 'jspdf-autotable';
 import CompanyService from './companyService';
 import CustomerService from './customerService';
 import JobManagementService from './jobManagementService';
+import InvoiceTemplateService from './invoiceTemplateService';
 
 /**
  * Invoice Service for generating and managing invoices
@@ -352,14 +353,33 @@ class InvoiceService {
   /**
    * Generate PDF invoice
    * @param {Object} invoice - Invoice data
+   * @param {Object} template - Optional template to use (if not provided, uses default)
    * @returns {Promise<{success: boolean, pdfBlob?: Blob, error?: string}>}
    */
-  static async generatePDF(invoice) {
+  static async generatePDF(invoice, template = null) {
     try {
+      // Get template if not provided
+      if (!template && invoice.companyId) {
+        const templateResult = await InvoiceTemplateService.getDefaultTemplate(invoice.companyId);
+        if (templateResult.success) {
+          template = templateResult.template;
+        }
+      }
+
+      // Use default classic template if still no template
+      if (!template) {
+        template = InvoiceTemplateService.getDefaultClassicTemplate();
+      }
+
       const doc = new jsPDF();
       const pageWidth = doc.internal.pageSize.getWidth();
       const margin = 20;
       let yPos = margin;
+
+      // Parse colors from template
+      const primaryColor = this.hexToRgb(template.colors?.primary || '#10b981');
+      const secondaryColor = this.hexToRgb(template.colors?.secondary || '#6b7280');
+      const accentColor = this.hexToRgb(template.colors?.accent || '#059669');
 
       // Load company logo if available
       let logoImage = null;
@@ -371,13 +391,25 @@ class InvoiceService {
         }
       }
 
-      // Header section
-      if (logoImage) {
-        doc.addImage(logoImage, 'PNG', margin, yPos, 40, 15);
-      }
+      // Header section - Apply template logo position
+      let companyX = margin;
+      let logoX = margin;
       
-      // Company info (right side if logo exists, left side if not)
-      const companyX = logoImage ? pageWidth - margin - 80 : margin;
+      if (template.logoPosition === 'center') {
+        logoX = (pageWidth - 40) / 2;
+        companyX = margin;
+      } else if (template.logoPosition === 'right') {
+        logoX = pageWidth - margin - 40;
+        companyX = margin;
+      } else {
+        // left (default)
+        logoX = margin;
+        companyX = logoImage ? pageWidth - margin - 80 : margin;
+      }
+
+      if (logoImage) {
+        doc.addImage(logoImage, 'PNG', logoX, yPos, 40, 15);
+      }
       doc.setFontSize(16);
       doc.setFont('helvetica', 'bold');
       doc.text(invoice.companyName || 'Company Name', companyX, yPos + 10);
@@ -406,10 +438,12 @@ class InvoiceService {
 
       yPos += 10;
 
-      // Invoice title and number
-      doc.setFontSize(20);
-      doc.setFont('helvetica', 'bold');
+      // Invoice title and number - Apply template styling
+      doc.setFontSize(template.headerStyle === 'bold' ? 24 : template.headerStyle === 'minimal' ? 16 : 20);
+      doc.setFont(template.fonts?.heading || 'helvetica', 'bold');
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
       doc.text('INVOICE', margin, yPos);
+      doc.setTextColor(0, 0, 0); // Reset to black
       
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
@@ -465,8 +499,15 @@ class InvoiceService {
         head: [['Description', 'Qty', 'Unit Price', 'Amount']],
         body: tableData,
         theme: 'striped',
-        headStyles: { fillColor: [16, 185, 129] }, // Primary green color
-        styles: { fontSize: 9 },
+        headStyles: { 
+          fillColor: primaryColor,
+          textColor: [255, 255, 255],
+          fontStyle: 'bold'
+        },
+        styles: { 
+          fontSize: 9,
+          font: template.fonts?.body || 'helvetica'
+        },
         columnStyles: {
           1: { halign: 'center' },
           2: { halign: 'right' },
@@ -489,10 +530,12 @@ class InvoiceService {
         yPos += 7;
       }
 
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(template.fonts?.heading || 'helvetica', 'bold');
       doc.setFontSize(12);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
       doc.text('Total:', totalsX, yPos);
       doc.text(this.formatCurrency(invoice.total || 0), pageWidth - margin, yPos, { align: 'right' });
+      doc.setTextColor(0, 0, 0); // Reset to black
 
       yPos += 15;
 
@@ -513,12 +556,36 @@ class InvoiceService {
 
       if (invoice.terms) {
         doc.setFontSize(9);
-        doc.setFont('helvetica', 'italic');
+        doc.setFont(template.fonts?.body || 'helvetica', 'italic');
         const termsLines = doc.splitTextToSize(invoice.terms, pageWidth - 2 * margin);
         termsLines.forEach(line => {
           doc.text(line, margin, yPos);
           yPos += 4;
         });
+      }
+
+      // Add footer text if template has it
+      if (template.footerText) {
+        const pageHeight = doc.internal.pageSize.getHeight();
+        doc.setFontSize(8);
+        doc.setFont(template.fonts?.body || 'helvetica', 'normal');
+        doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+        const footerLines = doc.splitTextToSize(template.footerText, pageWidth - 2 * margin);
+        let footerY = pageHeight - margin - (footerLines.length * 4);
+        footerLines.forEach(line => {
+          doc.text(line, margin, footerY, { align: 'center' });
+          footerY += 4;
+        });
+        doc.setTextColor(0, 0, 0); // Reset to black
+      }
+
+      // Add border if template specifies
+      if (template.showBorder) {
+        const borderColor = this.hexToRgb(template.borderColor || '#e5e7eb');
+        doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+        doc.setLineWidth(0.5);
+        const pageHeight = doc.internal.pageSize.getHeight();
+        doc.rect(margin - 5, margin - 5, pageWidth - 2 * margin + 10, pageHeight - 2 * margin + 10);
       }
 
       // Generate blob
@@ -552,6 +619,20 @@ class InvoiceService {
   }
 
   /**
+   * Convert hex color to RGB array
+   * @param {string} hex - Hex color string (e.g., '#10b981')
+   * @returns {Array} [r, g, b]
+   */
+  static hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? [
+      parseInt(result[1], 16),
+      parseInt(result[2], 16),
+      parseInt(result[3], 16)
+    ] : [16, 185, 129]; // Default green
+  }
+
+  /**
    * Format date for display
    */
   static formatDate(dateString) {
@@ -571,27 +652,6 @@ class InvoiceService {
       style: 'currency',
       currency: 'USD'
     }).format(amount);
-  }
-
-  /**
-   * Get invoice by ID
-   */
-  static async getInvoice(invoiceId) {
-    try {
-      const invoiceDoc = await getDoc(doc(db, 'invoices', invoiceId));
-      if (!invoiceDoc.exists()) {
-        return { success: false, error: 'Invoice not found' };
-      }
-
-      const invoice = { id: invoiceDoc.id, ...invoiceDoc.data() };
-      return { success: true, invoice };
-    } catch (error) {
-      console.error('Error getting invoice:', error);
-      return {
-        success: false,
-        error: error.message || 'Failed to get invoice'
-      };
-    }
   }
 
   /**
@@ -632,6 +692,107 @@ class InvoiceService {
       return {
         success: false,
         error: error.message || 'Failed to get invoices'
+      };
+    }
+  }
+
+  /**
+   * Get invoice by ID
+   */
+  static async getInvoice(invoiceId) {
+    try {
+      const invoiceDoc = await getDoc(doc(db, 'invoices', invoiceId));
+      if (!invoiceDoc.exists()) {
+        return {
+          success: false,
+          error: 'Invoice not found'
+        };
+      }
+
+      return {
+        success: true,
+        invoice: { id: invoiceDoc.id, ...invoiceDoc.data() }
+      };
+    } catch (error) {
+      console.error('Error getting invoice:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to get invoice'
+      };
+    }
+  }
+
+  /**
+   * Update invoice (edit invoice details)
+   * @param {string} invoiceId - Invoice ID
+   * @param {Object} updates - Fields to update
+   * @returns {Promise<{success: boolean, error?: string}>}
+   */
+  static async updateInvoice(invoiceId, updates) {
+    try {
+      const userId = this.getCurrentUserId();
+      
+      // Get current invoice to validate
+      const invoiceResult = await this.getInvoice(invoiceId);
+      if (!invoiceResult.success) {
+        return invoiceResult;
+      }
+
+      const invoice = invoiceResult.invoice;
+
+      // Prevent editing paid or cancelled invoices
+      if (invoice.status === 'paid' || invoice.status === 'cancelled') {
+        return {
+          success: false,
+          error: `Cannot edit invoice with status "${invoice.status}"`
+        };
+      }
+
+      // Calculate new total if items, subtotal, or tax changed
+      let newTotal = invoice.total;
+      if (updates.items || updates.subtotal !== undefined || updates.tax !== undefined) {
+        const subtotal = updates.subtotal !== undefined ? updates.subtotal : invoice.subtotal;
+        const tax = updates.tax !== undefined ? updates.tax : invoice.tax;
+        newTotal = this.calculateTotal(subtotal, tax);
+        updates.total = newTotal;
+      }
+
+      // Prepare update object
+      const updateData = {
+        ...updates,
+        updatedAt: new Date().toISOString()
+      };
+
+      // Track edit history
+      const editHistory = {
+        editedBy: userId,
+        editedAt: new Date().toISOString(),
+        changes: Object.keys(updates).filter(key => 
+          key !== 'updatedAt' && 
+          invoice[key] !== updates[key]
+        )
+      };
+
+      // Store edit history in subcollection
+      try {
+        await addDoc(
+          collection(db, 'invoices', invoiceId, 'editHistory'),
+          editHistory
+        );
+      } catch (historyError) {
+        console.warn('Failed to save edit history:', historyError);
+        // Don't fail the update if history save fails
+      }
+
+      // Update invoice
+      await updateDoc(doc(db, 'invoices', invoiceId), updateData);
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating invoice:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to update invoice'
       };
     }
   }

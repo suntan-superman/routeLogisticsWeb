@@ -149,6 +149,11 @@ class CustomerAuthService {
         ...customerDoc.data()
       };
     } catch (error) {
+      // Silently handle permission errors - user might not be a customer
+      if (error.code === 'permission-denied' || error.message?.includes('Missing or insufficient permissions')) {
+        // This is expected for non-customer users, don't log as error
+        return null;
+      }
       console.error('Error fetching customer profile:', error);
       return null;
     }

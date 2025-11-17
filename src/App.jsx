@@ -14,6 +14,7 @@ import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import SignUpPage from './pages/SignUpPage';
 import EmailVerificationPage from './pages/EmailVerificationPage';
+import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
 import CompanySetupPage from './pages/CompanySetupPage';
 import CustomerManagementPage from './pages/CustomerManagementPage';
 import EstimateTemplatesPage from './pages/EstimateTemplatesPage';
@@ -22,6 +23,7 @@ import JobManagementPage from './pages/JobManagementPage';
 import ReportsPage from './pages/ReportsPage';
 import CalendarPage from './pages/CalendarPage';
 import InvoicePage from './pages/InvoicePage';
+import InvoiceTemplatesPage from './pages/InvoiceTemplatesPage';
 import RecurringJobsPage from './pages/RecurringJobsPage';
 import InvitationsPage from './pages/InvitationsPage';
 import BulkImportPage from './pages/BulkImportPage';
@@ -78,6 +80,7 @@ function App() {
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/signup" element={<SignUpPage />} />
                 <Route path="/verify-email" element={<EmailVerificationPage />} />
+                <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
                 
                 {/* Protected Routes */}
                 <Route path="/" element={
@@ -148,6 +151,14 @@ function App() {
                   <ProtectedRoute>
                     <Layout>
                       <InvoicePage />
+                    </Layout>
+                  </ProtectedRoute>
+                } />
+                
+                <Route path="/invoice-templates" element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <InvoiceTemplatesPage />
                     </Layout>
                   </ProtectedRoute>
                 } />

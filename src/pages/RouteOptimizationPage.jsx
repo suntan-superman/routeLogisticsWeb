@@ -11,26 +11,27 @@ import {
   PlusIcon,
   XMarkIcon
 } from '@heroicons/react/24/outline';
-import { GoogleMap, LoadScript, Marker, DirectionsRenderer } from '@react-google-maps/api';
+import { GoogleMap, useJsApiLoader, Marker, DirectionsRenderer } from '@react-google-maps/api';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import toast from 'react-hot-toast';
-
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
+import { GOOGLE_MAPS_API_KEY, GOOGLE_MAPS_LIBRARIES, DEFAULT_MAP_CENTER } from '../constants/googleMaps';
 
 const mapContainerStyle = {
   width: '100%',
   height: '600px',
 };
 
-const defaultCenter = {
-  lat: 35.3733,
-  lng: -119.0187,
-};
-
 const RouteOptimizationPage = () => {
   const { userProfile } = useAuth();
   const { activeCompany } = useCompany();
+  
+  // Load Google Maps API
+  const { isLoaded: isMapsLoaded, loadError: mapsLoadError } = useJsApiLoader({
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
+    libraries: GOOGLE_MAPS_LIBRARIES
+  });
+  
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [jobs, setJobs] = useState([]);
@@ -108,8 +109,8 @@ const RouteOptimizationPage = () => {
       return;
     }
 
-    if (!window.google) {
-      toast.error('Google Maps not loaded');
+    if (!isMapsLoaded || !window.google || !window.google.maps) {
+      toast.error('Google Maps not loaded. Please wait for maps to load.');
       return;
     }
 
@@ -139,8 +140,8 @@ const RouteOptimizationPage = () => {
       const request = {
         origin: origin,
         destination: destination,
-        waypoints: intermediateWaypoints,
-        optimizeWaypoints: true,
+        waypoints: intermediateWaypoints.length > 0 ? intermediateWaypoints : undefined,
+        optimizeWaypoints: intermediateWaypoints.length > 0,
         travelMode: window.google.maps.TravelMode.DRIVING,
       };
 
@@ -173,10 +174,10 @@ const RouteOptimizationPage = () => {
       });
     } catch (error) {
       console.error('Error optimizing route:', error);
-      toast.error('Error optimizing route');
+      toast.error('Error optimizing route: ' + (error.message || 'Unknown error'));
       setOptimizing(false);
     }
-  }, [selectedJobs, jobs]);
+  }, [selectedJobs, jobs, isMapsLoaded]);
 
   const assignOptimizedRoute = async () => {
     if (!selectedTechnician) {
@@ -396,35 +397,7 @@ const RouteOptimizationPage = () => {
           transition={{ duration: 0.5, delay: 0.3 }}
           className="lg:col-span-2 bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden"
         >
-          {GOOGLE_MAPS_API_KEY ? (
-            <LoadScript googleMapsApiKey={GOOGLE_MAPS_API_KEY}>
-              <GoogleMap
-                mapContainerStyle={mapContainerStyle}
-                center={defaultCenter}
-                zoom={12}
-              >
-                {directions && <DirectionsRenderer directions={directions} />}
-                
-                {!directions &&
-                  jobs
-                    .filter((job) => selectedJobs.includes(job.id))
-                    .map((job, index) => (
-                      <Marker
-                        key={job.id}
-                        position={{
-                          lat: job.latitude || defaultCenter.lat,
-                          lng: job.longitude || defaultCenter.lng,
-                        }}
-                        label={{
-                          text: (index + 1).toString(),
-                          color: 'white',
-                          fontWeight: 'bold',
-                        }}
-                      />
-                    ))}
-              </GoogleMap>
-            </LoadScript>
-          ) : (
+          {!GOOGLE_MAPS_API_KEY ? (
             <div className="flex items-center justify-center h-[600px] bg-gray-50">
               <div className="text-center">
                 <MapPinIcon className="mx-auto h-12 w-12 text-gray-400 mb-2" />
@@ -434,6 +407,47 @@ const RouteOptimizationPage = () => {
                 </p>
               </div>
             </div>
+          ) : mapsLoadError ? (
+            <div className="flex items-center justify-center h-[600px] bg-gray-50">
+              <div className="text-center">
+                <MapPinIcon className="mx-auto h-12 w-12 text-red-400 mb-2" />
+                <p className="text-red-600">Error loading Google Maps</p>
+                <p className="text-sm text-gray-500 mt-1">Please check your API key</p>
+              </div>
+            </div>
+          ) : !isMapsLoaded ? (
+            <div className="flex items-center justify-center h-[600px] bg-gray-50">
+              <div className="text-center">
+                <ArrowPathIcon className="mx-auto h-12 w-12 text-gray-400 mb-2 animate-spin" />
+                <p className="text-gray-600">Loading Google Maps...</p>
+              </div>
+            </div>
+          ) : (
+            <GoogleMap
+              mapContainerStyle={mapContainerStyle}
+              center={DEFAULT_MAP_CENTER}
+              zoom={12}
+            >
+              {directions && <DirectionsRenderer directions={directions} />}
+              
+              {!directions &&
+                jobs
+                  .filter((job) => selectedJobs.includes(job.id))
+                  .map((job, index) => (
+                    <Marker
+                      key={job.id}
+                      position={{
+                        lat: job.latitude || DEFAULT_MAP_CENTER.lat,
+                        lng: job.longitude || DEFAULT_MAP_CENTER.lng,
+                      }}
+                      label={{
+                        text: (index + 1).toString(),
+                        color: 'white',
+                        fontWeight: 'bold',
+                      }}
+                    />
+                  ))}
+            </GoogleMap>
           )}
         </motion.div>
       </div>

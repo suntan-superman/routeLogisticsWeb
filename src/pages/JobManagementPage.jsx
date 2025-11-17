@@ -162,6 +162,7 @@ const JobManagementPage = () => {
           const transformedPhotos = (result.photos || []).map(photo => ({
             id: photo.id,
             url: photo.downloadURL || photo.url,
+            thumbnailUrl: photo.thumbnailURL || null,
             fileName: photo.fileName || `photo-${photo.id}.jpg`,
             capturedAt: photo.capturedAt,
             uploadedAt: photo.uploadedAt || photo.createdAt,
@@ -258,6 +259,17 @@ const JobManagementPage = () => {
     }
   }, [companyIdForJobs, userProfile]);
 
+  const loadStats = useCallback(async () => {
+    try {
+      const result = await JobManagementService.getJobStats(userProfile, companyIdForJobs);
+      if (result.success) {
+        setStats(result.stats);
+      }
+    } catch (error) {
+      console.error('Error loading stats:', error);
+    }
+  }, [userProfile, companyIdForJobs]);
+
   useEffect(() => {
     loadJobs();
     loadStats();
@@ -329,17 +341,6 @@ const JobManagementPage = () => {
     }
     setIsLoading(false);
   };
-
-  const loadStats = useCallback(async () => {
-    try {
-      const result = await JobManagementService.getJobStats(userProfile, companyIdForJobs);
-      if (result.success) {
-        setStats(result.stats);
-      }
-    } catch (error) {
-      console.error('Error loading stats:', error);
-    }
-  }, [userProfile, companyIdForJobs]);
 
   const loadCompanyServices = async () => {
     try {
@@ -1277,12 +1278,37 @@ const JobManagementPage = () => {
                   <PhotoGallery 
                     jobId={selectedJob.id}
                     photos={jobPhotos}
+                    companyId={selectedJob.companyId || companyIdForJobs || userProfile?.companyId}
+                    uploadedBy={userProfile?.id || userProfile?.uid}
                     onDeletePhoto={async (photoId) => {
                       const result = await PhotoService.deletePhoto(photoId);
                       if (result.success) {
                         setJobPhotos(prev => prev.filter(p => p.id !== photoId));
                       } else {
                         throw new Error(result.error);
+                      }
+                    }}
+                    onUploadPhoto={async (file) => {
+                      const companyId = selectedJob.companyId || companyIdForJobs || userProfile?.companyId;
+                      const uploadedBy = userProfile?.id || userProfile?.uid;
+                      
+                      if (!companyId || !uploadedBy) {
+                        throw new Error('Missing company ID or user ID');
+                      }
+
+                      const result = await JobPhotoService.uploadPhoto({
+                        file,
+                        companyId,
+                        jobId: selectedJob.id,
+                        uploadedBy,
+                        caption: ''
+                      });
+
+                      if (result.success) {
+                        // Reload photos to show the new one
+                        await loadJobPhotos(selectedJob);
+                      } else {
+                        throw new Error(result.error || 'Failed to upload photo');
                       }
                     }}
                     isLoading={jobPhotosLoading}

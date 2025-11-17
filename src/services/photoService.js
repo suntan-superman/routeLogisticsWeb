@@ -86,13 +86,24 @@ class PhotoService {
       const photoData = photoDoc.data();
 
       // Delete from storage if URL exists
-      if (photoData.url) {
+      if (photoData.downloadURL || photoData.url || photoData.storagePath) {
         try {
           const storageRef = ref(storage, photoData.storagePath || photoData.url);
           await deleteObject(storageRef);
         } catch (storageError) {
-          console.warn('Warning: Could not delete from storage:', storageError);
+          console.warn('Warning: Could not delete photo from storage:', storageError);
           // Continue with metadata deletion even if storage delete fails
+        }
+      }
+
+      // Delete thumbnail from storage if it exists
+      if (photoData.thumbnailPath) {
+        try {
+          const thumbnailRef = ref(storage, photoData.thumbnailPath);
+          await deleteObject(thumbnailRef);
+        } catch (thumbnailError) {
+          console.warn('Warning: Could not delete thumbnail from storage:', thumbnailError);
+          // Continue even if thumbnail delete fails
         }
       }
 

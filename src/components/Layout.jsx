@@ -43,6 +43,7 @@ const Layout = ({ children }) => {
     { name: 'Team Tracking', href: '/team-tracking', icon: MapPinIcon, adminOnly: true },
     { name: 'Notifications', href: '/notifications', icon: BellIcon, adminOnly: true },
     { name: 'Invoices', href: '/invoices', icon: ReceiptRefundIcon },
+    { name: 'Invoice Templates', href: '/invoice-templates', icon: DocumentTextIcon },
     { name: 'Calendar', href: '/calendar', icon: CalendarIcon },
     { name: 'Reports', href: '/reports', icon: ChartBarIcon },
   ];

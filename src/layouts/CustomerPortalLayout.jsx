@@ -305,7 +305,7 @@ const CustomerPortalLayout = ({ children }) => {
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="text-gray-600 hover:text-green-600">
+                  <a href="/privacy-policy" className="text-gray-600 hover:text-green-600">
                     Privacy Policy
                   </a>
                 </li>

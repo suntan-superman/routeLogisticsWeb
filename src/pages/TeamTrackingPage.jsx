@@ -16,23 +16,11 @@ import {
   Cog6ToothIcon,
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
-
-// Google Maps API Key - check both VITE and EXPO_PUBLIC env vars for compatibility
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 
-                             import.meta.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 
-                             '';
-
-// Move libraries constant outside component to avoid re-renders
-const GOOGLE_MAPS_LIBRARIES = ['places'];
+import { GOOGLE_MAPS_API_KEY, GOOGLE_MAPS_LIBRARIES, MAP_CONTAINER_STYLE, DEFAULT_MAP_CENTER } from '../constants/googleMaps';
 
 const mapContainerStyle = {
   width: '100%',
   height: '400px',
-};
-
-const defaultCenter = {
-  lat: 35.3733,
-  lng: -119.0187,
 };
 
 const TeamTrackingPage = () => {
@@ -55,7 +43,7 @@ const TeamTrackingPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [viewMode, setViewMode] = useState('route'); // 'route' or 'current'
   const [stats, setStats] = useState(null);
-  const [mapCenter, setMapCenter] = useState(defaultCenter);
+  const [mapCenter, setMapCenter] = useState(DEFAULT_MAP_CENTER);
   const [mapZoom, setMapZoom] = useState(12);
   const [showLocationSettings, setShowLocationSettings] = useState(false);
   const [settings, setSettings] = useState(null);

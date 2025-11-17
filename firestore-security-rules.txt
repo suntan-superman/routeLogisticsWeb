@@ -286,6 +286,40 @@ service cloud.firestore {
         request.auth.uid == request.resource.data.userId;
     }
     
+    // Invoice Templates collection - company-scoped access
+    match /invoiceTemplates/{templateId} {
+      // Helper function to check if user can access template
+      function canAccessTemplate() {
+        return request.auth != null &&
+               exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+               getUserProfile().companyId != null &&
+               resource.data.companyId == getUserProfile().companyId;
+      }
+      
+      // Allow read: super admin or users from the same company
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        canAccessTemplate()
+      );
+      
+      // Allow create: super admin or users from the same company
+      allow create: if request.auth != null && (
+        isSuperAdmin() ||
+        (request.resource.data.companyId != null &&
+         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         request.resource.data.companyId == getUserProfile().companyId &&
+         request.resource.data.userId == request.auth.uid)
+      );
+      
+      // Allow update/delete: super admin or users from the same company who created it
+      allow update, delete: if request.auth != null && (
+        isSuperAdmin() ||
+        (canAccessTemplate() &&
+         (resource.data.userId == request.auth.uid ||
+          isCompanyAdminOrSupervisor()))
+      );
+    }
+    
     // Invoices collection - users can only access their own invoices
     match /invoices/{invoiceId} {
       allow read, write: if request.auth != null && 

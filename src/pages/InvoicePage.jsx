@@ -13,8 +13,10 @@ import {
   CheckCircleIcon,
   ClockIcon,
   ExclamationCircleIcon,
-  XCircleIcon
+  XCircleIcon,
+  PencilIcon
 } from '@heroicons/react/24/outline';
+import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { parseDate, formatDate as formatDateHelper } from '../utils/dateHelpers';
 import {
@@ -39,6 +41,7 @@ const InvoicePage = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [completedJobs, setCompletedJobs] = useState([]);
@@ -254,6 +257,46 @@ const InvoicePage = () => {
     setIsLoading(false);
   };
 
+  const handleEditInvoice = async (invoice) => {
+    setSelectedInvoice(invoice);
+    setInvoiceData({
+      paymentTerms: invoice.paymentTerms || 'net30',
+      taxRate: invoice.taxRate || 0,
+      notes: invoice.notes || '',
+      terms: invoice.terms || ''
+    });
+    setShowEditModal(true);
+  };
+
+  const handleUpdateInvoice = async () => {
+    if (!selectedInvoice) return;
+
+    setIsLoading(true);
+    try {
+      const updates = {
+        paymentTerms: invoiceData.paymentTerms,
+        taxRate: invoiceData.taxRate,
+        tax: calculateTax(selectedInvoice.subtotal || 0, invoiceData.taxRate),
+        notes: invoiceData.notes,
+        terms: invoiceData.terms
+      };
+
+      const result = await InvoiceService.updateInvoice(selectedInvoice.id, updates);
+      if (result.success) {
+        await loadInvoices();
+        setShowEditModal(false);
+        setSelectedInvoice(null);
+        toast.success('Invoice updated successfully!');
+      } else {
+        toast.error(result.error || 'Failed to update invoice');
+      }
+    } catch (error) {
+      console.error('Error updating invoice:', error);
+      toast.error('Error updating invoice');
+    }
+    setIsLoading(false);
+  };
+
   const handleSendInvoice = async (invoiceId, isResend = false) => {
     const confirmMessage = isResend 
       ? 'Resend this invoice to the customer via email?' 
@@ -365,6 +408,16 @@ const InvoicePage = () => {
       >
         <ArrowDownTrayIcon className="h-5 w-5" />
       </button>
+      {(props.status === 'drafted' || props.status === 'sent' || props.status === 'viewed') && (
+        <button
+          type="button"
+          onClick={() => handleEditInvoice(props)}
+          className="text-green-600 hover:text-green-900"
+          title="Edit Invoice"
+        >
+          <PencilIcon className="h-5 w-5" />
+        </button>
+      )}
       {props.status === 'drafted' && (
         <button
           type="button"
@@ -423,13 +476,22 @@ const InvoicePage = () => {
             <p className="text-gray-600">Create, manage, and send invoices</p>
           </div>
         </div>
-        <button
-          onClick={openCreateModal}
-          className="inline-flex items-center px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
-        >
-          <PlusIcon className="h-5 w-5 mr-2" />
-          Create Invoice
-        </button>
+        <div className="flex items-center gap-3">
+          <Link
+            to="/invoice-templates"
+            className="inline-flex items-center px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <DocumentTextIcon className="h-5 w-5 mr-2" />
+            Templates
+          </Link>
+          <button
+            onClick={openCreateModal}
+            className="inline-flex items-center px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <PlusIcon className="h-5 w-5 mr-2" />
+            Create Invoice
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -787,6 +849,131 @@ const InvoicePage = () => {
                 </button>
                 <button
                   onClick={() => setShowCreateModal(false)}
+                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Invoice Modal */}
+      {showEditModal && selectedInvoice && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 transition-opacity bg-gray-500 bg-opacity-75" onClick={() => setShowEditModal(false)}></div>
+            
+            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full">
+              <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">Edit Invoice #{selectedInvoice.invoiceNumber}</h3>
+                  <button
+                    onClick={() => setShowEditModal(false)}
+                    className="text-gray-400 hover:text-gray-500"
+                  >
+                    <XCircleIcon className="h-6 w-6" />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="bg-gray-50 p-4 rounded-md">
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="font-medium text-gray-700">Customer:</span>
+                        <p className="text-gray-900">{selectedInvoice.customerName}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Invoice Date:</span>
+                        <p className="text-gray-900">{formatDate(selectedInvoice.invoiceDate)}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Subtotal:</span>
+                        <p className="text-gray-900">{formatCurrency(selectedInvoice.subtotal || 0)}</p>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Status:</span>
+                        <div className="mt-1">{getStatusBadge(selectedInvoice.status)}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Payment Terms</label>
+                    <select
+                      value={invoiceData.paymentTerms}
+                      onChange={(e) => setInvoiceData(prev => ({ ...prev, paymentTerms: e.target.value }))}
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
+                    >
+                      <option value="dueOnReceipt">Due on Receipt</option>
+                      <option value="net15">Net 15</option>
+                      <option value="net30">Net 30</option>
+                      <option value="net60">Net 60</option>
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Tax Rate (%)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={invoiceData.taxRate}
+                        onChange={(e) => {
+                          const rate = parseFloat(e.target.value) || 0;
+                          setInvoiceData(prev => ({ ...prev, taxRate: rate }));
+                        }}
+                        className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Tax Amount</label>
+                      <input
+                        type="text"
+                        value={formatCurrency(calculateTax(selectedInvoice.subtotal || 0, invoiceData.taxRate))}
+                        disabled
+                        className="mt-1 block w-full rounded-md border-gray-300 bg-gray-50 shadow-sm sm:text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Notes</label>
+                    <textarea
+                      value={invoiceData.notes}
+                      onChange={(e) => setInvoiceData(prev => ({ ...prev, notes: e.target.value }))}
+                      rows={3}
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
+                      placeholder="Additional notes for the invoice..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Terms & Conditions</label>
+                    <textarea
+                      value={invoiceData.terms}
+                      onChange={(e) => setInvoiceData(prev => ({ ...prev, terms: e.target.value }))}
+                      rows={3}
+                      className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
+                      placeholder="Payment terms and conditions..."
+                    />
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                <button
+                  onClick={handleUpdateInvoice}
+                  disabled={isLoading}
+                  className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-primary-600 text-base font-medium text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isLoading ? 'Updating...' : 'Update Invoice'}
+                </button>
+                <button
+                  onClick={() => setShowEditModal(false)}
                   className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
                 >
                   Cancel

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   XMarkIcon,
   ArrowLeftIcon,
@@ -9,13 +9,16 @@ import {
   ListBulletIcon,
   MapPinIcon,
   ClockIcon,
+  PhotoIcon,
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 
-const PhotoGallery = ({ jobId, photos = [], onDeletePhoto, isLoading = false, readOnly = false }) => {
+const PhotoGallery = ({ jobId, photos = [], onDeletePhoto, onUploadPhoto, isLoading = false, readOnly = false, companyId, uploadedBy }) => {
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(null);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef(null);
 
   const sortedPhotos = useMemo(() => {
     if (!Array.isArray(photos)) return [];
@@ -92,12 +95,71 @@ const PhotoGallery = ({ jobId, photos = [], onDeletePhoto, isLoading = false, re
     }
   };
 
+  const handleUploadClick = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileChange = async (event) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
+
+    if (!jobId || !companyId || !uploadedBy) {
+      toast.error('Missing required information for photo upload');
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      if (onUploadPhoto) {
+        for (const file of files) {
+          await onUploadPhoto(file);
+        }
+        toast.success(`Successfully uploaded ${files.length} photo${files.length > 1 ? 's' : ''}`);
+      } else {
+        toast.error('Upload handler not provided');
+      }
+    } catch (error) {
+      console.error('Error uploading photos:', error);
+      toast.error('Failed to upload photos');
+    } finally {
+      setIsUploading(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
   if (!sortedPhotos.length) {
     return (
       <div className="bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 p-12 text-center">
         <div className="text-gray-400 mb-2 text-4xl">📸</div>
         <p className="text-gray-600">No photos uploaded yet</p>
-        <p className="text-sm text-gray-500 mt-1">Upload photos from the mobile app to see them here</p>
+        {!readOnly && onUploadPhoto ? (
+          <>
+            <p className="text-sm text-gray-500 mt-1 mb-4">Upload photos to document this job</p>
+            <button
+              onClick={handleUploadClick}
+              disabled={isUploading}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <PhotoIcon className="w-5 h-5" />
+              <span>{isUploading ? 'Uploading...' : 'Upload Photos'}</span>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleFileChange}
+              className="hidden"
+            />
+          </>
+        ) : (
+          <p className="text-sm text-gray-500 mt-1">Upload photos from the mobile app to see them here</p>
+        )}
       </div>
     );
   }
@@ -111,6 +173,17 @@ const PhotoGallery = ({ jobId, photos = [], onDeletePhoto, isLoading = false, re
           <p className="text-sm text-gray-500 mt-1">Job documentation and progress photos</p>
         </div>
         <div className="flex gap-2">
+          {!readOnly && onUploadPhoto && (
+            <button
+              onClick={handleUploadClick}
+              disabled={isUploading}
+              className="inline-flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Upload photos"
+            >
+              <PhotoIcon className="w-5 h-5" />
+              <span className="text-sm font-medium">{isUploading ? 'Uploading...' : 'Upload'}</span>
+            </button>
+          )}
           <button
             onClick={() => setViewMode('grid')}
             className={`p-2 rounded-lg transition-colors ${
@@ -135,6 +208,18 @@ const PhotoGallery = ({ jobId, photos = [], onDeletePhoto, isLoading = false, re
           </button>
         </div>
       </div>
+
+      {/* Hidden file input */}
+      {!readOnly && onUploadPhoto && (
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={handleFileChange}
+          className="hidden"
+        />
+      )}
 
       {/* Grid View */}
       {viewMode === 'grid' && (
@@ -181,9 +266,15 @@ const PhotoGallery = ({ jobId, photos = [], onDeletePhoto, isLoading = false, re
               className="w-full p-4 flex items-center gap-4 hover:bg-gray-50 transition-colors text-left"
             >
               <img
-                src={photo.url}
+                src={photo.thumbnailUrl || photo.url}
                 alt={`Photo ${index + 1}`}
                 className="w-16 h-16 object-cover rounded-lg flex-shrink-0"
+                onError={(e) => {
+                  // Fallback to full image if thumbnail fails to load
+                  if (e.target.src !== photo.url) {
+                    e.target.src = photo.url;
+                  }
+                }}
               />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 text-sm text-gray-600 mb-1">

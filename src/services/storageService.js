@@ -2,6 +2,59 @@ import { storage } from './firebase';
 import { ref, uploadBytes, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 
 /**
+ * Generate a thumbnail from an image file
+ * @param {File|Blob} file - Image file
+ * @param {number} maxWidth - Maximum thumbnail width (default: 300)
+ * @param {number} maxHeight - Maximum thumbnail height (default: 300)
+ * @returns {Promise<Blob>} Thumbnail blob
+ */
+async function generateThumbnail(file, maxWidth = 300, maxHeight = 300) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    img.onload = () => {
+      // Calculate dimensions maintaining aspect ratio
+      let width = img.width;
+      let height = img.height;
+
+      if (width > height) {
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+      } else {
+        if (height > maxHeight) {
+          width = (width * maxHeight) / height;
+          height = maxHeight;
+        }
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+
+      // Draw and convert to blob
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error('Failed to generate thumbnail'));
+          }
+        },
+        'image/jpeg',
+        0.85 // Quality
+      );
+    };
+
+    img.onerror = () => reject(new Error('Failed to load image'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+/**
  * Storage Service for handling file uploads to Firebase Storage
  */
 class StorageService {
@@ -107,12 +160,31 @@ class StorageService {
 
       const downloadURL = await getDownloadURL(snapshot.ref);
 
+      // Generate and upload thumbnail
+      let thumbnailURL = null;
+      let thumbnailPath = null;
+      try {
+        const thumbnailBlob = await generateThumbnail(file);
+        const thumbnailFileName = `thumb_${timestamp}_${randomSuffix}.jpg`;
+        const thumbnailStoragePath = `companies/${companyId}/jobs/${jobId}/photos/thumbnails/${thumbnailFileName}`;
+        const thumbnailRef = ref(storage, thumbnailStoragePath);
+        
+        await uploadBytes(thumbnailRef, thumbnailBlob);
+        thumbnailURL = await getDownloadURL(thumbnailRef);
+        thumbnailPath = thumbnailRef.fullPath;
+      } catch (thumbnailError) {
+        console.warn('Failed to generate thumbnail, continuing without it:', thumbnailError);
+        // Don't fail the upload if thumbnail generation fails
+      }
+
       return {
         success: true,
         url: downloadURL,
         path: snapshot.ref.fullPath,
         size: snapshot.totalBytes,
-        contentType: file.type || snapshot.metadata?.contentType || 'image/jpeg'
+        contentType: file.type || snapshot.metadata?.contentType || 'image/jpeg',
+        thumbnailURL,
+        thumbnailPath
       };
     } catch (error) {
       console.error('Error uploading job photo:', error);

@@ -65,6 +65,8 @@ class JobPhotoService {
         caption,
         storagePath: uploadResult.path,
         downloadURL: uploadResult.url,
+        thumbnailURL: uploadResult.thumbnailURL || null,
+        thumbnailPath: uploadResult.thumbnailPath || null,
         mimeType: uploadResult.contentType || file?.type || 'image/jpeg',
         size: uploadResult.size || file?.size || 0,
         createdAt: serverTimestamp(),

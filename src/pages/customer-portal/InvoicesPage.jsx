@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useCustomerPortal } from '../../contexts/CustomerPortalContext';
 import { useAuthSafe } from '../../contexts/AuthContext';
 import CustomerPortalService from '../../services/customerPortalService';
+import InvoiceService from '../../services/invoiceService';
 import { 
   DocumentTextIcon,
   CalendarIcon,
@@ -324,26 +325,63 @@ function InvoiceCard({ invoice, onViewDetails, getStatusColor, getStatusIcon }) 
         </span>
       </div>
 
-      <div className="grid grid-cols-3 gap-4 text-sm text-gray-600">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
         <div className="flex items-center gap-2">
-          <CurrencyDollarIcon className="w-4 h-4 flex-shrink-0" />
-          <span className="font-medium text-gray-900">{CustomerPortalService.formatCurrency(invoice.total)}</span>
+          <CurrencyDollarIcon className="w-4 h-4 flex-shrink-0 text-gray-400" />
+          <div>
+            <p className="text-xs text-gray-500">Amount</p>
+            <p className="font-semibold text-gray-900">{CustomerPortalService.formatCurrency(invoice.total || 0)}</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          <CalendarIcon className="w-4 h-4 flex-shrink-0" />
-          <span>Due {CustomerPortalService.formatDate(invoice.dueDate)}</span>
+          <CalendarIcon className="w-4 h-4 flex-shrink-0 text-gray-400" />
+          <div>
+            <p className="text-xs text-gray-500">Due Date</p>
+            <p className="font-medium text-gray-900">
+              {invoice.dueDate ? CustomerPortalService.formatDate(invoice.dueDate) : 'N/A'}
+            </p>
+          </div>
         </div>
-        {invoice.paidDate && (
+        {invoice.paidAmount > 0 ? (
           <div className="flex items-center gap-2">
             <CheckCircleIcon className="w-4 h-4 flex-shrink-0 text-green-600" />
-            <span>Paid {CustomerPortalService.formatDate(invoice.paidDate)}</span>
+            <div>
+              <p className="text-xs text-gray-500">Paid</p>
+              <p className="font-medium text-green-600">
+                {CustomerPortalService.formatCurrency(invoice.paidAmount)}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <ClockIcon className="w-4 h-4 flex-shrink-0 text-yellow-500" />
+            <div>
+              <p className="text-xs text-gray-500">Status</p>
+              <p className="font-medium text-gray-900 capitalize">{invoice.status}</p>
+            </div>
+          </div>
+        )}
+        {invoice.items && invoice.items.length > 0 && (
+          <div className="flex items-center gap-2">
+            <DocumentTextIcon className="w-4 h-4 flex-shrink-0 text-gray-400" />
+            <div>
+              <p className="text-xs text-gray-500">Items</p>
+              <p className="font-medium text-gray-900">{invoice.items.length}</p>
+            </div>
           </div>
         )}
       </div>
 
-      <div className="mt-4 text-xs text-gray-500">
-        Click to view details
-      </div>
+      {invoice.status === 'overdue' && (
+        <div className="mt-4 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+          ⚠️ This invoice is overdue
+        </div>
+      )}
+      {invoice.status === 'pending' && new Date(invoice.dueDate) < new Date() && invoice.status !== 'paid' && (
+        <div className="mt-4 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700">
+          ⏰ Payment due soon
+        </div>
+      )}
     </button>
   );
 }
@@ -352,18 +390,59 @@ function InvoiceCard({ invoice, onViewDetails, getStatusColor, getStatusIcon }) 
  * Invoice Details Modal Component
  */
 function InvoiceDetailsModal({ invoice, onClose, getStatusColor, getStatusIcon }) {
-  const handleDownloadPDF = () => {
-    toast.promise(
-      (async () => {
-        // TODO: Implement PDF download
-        await new Promise(resolve => setTimeout(resolve, 500));
-      })(),
-      {
-        loading: 'Preparing PDF...',
-        success: 'Invoice downloaded!',
-        error: 'Failed to download invoice'
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+
+  const handleDownloadPDF = async () => {
+    setIsGeneratingPDF(true);
+    try {
+      // Convert customer invoice to format expected by InvoiceService
+      const invoiceForPDF = {
+        ...invoice,
+        invoiceNumber: invoice.invoiceNumber || `INV-${invoice.id}`,
+        invoiceDate: invoice.invoiceDate || invoice.createdAt,
+        dueDate: invoice.dueDate,
+        companyName: invoice.companyName || 'Service Company',
+        companyAddress: invoice.companyAddress || '',
+        companyPhone: invoice.companyPhone || '',
+        companyEmail: invoice.companyEmail || '',
+        companyLogo: invoice.companyLogo || null,
+        customerName: invoice.customerName || 'Customer',
+        customerAddress: invoice.customerAddress || '',
+        customerEmail: invoice.customerEmail || '',
+        items: invoice.items || [],
+        subtotal: invoice.subtotal || invoice.amount || 0,
+        tax: invoice.tax || 0,
+        taxRate: invoice.taxRate || 0,
+        total: invoice.total || 0,
+        paymentTerms: invoice.paymentTerms || 'net30',
+        notes: invoice.notes || '',
+        terms: invoice.terms || '',
+        companyId: invoice.companyId
+      };
+
+      const result = await InvoiceService.generatePDF(invoiceForPDF);
+      
+      if (result.success && result.pdfBlob) {
+        // Create download link
+        const url = window.URL.createObjectURL(result.pdfBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `Invoice-${invoice.invoiceNumber || invoice.id}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        
+        toast.success('Invoice downloaded successfully!');
+      } else {
+        throw new Error(result.error || 'Failed to generate PDF');
       }
-    );
+    } catch (error) {
+      console.error('Error downloading PDF:', error);
+      toast.error(error.message || 'Failed to download invoice');
+    } finally {
+      setIsGeneratingPDF(false);
+    }
   };
 
   return (
@@ -379,6 +458,23 @@ function InvoiceDetailsModal({ invoice, onClose, getStatusColor, getStatusIcon }
 
         {/* Content */}
         <div className="p-6 space-y-6">
+          {/* Company Information */}
+          {invoice.companyName && (
+            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+              <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-2">From</h3>
+              <div className="text-gray-900">
+                <p className="font-semibold text-lg">{invoice.companyName}</p>
+                {invoice.companyAddress && (
+                  <p className="text-sm mt-1 whitespace-pre-line">{invoice.companyAddress}</p>
+                )}
+                <div className="flex flex-wrap gap-4 mt-2 text-sm text-gray-600">
+                  {invoice.companyPhone && <p>📞 {invoice.companyPhone}</p>}
+                  {invoice.companyEmail && <p>✉️ {invoice.companyEmail}</p>}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Status and Amount */}
           <div className="grid grid-cols-2 gap-6">
             <div>
@@ -455,31 +551,108 @@ function InvoiceDetailsModal({ invoice, onClose, getStatusColor, getStatusIcon }
           <div className="bg-gray-50 rounded-lg p-4 space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-gray-600">Subtotal</span>
-              <span className="text-gray-900">{CustomerPortalService.formatCurrency(invoice.amount)}</span>
+              <span className="text-gray-900">
+                {CustomerPortalService.formatCurrency(invoice.subtotal || invoice.amount || 0)}
+              </span>
             </div>
             {invoice.tax > 0 && (
               <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Tax</span>
+                <span className="text-gray-600">
+                  Tax {invoice.taxRate ? `(${invoice.taxRate}%)` : ''}
+                </span>
                 <span className="text-gray-900">{CustomerPortalService.formatCurrency(invoice.tax)}</span>
               </div>
             )}
             <div className="border-t border-gray-200 pt-2 flex justify-between font-medium">
               <span className="text-gray-900">Total</span>
-              <span className="text-lg text-gray-900">{CustomerPortalService.formatCurrency(invoice.total)}</span>
+              <span className="text-lg text-gray-900">
+                {CustomerPortalService.formatCurrency(invoice.total || 0)}
+              </span>
             </div>
           </div>
 
-          {/* Paid Amount */}
-          {invoice.paidAmount > 0 && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <p className="text-sm text-green-700 font-medium">
-                Paid: {CustomerPortalService.formatCurrency(invoice.paidAmount)}
-              </p>
-              {invoice.paidDate && (
-                <p className="text-xs text-green-600 mt-1">
-                  on {CustomerPortalService.formatDate(invoice.paidDate)}
-                </p>
+          {/* Payment Information */}
+          <div>
+            <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-3">Payment Information</h3>
+            <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+              {invoice.paidAmount > 0 ? (
+                <>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Amount Paid</span>
+                    <span className="text-lg font-semibold text-green-600">
+                      {CustomerPortalService.formatCurrency(invoice.paidAmount)}
+                    </span>
+                  </div>
+                  {invoice.paidDate && (
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-600">Payment Date</span>
+                      <span className="text-gray-900">
+                        {CustomerPortalService.formatDate(invoice.paidDate)}
+                      </span>
+                    </div>
+                  )}
+                  {invoice.paymentMethod && (
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-600">Payment Method</span>
+                      <span className="text-gray-900 capitalize">{invoice.paymentMethod}</span>
+                    </div>
+                  )}
+                  {invoice.total > invoice.paidAmount && (
+                    <div className="pt-2 border-t border-gray-200 flex justify-between items-center">
+                      <span className="text-sm font-medium text-gray-700">Remaining Balance</span>
+                      <span className="text-lg font-semibold text-orange-600">
+                        {CustomerPortalService.formatCurrency(invoice.total - invoice.paidAmount)}
+                      </span>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="text-center py-2">
+                  <p className="text-sm text-gray-600">No payment received yet</p>
+                  {invoice.status !== 'paid' && invoice.status !== 'cancelled' && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Payment due: {CustomerPortalService.formatDate(invoice.dueDate)}
+                    </p>
+                  )}
+                </div>
               )}
+            </div>
+          </div>
+
+          {/* Payment History */}
+          {invoice.paymentHistory && invoice.paymentHistory.length > 0 && (
+            <div>
+              <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-3">Payment History</h3>
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-700">Date</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-700">Amount</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-700">Method</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-700">Reference</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {invoice.paymentHistory.map((payment, idx) => (
+                      <tr key={idx} className="hover:bg-gray-50">
+                        <td className="px-4 py-2 text-sm text-gray-900">
+                          {CustomerPortalService.formatDate(payment.date)}
+                        </td>
+                        <td className="px-4 py-2 text-sm font-medium text-gray-900">
+                          {CustomerPortalService.formatCurrency(payment.amount)}
+                        </td>
+                        <td className="px-4 py-2 text-sm text-gray-900 capitalize">
+                          {payment.method || 'N/A'}
+                        </td>
+                        <td className="px-4 py-2 text-sm text-gray-600 font-mono">
+                          {payment.reference || 'N/A'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
@@ -496,14 +669,35 @@ function InvoiceDetailsModal({ invoice, onClose, getStatusColor, getStatusIcon }
         <div className="border-t border-gray-200 px-6 py-4 flex gap-3">
           <button
             onClick={handleDownloadPDF}
-            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
+            disabled={isGeneratingPDF}
+            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <ArrowDownTrayIcon className="w-5 h-5" />
-            Download PDF
+            {isGeneratingPDF ? (
+              <>
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Generating PDF...
+              </>
+            ) : (
+              <>
+                <ArrowDownTrayIcon className="w-5 h-5" />
+                Download PDF
+              </>
+            )}
           </button>
+          {invoice.status !== 'paid' && invoice.status !== 'cancelled' && (
+            <button
+              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+              onClick={() => {
+                toast.info('Payment integration coming soon!');
+                // TODO: Integrate with Stripe payment
+              }}
+            >
+              Pay Now
+            </button>
+          )}
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition-colors"
+            className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition-colors"
           >
             Close
           </button>

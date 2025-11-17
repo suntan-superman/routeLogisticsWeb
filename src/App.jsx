@@ -15,6 +15,7 @@ import LoginPage from './pages/LoginPage';
 import SignUpPage from './pages/SignUpPage';
 import EmailVerificationPage from './pages/EmailVerificationPage';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
+import SupportPage from './pages/SupportPage';
 import CompanySetupPage from './pages/CompanySetupPage';
 import CustomerManagementPage from './pages/CustomerManagementPage';
 import EstimateTemplatesPage from './pages/EstimateTemplatesPage';
@@ -81,6 +82,7 @@ function App() {
                 <Route path="/signup" element={<SignUpPage />} />
                 <Route path="/verify-email" element={<EmailVerificationPage />} />
                 <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+                <Route path="/support" element={<SupportPage />} />
                 
                 {/* Protected Routes */}
                 <Route path="/" element={

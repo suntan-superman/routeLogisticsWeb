@@ -300,14 +300,14 @@ const CustomerPortalLayout = ({ children }) => {
               <h3 className="font-semibold text-gray-900 mb-3">Support</h3>
               <ul className="space-y-2 text-sm">
                 <li>
-                  <a href="mailto:support@mifactotum.com" className="text-gray-600 hover:text-green-600">
-                    Contact Support
-                  </a>
+                  <Link to="/support" className="text-gray-600 hover:text-green-600">
+                    Support & Help
+                  </Link>
                 </li>
                 <li>
-                  <a href="/privacy-policy" className="text-gray-600 hover:text-green-600">
+                  <Link to="/privacy-policy" className="text-gray-600 hover:text-green-600">
                     Privacy Policy
-                  </a>
+                  </Link>
                 </li>
               </ul>
             </div>

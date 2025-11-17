@@ -328,6 +328,26 @@ service cloud.firestore {
         request.auth.uid == request.resource.data.userId;
     }
     
+    // Payments collection - Stripe payment tracking
+    match /payments/{paymentId} {
+      // Allow read:
+      // - Customers can see their own payments (via customerId match)
+      // - Company admins/supervisors can see payments for their company
+      // - Super admin can see all payments
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        (resource.data.customerId != null &&
+         resource.data.customerId == request.auth.uid) ||
+        (resource.data.companyId != null &&
+         resource.data.companyId == getUserProfile().companyId &&
+         isCompanyAdminOrSupervisor())
+      );
+      
+      // Payments are created/updated only by Cloud Functions (server-side)
+      // No client-side write access
+      allow create, update, delete: if false;
+    }
+    
     // Recurring Jobs collection - users can only access their own recurring jobs
     // Super admin can access all recurring jobs
     match /recurringJobs/{recurringJobId} {

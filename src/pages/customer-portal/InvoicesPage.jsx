@@ -3,6 +3,7 @@ import { useCustomerPortal } from '../../contexts/CustomerPortalContext';
 import { useAuthSafe } from '../../contexts/AuthContext';
 import CustomerPortalService from '../../services/customerPortalService';
 import InvoiceService from '../../services/invoiceService';
+import PaymentModal from '../../components/PaymentModal';
 import { 
   DocumentTextIcon,
   CalendarIcon,
@@ -32,6 +33,8 @@ const InvoicesPage = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentInvoice, setPaymentInvoice] = useState(null);
 
   useEffect(() => {
     if (customerData?.id) {
@@ -275,6 +278,30 @@ const InvoicesPage = () => {
           }}
           getStatusColor={getStatusColor}
           getStatusIcon={getStatusIcon}
+        />
+      )}
+
+      {/* Payment Modal */}
+      {showPaymentModal && paymentInvoice && (
+        <PaymentModal
+          invoice={paymentInvoice}
+          isOpen={showPaymentModal}
+          onClose={() => {
+            setShowPaymentModal(false);
+            setPaymentInvoice(null);
+          }}
+          onPaymentSuccess={async (paymentIntent, invoice) => {
+            // Reload invoices to reflect payment status
+            await loadInvoices();
+            // Close payment modal
+            setShowPaymentModal(false);
+            setPaymentInvoice(null);
+            // Close details modal if open
+            if (showDetailsModal) {
+              setShowDetailsModal(false);
+              setSelectedInvoice(null);
+            }
+          }}
         />
       )}
     </div>
@@ -686,10 +713,10 @@ function InvoiceDetailsModal({ invoice, onClose, getStatusColor, getStatusIcon }
           </button>
           {invoice.status !== 'paid' && invoice.status !== 'cancelled' && (
             <button
-              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+              className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
               onClick={() => {
-                toast.info('Payment integration coming soon!');
-                // TODO: Integrate with Stripe payment
+                setPaymentInvoice(invoice);
+                setShowPaymentModal(true);
               }}
             >
               Pay Now

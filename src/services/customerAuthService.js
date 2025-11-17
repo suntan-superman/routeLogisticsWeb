@@ -128,8 +128,16 @@ class CustomerAuthService {
         return null;
       }
 
-      const customerRef = doc(db, 'portalCustomers', customerId);
-      const customerDoc = await getDoc(customerRef);
+      // Try new unified customers collection first
+      let customerDoc = await getDoc(doc(db, 'customers', customerId));
+      
+      // Fallback to legacy collections
+      if (!customerDoc.exists()) {
+        customerDoc = await getDoc(doc(db, 'portalCustomers', customerId));
+      }
+      if (!customerDoc.exists()) {
+        customerDoc = await getDoc(doc(db, 'customerProfiles', customerId));
+      }
 
       if (!customerDoc.exists()) {
         console.log('Customer profile not found:', customerId);
@@ -174,6 +182,7 @@ class CustomerAuthService {
 
   /**
    * Update customer profile
+   * Updates in new customers collection
    */
   static async updateCustomerProfile(customerId, updates) {
     try {
@@ -181,7 +190,7 @@ class CustomerAuthService {
         throw new Error('Customer ID is required');
       }
 
-      const allowedFields = ['name', 'phone', 'address', 'preferences', 'photoURL'];
+      const allowedFields = ['name', 'firstName', 'lastName', 'phone', 'phoneNumber', 'address', 'city', 'state', 'zipCode', 'preferences', 'photoURL'];
       const sanitizedUpdates = {};
 
       for (const [key, value] of Object.entries(updates)) {
@@ -192,7 +201,8 @@ class CustomerAuthService {
 
       sanitizedUpdates.updatedAt = serverTimestamp();
 
-      const customerRef = doc(db, 'portalCustomers', customerId);
+      // Update in new customers collection
+      const customerRef = doc(db, 'customers', customerId);
       await setDoc(customerRef, sanitizedUpdates, { merge: true });
 
       return {

@@ -21,8 +21,14 @@ const CustomerPortalLayout = ({ children }) => {
   const { customer, selectedCompanyId, selectCompany, companies, logout } = useCustomerPortal();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
-  const handleLogout = async () => {
+  const handleLogoutClick = () => {
+    setShowLogoutConfirm(true);
+  };
+
+  const handleLogoutConfirm = async () => {
+    setShowLogoutConfirm(false);
     try {
       await logout();
       navigate('/customer-portal/login');
@@ -30,6 +36,10 @@ const CustomerPortalLayout = ({ children }) => {
     } catch (error) {
       toast.error('Failed to logout');
     }
+  };
+
+  const handleLogoutCancel = () => {
+    setShowLogoutConfirm(false);
   };
 
   const isActive = (path) => location.pathname === path;
@@ -135,7 +145,7 @@ const CustomerPortalLayout = ({ children }) => {
                   {customer?.name?.charAt(0) || 'C'}
                 </div>
                 <button
-                  onClick={handleLogout}
+                  onClick={handleLogoutClick}
                   className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
                   title="Logout"
                 >
@@ -211,8 +221,8 @@ const CustomerPortalLayout = ({ children }) => {
 
               <button
                 onClick={() => {
-                  handleLogout();
                   setMobileMenuOpen(false);
+                  handleLogoutClick();
                 }}
                 className="w-full flex items-center gap-3 px-4 py-2.5 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors text-left"
               >
@@ -313,6 +323,56 @@ const CustomerPortalLayout = ({ children }) => {
           </div>
         </div>
       </footer>
+
+      {/* Logout Confirmation Modal */}
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex min-h-full items-center justify-center p-4 text-center sm:p-0">
+            {/* Backdrop */}
+            <div 
+              className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
+              onClick={handleLogoutCancel}
+            />
+
+            {/* Modal */}
+            <div className="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg">
+              <div className="bg-white px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
+                <div className="sm:flex sm:items-start">
+                  <div className="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10">
+                    <ArrowLeftOnRectangleIcon className="h-6 w-6 text-red-600" />
+                  </div>
+                  <div className="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left">
+                    <h3 className="text-lg font-semibold leading-6 text-gray-900">
+                      Confirm Logout
+                    </h3>
+                    <div className="mt-2">
+                      <p className="text-sm text-gray-500">
+                        Are you sure you want to logout? You will need to enter your email and verification code to sign in again.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-gray-50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
+                <button
+                  type="button"
+                  onClick={handleLogoutConfirm}
+                  className="inline-flex w-full justify-center rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-500 sm:ml-3 sm:w-auto transition-colors"
+                >
+                  Yes, Logout
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLogoutCancel}
+                  className="mt-3 inline-flex w-full justify-center rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -61,7 +61,14 @@ const DashboardPage = () => {
     }
   };
 
-  const handleLogout = async () => {
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
+  const handleLogoutClick = () => {
+    setShowLogoutConfirm(true);
+  };
+
+  const handleLogoutConfirm = async () => {
+    setShowLogoutConfirm(false);
     try {
       // Always use main auth logout (consolidated flow)
       if (authContext?.signOut) {
@@ -75,6 +82,10 @@ const DashboardPage = () => {
       console.error('Logout error:', error);
       toast.error('An error occurred during logout');
     }
+  };
+
+  const handleLogoutCancel = () => {
+    setShowLogoutConfirm(false);
   };
 
   return (

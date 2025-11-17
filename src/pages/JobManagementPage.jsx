@@ -261,7 +261,7 @@ const JobManagementPage = () => {
   useEffect(() => {
     loadJobs();
     loadStats();
-  }, [companyIdForJobs, userProfile]);
+  }, [companyIdForJobs, userProfile, loadStats]);
 
   useEffect(() => {
     filterAndSortJobs();
@@ -330,16 +330,16 @@ const JobManagementPage = () => {
     setIsLoading(false);
   };
 
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     try {
-      const result = await JobManagementService.getJobStats();
+      const result = await JobManagementService.getJobStats(userProfile, companyIdForJobs);
       if (result.success) {
         setStats(result.stats);
       }
     } catch (error) {
       console.error('Error loading stats:', error);
     }
-  };
+  }, [userProfile, companyIdForJobs]);
 
   const loadCompanyServices = async () => {
     try {

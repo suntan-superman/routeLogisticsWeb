@@ -563,14 +563,42 @@ class JobManagementService {
   }
 
   // Get job statistics
-  static async getJobStats() {
+  static async getJobStats(userProfile = null, companyId = null) {
     try {
       const userId = this.getCurrentUserId();
       
-      const q = query(
-        collection(db, 'jobs'),
-        where('userId', '==', userId)
-      );
+      // Use provided companyId or fall back to userProfile companyId
+      const effectiveCompanyId = companyId || userProfile?.companyId;
+      
+      // Build query based on role and company (same logic as getJobs)
+      let q;
+      
+      if (userProfile?.role === 'super_admin') {
+        if (effectiveCompanyId) {
+          // Super admin viewing specific company's stats
+          q = query(
+            collection(db, 'jobs'),
+            where('companyId', '==', effectiveCompanyId)
+          );
+        } else {
+          // Super admin without company selection - get all jobs
+          q = query(
+            collection(db, 'jobs')
+          );
+        }
+      } else if (effectiveCompanyId) {
+        // Regular users with company: get all company jobs
+        q = query(
+          collection(db, 'jobs'),
+          where('companyId', '==', effectiveCompanyId)
+        );
+      } else {
+        // Fallback to userId for users without company
+        q = query(
+          collection(db, 'jobs'),
+          where('userId', '==', userId)
+        );
+      }
       
       const querySnapshot = await getDocs(q);
       

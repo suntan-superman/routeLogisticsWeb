@@ -87,7 +87,7 @@ const CustomerPortalLayout = ({ children }) => {
               </div>
               <div className="hidden sm:block">
                 <p className="text-sm font-bold text-gray-900">Customer Portal</p>
-                <p className="text-xs text-gray-600">miFactotum</p>
+                <p className="text-xs text-gray-600">Route Logistics</p>
               </div>
             </Link>
 

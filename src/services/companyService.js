@@ -919,6 +919,9 @@ class CompanyService {
   static async updateCompany(companyId, updates) {
     try {
       const userId = this.getCurrentUserId();
+      const user = auth.currentUser;
+      const isSuperAdmin = user?.email === 'sroy@worksidesoftware.com';
+      
       // Verify user owns the company (or is super admin)
       const companyResult = await this.getCompany(companyId);
       if (!companyResult.success) {

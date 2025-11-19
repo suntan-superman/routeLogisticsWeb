@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
 import CompanyService from '../services/companyService';
+import QuickBooksService from '../services/quickbooksService';
 import MaterialsService from '../services/materialsService';
 import StorageService from '../services/storageService';
 import { useDropzone } from 'react-dropzone';
@@ -132,8 +133,15 @@ const CompanySetupPage = () => {
   }, []);
   const availableCustomServices = useMemo(() => {
     const servicesSet = new Set();
-    (company?.services || []).forEach((service) => servicesSet.add(service));
-    selectedServices.forEach((service) => servicesSet.add(service));
+    // Extract service names from company services (handle both string and object formats)
+    (company?.services || []).forEach((service) => {
+      const serviceName = typeof service === 'string' ? service : (service.name || service);
+      if (serviceName) servicesSet.add(serviceName);
+    });
+    selectedServices.forEach((service) => {
+      const serviceName = typeof service === 'string' ? service : (service.name || service);
+      if (serviceName) servicesSet.add(serviceName);
+    });
     return Array.from(servicesSet).filter((service) => !standardServiceSet.has(service));
   }, [company?.services, selectedServices, standardServiceSet]);
   const [newMemberEmail, setNewMemberEmail] = useState('');
@@ -606,7 +614,14 @@ const renderCompaniesEmptyState = () => (
     const userServices = userProfile?.services || [];
     const companyServices = companyRecord.services || [];
     const servicesToApply = companyServices.length > 0 ? companyServices : userServices;
-    const uniqueServices = Array.from(new Set((servicesToApply || []).filter(Boolean)));
+    
+    // Extract service names (handle both string and object formats)
+    const serviceNames = (servicesToApply || [])
+      .filter(Boolean)
+      .map(service => typeof service === 'string' ? service : (service.name || service))
+      .filter(Boolean);
+    
+    const uniqueServices = Array.from(new Set(serviceNames));
     setSelectedServices(uniqueServices);
   }, [userProfile?.services]);
 
@@ -864,6 +879,114 @@ const renderCompaniesEmptyState = () => (
     }));
   };
 
+  const handleSyncServicesToQuickBooks = useCallback(async () => {
+    const companyId = getEffectiveCompanyId();
+    if (!companyId) {
+      toast.error('Company ID not found');
+      return;
+    }
+
+    if (selectedServices.length === 0) {
+      toast.error('Please select at least one service to sync');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      
+      // CRITICAL: Capture previous state BEFORE saving to detect removed services
+      let previousServices = [];
+      if (company && company.services) {
+        previousServices = company.services;
+      } else {
+        // Load current company data to get previous state
+        const currentCompany = await CompanyService.getCompany(companyId);
+        if (currentCompany && currentCompany.services) {
+          previousServices = currentCompany.services;
+        }
+      }
+      
+      // Identify removed services (services that were synced but are no longer selected)
+      const removedServices = [];
+      const currentServiceNames = new Set(selectedServices.map(s => typeof s === 'string' ? s : (s.name || s)));
+      
+      previousServices.forEach(service => {
+        const serviceObj = typeof service === 'object' ? service : null;
+        if (serviceObj && serviceObj.quickbooks_item_id && serviceObj.quickbooks_sync_status === 'synced') {
+          const serviceName = serviceObj.name || service;
+          if (serviceName && !currentServiceNames.has(serviceName)) {
+            removedServices.push({
+              name: serviceName,
+              quickbooks_item_id: serviceObj.quickbooks_item_id
+            });
+          }
+        }
+      });
+      
+      console.log('[CompanySetup] Removed services detected:', removedServices);
+      
+      // First, ensure services are saved to company before syncing
+      if (company) {
+        const saveResult = await CompanyService.updateCompany(company.id, {
+          services: selectedServices,
+          serviceCategories: serviceCategories
+        });
+        if (!saveResult.success) {
+          toast.error('Failed to save services before syncing');
+          return;
+        }
+      }
+      
+      // TODO: Get GL account mapping from company settings (for now, empty object)
+      const glAccountMapping = {};
+      
+      console.log('[CompanySetup] Starting service sync for company:', companyId);
+      const result = await QuickBooksService.syncServices(companyId, glAccountMapping, removedServices);
+      console.log('[CompanySetup] Sync result:', result);
+      console.log('[CompanySetup] Sync errors:', JSON.stringify(result.errors, null, 2));
+      
+      if (result.success) {
+        const syncedCount = result.synced?.length || 0;
+        const errorCount = result.errors?.length || 0;
+        const deactivatedCount = result.deactivated?.length || 0;
+        
+        if (syncedCount > 0) {
+          toast.success(`Successfully synced ${syncedCount} service${syncedCount !== 1 ? 's' : ''} to QuickBooks`);
+        }
+        
+        if (deactivatedCount > 0) {
+          toast(`Deactivated ${deactivatedCount} removed service${deactivatedCount !== 1 ? 's' : ''} in QuickBooks`, {
+            icon: 'ℹ️'
+          });
+        }
+        
+        if (errorCount > 0) {
+          const errorDetails = result.errors.map(e => 
+            typeof e === 'string' ? e : `${e.service || 'Unknown'}: ${e.error || e}`
+          ).join(', ');
+          console.error('[CompanySetup] Sync errors:', result.errors);
+          toast.error(`${errorCount} service${errorCount !== 1 ? 's' : ''} failed to sync: ${errorDetails}`);
+        }
+        
+        // Reload company data to update sync status
+        await loadCompanyData();
+      } else {
+        const errorMsg = result.error || result.details || 'Failed to sync services to QuickBooks';
+        console.error('[CompanySetup] Sync failed - full result:', JSON.stringify(result, null, 2));
+        const errorDetails = result.errors?.map(e => 
+          typeof e === 'string' ? e : `${e.service || 'Unknown'}: ${e.error || e}`
+        ).join(', ') || errorMsg;
+        toast.error(`Sync failed: ${errorDetails}`);
+      }
+    } catch (error) {
+      console.error('[CompanySetup] Error syncing services to QuickBooks:', error);
+      const errorMessage = error.message || error.toString() || 'Error syncing services to QuickBooks';
+      toast.error(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [getEffectiveCompanyId, selectedServices, serviceCategories, company, loadCompanyData]);
+
   const handleSaveCompany = async () => {
     setIsLoading(true);
     try {
@@ -896,8 +1019,12 @@ const renderCompaniesEmptyState = () => (
         const reloadResult = await CompanyService.getCompany(company ? company.id : result.companyId);
         if (reloadResult.success) {
           setCompany(reloadResult.company);
-          // Update selectedServices from the reloaded company data
-          setSelectedServices(reloadResult.company.services || []);
+          // Update selectedServices from the reloaded company data (extract service names)
+          const reloadedServices = reloadResult.company.services || [];
+          const serviceNames = reloadedServices
+            .map(service => typeof service === 'string' ? service : (service.name || service))
+            .filter(Boolean);
+          setSelectedServices(Array.from(new Set(serviceNames)));
         } else {
           setCompany(result.company);
         }
@@ -1433,18 +1560,38 @@ const renderCompaniesEmptyState = () => (
         return (
           <div className="space-y-6">
             <div>
-              <h3 className="text-lg font-bold text-gray-900 mb-4">Service Categories</h3>
-              <p className="text-sm text-gray-600 mb-4">
-                Select the service categories your company offers. These match the options available in the mobile app and will be used in estimates and job scheduling.
-              </p>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">Service Categories</h3>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Select the service categories your company offers. These match the options available in the mobile app and will be used in estimates and job scheduling.
+                  </p>
+                </div>
+                {(userProfile?.role === 'admin' || isSuperAdmin) && (
+                  <button
+                    type="button"
+                    onClick={handleSyncServicesToQuickBooks}
+                    disabled={isLoading || selectedServices.length === 0}
+                    className="inline-flex items-center px-4 py-2 border border-green-300 rounded-lg bg-white text-green-700 text-sm font-medium hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Sync selected services to QuickBooks"
+                  >
+                    <ArrowPathIcon className={`w-5 h-5 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                    Sync to QuickBooks
+                  </button>
+                )}
+              </div>
               
               <div className="space-y-4">
                 {SERVICE_CATEGORIES.map((category) => {
                   // Check if any services in this category are selected
                   const categoryServices = category.services;
-                  const selectedServicesInCategory = categoryServices.filter(service => 
-                    selectedServices.includes(service)
-                  );
+                  const selectedServicesInCategory = categoryServices.filter(service => {
+                    // selectedServices should always be strings, but handle both formats just in case
+                    return selectedServices.some(selected => {
+                      const selectedName = typeof selected === 'string' ? selected : (selected.name || selected);
+                      return selectedName === service;
+                    });
+                  });
                   const isCategorySelected = selectedServicesInCategory.length > 0;
                   const allServicesSelected = selectedServicesInCategory.length === categoryServices.length;
                   
@@ -1462,8 +1609,13 @@ const renderCompaniesEmptyState = () => (
                                 setSelectedServices(prev => {
                                   const newServices = [...prev];
                                   categoryServices.forEach(service => {
-                                    if (!newServices.includes(service)) {
-                                      newServices.push(service);
+                                    const serviceName = typeof service === 'string' ? service : (service.name || service);
+                                    const isAlreadySelected = newServices.some(selected => {
+                                      const selectedName = typeof selected === 'string' ? selected : (selected.name || selected);
+                                      return selectedName === serviceName;
+                                    });
+                                    if (!isAlreadySelected) {
+                                      newServices.push(serviceName);
                                     }
                                   });
                                   return newServices;
@@ -1474,7 +1626,10 @@ const renderCompaniesEmptyState = () => (
                                 }
                               } else {
                                 // Deselect all services in this category
-                                setSelectedServices(prev => prev.filter(service => !categoryServices.includes(service)));
+                                setSelectedServices(prev => prev.filter(selected => {
+                                  const selectedName = typeof selected === 'string' ? selected : (selected.name || selected);
+                                  return !categoryServices.includes(selectedName);
+                                }));
                                 // Remove category from list
                                 setServiceCategories(prev => prev.filter(cat => cat !== category.name));
                               }
@@ -1500,7 +1655,10 @@ const renderCompaniesEmptyState = () => (
                         <div className="bg-white px-4 py-3 border-t border-gray-200">
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             {category.services.map((service, idx) => {
-                              const isServiceSelected = selectedServices.includes(service);
+                              const isServiceSelected = selectedServices.some(selected => {
+                                const selectedName = typeof selected === 'string' ? selected : (selected.name || selected);
+                                return selectedName === service;
+                              });
                               return (
                                 <div key={idx} className="flex items-center">
                                   <input
@@ -1509,10 +1667,15 @@ const renderCompaniesEmptyState = () => (
                                     checked={isServiceSelected}
                                     onChange={(e) => {
                                       if (e.target.checked) {
-                                        // Add service
-                                        setSelectedServices(prev => 
-                                          prev.includes(service) ? prev : [...prev, service]
-                                        );
+                                        // Add service (ensure it's a string)
+                                        setSelectedServices(prev => {
+                                          const serviceName = typeof service === 'string' ? service : (service.name || service);
+                                          const isAlreadySelected = prev.some(selected => {
+                                            const selectedName = typeof selected === 'string' ? selected : (selected.name || selected);
+                                            return selectedName === serviceName;
+                                          });
+                                          return isAlreadySelected ? prev : [...prev, serviceName];
+                                        });
                                         // Add category if not already added
                                         if (!serviceCategories.includes(category.name)) {
                                           setServiceCategories(prev => [...prev, category.name]);
@@ -1520,11 +1683,16 @@ const renderCompaniesEmptyState = () => (
                                       } else {
                                         // Remove service
                                         setSelectedServices(prev => {
-                                          const updated = prev.filter(s => s !== service);
+                                          const serviceName = typeof service === 'string' ? service : (service.name || service);
+                                          const updated = prev.filter(s => {
+                                            const sName = typeof s === 'string' ? s : (s.name || s);
+                                            return sName !== serviceName;
+                                          });
                                           // Check if we should remove category
-                                          const remainingServicesInCategory = updated.filter(s => 
-                                            categoryServices.includes(s)
-                                          );
+                                          const remainingServicesInCategory = updated.filter(s => {
+                                            const sName = typeof s === 'string' ? s : (s.name || s);
+                                            return categoryServices.includes(sName);
+                                          });
                                           if (remainingServicesInCategory.length === 0) {
                                             setServiceCategories(prev => prev.filter(cat => cat !== category.name));
                                           }
@@ -1564,9 +1732,13 @@ const renderCompaniesEmptyState = () => (
                     </div>
                     <div className="bg-white px-4 py-3 space-y-2">
                       {availableCustomServices.map((service, idx) => {
-                        const isServiceSelected = selectedServices.includes(service);
+                        const serviceName = typeof service === 'string' ? service : (service.name || service);
+                        const isServiceSelected = selectedServices.some(selected => {
+                          const selectedName = typeof selected === 'string' ? selected : (selected.name || selected);
+                          return selectedName === serviceName;
+                        });
                         return (
-                          <div key={`${service}-${idx}`} className="flex items-center justify-between border border-gray-100 rounded-md px-3 py-2">
+                          <div key={`${serviceName}-${idx}`} className="flex items-center justify-between border border-gray-100 rounded-md px-3 py-2">
                             <div className="flex items-center">
                               <input
                                 type="checkbox"
@@ -1574,11 +1746,18 @@ const renderCompaniesEmptyState = () => (
                                 checked={isServiceSelected}
                                 onChange={(e) => {
                                   if (e.target.checked) {
-                                    setSelectedServices(prev =>
-                                      prev.includes(service) ? prev : [...prev, service]
-                                    );
+                                    setSelectedServices(prev => {
+                                      const isAlreadySelected = prev.some(selected => {
+                                        const selectedName = typeof selected === 'string' ? selected : (selected.name || selected);
+                                        return selectedName === serviceName;
+                                      });
+                                      return isAlreadySelected ? prev : [...prev, serviceName];
+                                    });
                                   } else {
-                                    setSelectedServices(prev => prev.filter(s => s !== service));
+                                    setSelectedServices(prev => prev.filter(s => {
+                                      const sName = typeof s === 'string' ? s : (s.name || s);
+                                      return sName !== serviceName;
+                                    }));
                                   }
                                 }}
                                 className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
@@ -1587,12 +1766,15 @@ const renderCompaniesEmptyState = () => (
                                 htmlFor={`custom-service-${idx}`}
                                 className="ml-3 text-sm text-gray-800"
                               >
-                                {service}
+                                {serviceName}
                               </label>
                             </div>
                             <button
                               type="button"
-                              onClick={() => setSelectedServices(prev => prev.filter(s => s !== service))}
+                              onClick={() => setSelectedServices(prev => prev.filter(s => {
+                                const sName = typeof s === 'string' ? s : (s.name || s);
+                                return sName !== serviceName;
+                              }))}
                               disabled={!isServiceSelected}
                               className={`text-xs ${isServiceSelected ? 'text-gray-500 hover:text-red-500' : 'text-gray-300 cursor-not-allowed'}`}
                             >

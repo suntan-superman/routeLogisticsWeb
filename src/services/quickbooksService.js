@@ -160,12 +160,16 @@ class QuickBooksService {
    * Sync all services to QuickBooks
    * @param {string} companyId - Company ID
    * @param {Object} glAccountMapping - GL account mapping
+   * @param {Array} removedServices - Services that were removed (to deactivate)
    * @returns {Promise<Object>} Sync result
    */
-  static async syncServices(companyId, glAccountMapping = {}) {
+  static async syncServices(companyId, glAccountMapping = {}, removedServices = []) {
     try {
       const idToken = await this.getIdToken();
 
+      console.log('[QuickBooksService] Syncing services for company:', companyId);
+      console.log('[QuickBooksService] Removed services to deactivate:', removedServices);
+      
       const response = await fetch(`${functionsUrl}/syncServicesToQuickBooks`, {
         method: 'POST',
         headers: {
@@ -174,19 +178,23 @@ class QuickBooksService {
         },
         body: JSON.stringify({
           companyId,
-          glAccountMapping
+          glAccountMapping,
+          removedServices
         })
       });
 
       const data = await response.json();
+      console.log('[QuickBooksService] Sync response:', { status: response.status, data });
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to sync services');
+        const errorMessage = data.error || data.details || 'Failed to sync services';
+        console.error('[QuickBooksService] Sync failed:', errorMessage, data);
+        throw new Error(errorMessage);
       }
 
       return data;
     } catch (error) {
-      console.error('Error syncing services to QuickBooks:', error);
+      console.error('[QuickBooksService] Error syncing services to QuickBooks:', error);
       throw error;
     }
   }

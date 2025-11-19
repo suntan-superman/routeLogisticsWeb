@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import CustomerService from '../services/customerService';
+import QuickBooksService from '../services/quickbooksService';
 import { geocodeAddress } from '../services/geocodingService';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
@@ -19,7 +20,8 @@ import {
   CheckCircleIcon,
   XCircleIcon,
   ClockIcon,
-  ExclamationTriangleIcon
+  ExclamationTriangleIcon,
+  ArrowPathIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import { formatPhoneNumber } from '../utils/phoneFormatter';
@@ -399,6 +401,32 @@ const CustomerManagementPage = () => {
     setIsLoading(false);
   };
 
+  const handleSyncToQuickBooks = async (customer) => {
+    const companyId = getEffectiveCompanyId();
+    if (!companyId) {
+      toast.error('Company ID not found');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      const result = await QuickBooksService.syncCustomer(customer.id, companyId);
+      
+      if (result.success) {
+        toast.success('Customer synced to QuickBooks successfully!');
+        // Reload customers to update sync status
+        await loadCustomers();
+      } else {
+        toast.error(result.error || 'Failed to sync customer to QuickBooks');
+      }
+    } catch (error) {
+      console.error('Error syncing customer to QuickBooks:', error);
+      toast.error(error.message || 'Error syncing customer to QuickBooks');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleRestoreCustomer = async (customerId) => {
     setIsLoading(true);
     try {
@@ -630,6 +658,17 @@ const CustomerManagementPage = () => {
           title="Restore"
         >
           Restore
+        </button>
+      )}
+      {(userProfile?.role === 'admin' || isSuperAdmin) && (
+        <button
+          type="button"
+          onClick={() => handleSyncToQuickBooks(props)}
+          className="text-green-600 hover:text-green-900 disabled:opacity-50"
+          title={props.quickbooks_sync_status === 'synced' ? 'Synced to QuickBooks' : 'Sync to QuickBooks'}
+          disabled={isLoading}
+        >
+          <ArrowPathIcon className={`h-4 w-4 ${props.quickbooks_sync_status === 'synced' ? 'text-green-600' : ''}`} />
         </button>
       )}
     </div>

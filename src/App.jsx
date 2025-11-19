@@ -34,6 +34,7 @@ import NotificationsPage from './pages/NotificationsPage';
 import RouteOptimizationPage from './pages/RouteOptimizationPage';
 import CustomerPortalPage from './pages/CustomerPortalPage';
 import LocationSettingsPage from './pages/LocationSettingsPage';
+import QuickBooksSettingsPage from './pages/QuickBooksSettingsPage';
 
 // Customer Portal Pages (login uses main /login page)
 import CustomerPortalDashboardPage from './pages/customer-portal/DashboardPage';
@@ -161,6 +162,14 @@ function App() {
                   <ProtectedRoute>
                     <Layout>
                       <InvoiceTemplatesPage />
+                    </Layout>
+                  </ProtectedRoute>
+                } />
+                
+                <Route path="/quickbooks-settings" element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <QuickBooksSettingsPage />
                     </Layout>
                   </ProtectedRoute>
                 } />

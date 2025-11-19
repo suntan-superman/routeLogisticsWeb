@@ -18,7 +18,8 @@ import {
   DocumentArrowUpIcon,
   MagnifyingGlassIcon,
   MapPinIcon,
-  BellIcon
+  BellIcon,
+  LinkIcon
 } from '@heroicons/react/24/outline';
 import { canAccessRoute } from '../utils/permissions';
 
@@ -44,6 +45,7 @@ const Layout = ({ children }) => {
     { name: 'Notifications', href: '/notifications', icon: BellIcon, adminOnly: true },
     { name: 'Invoices', href: '/invoices', icon: ReceiptRefundIcon },
     { name: 'Invoice Templates', href: '/invoice-templates', icon: DocumentTextIcon },
+    { name: 'QuickBooks', href: '/quickbooks-settings', icon: LinkIcon, adminOnly: true },
     { name: 'Calendar', href: '/calendar', icon: CalendarIcon },
     { name: 'Reports', href: '/reports', icon: ChartBarIcon },
   ];

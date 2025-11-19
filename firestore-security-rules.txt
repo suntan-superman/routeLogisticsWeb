@@ -754,5 +754,51 @@ service cloud.firestore {
       allow read: if request.auth != null && 
                   isSuperAdmin();
     }
+
+    // QuickBooks Connections
+    match /quickbooksConnections/{companyId} {
+      // Allow read/write: super admin or company admin/supervisor
+      allow read, write: if request.auth != null && 
+        (isSuperAdmin() || 
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          getUserProfile().companyId == companyId &&
+          isCompanyAdminOrSupervisor()));
+    }
+
+    // QuickBooks OAuth Sessions (temporary, expires in 10 minutes)
+    match /quickbooksOAuthSessions/{sessionId} {
+      // Allow read/write for authenticated users (temporary sessions)
+      allow read, write: if request.auth != null;
+    }
+
+    // Sync Errors
+    match /syncErrors/{errorId} {
+      // Allow read: super admin or company admin/supervisor from same company
+      allow read: if request.auth != null && 
+        (isSuperAdmin() || 
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          resource.data.companyId != null &&
+          resource.data.companyId == getUserProfile().companyId &&
+          isCompanyAdminOrSupervisor()));
+      
+      // Only Cloud Functions can create sync errors
+      allow create: if false;
+      allow update, delete: if false;
+    }
+
+    // Sync Conflicts
+    match /syncConflicts/{conflictId} {
+      // Allow read: super admin or company admin/supervisor from same company
+      allow read: if request.auth != null && 
+        (isSuperAdmin() || 
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          resource.data.companyId != null &&
+          resource.data.companyId == getUserProfile().companyId &&
+          isCompanyAdminOrSupervisor()));
+      
+      // Only Cloud Functions can create sync conflicts
+      allow create: if false;
+      allow update, delete: if false;
+    }
   }
 }

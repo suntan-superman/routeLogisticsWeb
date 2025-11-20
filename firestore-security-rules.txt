@@ -195,17 +195,24 @@ service cloud.firestore {
     match /companies/{companyId} {
       // Allow read: 
       // - Any authenticated user can read companies (needed for code lookups and uniqueness checks)
-      // - Unauthenticated users can read active companies (needed for signup code validation)
+      // - Unauthenticated users can read active companies that opted into directory (public directory access)
+      // - Unauthenticated users can read active companies with code (needed for signup code validation)
       // Company data (name, address, etc.) is not highly sensitive
       // Only allow unauthenticated reads for active companies (prevents reading inactive/deleted companies)
       allow read: if request.auth != null || 
                    (resource.data.isActive == true && 
+                    resource.data.displayInDirectory == true) ||
+                   (resource.data.isActive == true && 
                     resource.data.code != null);
       
       // Allow write (update/delete) only for own company
+      // Note: Only company admins can update directory fields (enforced in application logic)
       allow write: if request.auth != null && (
         isSuperAdmin() ||
-        request.auth.uid == resource.data.ownerId
+        request.auth.uid == resource.data.ownerId ||
+        (isCompanyAdminOrSupervisor() &&
+         resource.data.companyId != null &&
+         resource.data.companyId == getUserProfile().companyId)
       );
       
       // Allow create: anyone authenticated can create a company (they become owner)
@@ -669,7 +676,32 @@ service cloud.firestore {
     // CUSTOMER PORTAL COLLECTIONS
     // ========================================
     
-    // Customer profiles for portal (cloud function managed)
+    // NEW: Unified customers collection (replaces portalCustomers + customerProfiles)
+    // This rule allows customers to read/update their own profile in the unified collection
+    // Note: The customers collection at the top (line 48) is for technician/admin access
+    // This rule is specifically for customer portal self-access
+    match /customers/{customerId} {
+      // Allow customers to read their own profile (document ID matches auth UID)
+      allow read: if request.auth != null && request.auth.uid == customerId;
+      
+      // Allow customers to update their own profile (except protected fields)
+      allow update: if request.auth != null && 
+                       request.auth.uid == customerId &&
+                       !("companies" in request.resource.data) &&
+                       !("status" in request.resource.data) &&
+                       !("authMethod" in request.resource.data) &&
+                       !("metadata" in request.resource.data) &&
+                       !("customerId" in request.resource.data);
+      
+      // Only Cloud Functions can create customers
+      allow create: if false;
+      
+      // Only Cloud Functions can delete customers
+      allow delete: if false;
+    }
+    
+    // LEGACY: Customer profiles for portal (OTP-based authentication, cloud function managed)
+    // Kept for backward compatibility during migration
     match /portalCustomers/{customerId} {
       allow read: if request.auth != null && request.auth.uid == customerId;
       allow update: if request.auth != null && 
@@ -678,9 +710,11 @@ service cloud.firestore {
     }
     
     // Helper function to check if customer has access to a company
-    // Checks both portalCustomers (OTP flow) and customerProfiles (signup flow)
+    // Checks customers (new), portalCustomers (legacy), and customerProfiles (legacy)
     function customerHasCompanyAccess(companyId) {
-      return (exists(/databases/$(database)/documents/portalCustomers/$(request.auth.uid)) &&
+      return (exists(/databases/$(database)/documents/customers/$(request.auth.uid)) &&
+              companyId in get(/databases/$(database)/documents/customers/$(request.auth.uid)).data.companies) ||
+             (exists(/databases/$(database)/documents/portalCustomers/$(request.auth.uid)) &&
               companyId in get(/databases/$(database)/documents/portalCustomers/$(request.auth.uid)).data.companies) ||
              (exists(/databases/$(database)/documents/customerProfiles/$(request.auth.uid)) &&
               companyId in get(/databases/$(database)/documents/customerProfiles/$(request.auth.uid)).data.companies);
@@ -688,8 +722,11 @@ service cloud.firestore {
     
     // Helper function to check if customer has no companies yet
     function customerHasNoCompanies() {
-      return (!exists(/databases/$(database)/documents/portalCustomers/$(request.auth.uid)) &&
+      return (!exists(/databases/$(database)/documents/customers/$(request.auth.uid)) &&
+              !exists(/databases/$(database)/documents/portalCustomers/$(request.auth.uid)) &&
               !exists(/databases/$(database)/documents/customerProfiles/$(request.auth.uid))) ||
+             (exists(/databases/$(database)/documents/customers/$(request.auth.uid)) &&
+              get(/databases/$(database)/documents/customers/$(request.auth.uid)).data.companies.size() == 0) ||
              (exists(/databases/$(database)/documents/portalCustomers/$(request.auth.uid)) &&
               get(/databases/$(database)/documents/portalCustomers/$(request.auth.uid)).data.companies.size() == 0) ||
              (exists(/databases/$(database)/documents/customerProfiles/$(request.auth.uid)) &&

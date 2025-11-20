@@ -940,6 +940,30 @@ class CompanyService {
         updatesCopy.photoRetentionDays = this.normalizeRetentionDays(updatesCopy.photoRetentionDays);
       }
 
+      // Handle directory fields
+      // If displayInDirectory is being set to true, update directoryLastUpdated
+      if (updatesCopy.displayInDirectory === true) {
+        updatesCopy.directoryLastUpdated = new Date().toISOString();
+      }
+
+      // Validate directory fields if displayInDirectory is true
+      if (updatesCopy.displayInDirectory === true || companyResult.company.displayInDirectory === true) {
+        // Import DirectoryService for validation (dynamic import to avoid circular dependency)
+        const DirectoryService = (await import('./directoryService')).default;
+        const validation = DirectoryService.validateDirectoryData({
+          ...companyResult.company,
+          ...updatesCopy
+        });
+
+        if (!validation.valid) {
+          return {
+            success: false,
+            error: 'Directory validation failed',
+            validationErrors: validation.errors
+          };
+        }
+      }
+
       const updatedData = {
         ...updatesCopy,
         updatedAt: new Date().toISOString()
@@ -1157,7 +1181,7 @@ class CompanyService {
       const teamMembers = [];
       const teamMembersByEmail = new Map();
       const teamMembersByUserId = new Map();
-
+      
       querySnapshot.forEach((doc) => {
         const data = doc.data() || {};
         const entry = { id: doc.id, ...data };
@@ -1245,7 +1269,7 @@ class CompanyService {
     } catch (error) {
       const permissionDenied = error?.code === 'permission-denied';
       if (!permissionDenied) {
-        console.error('Error getting team members:', error);
+      console.error('Error getting team members:', error);
       }
       return {
         success: false,
@@ -1315,7 +1339,7 @@ class CompanyService {
 
       const teamMember = teamMemberSnap.data();
       const companyResult = await this.getCompany(teamMember.companyId);
-
+      
       if (!companyResult.success) {
         return companyResult;
       }
@@ -1364,7 +1388,7 @@ class CompanyService {
           console.warn('[CompanyService.removeTeamMember] Failed to delete invitation', { invitationId, error: deleteError });
         }
       }));
- 
+
       return {
         success: true
       };

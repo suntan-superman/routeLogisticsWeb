@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import CompanySwitcher from './CompanySwitcher';
@@ -19,7 +19,9 @@ import {
   MagnifyingGlassIcon,
   MapPinIcon,
   BellIcon,
-  LinkIcon
+  LinkIcon,
+  ChevronDownIcon,
+  ChevronRightIcon
 } from '@heroicons/react/24/outline';
 import { canAccessRoute } from '../utils/permissions';
 
@@ -28,37 +30,92 @@ const Layout = ({ children }) => {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   
-  // Define navigation array first
-  const navigation = [
-    { name: 'Dashboard', href: '/', icon: HomeIcon },
-    { name: 'Company Setup', href: '/company-setup', icon: BuildingOfficeIcon },
-    { name: 'Invitations', href: '/invitations', icon: EnvelopeIcon, adminOnly: true },
-    { name: 'Bulk Import', href: '/bulk-import', icon: DocumentArrowUpIcon, adminOnly: true },
-    { name: 'Company Search', href: '/company-search', icon: MagnifyingGlassIcon },
-    { name: 'Customers', href: '/customers', icon: UsersIcon },
-    { name: 'Estimates', href: '/estimates', icon: DocumentTextIcon },
-    { name: 'Estimate Templates', href: '/estimate-templates', icon: DocumentTextIcon },
-    { name: 'Jobs', href: '/jobs', icon: ClipboardDocumentListIcon },
-    { name: 'Recurring Jobs', href: '/recurring-jobs', icon: ArrowPathIcon },
-    { name: 'Route Optimization', href: '/route-optimization', icon: MapPinIcon, adminOnly: true },
-    { name: 'Team Tracking', href: '/team-tracking', icon: MapPinIcon, adminOnly: true },
-    { name: 'Notifications', href: '/notifications', icon: BellIcon, adminOnly: true },
-    { name: 'Invoices', href: '/invoices', icon: ReceiptRefundIcon },
-    { name: 'Invoice Templates', href: '/invoice-templates', icon: DocumentTextIcon },
-    { name: 'QuickBooks', href: '/quickbooks-settings', icon: LinkIcon, adminOnly: true },
-    { name: 'Calendar', href: '/calendar', icon: CalendarIcon },
-    { name: 'Reports', href: '/reports', icon: ChartBarIcon },
+  // Define navigation groups
+  const navigationGroups = [
+    {
+      name: 'Overview',
+      items: [
+        { name: 'Dashboard', href: '/', icon: HomeIcon },
+        { name: 'Calendar', href: '/calendar', icon: CalendarIcon },
+        { name: 'Reports', href: '/reports', icon: ChartBarIcon },
+      ]
+    },
+    {
+      name: 'Company Management',
+      items: [
+        { name: 'Company Setup', href: '/company-setup', icon: BuildingOfficeIcon },
+        { name: 'Company Search', href: '/company-search', icon: MagnifyingGlassIcon },
+        { name: 'Invitations', href: '/invitations', icon: EnvelopeIcon, adminOnly: true },
+        { name: 'Bulk Import', href: '/bulk-import', icon: DocumentArrowUpIcon, adminOnly: true },
+      ]
+    },
+    {
+      name: 'Customer & Jobs',
+      items: [
+        { name: 'Customers', href: '/customers', icon: UsersIcon },
+        { name: 'Jobs', href: '/jobs', icon: ClipboardDocumentListIcon },
+        { name: 'Recurring Jobs', href: '/recurring-jobs', icon: ArrowPathIcon },
+      ]
+    },
+    {
+      name: 'Estimates & Invoices',
+      items: [
+        { name: 'Estimates', href: '/estimates', icon: DocumentTextIcon },
+        { name: 'Estimate Templates', href: '/estimate-templates', icon: DocumentTextIcon },
+        { name: 'Invoices', href: '/invoices', icon: ReceiptRefundIcon },
+        { name: 'Invoice Templates', href: '/invoice-templates', icon: DocumentTextIcon },
+      ]
+    },
+    {
+      name: 'Operations',
+      items: [
+        { name: 'Route Optimization', href: '/route-optimization', icon: MapPinIcon, adminOnly: true },
+        { name: 'Team Tracking', href: '/team-tracking', icon: MapPinIcon, adminOnly: true },
+        { name: 'Notifications', href: '/notifications', icon: BellIcon, adminOnly: true },
+      ]
+    },
+    {
+      name: 'Integrations',
+      items: [
+        { name: 'QuickBooks', href: '/quickbooks-settings', icon: LinkIcon, adminOnly: true },
+      ]
+    },
   ];
 
-  // Filter navigation based on user role
+  // Filter navigation groups based on user role
   const isAdmin = userProfile?.role === 'admin' || isSuperAdmin;
-  const filteredNavigation = navigation.filter(item => {
-    if (!userProfile) return true;
+  const filteredNavigationGroups = navigationGroups.map(group => ({
+    ...group,
+    items: group.items.filter(item => {
+      if (!userProfile) return true;
+      if (item.adminOnly && !isAdmin) return false;
+      return canAccessRoute(userProfile, item.href);
+    })
+  })).filter(group => group.items.length > 0); // Remove empty groups
 
-    if (item.adminOnly && !isAdmin) return false;
-
-    return canAccessRoute(userProfile, item.href);
-  });
+  // Track which groups are expanded (default: all expanded)
+  const [expandedGroups, setExpandedGroups] = useState({});
+  
+  // Initialize expanded groups when filtered groups are available
+  useEffect(() => {
+    const groups = {};
+    filteredNavigationGroups.forEach(group => {
+      // Only initialize if not already set (preserve user's collapse/expand state)
+      if (!(group.name in expandedGroups)) {
+        groups[group.name] = true; // Default to expanded
+      }
+    });
+    if (Object.keys(groups).length > 0) {
+      setExpandedGroups(prev => ({ ...prev, ...groups }));
+    }
+  }, [filteredNavigationGroups.length]); // Only run when number of groups changes
+  
+  const toggleGroup = (groupName) => {
+    setExpandedGroups(prev => ({
+      ...prev,
+      [groupName]: !prev[groupName]
+    }));
+  };
 
   const isCurrentPath = (path) => {
     return location.pathname === path;
@@ -89,23 +146,45 @@ const Layout = ({ children }) => {
               <XMarkIcon className="h-6 w-6" />
             </button>
           </div>
-          <nav className="flex-1 px-4 py-4 space-y-1">
-            {filteredNavigation.map((item) => {
-              const Icon = item.icon;
+          <nav className="flex-1 px-4 py-4 space-y-6 overflow-y-auto">
+            {filteredNavigationGroups.map((group) => {
+              const isExpanded = expandedGroups[group.name];
               return (
-                <Link
-                  key={item.name}
-                  to={item.href}
-                  className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                    isCurrentPath(item.href)
-                      ? 'bg-primary-100 text-primary-700'
-                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                  }`}
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
-                  {item.name}
-                </Link>
+                <div key={group.name}>
+                  <button
+                    onClick={() => toggleGroup(group.name)}
+                    className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider hover:text-gray-700 transition-colors"
+                  >
+                    <span>{group.name}</span>
+                    {isExpanded ? (
+                      <ChevronDownIcon className="h-4 w-4" />
+                    ) : (
+                      <ChevronRightIcon className="h-4 w-4" />
+                    )}
+                  </button>
+                  {isExpanded && (
+                    <div className="space-y-1">
+                      {group.items.map((item) => {
+                        const Icon = item.icon;
+                        return (
+                          <Link
+                            key={item.name}
+                            to={item.href}
+                            className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                              isCurrentPath(item.href)
+                                ? 'bg-primary-100 text-primary-700'
+                                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                            }`}
+                            onClick={() => setSidebarOpen(false)}
+                          >
+                            <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
+                            {item.name}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </nav>
@@ -148,22 +227,44 @@ const Layout = ({ children }) => {
               </div>
             </div>
           </div>
-          <nav className="flex-1 px-4 py-4 space-y-1">
-            {filteredNavigation.map((item) => {
-              const Icon = item.icon;
+          <nav className="flex-1 px-4 py-4 space-y-6 overflow-y-auto">
+            {filteredNavigationGroups.map((group) => {
+              const isExpanded = expandedGroups[group.name];
               return (
-                <Link
-                  key={item.name}
-                  to={item.href}
-                  className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                    isCurrentPath(item.href)
-                      ? 'bg-primary-100 text-primary-700'
-                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                  }`}
-                >
-                  <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
-                  {item.name}
-                </Link>
+                <div key={group.name}>
+                  <button
+                    onClick={() => toggleGroup(group.name)}
+                    className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider hover:text-gray-700 transition-colors"
+                  >
+                    <span>{group.name}</span>
+                    {isExpanded ? (
+                      <ChevronDownIcon className="h-4 w-4" />
+                    ) : (
+                      <ChevronRightIcon className="h-4 w-4" />
+                    )}
+                  </button>
+                  {isExpanded && (
+                    <div className="space-y-1">
+                      {group.items.map((item) => {
+                        const Icon = item.icon;
+                        return (
+                          <Link
+                            key={item.name}
+                            to={item.href}
+                            className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                              isCurrentPath(item.href)
+                                ? 'bg-primary-100 text-primary-700'
+                                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                            }`}
+                          >
+                            <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
+                            {item.name}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </nav>
@@ -194,7 +295,7 @@ const Layout = ({ children }) => {
       {/* Main content */}
       <div className="lg:pl-64">
         {/* Top bar */}
-        <div className="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-gray-200 bg-white px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
+        <div className="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-gray-200 bg-white px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:pl-4 lg:pr-8">
           <button
             type="button"
             className="-m-2.5 p-2.5 text-gray-700 lg:hidden"
@@ -217,7 +318,7 @@ const Layout = ({ children }) => {
 
         {/* Page content */}
         <main className="py-6">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-7xl pl-2 sm:pl-3 lg:pl-2 pr-2 sm:pr-3 lg:pr-8">
             {children}
           </div>
         </main>

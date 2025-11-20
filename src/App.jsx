@@ -35,6 +35,9 @@ import RouteOptimizationPage from './pages/RouteOptimizationPage';
 import CustomerPortalPage from './pages/CustomerPortalPage';
 import LocationSettingsPage from './pages/LocationSettingsPage';
 import QuickBooksSettingsPage from './pages/QuickBooksSettingsPage';
+import TestDirectoryPage from './pages/TestDirectoryPage';
+import PublicDirectoryPage from './pages/PublicDirectoryPage';
+import ProviderProfilePage from './pages/ProviderProfilePage';
 
 // Customer Portal Pages (login uses main /login page)
 import CustomerPortalDashboardPage from './pages/customer-portal/DashboardPage';
@@ -84,6 +87,8 @@ function App() {
                 <Route path="/verify-email" element={<EmailVerificationPage />} />
                 <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
                 <Route path="/support" element={<SupportPage />} />
+                <Route path="/directory" element={<PublicDirectoryPage />} />
+                <Route path="/provider/:companyId" element={<ProviderProfilePage />} />
                 
                 {/* Protected Routes */}
                 <Route path="/" element={
@@ -170,6 +175,14 @@ function App() {
                   <ProtectedRoute>
                     <Layout>
                       <QuickBooksSettingsPage />
+                    </Layout>
+                  </ProtectedRoute>
+                } />
+                
+                <Route path="/test-directory" element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <TestDirectoryPage />
                     </Layout>
                   </ProtectedRoute>
                 } />

@@ -30,7 +30,8 @@ import {
   MagnifyingGlassIcon,
   PencilIcon,
   ArrowPathIcon,
-  ClipboardDocumentIcon
+  ClipboardDocumentIcon,
+  GlobeAltIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import { formatPhoneNumber } from '../utils/phoneFormatter';
@@ -49,6 +50,8 @@ import {
   Inject
 } from '@syncfusion/ej2-react-grids';
 import { ROLE_OPTIONS, DEFAULT_ROLE } from '../constants/roles';
+import DirectorySettings from '../components/DirectorySettings';
+import DirectoryService from '../services/directoryService';
 
 const CompanySetupPage = () => {
   const { userProfile, updateUserProfile, isSuperAdmin, currentUser } = useAuth();
@@ -81,6 +84,12 @@ const CompanySetupPage = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showCompanyList, setShowCompanyList] = useState(false);
+  
+  // Directory settings states
+  const [directoryData, setDirectoryData] = useState({});
+  const [showDirectoryConfirmModal, setShowDirectoryConfirmModal] = useState(false);
+  const [directoryConfirmCallback, setDirectoryConfirmCallback] = useState(null);
+  const [directoryValidationErrors, setDirectoryValidationErrors] = useState([]);
   const [allCompanies, setAllCompanies] = useState([]);
   const [newCompanyData, setNewCompanyData] = useState({
     name: '',
@@ -230,7 +239,8 @@ const loadMaterials = useCallback(async () => {
     { id: 3, name: 'Materials', icon: WrenchScrewdriverIcon },
     { id: 4, name: 'Team', icon: UserGroupIcon },
     { id: 5, name: 'Branding', icon: PhotoIcon },
-    { id: 6, name: 'Templates', icon: DocumentTextIcon }
+    { id: 6, name: 'Templates', icon: DocumentTextIcon },
+    { id: 7, name: 'Directory', icon: GlobeAltIcon }
   ];
 
   const getRoleLabel = useCallback((role, roleDisplay) => {
@@ -623,6 +633,19 @@ const renderCompaniesEmptyState = () => (
     
     const uniqueServices = Array.from(new Set(serviceNames));
     setSelectedServices(uniqueServices);
+
+    // Load directory settings
+    setDirectoryData({
+      displayInDirectory: companyRecord.displayInDirectory || false,
+      category: companyRecord.category || '',
+      regionsServed: companyRecord.regionsServed || [],
+      zipCodes: companyRecord.zipCodes || [],
+      latitude: companyRecord.latitude || null,
+      longitude: companyRecord.longitude || null,
+      websiteUrl: companyRecord.websiteUrl || companyRecord.website || '',
+      hostedSiteEnabled: companyRecord.hostedSiteEnabled || false,
+      hostedSiteSlug: companyRecord.hostedSiteSlug || ''
+    });
   }, [userProfile?.services]);
 
   useEffect(() => {
@@ -1000,7 +1023,13 @@ const renderCompaniesEmptyState = () => (
         ...companyData,
         photoRetentionDays: sanitizedRetention,
         serviceCategories: serviceCategories, // Category names for filtering/display
-        services: selectedServices // Individual services (matches mobile app)
+        services: selectedServices, // Individual services (matches mobile app)
+        // Include directory settings
+        ...directoryData,
+        // Update directoryLastUpdated timestamp when directory settings change
+        ...(directoryData.displayInDirectory && {
+          directoryLastUpdated: new Date()
+        })
       };
       
       if (company) {
@@ -2285,6 +2314,31 @@ const renderCompaniesEmptyState = () => (
           </div>
         );
 
+      case 7:
+        return (
+          <DirectorySettings
+            companyData={{
+              ...companyData,
+              ...directoryData,
+              services: selectedServices
+            }}
+            onDataChange={(data) => {
+              setDirectoryData(data);
+            }}
+            onValidationChange={(isValid, errors) => {
+              setDirectoryValidationErrors(errors);
+            }}
+            onConfirmOptIn={(callback) => {
+              setDirectoryConfirmCallback(() => callback);
+              setShowDirectoryConfirmModal(true);
+            }}
+            onCancelOptIn={() => {
+              setShowDirectoryConfirmModal(false);
+              setDirectoryConfirmCallback(null);
+            }}
+          />
+        );
+
       default:
         return null;
     }
@@ -2650,6 +2704,81 @@ const renderCompaniesEmptyState = () => (
                     Enter a company name and valid owner email to continue.
                   </p>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Directory Opt-In Confirmation Modal */}
+      {showDirectoryConfirmModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div 
+              className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" 
+              onClick={() => {
+                setShowDirectoryConfirmModal(false);
+                setDirectoryConfirmCallback(null);
+              }}
+            />
+            
+            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+              <div className="bg-white px-4 pt-5 pb-4 sm:p-6">
+                <div className="flex items-start">
+                  <div className="flex-shrink-0">
+                    <ExclamationTriangleIcon className="h-6 w-6 text-yellow-600" />
+                  </div>
+                  <div className="ml-3 flex-1">
+                    <h3 className="text-lg font-medium text-gray-900 mb-4">
+                      Enable Public Directory Listing
+                    </h3>
+                    <div className="text-sm text-gray-600 space-y-3">
+                      <p>
+                        By enabling your company in the public directory, the following information will be visible to anyone:
+                      </p>
+                      <ul className="list-disc list-inside space-y-1 text-gray-700">
+                        <li>Company name and category</li>
+                        <li>Services offered</li>
+                        <li>Regions and ZIP codes served</li>
+                        <li>Contact information (phone, email, address)</li>
+                        <li>Website URL (if provided)</li>
+                      </ul>
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mt-3">
+                        <p className="text-sm text-blue-800">
+                          <strong>Note:</strong> Internal notes, financial data, customer information, and team member details will never be visible.
+                        </p>
+                      </div>
+                      <p className="font-medium text-gray-900 mt-4">
+                        Are you sure you want to make your company visible in the public directory?
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (directoryConfirmCallback) {
+                      directoryConfirmCallback();
+                    }
+                    setShowDirectoryConfirmModal(false);
+                    setDirectoryConfirmCallback(null);
+                  }}
+                  className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-primary-600 text-base font-medium text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 sm:ml-3 sm:w-auto sm:text-sm"
+                >
+                  Yes, Enable Directory
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDirectoryConfirmModal(false);
+                    setDirectoryConfirmCallback(null);
+                  }}
+                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+                >
+                  Cancel
+                </button>
               </div>
             </div>
           </div>

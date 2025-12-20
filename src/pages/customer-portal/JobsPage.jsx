@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useCustomerPortal } from '../../contexts/CustomerPortalContext';
 import { useAuthSafe } from '../../contexts/AuthContext';
 import CustomerPortalService from '../../services/customerPortalService';
+import PhotoGallery from '../../components/PhotoGallery';
 import { 
   CalendarIcon, 
   ClockIcon, 
@@ -314,9 +315,60 @@ function JobCard({ job, onViewDetails, getStatusColor, getStatusBadgeText }) {
  * Job Details Modal Component
  */
 function JobDetailsModal({ job, onClose, getStatusColor, getStatusBadgeText }) {
+  const { selectedCompanyId } = useCustomerPortal();
   const [submittingRating, setSubmittingRating] = useState(false);
   const [rating, setRating] = useState(job.rating || 0);
   const [review, setReview] = useState(job.review || '');
+  const [jobPhotos, setJobPhotos] = useState([]);
+  const [isLoadingPhotos, setIsLoadingPhotos] = useState(false);
+
+  // Load photos for this job
+  const loadJobPhotos = useCallback(async () => {
+    if (!job?.id || !job?.companyId) {
+      setJobPhotos([]);
+      return;
+    }
+
+    const companyId = job.companyId || selectedCompanyId;
+    if (!companyId) {
+      setJobPhotos([]);
+      return;
+    }
+
+    setIsLoadingPhotos(true);
+    try {
+      const result = await CustomerPortalService.getCustomerJobPhotos(companyId, job.id);
+      if (result.success) {
+        // Transform photos to match PhotoGallery component format
+        const transformedPhotos = (result.photos || []).map(photo => ({
+          id: photo.id,
+          url: photo.url,
+          thumbnailUrl: photo.thumbnailUrl,
+          fileName: photo.fileName,
+          capturedAt: photo.capturedAt,
+          uploadedAt: photo.uploadedAt || photo.capturedAt,
+          latitude: photo.latitude,
+          longitude: photo.longitude,
+          locationAccuracy: photo.locationAccuracy,
+          notes: photo.notes,
+        }));
+        setJobPhotos(transformedPhotos);
+      } else {
+        console.warn('Failed to load job photos:', result.error);
+        setJobPhotos([]);
+      }
+    } catch (error) {
+      console.error('Error loading job photos:', error);
+      setJobPhotos([]);
+    } finally {
+      setIsLoadingPhotos(false);
+    }
+  }, [job?.id, job?.companyId, selectedCompanyId]);
+
+  useEffect(() => {
+    // Load photos when modal opens
+    loadJobPhotos();
+  }, [loadJobPhotos]);
 
   const handleSubmitRating = async () => {
     if (!rating) {
@@ -415,6 +467,17 @@ function JobDetailsModal({ job, onClose, getStatusColor, getStatusBadgeText }) {
               <p className="mt-2 text-gray-900 whitespace-pre-line">{job.completionNotes}</p>
             </div>
           )}
+
+          {/* Photos */}
+          <div>
+            <PhotoGallery
+              jobId={job.id}
+              photos={jobPhotos}
+              isLoading={isLoadingPhotos}
+              readOnly={true}
+              companyId={job.companyId || selectedCompanyId}
+            />
+          </div>
 
           {/* Technician Info */}
           {job.technician && (

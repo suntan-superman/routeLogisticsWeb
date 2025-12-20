@@ -17,8 +17,23 @@ import { db } from './firebase';
 import { auth } from './firebase';
 import { getCustomerCreationStatus, canApproveCustomers } from '../utils/permissions';
 
+/**
+ * Customer Service
+ * 
+ * Handles all customer-related data operations including:
+ * - Customer CRUD operations
+ * - Customer search and filtering
+ * - Approval workflow for field technician-created customers
+ * - Customer status management
+ * 
+ * @module services/customerService
+ */
 class CustomerService {
-  // Get current user ID
+  /**
+   * Get the current authenticated user's ID
+   * @returns {string} Current user ID
+   * @throws {Error} If no user is signed in
+   */
   static getCurrentUserId() {
     const user = auth.currentUser;
     if (!user) {
@@ -27,7 +42,10 @@ class CustomerService {
     return user.uid;
   }
 
-  // Get current user profile (for role checking)
+  /**
+   * Get the current user's profile from Firestore
+   * @returns {Promise<Object|null>} User profile data or null if not found
+   */
   static async getCurrentUserProfile() {
     try {
       const userId = this.getCurrentUserId();
@@ -42,7 +60,27 @@ class CustomerService {
     }
   }
 
-  // Create a new customer (with approval workflow)
+  /**
+   * Create a new customer with approval workflow
+   * 
+   * Field technicians create customers with 'pending' status that require approval.
+   * Admins and supervisors create customers with 'approved' status.
+   * 
+   * @param {Object} customerData - Customer information
+   * @param {string} customerData.name - Customer name
+   * @param {string} [customerData.email] - Customer email
+   * @param {string} [customerData.phone] - Customer phone
+   * @param {string} [customerData.address] - Street address
+   * @param {string} [customerData.city] - City
+   * @param {string} [customerData.state] - State
+   * @param {string} [customerData.zipCode] - ZIP code
+   * @param {string} [customerData.notes] - Notes about the customer
+   * @param {boolean} [customerData.emailConsent] - Email marketing consent
+   * @param {number} [customerData.latitude] - GPS latitude
+   * @param {number} [customerData.longitude] - GPS longitude
+   * @param {Object|null} [userProfile] - Pre-fetched user profile (optional)
+   * @returns {Promise<{success: boolean, customerId?: string, customer?: Object, error?: string, existingCustomerId?: string}>}
+   */
   static async createCustomer(customerData, userProfile = null) {
     try {
       const userId = this.getCurrentUserId();
@@ -90,6 +128,7 @@ class CustomerService {
         ...sanitizedCustomerData,
         userId,
         companyId: userProfile?.companyId || null,
+        companies: companyId ? [companyId] : [],
         status: status, // 'approved' or 'pending'
         createdBy: userId,
         createdByRole: userProfile?.role || 'field_tech',
@@ -110,6 +149,26 @@ class CustomerService {
         searchNameZipCompanyKey: searchNameZipCompanyKey || null,
       };
 
+      // Check for existing customer with same email in customers collection
+      if (searchEmail) {
+        const existingCustomerQuery = query(
+          collection(db, 'customers'),
+          where('companyId', '==', companyId),
+          where('email', '==', searchEmail),
+          limit(1)
+        );
+        
+        const existingSnapshot = await getDocs(existingCustomerQuery);
+        if (!existingSnapshot.empty) {
+          const existingDoc = existingSnapshot.docs[0];
+          return {
+            success: false,
+            error: 'A customer with this email already exists',
+            existingCustomerId: existingDoc.id
+          };
+        }
+      }
+      
       const docRef = await addDoc(collection(db, 'customers'), customer);
       
       return {

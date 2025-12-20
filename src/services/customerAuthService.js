@@ -99,6 +99,11 @@ class CustomerAuthService {
       // Fetch customer profile
       const customerProfile = await this.getCustomerProfile(userCredential.user.uid);
 
+      // Store session token for single-session enforcement
+      if (customerProfile?.sessionToken) {
+        localStorage.setItem('customerSessionToken', customerProfile.sessionToken);
+      }
+
       // Store session info
       localStorage.setItem('customerEmail', email);
       localStorage.setItem('customerLoginTime', new Date().toISOString());
@@ -128,17 +133,7 @@ class CustomerAuthService {
         return null;
       }
 
-      // Try new unified customers collection first
-      let customerDoc = await getDoc(doc(db, 'customers', customerId));
-      
-      // Fallback to legacy collections
-      if (!customerDoc.exists()) {
-        customerDoc = await getDoc(doc(db, 'portalCustomers', customerId));
-      }
-      if (!customerDoc.exists()) {
-        customerDoc = await getDoc(doc(db, 'customerProfiles', customerId));
-      }
-
+      const customerDoc = await getDoc(doc(db, 'customers', customerId));
       if (!customerDoc.exists()) {
         console.log('Customer profile not found:', customerId);
         return null;
@@ -232,6 +227,7 @@ class CustomerAuthService {
       localStorage.removeItem('customerEmail');
       localStorage.removeItem('customerLoginTime');
       localStorage.removeItem('customerSessionId');
+      localStorage.removeItem('customerSessionToken'); // Clear session token
 
       // Sign out from Firebase
       await firebaseSignOut(auth);

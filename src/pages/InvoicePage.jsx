@@ -69,7 +69,10 @@ const InvoicePage = () => {
     paymentTerms: 'net30',
     taxRate: 0,
     notes: '',
-    terms: ''
+    terms: '',
+    items: [],
+    invoiceDate: '',
+    dueDate: ''
   });
 
   useEffect(() => {
@@ -259,27 +262,102 @@ const InvoicePage = () => {
 
   const handleEditInvoice = async (invoice) => {
     setSelectedInvoice(invoice);
+    
+    // Calculate due date from invoice date and payment terms
+    let dueDate = invoice.dueDate;
+    if (!dueDate && invoice.invoiceDate) {
+      const invoiceDate = new Date(invoice.invoiceDate);
+      const terms = invoice.paymentTerms || 'net30';
+      let daysToAdd = 30;
+      if (terms === 'dueOnReceipt') daysToAdd = 0;
+      else if (terms === 'net15') daysToAdd = 15;
+      else if (terms === 'net30') daysToAdd = 30;
+      else if (terms === 'net60') daysToAdd = 60;
+      invoiceDate.setDate(invoiceDate.getDate() + daysToAdd);
+      dueDate = invoiceDate.toISOString().split('T')[0];
+    }
+    
     setInvoiceData({
       paymentTerms: invoice.paymentTerms || 'net30',
       taxRate: invoice.taxRate || 0,
       notes: invoice.notes || '',
-      terms: invoice.terms || ''
+      terms: invoice.terms || '',
+      items: invoice.items ? [...invoice.items] : [],
+      invoiceDate: invoice.invoiceDate ? new Date(invoice.invoiceDate).toISOString().split('T')[0] : '',
+      dueDate: dueDate ? (typeof dueDate === 'string' ? dueDate.split('T')[0] : new Date(dueDate).toISOString().split('T')[0]) : ''
     });
     setShowEditModal(true);
+  };
+
+  // Calculate subtotal from items
+  const calculateSubtotal = (items) => {
+    if (!Array.isArray(items)) return 0;
+    return items.reduce((sum, item) => {
+      const itemTotal = (item.amount || item.total || 0);
+      return sum + itemTotal;
+    }, 0);
+  };
+
+  // Calculate total (subtotal + tax)
+  const calculateTotal = (subtotal, taxRate) => {
+    const tax = calculateTax(subtotal, taxRate);
+    return subtotal + tax;
   };
 
   const handleUpdateInvoice = async () => {
     if (!selectedInvoice) return;
 
+    // Prevent editing paid invoices
+    if (selectedInvoice.status === 'paid') {
+      toast.error('Cannot edit paid invoices');
+      return;
+    }
+
     setIsLoading(true);
     try {
+      // Calculate new subtotal from items
+      const newSubtotal = calculateSubtotal(invoiceData.items);
+      const newTax = calculateTax(newSubtotal, invoiceData.taxRate);
+      const newTotal = calculateTotal(newSubtotal, invoiceData.taxRate);
+
+      // Calculate due date if not provided
+      let dueDate = invoiceData.dueDate;
+      if (!dueDate && invoiceData.invoiceDate) {
+        const invoiceDate = new Date(invoiceData.invoiceDate);
+        const terms = invoiceData.paymentTerms || 'net30';
+        let daysToAdd = 30;
+        if (terms === 'dueOnReceipt') daysToAdd = 0;
+        else if (terms === 'net15') daysToAdd = 15;
+        else if (terms === 'net30') daysToAdd = 30;
+        else if (terms === 'net60') daysToAdd = 60;
+        invoiceDate.setDate(invoiceDate.getDate() + daysToAdd);
+        dueDate = invoiceDate.toISOString().split('T')[0];
+      }
+
       const updates = {
         paymentTerms: invoiceData.paymentTerms,
         taxRate: invoiceData.taxRate,
-        tax: calculateTax(selectedInvoice.subtotal || 0, invoiceData.taxRate),
+        tax: newTax,
         notes: invoiceData.notes,
-        terms: invoiceData.terms
+        terms: invoiceData.terms,
+        items: invoiceData.items.map(item => ({
+          description: item.description || '',
+          quantity: item.quantity || 1,
+          unitPrice: item.unitPrice || 0,
+          amount: item.amount || (item.quantity || 1) * (item.unitPrice || 0),
+          notes: item.notes || ''
+        })),
+        subtotal: newSubtotal,
+        total: newTotal
       };
+
+      // Add dates if provided
+      if (invoiceData.invoiceDate) {
+        updates.invoiceDate = invoiceData.invoiceDate;
+      }
+      if (dueDate) {
+        updates.dueDate = dueDate;
+      }
 
       const result = await InvoiceService.updateInvoice(selectedInvoice.id, updates);
       if (result.success) {
@@ -295,6 +373,51 @@ const InvoicePage = () => {
       toast.error('Error updating invoice');
     }
     setIsLoading(false);
+  };
+
+  // Add new line item
+  const addLineItem = () => {
+    setInvoiceData(prev => ({
+      ...prev,
+      items: [...(prev.items || []), {
+        description: '',
+        quantity: 1,
+        unitPrice: 0,
+        amount: 0,
+        notes: ''
+      }]
+    }));
+  };
+
+  // Update line item
+  const updateLineItem = (index, field, value) => {
+    setInvoiceData(prev => {
+      const newItems = [...(prev.items || [])];
+      newItems[index] = {
+        ...newItems[index],
+        [field]: value
+      };
+      
+      // Recalculate amount if quantity or unitPrice changed
+      if (field === 'quantity' || field === 'unitPrice') {
+        const quantity = field === 'quantity' ? parseFloat(value) || 0 : (newItems[index].quantity || 1);
+        const unitPrice = field === 'unitPrice' ? parseFloat(value) || 0 : (newItems[index].unitPrice || 0);
+        newItems[index].amount = quantity * unitPrice;
+      }
+      
+      return {
+        ...prev,
+        items: newItems
+      };
+    });
+  };
+
+  // Remove line item
+  const removeLineItem = (index) => {
+    setInvoiceData(prev => ({
+      ...prev,
+      items: prev.items.filter((_, i) => i !== index)
+    }));
   };
 
   const handleSendInvoice = async (invoiceId, isResend = false) => {
@@ -885,17 +1008,141 @@ const InvoicePage = () => {
                         <p className="text-gray-900">{selectedInvoice.customerName}</p>
                       </div>
                       <div>
-                        <span className="font-medium text-gray-700">Invoice Date:</span>
-                        <p className="text-gray-900">{formatDate(selectedInvoice.invoiceDate)}</p>
-                      </div>
-                      <div>
-                        <span className="font-medium text-gray-700">Subtotal:</span>
-                        <p className="text-gray-900">{formatCurrency(selectedInvoice.subtotal || 0)}</p>
-                      </div>
-                      <div>
                         <span className="font-medium text-gray-700">Status:</span>
                         <div className="mt-1">{getStatusBadge(selectedInvoice.status)}</div>
                       </div>
+                      <div>
+                        <span className="font-medium text-gray-700">Invoice Number:</span>
+                        <p className="text-gray-900">{selectedInvoice.invoiceNumber}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Dates */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Invoice Date</label>
+                      <input
+                        type="date"
+                        value={invoiceData.invoiceDate}
+                        onChange={(e) => setInvoiceData(prev => ({ ...prev, invoiceDate: e.target.value }))}
+                        className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Due Date</label>
+                      <input
+                        type="date"
+                        value={invoiceData.dueDate}
+                        onChange={(e) => setInvoiceData(prev => ({ ...prev, dueDate: e.target.value }))}
+                        className="mt-1 block w-full px-4 py-2.5 rounded-lg border border-gray-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 transition-colors sm:text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Line Items */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-sm font-medium text-gray-700">Line Items</label>
+                      <button
+                        type="button"
+                        onClick={addLineItem}
+                        className="text-sm text-primary-600 hover:text-primary-900 font-medium"
+                      >
+                        + Add Item
+                      </button>
+                    </div>
+                    <div className="border border-gray-200 rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-medium text-gray-700">Description</th>
+                            <th className="px-3 py-2 text-right font-medium text-gray-700">Qty</th>
+                            <th className="px-3 py-2 text-right font-medium text-gray-700">Price</th>
+                            <th className="px-3 py-2 text-right font-medium text-gray-700">Total</th>
+                            <th className="px-3 py-2 text-center font-medium text-gray-700">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {invoiceData.items && invoiceData.items.length > 0 ? (
+                            invoiceData.items.map((item, index) => (
+                              <tr key={index} className="hover:bg-gray-50">
+                                <td className="px-3 py-2">
+                                  <input
+                                    type="text"
+                                    value={item.description || ''}
+                                    onChange={(e) => updateLineItem(index, 'description', e.target.value)}
+                                    className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                    placeholder="Item description"
+                                  />
+                                </td>
+                                <td className="px-3 py-2">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={item.quantity || 1}
+                                    onChange={(e) => updateLineItem(index, 'quantity', e.target.value)}
+                                    className="w-full px-2 py-1 border border-gray-300 rounded text-sm text-right"
+                                  />
+                                </td>
+                                <td className="px-3 py-2">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={item.unitPrice || 0}
+                                    onChange={(e) => updateLineItem(index, 'unitPrice', e.target.value)}
+                                    className="w-full px-2 py-1 border border-gray-300 rounded text-sm text-right"
+                                  />
+                                </td>
+                                <td className="px-3 py-2 text-right text-gray-900 font-medium">
+                                  {formatCurrency(item.amount || (item.quantity || 1) * (item.unitPrice || 0))}
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => removeLineItem(index)}
+                                    className="text-red-600 hover:text-red-900"
+                                  >
+                                    <XCircleIcon className="h-5 w-5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan="5" className="px-3 py-4 text-center text-gray-500 text-sm">
+                                No line items. Click "Add Item" to add one.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Totals Summary */}
+                  <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Subtotal:</span>
+                      <span className="text-gray-900 font-medium">
+                        {formatCurrency(calculateSubtotal(invoiceData.items))}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">
+                        Tax ({invoiceData.taxRate}%):
+                      </span>
+                      <span className="text-gray-900">
+                        {formatCurrency(calculateTax(calculateSubtotal(invoiceData.items), invoiceData.taxRate))}
+                      </span>
+                    </div>
+                    <div className="flex justify-between pt-2 border-t border-gray-200 font-medium">
+                      <span className="text-gray-900">Total:</span>
+                      <span className="text-lg text-gray-900">
+                        {formatCurrency(calculateTotal(calculateSubtotal(invoiceData.items), invoiceData.taxRate))}
+                      </span>
                     </div>
                   </div>
 
@@ -933,7 +1180,7 @@ const InvoicePage = () => {
                       <label className="block text-sm font-medium text-gray-700">Tax Amount</label>
                       <input
                         type="text"
-                        value={formatCurrency(calculateTax(selectedInvoice.subtotal || 0, invoiceData.taxRate))}
+                        value={formatCurrency(calculateTax(calculateSubtotal(invoiceData.items), invoiceData.taxRate))}
                         disabled
                         className="mt-1 block w-full rounded-md border-gray-300 bg-gray-50 shadow-sm sm:text-sm"
                       />
@@ -1048,4 +1295,5 @@ const InvoicePage = () => {
 };
 
 export default InvoicePage;
+
 

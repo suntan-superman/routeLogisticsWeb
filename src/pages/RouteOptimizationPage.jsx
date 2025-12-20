@@ -41,6 +41,20 @@ const RouteOptimizationPage = () => {
   const [directions, setDirections] = useState(null);
   const [routeInfo, setRouteInfo] = useState(null);
   const [optimizing, setOptimizing] = useState(false);
+  const [showSaveRouteModal, setShowSaveRouteModal] = useState(false);
+  const [routeName, setRouteName] = useState('');
+  const [saveAsTemplate, setSaveAsTemplate] = useState(false);
+  const [savedRoutes, setSavedRoutes] = useState([]);
+  const [showLoadRouteModal, setShowLoadRouteModal] = useState(false);
+  const [savingRoute, setSavingRoute] = useState(false);
+  const [loadingRoutes, setLoadingRoutes] = useState(false);
+  const [templateRoutes, setTemplateRoutes] = useState([]);
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [showApplyTemplateModal, setShowApplyTemplateModal] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [templateTargetDate, setTemplateTargetDate] = useState(new Date().toISOString().split('T')[0]);
+  const [applyingTemplate, setApplyingTemplate] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -208,6 +222,204 @@ const RouteOptimizationPage = () => {
     }
   };
 
+  const handleSaveRoute = async () => {
+    if (!routeInfo || selectedJobs.length === 0) {
+      toast.error('Please optimize a route first before saving');
+      return;
+    }
+
+    if (!routeName.trim()) {
+      toast.error('Please enter a route name');
+      return;
+    }
+
+    setSavingRoute(true);
+    try {
+      const selectedTechnicianData = technicians.find((t) => t.id === selectedTechnician);
+      
+      const result = await RouteService.saveRoute({
+        name: routeName.trim(),
+        date: selectedDate,
+        technicianId: selectedTechnician || null,
+        technicianName: selectedTechnicianData?.name || null,
+        jobIds: selectedJobs,
+        routeInfo,
+        directions,
+        isTemplate: saveAsTemplate
+      });
+
+      if (result.success) {
+        toast.success(saveAsTemplate ? 'Route template saved successfully!' : 'Route saved successfully!');
+        setShowSaveRouteModal(false);
+        setRouteName('');
+        setSaveAsTemplate(false);
+      } else {
+        toast.error(result.error || 'Failed to save route');
+      }
+    } catch (error) {
+      console.error('Error saving route:', error);
+      toast.error('Failed to save route: ' + (error.message || 'Unknown error'));
+    } finally {
+      setSavingRoute(false);
+    }
+  };
+
+  const loadSavedRoutes = async () => {
+    setLoadingRoutes(true);
+    try {
+      const result = await RouteService.getRoutes(null, {
+        templatesOnly: false
+      });
+
+      if (result.success) {
+        setSavedRoutes(result.routes || []);
+        setShowLoadRouteModal(true);
+      } else {
+        toast.error(result.error || 'Failed to load routes');
+      }
+    } catch (error) {
+      console.error('Error loading routes:', error);
+      toast.error('Failed to load routes: ' + (error.message || 'Unknown error'));
+    } finally {
+      setLoadingRoutes(false);
+    }
+  };
+
+  const handleLoadRoute = async (routeId) => {
+    try {
+      const result = await RouteService.loadRoute(routeId);
+
+      if (result.success && result.jobs) {
+        // Filter jobs that still exist and have valid addresses
+        const validJobs = result.jobs.filter(
+          (job) => job && (job.customerAddress || job.address)
+        );
+
+        if (validJobs.length === 0) {
+          toast.error('No valid jobs found in this route');
+          return;
+        }
+
+        // Set the selected jobs
+        setSelectedJobs(validJobs.map((job) => job.id));
+        
+        // Set the route date if it exists
+        if (result.route.date) {
+          setSelectedDate(result.route.date);
+        }
+
+        // Set the technician if it exists
+        if (result.route.technicianId) {
+          setSelectedTechnician(result.route.technicianId);
+        }
+
+        // Close the modal
+        setShowLoadRouteModal(false);
+
+        // Re-optimize the route with the loaded jobs
+        // Wait a bit for state to update
+        setTimeout(() => {
+          toast.success(`Loaded route: ${result.route.name}`);
+          // The user can now click "Optimize Route" to regenerate the directions
+        }, 300);
+      } else {
+        toast.error(result.error || 'Failed to load route');
+      }
+    } catch (error) {
+      console.error('Error loading route:', error);
+      toast.error('Failed to load route: ' + (error.message || 'Unknown error'));
+    }
+  };
+
+  const handleDeleteRoute = async (routeId, routeName) => {
+    if (!confirm(`Are you sure you want to delete "${routeName}"?`)) {
+      return;
+    }
+
+    try {
+      const result = await RouteService.deleteRoute(routeId);
+      if (result.success) {
+        toast.success('Route deleted successfully');
+        // Reload routes if modal is open
+        if (showLoadRouteModal) {
+          loadSavedRoutes();
+        }
+        // Reload templates if template modal is open
+        if (showTemplateModal) {
+          loadTemplateRoutes();
+        }
+      } else {
+        toast.error(result.error || 'Failed to delete route');
+      }
+    } catch (error) {
+      console.error('Error deleting route:', error);
+      toast.error('Failed to delete route: ' + (error.message || 'Unknown error'));
+    }
+  };
+
+  const loadTemplateRoutes = async () => {
+    setLoadingTemplates(true);
+    try {
+      const result = await RouteService.getTemplateRoutes(null);
+
+      if (result.success) {
+        setTemplateRoutes(result.templates || []);
+        setShowTemplateModal(true);
+      } else {
+        toast.error(result.error || 'Failed to load template routes');
+      }
+    } catch (error) {
+      console.error('Error loading template routes:', error);
+      toast.error('Failed to load template routes: ' + (error.message || 'Unknown error'));
+    } finally {
+      setLoadingTemplates(false);
+    }
+  };
+
+  const handleApplyTemplate = (template) => {
+    setSelectedTemplate(template);
+    setTemplateTargetDate(new Date().toISOString().split('T')[0]);
+    setShowTemplateModal(false);
+    setShowApplyTemplateModal(true);
+  };
+
+  const confirmApplyTemplate = async () => {
+    if (!selectedTemplate) {
+      return;
+    }
+
+    if (!templateTargetDate) {
+      toast.error('Please select a target date');
+      return;
+    }
+
+    setApplyingTemplate(true);
+    try {
+      const result = await RouteService.applyTemplateRoute(
+        selectedTemplate.id,
+        templateTargetDate,
+        selectedTechnician || null
+      );
+
+      if (result.success) {
+        toast.success(result.message || `Template applied successfully! Created ${result.jobs?.length || 0} jobs.`);
+        setShowApplyTemplateModal(false);
+        setSelectedTemplate(null);
+        // Reload jobs for the target date
+        await loadData();
+        // Set the date to the target date to show the new jobs
+        setSelectedDate(templateTargetDate);
+      } else {
+        toast.error(result.error || 'Failed to apply template');
+      }
+    } catch (error) {
+      console.error('Error applying template:', error);
+      toast.error('Failed to apply template: ' + (error.message || 'Unknown error'));
+    } finally {
+      setApplyingTemplate(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -276,6 +488,23 @@ const RouteOptimizationPage = () => {
 
           <div className="flex items-end gap-2">
             <button
+              onClick={loadTemplateRoutes}
+              disabled={loadingTemplates}
+              className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              title="View route templates"
+            >
+              <BookmarkIcon className="h-5 w-5" />
+              Templates
+            </button>
+            <button
+              onClick={loadSavedRoutes}
+              disabled={loadingRoutes}
+              className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              <FolderIcon className="h-5 w-5" />
+              Load
+            </button>
+            <button
               onClick={optimizeRoute}
               disabled={selectedJobs.length < 2 || optimizing}
               className="flex-1 px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
@@ -293,13 +522,22 @@ const RouteOptimizationPage = () => {
               )}
             </button>
             {routeInfo && (
-              <button
-                onClick={assignOptimizedRoute}
-                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center gap-2"
-              >
-                <PlusIcon className="h-5 w-5" />
-                Assign
-              </button>
+              <>
+                <button
+                  onClick={() => setShowSaveRouteModal(true)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center gap-2"
+                >
+                  <BookmarkIcon className="h-5 w-5" />
+                  Save
+                </button>
+                <button
+                  onClick={assignOptimizedRoute}
+                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center gap-2"
+                >
+                  <PlusIcon className="h-5 w-5" />
+                  Assign
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -451,6 +689,372 @@ const RouteOptimizationPage = () => {
           )}
         </motion.div>
       </div>
+
+      {/* Save Route Modal */}
+      {showSaveRouteModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-gray-900">Save Route</h2>
+              <button
+                onClick={() => {
+                  setShowSaveRouteModal(false);
+                  setRouteName('');
+                  setSaveAsTemplate(false);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <XMarkIcon className="h-6 w-6" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Route Name *
+                </label>
+                <input
+                  type="text"
+                  value={routeName}
+                  onChange={(e) => setRouteName(e.target.value)}
+                  placeholder="e.g., Monday Morning Route"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="saveAsTemplate"
+                  checked={saveAsTemplate}
+                  onChange={(e) => setSaveAsTemplate(e.target.checked)}
+                  className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                />
+                <label htmlFor="saveAsTemplate" className="ml-2 block text-sm text-gray-700">
+                  Save as template (can be reused for other dates)
+                </label>
+              </div>
+
+              <div className="bg-gray-50 p-3 rounded-md text-sm text-gray-600">
+                <p><strong>Date:</strong> {new Date(selectedDate + 'T12:00:00').toLocaleDateString()}</p>
+                <p><strong>Jobs:</strong> {selectedJobs.length}</p>
+                <p><strong>Distance:</strong> {routeInfo?.totalDistance || 'N/A'} miles</p>
+                <p><strong>Duration:</strong> {routeInfo?.totalDuration || 'N/A'} minutes</p>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={() => {
+                    setShowSaveRouteModal(false);
+                    setRouteName('');
+                    setSaveAsTemplate(false);
+                  }}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveRoute}
+                  disabled={!routeName.trim() || savingRoute}
+                  className="flex-1 px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {savingRoute ? 'Saving...' : 'Save Route'}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Load Routes Modal */}
+      {showLoadRouteModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl max-h-[80vh] flex flex-col"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-gray-900">Load Saved Route</h2>
+              <button
+                onClick={() => setShowLoadRouteModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <XMarkIcon className="h-6 w-6" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              {savedRoutes.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <FolderIcon className="mx-auto h-12 w-12 text-gray-400 mb-2" />
+                  <p>No saved routes found</p>
+                  <p className="text-sm mt-1">Create and save a route to see it here</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {savedRoutes.map((route) => (
+                    <div
+                      key={route.id}
+                      className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-medium text-gray-900">{route.name}</h3>
+                            {route.isTemplate && (
+                              <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded">
+                                Template
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-2 space-y-1 text-sm text-gray-600">
+                            {route.date && (
+                              <p><strong>Date:</strong> {new Date(route.date + 'T12:00:00').toLocaleDateString()}</p>
+                            )}
+                            <p><strong>Jobs:</strong> {route.jobCount || route.jobIds?.length || 0}</p>
+                            {route.routeInfo && (
+                              <>
+                                <p><strong>Distance:</strong> {route.routeInfo.totalDistance} miles</p>
+                                <p><strong>Duration:</strong> {route.routeInfo.totalDuration} minutes</p>
+                              </>
+                            )}
+                            {route.technicianName && (
+                              <p><strong>Technician:</strong> {route.technicianName}</p>
+                            )}
+                            {route.createdAt && (
+                              <p className="text-xs text-gray-400">
+                                Saved: {new Date(route.createdAt).toLocaleDateString()}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex gap-2 ml-4">
+                          <button
+                            onClick={() => handleLoadRoute(route.id)}
+                            className="px-3 py-1.5 bg-primary-600 text-white text-sm rounded-md hover:bg-primary-700"
+                          >
+                            Load
+                          </button>
+                          <button
+                            onClick={() => handleDeleteRoute(route.id, route.name)}
+                            className="px-3 py-1.5 bg-red-600 text-white text-sm rounded-md hover:bg-red-700"
+                          >
+                            <TrashIcon className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="pt-4 border-t border-gray-200 mt-4">
+              <button
+                onClick={() => setShowLoadRouteModal(false)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+              >
+                Close
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Template Routes Modal */}
+      {showTemplateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl max-h-[80vh] flex flex-col"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-gray-900">Route Templates</h2>
+              <button
+                onClick={() => setShowTemplateModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <XMarkIcon className="h-6 w-6" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              {loadingTemplates ? (
+                <div className="text-center py-8 text-gray-500">
+                  <ArrowPathIcon className="mx-auto h-12 w-12 text-gray-400 mb-2 animate-spin" />
+                  <p>Loading templates...</p>
+                </div>
+              ) : templateRoutes.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <BookmarkIcon className="mx-auto h-12 w-12 text-gray-400 mb-2" />
+                  <p>No route templates found</p>
+                  <p className="text-sm mt-1">Save a route as a template to see it here</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {templateRoutes.map((template) => (
+                    <div
+                      key={template.id}
+                      className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-medium text-gray-900">{template.name}</h3>
+                            <span className="px-2 py-0.5 text-xs bg-purple-100 text-purple-800 rounded">
+                              Template
+                            </span>
+                          </div>
+                          <div className="mt-2 space-y-1 text-sm text-gray-600">
+                            <p><strong>Jobs:</strong> {template.jobCount || template.jobIds?.length || 0}</p>
+                            {template.routeInfo && (
+                              <>
+                                <p><strong>Distance:</strong> {template.routeInfo.totalDistance} miles</p>
+                                <p><strong>Duration:</strong> {template.routeInfo.totalDuration} minutes</p>
+                              </>
+                            )}
+                            {template.technicianName && (
+                              <p><strong>Technician:</strong> {template.technicianName}</p>
+                            )}
+                            {template.createdAt && (
+                              <p className="text-xs text-gray-400">
+                                Created: {new Date(template.createdAt).toLocaleDateString()}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex gap-2 ml-4">
+                          <button
+                            onClick={() => handleApplyTemplate(template)}
+                            className="px-3 py-1.5 bg-primary-600 text-white text-sm rounded-md hover:bg-primary-700"
+                          >
+                            Apply
+                          </button>
+                          <button
+                            onClick={() => handleDeleteRoute(template.id, template.name)}
+                            className="px-3 py-1.5 bg-red-600 text-white text-sm rounded-md hover:bg-red-700"
+                          >
+                            <TrashIcon className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="pt-4 border-t border-gray-200 mt-4">
+              <button
+                onClick={() => setShowTemplateModal(false)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+              >
+                Close
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Apply Template Modal */}
+      {showApplyTemplateModal && selectedTemplate && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-gray-900">Apply Template</h2>
+              <button
+                onClick={() => {
+                  setShowApplyTemplateModal(false);
+                  setSelectedTemplate(null);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <XMarkIcon className="h-6 w-6" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-gray-50 p-3 rounded-md text-sm">
+                <p className="font-medium text-gray-900 mb-2">{selectedTemplate.name}</p>
+                <p className="text-gray-600"><strong>Jobs:</strong> {selectedTemplate.jobCount || selectedTemplate.jobIds?.length || 0}</p>
+                {selectedTemplate.routeInfo && (
+                  <>
+                    <p className="text-gray-600"><strong>Distance:</strong> {selectedTemplate.routeInfo.totalDistance} miles</p>
+                    <p className="text-gray-600"><strong>Duration:</strong> {selectedTemplate.routeInfo.totalDuration} minutes</p>
+                  </>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <CalendarIcon className="inline h-4 w-4 mr-1" />
+                  Target Date *
+                </label>
+                <input
+                  type="date"
+                  value={templateTargetDate}
+                  onChange={(e) => setTemplateTargetDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  min={new Date().toISOString().split('T')[0]}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <TruckIcon className="inline h-4 w-4 mr-1" />
+                  Assign to Technician (Optional)
+                </label>
+                <select
+                  value={selectedTechnician}
+                  onChange={(e) => setSelectedTechnician(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="">No change (use template default)</option>
+                  {technicians.map((tech) => (
+                    <option key={tech.id} value={tech.id}>
+                      {tech.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-sm text-blue-800">
+                <p><strong>Note:</strong> This will create new jobs from the template for the selected date. Existing jobs will not be modified.</p>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={() => {
+                    setShowApplyTemplateModal(false);
+                    setSelectedTemplate(null);
+                  }}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmApplyTemplate}
+                  disabled={!templateTargetDate || applyingTemplate}
+                  className="flex-1 px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {applyingTemplate ? 'Applying...' : 'Apply Template'}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };

@@ -8,7 +8,7 @@ import {
   updateProfile,
   sendEmailVerification
 } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import toast from 'react-hot-toast';
 import CompanyService from '../services/companyService';
 
@@ -24,6 +24,14 @@ export const useAuth = () => {
 
 // Super Admin Configuration
 const SUPER_ADMIN_EMAIL = 'sroy@worksidesoftware.com';
+
+// Session Management Utilities
+const generateSessionToken = () => {
+  const timestamp = Date.now();
+  const random1 = Math.random().toString(36).substring(2, 15);
+  const random2 = Math.random().toString(36).substring(2, 15);
+  return `${timestamp}-${random1}-${random2}`;
+};
 
 export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
@@ -152,6 +160,9 @@ export const AuthProvider = ({ children }) => {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       
+      // Generate session token for single-session enforcement
+      const sessionToken = generateSessionToken();
+      
       // Fetch user profile
       const userDocRef = doc(db, 'users', user.uid);
       const userDoc = await getDoc(userDocRef);
@@ -195,6 +206,17 @@ export const AuthProvider = ({ children }) => {
         setUserProfile(finalProfile);
       }
       
+      // Update user document with new session token (invalidates old sessions)
+      await updateDoc(userDocRef, {
+        sessionToken: sessionToken,
+        sessionCreatedAt: serverTimestamp(),
+        sessionDeviceInfo: 'web',
+        lastLoginAt: serverTimestamp(),
+      });
+      
+      // Store session token locally
+      localStorage.setItem('sessionToken', sessionToken);
+      
       toast.success('Welcome back!');
       return { success: true, user };
     } catch (error) {
@@ -233,6 +255,9 @@ export const AuthProvider = ({ children }) => {
   // Sign out function
   const logout = async () => {
     try {
+      // Clear session token
+      localStorage.removeItem('sessionToken');
+      
       await signOut(auth);
       setUserProfile(null);
       toast.success('Signed out successfully');
@@ -277,6 +302,27 @@ export const AuthProvider = ({ children }) => {
           const userDoc = await getDoc(userDocRef);
           if (userDoc.exists()) {
             const profileData = userDoc.data();
+            
+            // Validate session token for single-session enforcement
+            const storedSessionToken = localStorage.getItem('sessionToken');
+            const firestoreSessionToken = profileData.sessionToken;
+            
+            // If session tokens don't match, user was logged in on another device
+            if (storedSessionToken && firestoreSessionToken && storedSessionToken !== firestoreSessionToken) {
+              console.log('[AuthContext] Session token mismatch - user logged in on another device');
+              // Clear session and sign out
+              localStorage.removeItem('sessionToken');
+              await signOut(auth);
+              setUserProfile(null);
+              setLoading(false);
+              toast.error('You have been logged out because you logged in on another device. Please log in again.');
+              return;
+            }
+            
+            // If no stored token but Firestore has one, this is a new session - store it
+            if (!storedSessionToken && firestoreSessionToken) {
+              localStorage.setItem('sessionToken', firestoreSessionToken);
+            }
 
             if (profileData.role === 'admin' && !profileData.companyId && user.email !== SUPER_ADMIN_EMAIL) {
               const claimResult = await CompanyService.claimPendingCompanyOwnership();

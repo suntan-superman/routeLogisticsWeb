@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import CustomerService from '../services/customerService';
 import QuickBooksService from '../services/quickbooksService';
@@ -47,7 +47,6 @@ const CustomerManagementPage = () => {
   const { getEffectiveCompanyId } = useCompany();
   const [customers, setCustomers] = useState([]);
   const [pendingCustomers, setPendingCustomers] = useState([]);
-  const [filteredCustomers, setFilteredCustomers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingPending, setIsLoadingPending] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -97,10 +96,6 @@ const CustomerManagementPage = () => {
     loadStats();
   }, [userProfile, refreshKey]);
 
-  useEffect(() => {
-    filterAndSortCustomers();
-  }, [customers, searchTerm, activeFilter, sortBy]);
-
   const loadCustomers = async () => {
     setIsLoading(true);
     try {
@@ -148,34 +143,39 @@ const CustomerManagementPage = () => {
     }
   };
 
-  const filterAndSortCustomers = () => {
+  const filteredCustomers = useMemo(() => {
     let filtered = [...customers];
 
-    // Apply search filter
-    if (searchTerm) {
-      filtered = filtered.filter(customer => {
-        const searchLower = searchTerm.toLowerCase();
-        return (
-          customer.name?.toLowerCase().includes(searchLower) ||
-          customer.email?.toLowerCase().includes(searchLower) ||
-          customer.phone?.includes(searchTerm) ||
-          customer.address?.toLowerCase().includes(searchLower)
-        );
-      });
+    if (searchTerm.trim()) {
+      const searchLower = searchTerm.trim().toLowerCase();
+      const valueMatches = (value) =>
+        value?.toString().toLowerCase().includes(searchLower);
+
+      filtered = filtered.filter((customer) => (
+        valueMatches(customer.name) ||
+        valueMatches(customer.firstName) ||
+        valueMatches(customer.lastName) ||
+        valueMatches(customer.email) ||
+        valueMatches(customer.address) ||
+        valueMatches(customer.city) ||
+        valueMatches(customer.state) ||
+        valueMatches(customer.zipCode) ||
+        customer.phone?.includes(searchTerm.trim())
+      ));
     }
 
-    // Apply active/inactive/status filter
     if (activeFilter === 'active') {
-      filtered = filtered.filter(customer => customer.isActive && customer.status === 'approved');
+      filtered = filtered.filter(
+        (customer) => customer.isActive && customer.status === 'approved'
+      );
     } else if (activeFilter === 'inactive') {
-      filtered = filtered.filter(customer => !customer.isActive);
+      filtered = filtered.filter((customer) => !customer.isActive);
     } else if (activeFilter === 'pending') {
-      filtered = filtered.filter(customer => customer.status === 'pending');
+      filtered = filtered.filter((customer) => customer.status === 'pending');
     } else if (activeFilter === 'rejected') {
-      filtered = filtered.filter(customer => customer.status === 'rejected');
+      filtered = filtered.filter((customer) => customer.status === 'rejected');
     }
 
-    // Apply sorting
     filtered.sort((a, b) => {
       switch (sortBy) {
         case 'name':
@@ -189,8 +189,8 @@ const CustomerManagementPage = () => {
       }
     });
 
-    setFilteredCustomers(filtered);
-  };
+    return filtered;
+  }, [customers, searchTerm, activeFilter, sortBy]);
 
   const handleInputChange = (field, value) => {
     setCustomerData(prev => ({

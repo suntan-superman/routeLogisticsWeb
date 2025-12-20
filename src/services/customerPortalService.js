@@ -416,6 +416,112 @@ class CustomerPortalService {
     };
     return colors[status] || 'gray';
   }
+
+  /**
+   * Get photos for a customer job
+   * Fetches photos from jobPhotos collection using jobId and companyId
+   * @param {string} companyId - Company ID
+   * @param {string} jobId - Job ID (same as customerJob document ID)
+   * @returns {Promise<{success: boolean, photos: Array, error?: string}>}
+   */
+  static async getCustomerJobPhotos(companyId, jobId) {
+    try {
+      if (!companyId || !jobId) {
+        throw new Error('Company ID and Job ID are required');
+      }
+
+      const photosQuery = query(
+        collection(db, 'jobPhotos'),
+        where('companyId', '==', companyId),
+        where('jobId', '==', jobId),
+        orderBy('createdAt', 'desc')
+      );
+
+      const snapshot = await getDocs(photosQuery);
+      const photos = [];
+
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        // Transform photo data to match PhotoGallery component format
+        photos.push({
+          id: doc.id,
+          url: data.downloadURL || data.url || '',
+          thumbnailUrl: data.thumbnailURL || null,
+          fileName: data.fileName || `photo-${doc.id}.jpg`,
+          capturedAt: data.capturedAt?.toDate?.() || data.capturedAt || null,
+          uploadedAt: data.createdAt?.toDate?.() || data.createdAt || null,
+          latitude: data.latitude || null,
+          longitude: data.longitude || null,
+          locationAccuracy: data.locationAccuracy || null,
+          notes: data.note || data.notes || data.caption || '',
+          storagePath: data.storagePath || null,
+          mimeType: data.mimeType || 'image/jpeg',
+          size: data.size || 0,
+        });
+      });
+
+      return {
+        success: true,
+        photos
+      };
+    } catch (error) {
+      console.error('[CustomerPortalService] Error getting customer job photos:', error);
+      // If orderBy fails (index not created), try without orderBy
+      if (error.code === 'failed-precondition') {
+        try {
+          const photosQuery = query(
+            collection(db, 'jobPhotos'),
+            where('companyId', '==', companyId),
+            where('jobId', '==', jobId)
+          );
+          const snapshot = await getDocs(photosQuery);
+          const photos = [];
+
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            photos.push({
+              id: doc.id,
+              url: data.downloadURL || data.url || '',
+              thumbnailUrl: data.thumbnailURL || null,
+              fileName: data.fileName || `photo-${doc.id}.jpg`,
+              capturedAt: data.capturedAt?.toDate?.() || data.capturedAt || null,
+              uploadedAt: data.createdAt?.toDate?.() || data.createdAt || null,
+              latitude: data.latitude || null,
+              longitude: data.longitude || null,
+              locationAccuracy: data.locationAccuracy || null,
+              notes: data.note || data.notes || data.caption || '',
+              storagePath: data.storagePath || null,
+              mimeType: data.mimeType || 'image/jpeg',
+              size: data.size || 0,
+            });
+          });
+
+          // Sort manually by createdAt descending (newest first)
+          photos.sort((a, b) => {
+            const aTime = a.uploadedAt || a.capturedAt || new Date(0);
+            const bTime = b.uploadedAt || b.capturedAt || new Date(0);
+            return new Date(bTime).getTime() - new Date(aTime).getTime();
+          });
+
+          return {
+            success: true,
+            photos
+          };
+        } catch (retryError) {
+          return {
+            success: false,
+            error: retryError.message,
+            photos: []
+          };
+        }
+      }
+      return {
+        success: false,
+        error: error.message,
+        photos: []
+      };
+    }
+  }
 }
 
 export default CustomerPortalService;

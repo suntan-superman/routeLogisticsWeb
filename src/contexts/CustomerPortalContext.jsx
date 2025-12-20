@@ -20,6 +20,19 @@ export const CustomerPortalProvider = ({ children }) => {
     const unsubscribe = CustomerAuthService.onAuthStateChanged(async (user) => {
       try {
         if (user) {
+          // Validate session token for single-session enforcement
+          const sessionValidation = await CustomerAuthService.validateSession(user.uid);
+          if (!sessionValidation.valid) {
+            if (sessionValidation.reason === 'Session mismatch - logged in on another device') {
+              setError('You have been logged out because you logged in on another device. Please log in again.');
+            }
+            setCustomer(null);
+            setIsAuthenticated(false);
+            setSelectedCompanyId(null);
+            setIsLoading(false);
+            return;
+          }
+
           // User is authenticated - try to get customer profile
           // This will return null if user is not a customer (permission denied)
           const profile = await CustomerAuthService.getCustomerProfile(user.uid);

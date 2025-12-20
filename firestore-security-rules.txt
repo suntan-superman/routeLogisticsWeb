@@ -700,37 +700,18 @@ service cloud.firestore {
       allow delete: if false;
     }
     
-    // LEGACY: Customer profiles for portal (OTP-based authentication, cloud function managed)
-    // Kept for backward compatibility during migration
-    match /portalCustomers/{customerId} {
-      allow read: if request.auth != null && request.auth.uid == customerId;
-      allow update: if request.auth != null && 
-                       request.auth.uid == customerId &&
-                       !("companies" in request.resource.data);
-    }
-    
     // Helper function to check if customer has access to a company
-    // Checks customers (new), portalCustomers (legacy), and customerProfiles (legacy)
     function customerHasCompanyAccess(companyId) {
       return (exists(/databases/$(database)/documents/customers/$(request.auth.uid)) &&
-              companyId in get(/databases/$(database)/documents/customers/$(request.auth.uid)).data.companies) ||
-             (exists(/databases/$(database)/documents/portalCustomers/$(request.auth.uid)) &&
-              companyId in get(/databases/$(database)/documents/portalCustomers/$(request.auth.uid)).data.companies) ||
-             (exists(/databases/$(database)/documents/customerProfiles/$(request.auth.uid)) &&
-              companyId in get(/databases/$(database)/documents/customerProfiles/$(request.auth.uid)).data.companies);
+              companyId in get(/databases/$(database)/documents/customers/$(request.auth.uid)).data.companies);
     }
     
     // Helper function to check if customer has no companies yet
     function customerHasNoCompanies() {
-      return (!exists(/databases/$(database)/documents/customers/$(request.auth.uid)) &&
-              !exists(/databases/$(database)/documents/portalCustomers/$(request.auth.uid)) &&
-              !exists(/databases/$(database)/documents/customerProfiles/$(request.auth.uid))) ||
+      return (!exists(/databases/$(database)/documents/customers/$(request.auth.uid))) ||
              (exists(/databases/$(database)/documents/customers/$(request.auth.uid)) &&
-              get(/databases/$(database)/documents/customers/$(request.auth.uid)).data.companies.size() == 0) ||
-             (exists(/databases/$(database)/documents/portalCustomers/$(request.auth.uid)) &&
-              get(/databases/$(database)/documents/portalCustomers/$(request.auth.uid)).data.companies.size() == 0) ||
-             (exists(/databases/$(database)/documents/customerProfiles/$(request.auth.uid)) &&
-              get(/databases/$(database)/documents/customerProfiles/$(request.auth.uid)).data.companies.size() == 0);
+              (!('companies' in get(/databases/$(database)/documents/customers/$(request.auth.uid)).data) ||
+               get(/databases/$(database)/documents/customers/$(request.auth.uid)).data.companies.size() == 0));
     }
     
     // Customer jobs visible in portal (read-only for customers)
@@ -762,35 +743,6 @@ service cloud.firestore {
       allow create, delete: if false;
     }
     
-    // ========================================
-    // CUSTOMER PROFILES COLLECTION (Separate from users/)
-    // ========================================
-    
-    // Customer profiles - OTP-based authentication, no password
-    match /customerProfiles/{customerId} {
-      // Allow customers to read their own profile
-      allow read: if request.auth != null && 
-                  request.auth.uid == customerId;
-      
-      // Allow customers to update their own profile (except companies and status)
-      allow update: if request.auth != null && 
-                    request.auth.uid == customerId &&
-                    !("companies" in request.resource.data) &&
-                    !("status" in request.resource.data);
-      
-      // Cloud functions have admin privileges and can create
-      // This rule doesn't apply to Cloud Functions, but we allow creation for completeness
-      // (Cloud Functions use admin SDK which bypasses these rules anyway)
-      allow create: if request.auth != null && 
-                    request.auth.uid == customerId;
-      
-      // No deletes allowed
-      allow delete: if false;
-      
-      // Super admin can read all customer profiles
-      allow read: if request.auth != null && 
-                  isSuperAdmin();
-    }
 
     // QuickBooks Connections
     match /quickbooksConnections/{companyId} {
@@ -836,6 +788,49 @@ service cloud.firestore {
       // Only Cloud Functions can create sync conflicts
       allow create: if false;
       allow update, delete: if false;
+    }
+    
+    // Routes collection - saved route optimizations
+    match /routes/{routeId} {
+      // Allow read:
+      // - Super admin (can read all routes)
+      // - Company admin/supervisor for same company
+      // - Creator of the route
+      allow read: if request.auth != null && (
+        isSuperAdmin() ||
+        (resource.data.companyId != null &&
+         resource.data.companyId == getUserProfile().companyId &&
+         (isCompanyAdminOrSupervisor() || resource.data.createdBy == request.auth.uid))
+      );
+      
+      // Allow create:
+      // - Any authenticated user in the company (routes are company-scoped)
+      allow create: if request.auth != null &&
+        request.resource.data.companyId != null &&
+        request.resource.data.companyId == getUserProfile().companyId &&
+        request.resource.data.createdBy == request.auth.uid;
+      
+      // Allow update:
+      // - Super admin (can update any route)
+      // - Company admin/supervisor for same company
+      // - Creator of the route
+      allow update: if request.auth != null && (
+        isSuperAdmin() ||
+        (resource.data.companyId != null &&
+         resource.data.companyId == getUserProfile().companyId &&
+         (isCompanyAdminOrSupervisor() || resource.data.createdBy == request.auth.uid))
+      );
+      
+      // Allow delete:
+      // - Super admin (can delete any route)
+      // - Company admin/supervisor for same company
+      // - Creator of the route
+      allow delete: if request.auth != null && (
+        isSuperAdmin() ||
+        (resource.data.companyId != null &&
+         resource.data.companyId == getUserProfile().companyId &&
+         (isCompanyAdminOrSupervisor() || resource.data.createdBy == request.auth.uid))
+      );
     }
   }
 }

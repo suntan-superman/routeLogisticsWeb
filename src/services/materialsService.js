@@ -10,7 +10,8 @@ import {
   addDoc,
   deleteDoc,
   orderBy,
-  Timestamp
+  Timestamp,
+  serverTimestamp
 } from 'firebase/firestore';
 import { db, auth } from './firebase';
 
@@ -508,6 +509,288 @@ class MaterialsService {
         success: false,
         error: error.message,
         materials: []
+      };
+    }
+  }
+
+  /**
+   * Add materials used on a job
+   * Creates jobMaterials records linking materials to a job
+   * @param {string} jobId - Job ID
+   * @param {string} companyId - Company ID
+   * @param {string} technicianId - Technician who used the materials
+   * @param {string} customerId - Customer ID
+   * @param {Array} materialsUsed - Array of {materialId, quantityUsed, notes?}
+   * @returns {Promise<Object>} { success: boolean, jobMaterials: Array, error?: string }
+   */
+  static async addMaterialsToJob(jobId, companyId, technicianId, customerId, materialsUsed) {
+    try {
+      if (!jobId || !companyId || !technicianId || !customerId) {
+        throw new Error('Missing required parameters (jobId, companyId, technicianId, customerId)');
+      }
+
+      if (!Array.isArray(materialsUsed) || materialsUsed.length === 0) {
+        return {
+          success: true,
+          jobMaterials: [],
+          message: 'No materials to add'
+        };
+      }
+
+      const userId = this.getCurrentUserId();
+      const jobMaterialsRef = collection(db, 'jobMaterials');
+      const createdJobMaterials = [];
+
+      // Process each material
+      for (const materialUsage of materialsUsed) {
+        const { materialId, quantityUsed, notes = '' } = materialUsage;
+
+        if (!materialId || !quantityUsed || quantityUsed <= 0) {
+          console.warn('Skipping invalid material usage:', materialUsage);
+          continue;
+        }
+
+        // Fetch material to get current cost and price
+        const materialDoc = await getDoc(doc(db, 'materials', materialId));
+        
+        if (!materialDoc.exists()) {
+          console.warn(`Material ${materialId} not found, skipping`);
+          continue;
+        }
+
+        const material = materialDoc.data();
+        
+        // Use current material prices
+        const unitCostAtUse = material.costPerUnit || 0;
+        const unitPriceAtUse = material.retailPrice || 0;
+        const totalCost = quantityUsed * unitCostAtUse;
+        const totalPrice = quantityUsed * unitPriceAtUse;
+
+        // Create jobMaterial record
+        const jobMaterialData = {
+          jobId,
+          companyId,
+          technicianId,
+          customerId,
+          materialId,
+          quantityUsed,
+          unitCostAtUse,
+          unitPriceAtUse,
+          totalCost,
+          totalPrice,
+          notes: notes || '',
+          dateUsed: serverTimestamp(),
+          addedBy: userId,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        };
+
+        const jobMaterialRef = await addDoc(jobMaterialsRef, jobMaterialData);
+        
+        createdJobMaterials.push({
+          id: jobMaterialRef.id,
+          ...jobMaterialData
+        });
+      }
+
+      return {
+        success: true,
+        jobMaterials: createdJobMaterials,
+        count: createdJobMaterials.length
+      };
+    } catch (error) {
+      console.error('Error adding materials to job:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to add materials to job',
+        jobMaterials: []
+      };
+    }
+  }
+
+  /**
+   * Get materials used on a job
+   * @param {string} jobId - Job ID
+   * @returns {Promise<Object>} { success: boolean, jobMaterials: Array, error?: string }
+   */
+  static async getJobMaterials(jobId) {
+    try {
+      if (!jobId) {
+        throw new Error('Job ID is required');
+      }
+
+      const jobMaterialsQuery = query(
+        collection(db, 'jobMaterials'),
+        where('jobId', '==', jobId),
+        orderBy('dateUsed', 'desc')
+      );
+
+      const snapshot = await getDocs(jobMaterialsQuery);
+      const jobMaterials = [];
+
+      // Fetch material details for each jobMaterial
+      const materialPromises = [];
+      
+      snapshot.forEach((doc) => {
+        const jobMaterial = {
+          id: doc.id,
+          ...doc.data()
+        };
+        
+        if (jobMaterial.materialId) {
+          materialPromises.push(
+            getDoc(doc(db, 'materials', jobMaterial.materialId))
+              .then(materialDoc => ({
+                ...jobMaterial,
+                material: materialDoc.exists() ? {
+                  id: materialDoc.id,
+                  ...materialDoc.data()
+                } : null
+              }))
+              .catch(err => {
+                console.error('Error fetching material:', err);
+                return {
+                  ...jobMaterial,
+                  material: null
+                };
+              })
+          );
+        } else {
+          jobMaterials.push(jobMaterial);
+        }
+      });
+
+      // Wait for all material fetches
+      const results = await Promise.all(materialPromises);
+      jobMaterials.push(...results);
+
+      return {
+        success: true,
+        jobMaterials,
+        count: jobMaterials.length
+      };
+    } catch (error) {
+      console.error('Error getting job materials:', error);
+      // If orderBy fails due to missing index, try without orderBy
+      if (error.code === 'failed-precondition') {
+        try {
+          const jobMaterialsQuery = query(
+            collection(db, 'jobMaterials'),
+            where('jobId', '==', jobId)
+          );
+          const snapshot = await getDocs(jobMaterialsQuery);
+          const jobMaterials = [];
+
+          snapshot.forEach((doc) => {
+            jobMaterials.push({
+              id: doc.id,
+              ...doc.data()
+            });
+          });
+
+          return {
+            success: true,
+            jobMaterials,
+            count: jobMaterials.length
+          };
+        } catch (retryError) {
+          return {
+            success: false,
+            error: retryError.message,
+            jobMaterials: []
+          };
+        }
+      }
+      
+      return {
+        success: false,
+        error: error.message || 'Failed to get job materials',
+        jobMaterials: []
+      };
+    }
+  }
+
+  /**
+   * Remove a material from a job
+   * @param {string} jobMaterialId - JobMaterial document ID
+   * @returns {Promise<Object>} { success: boolean, error?: string }
+   */
+  static async removeMaterialFromJob(jobMaterialId) {
+    try {
+      if (!jobMaterialId) {
+        throw new Error('JobMaterial ID is required');
+      }
+
+      await deleteDoc(doc(db, 'jobMaterials', jobMaterialId));
+
+      return {
+        success: true,
+        message: 'Material removed from job'
+      };
+    } catch (error) {
+      console.error('Error removing material from job:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to remove material from job'
+      };
+    }
+  }
+
+  /**
+   * Update quantity of material used on a job
+   * @param {string} jobMaterialId - JobMaterial document ID
+   * @param {number} quantityUsed - New quantity
+   * @param {string} notes - Optional notes
+   * @returns {Promise<Object>} { success: boolean, jobMaterial?: Object, error?: string }
+   */
+  static async updateJobMaterialQuantity(jobMaterialId, quantityUsed, notes = null) {
+    try {
+      if (!jobMaterialId) {
+        throw new Error('JobMaterial ID is required');
+      }
+
+      if (!quantityUsed || quantityUsed <= 0) {
+        throw new Error('Quantity must be greater than 0');
+      }
+
+      // Get existing jobMaterial to recalculate totals
+      const jobMaterialRef = doc(db, 'jobMaterials', jobMaterialId);
+      const jobMaterialDoc = await getDoc(jobMaterialRef);
+
+      if (!jobMaterialDoc.exists()) {
+        throw new Error('JobMaterial not found');
+      }
+
+      const jobMaterial = jobMaterialDoc.data();
+      const unitCostAtUse = jobMaterial.unitCostAtUse || 0;
+      const unitPriceAtUse = jobMaterial.unitPriceAtUse || 0;
+      
+      const updateData = {
+        quantityUsed,
+        totalCost: quantityUsed * unitCostAtUse,
+        totalPrice: quantityUsed * unitPriceAtUse,
+        updatedAt: serverTimestamp()
+      };
+
+      if (notes !== null) {
+        updateData.notes = notes;
+      }
+
+      await updateDoc(jobMaterialRef, updateData);
+
+      return {
+        success: true,
+        jobMaterial: {
+          id: jobMaterialDoc.id,
+          ...jobMaterial,
+          ...updateData
+        }
+      };
+    } catch (error) {
+      console.error('Error updating job material quantity:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to update job material'
       };
     }
   }

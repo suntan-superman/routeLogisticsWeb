@@ -78,12 +78,12 @@ const CustomerPortalLayout = ({ children }) => {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="sticky top-0 z-40 bg-white border-b border-gray-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="px-4 mx-auto max-w-7xl sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             {/* Logo and Brand */}
             <Link to="/customer-portal/dashboard" className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-green-600 to-green-700 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-xl">📊</span>
+              <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-green-600 to-green-700">
+                <span className="text-xl font-bold text-white">📊</span>
               </div>
               <div className="hidden sm:block">
                 <p className="text-sm font-bold text-gray-900">Customer Portal</p>
@@ -92,12 +92,12 @@ const CustomerPortalLayout = ({ children }) => {
             </Link>
 
             {/* Company Selector - Desktop */}
-            <div className="hidden md:flex items-center gap-3 mx-auto max-w-xs">
+            <div className="items-center hidden max-w-xs gap-3 mx-auto md:flex">
               {currentCompany && (
                 <div className="flex-1">
                   <button
                     onClick={() => setCompanyDropdownOpen(!companyDropdownOpen)}
-                    className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium text-gray-900"
+                    className="flex items-center justify-between w-full gap-2 px-3 py-2 text-sm font-medium text-gray-900 transition-colors bg-gray-100 rounded-lg hover:bg-gray-200"
                   >
                     <span className="truncate">{currentCompany.businessName || currentCompany.name}</span>
                     <ChevronDownIcon
@@ -109,7 +109,7 @@ const CustomerPortalLayout = ({ children }) => {
 
                   {/* Dropdown */}
                   {companyDropdownOpen && companies && companies.length > 1 && (
-                    <div className="absolute top-16 left-1/2 -translate-x-1/2 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                    <div className="absolute z-50 w-64 mt-1 -translate-x-1/2 bg-white border border-gray-200 rounded-lg shadow-lg top-16 left-1/2">
                       {companies.map(company => (
                         <button
                           key={company.id}
@@ -133,20 +133,20 @@ const CustomerPortalLayout = ({ children }) => {
             </div>
 
             {/* Right Side - Desktop */}
-            <div className="hidden md:flex items-center gap-4">
-              <button className="p-2 text-gray-600 hover:text-gray-900 relative">
+            <div className="items-center hidden gap-4 md:flex">
+              <button className="relative p-2 text-gray-600 hover:text-gray-900">
                 <BellIcon className="w-6 h-6" />
-                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
+                <span className="absolute w-2 h-2 bg-red-500 rounded-full top-1 right-1" />
               </button>
 
               {/* User Menu */}
               <div className="flex items-center gap-3 pl-4 border-l border-gray-200">
-                <div className="w-10 h-10 bg-gradient-to-br from-green-600 to-green-700 rounded-full flex items-center justify-center text-white font-bold">
+                <div className="flex items-center justify-center w-10 h-10 font-bold text-white rounded-full bg-gradient-to-br from-green-600 to-green-700">
                   {customer?.name?.charAt(0) || 'C'}
                 </div>
                 <button
                   onClick={handleLogoutClick}
-                  className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="p-2 text-gray-600 transition-colors rounded-lg hover:text-gray-900 hover:bg-gray-100"
                   title="Logout"
                 >
                   <ArrowLeftOnRectangleIcon className="w-5 h-5" />
@@ -155,7 +155,7 @@ const CustomerPortalLayout = ({ children }) => {
             </div>
 
             {/* Mobile Menu Button */}
-            <div className="md:hidden flex items-center gap-2">
+            <div className="flex items-center gap-2 md:hidden">
               <button className="p-2 text-gray-600 hover:text-gray-900">
                 <BellIcon className="w-6 h-6" />
               </button>
@@ -174,11 +174,11 @@ const CustomerPortalLayout = ({ children }) => {
 
           {/* Mobile Menu */}
           {mobileMenuOpen && (
-            <div className="md:hidden border-t border-gray-200 py-3 space-y-2">
+            <div className="py-3 space-y-2 border-t border-gray-200 md:hidden">
               {/* Company Selector - Mobile */}
               {currentCompany && companies && companies.length > 1 && (
-                <div className="px-2 mb-3 pb-3 border-b border-gray-200">
-                  <p className="text-xs font-medium text-gray-600 uppercase mb-2">Company</p>
+                <div className="px-2 pb-3 mb-3 border-b border-gray-200">
+                  <p className="mb-2 text-xs font-medium text-gray-600 uppercase">Company</p>
                   <div className="space-y-1">
                     {companies.map(company => (
                       <button
@@ -213,7 +213,7 @@ const CustomerPortalLayout = ({ children }) => {
                         : 'text-gray-700 hover:bg-gray-100'
                     }`}
                   >
-                    <Icon className="w-5 h-5 flex-shrink-0" />
+                    <Icon className="flex-shrink-0 w-5 h-5" />
                     <span>{item.label}</span>
                   </Link>
                 );
@@ -226,7 +226,7 @@ const CustomerPortalLayout = ({ children }) => {
                 }}
                 className="w-full flex items-center gap-3 px-4 py-2.5 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors text-left"
               >
-                <ArrowLeftOnRectangleIcon className="w-5 h-5 flex-shrink-0" />
+                <ArrowLeftOnRectangleIcon className="flex-shrink-0 w-5 h-5" />
                 <span>Logout</span>
               </button>
             </div>
@@ -234,11 +234,11 @@ const CustomerPortalLayout = ({ children }) => {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="px-4 py-8 mx-auto max-w-7xl sm:px-6 lg:px-8">
         <div className="flex gap-8">
           {/* Sidebar - Desktop */}
-          <aside className="hidden md:block w-56 flex-shrink-0">
-            <nav className="space-y-1 sticky top-24">
+          <aside className="flex-shrink-0 hidden w-56 md:block">
+            <nav className="sticky space-y-1 top-24">
               {navigationItems.map(item => {
                 const Icon = item.icon;
                 return (
@@ -251,7 +251,7 @@ const CustomerPortalLayout = ({ children }) => {
                         : 'text-gray-700 hover:bg-gray-100'
                     }`}
                   >
-                    <Icon className="w-5 h-5 flex-shrink-0" />
+                    <Icon className="flex-shrink-0 w-5 h-5" />
                     <span>{item.label}</span>
                   </Link>
                 );
@@ -267,17 +267,17 @@ const CustomerPortalLayout = ({ children }) => {
       </div>
 
       {/* Footer */}
-      <footer className="mt-16 border-t border-gray-200 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
+      <footer className="mt-16 bg-white border-t border-gray-200">
+        <div className="px-4 py-8 mx-auto max-w-7xl sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 gap-8 mb-8 md:grid-cols-3">
             <div>
-              <h3 className="font-semibold text-gray-900 mb-3">About Portal</h3>
+              <h3 className="mb-3 font-semibold text-gray-900">About Portal</h3>
               <p className="text-sm text-gray-600">
                 Manage your jobs, invoices, and account in one secure location.
               </p>
             </div>
             <div>
-              <h3 className="font-semibold text-gray-900 mb-3">Quick Links</h3>
+              <h3 className="mb-3 font-semibold text-gray-900">Quick Links</h3>
               <ul className="space-y-2 text-sm">
                 <li>
                   <Link to="/customer-portal/jobs" className="text-gray-600 hover:text-green-600">
@@ -297,7 +297,7 @@ const CustomerPortalLayout = ({ children }) => {
               </ul>
             </div>
             <div>
-              <h3 className="font-semibold text-gray-900 mb-3">Support</h3>
+              <h3 className="mb-3 font-semibold text-gray-900">Support</h3>
               <ul className="space-y-2 text-sm">
                 <li>
                   <Link to="/support" className="text-gray-600 hover:text-green-600">
@@ -313,11 +313,11 @@ const CustomerPortalLayout = ({ children }) => {
             </div>
           </div>
 
-          <div className="border-t border-gray-200 pt-8 flex flex-col md:flex-row items-center justify-between">
+          <div className="flex flex-col items-center justify-between pt-8 border-t border-gray-200 md:flex-row">
             <p className="text-sm text-gray-600">
-              © 2025 miFactotum. All rights reserved.
+              © 2026 Workside Software. All rights reserved.
             </p>
-            <p className="text-sm text-gray-600 mt-4 md:mt-0">
+            <p className="mt-4 text-sm text-gray-600 md:mt-0">
               Logged in as: <span className="font-medium text-gray-900">{customer?.name}</span>
             </p>
           </div>
@@ -327,19 +327,19 @@ const CustomerPortalLayout = ({ children }) => {
       {/* Logout Confirmation Modal */}
       {showLogoutConfirm && (
         <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="flex min-h-full items-center justify-center p-4 text-center sm:p-0">
+          <div className="flex items-center justify-center min-h-full p-4 text-center sm:p-0">
             {/* Backdrop */}
             <div 
-              className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
+              className="fixed inset-0 transition-opacity bg-gray-500 bg-opacity-75"
               onClick={handleLogoutCancel}
             />
 
             {/* Modal */}
-            <div className="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg">
-              <div className="bg-white px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
+            <div className="relative overflow-hidden text-left transition-all transform bg-white rounded-lg shadow-xl sm:my-8 sm:w-full sm:max-w-lg">
+              <div className="px-4 pt-5 pb-4 bg-white sm:p-6 sm:pb-4">
                 <div className="sm:flex sm:items-start">
-                  <div className="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10">
-                    <ArrowLeftOnRectangleIcon className="h-6 w-6 text-red-600" />
+                  <div className="flex items-center justify-center flex-shrink-0 w-12 h-12 mx-auto bg-red-100 rounded-full sm:mx-0 sm:h-10 sm:w-10">
+                    <ArrowLeftOnRectangleIcon className="w-6 h-6 text-red-600" />
                   </div>
                   <div className="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left">
                     <h3 className="text-lg font-semibold leading-6 text-gray-900">
@@ -353,7 +353,7 @@ const CustomerPortalLayout = ({ children }) => {
                   </div>
                 </div>
               </div>
-              <div className="bg-gray-50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
+              <div className="px-4 py-3 bg-gray-50 sm:flex sm:flex-row-reverse sm:px-6">
                 <button
                   type="button"
                   onClick={handleLogoutConfirm}

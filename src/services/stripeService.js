@@ -4,10 +4,9 @@
  */
 
 import { loadStripe } from '@stripe/stripe-js';
+import { getFunctionUrl } from '../config/firebaseConfig';
 
 const STRIPE_PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '';
-const PROJECT_ID = 'mi-factotum-field-service';
-const FUNCTIONS_BASE_URL = `https://us-central1-${PROJECT_ID}.cloudfunctions.net`;
 
 class StripeService {
   static stripePromise = null;
@@ -46,7 +45,7 @@ class StripeService {
       const token = await currentUser.getIdToken();
 
       // Call Cloud Function to create payment intent
-      const response = await fetch(`${FUNCTIONS_BASE_URL}/createPaymentIntent`, {
+      const response = await fetch(getFunctionUrl('createPaymentIntent'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

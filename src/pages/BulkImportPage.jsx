@@ -5,6 +5,7 @@ import CompanyService from '../services/companyService';
 import InvitationService from '../services/invitationService';
 import CustomerService from '../services/customerService';
 import MaterialsService from '../services/materialsService';
+import { getFunctionUrl } from '../config/firebaseConfig';
 import { useDropzone } from 'react-dropzone';
 import { auth } from '../services/firebase';
 import { 
@@ -929,8 +930,7 @@ const BulkImportPage = () => {
 
   const sendInvitationEmail = async (invitation) => {
     try {
-      const projectId = 'mi-factotum-field-service';
-      const sendInviteEmailUrl = `https://us-central1-${projectId}.cloudfunctions.net/sendInvitationEmail`;
+      const sendInviteEmailUrl = getFunctionUrl('sendInvitationEmail');
       
       const token = await auth.currentUser?.getIdToken();
       

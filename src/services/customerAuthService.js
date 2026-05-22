@@ -5,10 +5,7 @@ import {
 } from 'firebase/auth';
 import { auth, db } from './firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-
-// Get project ID from Firebase config
-const PROJECT_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'mi-factotum-field-service';
-const FUNCTIONS_BASE_URL = `https://us-central1-${PROJECT_ID}.cloudfunctions.net`;
+import { getFunctionUrl } from '../config/firebaseConfig';
 
 /**
  * Customer Authentication Service
@@ -26,7 +23,7 @@ class CustomerAuthService {
       }
 
       const response = await fetch(
-        `${FUNCTIONS_BASE_URL}/requestCustomerOTP`,
+        getFunctionUrl('requestCustomerOTP'),
         {
           method: 'POST',
           headers: {
@@ -72,7 +69,7 @@ class CustomerAuthService {
       }
 
       const response = await fetch(
-        `${FUNCTIONS_BASE_URL}/verifyCustomerOTP`,
+        getFunctionUrl('verifyCustomerOTP'),
         {
           method: 'POST',
           headers: {
@@ -272,7 +269,7 @@ class CustomerAuthService {
   static async requestPasswordReset(email) {
     try {
       const response = await fetch(
-        `${process.env.REACT_APP_FUNCTIONS_URL}/sendPasswordReset`,
+        getFunctionUrl('sendPasswordReset'),
         {
           method: 'POST',
           headers: {

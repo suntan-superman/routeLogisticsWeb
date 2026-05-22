@@ -3,11 +3,10 @@
  * Frontend service for interacting with QuickBooks Cloud Functions
  */
 
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import { auth } from './firebase';
+import { functionsBaseUrl } from '../config/firebaseConfig';
 
-const functions = getFunctions();
-const functionsUrl = 'https://us-central1-mi-factotum-field-service.cloudfunctions.net';
+const functionsUrl = functionsBaseUrl.replace(/\/$/, '');
 
 class QuickBooksService {
   /**

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useCompany } from '../contexts/CompanyContext';
 import QuickBooksService from '../services/quickbooksService';
+import { getFunctionUrl } from '../config/firebaseConfig';
 import {
   LinkIcon,
   XMarkIcon,
@@ -50,7 +51,7 @@ const QuickBooksSettingsPage = () => {
     setIsConnecting(true);
     try {
       // Get OAuth URL - use the Cloud Function callback URL
-      const redirectUri = 'https://us-central1-mi-factotum-field-service.cloudfunctions.net/handleQuickBooksOAuthCallback';
+      const redirectUri = getFunctionUrl('handleQuickBooksOAuthCallback');
       const { authUrl } = await QuickBooksService.initiateOAuth(companyId, redirectUri);
 
       // Open OAuth flow in popup window

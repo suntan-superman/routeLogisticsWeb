@@ -7,6 +7,7 @@ import {
   DocumentTextIcon,
   ChatBubbleLeftRightIcon
 } from '@heroicons/react/24/outline';
+import { getFunctionUrl } from '../config/firebaseConfig';
 
 export default function SupportPage() {
   const [formData, setFormData] = useState({
@@ -24,8 +25,7 @@ export default function SupportPage() {
     setSubmitStatus(null);
 
     try {
-      const projectId = 'mi-factotum-field-service';
-      const functionUrl = `https://us-central1-${projectId}.cloudfunctions.net/submitSupportRequest`;
+      const functionUrl = getFunctionUrl('submitSupportRequest');
       
       const response = await fetch(functionUrl, {
         method: 'POST',

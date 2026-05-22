@@ -29,6 +29,7 @@ import {
 } from '@syncfusion/ej2-react-grids';
 import { ROLE_COLORS } from '../utils/roleColors';
 import { ROLE_OPTIONS, DEFAULT_ROLE } from '../constants/roles';
+import { getFunctionUrl } from '../config/firebaseConfig';
 
 const InvitationsPage = () => {
   const { userProfile, isSuperAdmin } = useAuth();
@@ -146,8 +147,7 @@ const InvitationsPage = () => {
   const sendInvitationEmail = async (invitation) => {
     try {
       // Call Firebase function to send email via HTTP request (like invoice email)
-      const projectId = 'mi-factotum-field-service';
-      const sendInviteEmailUrl = `https://us-central1-${projectId}.cloudfunctions.net/sendInvitationEmail`;
+      const sendInviteEmailUrl = getFunctionUrl('sendInvitationEmail');
       
       // Get current user's auth token
       const token = await auth.currentUser?.getIdToken();

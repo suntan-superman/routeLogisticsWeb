@@ -1,18 +1,19 @@
 import admin from 'firebase-admin';
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 // Initialize Firebase Admin
-const serviceAccountPath = join(__dirname, '..', 'serviceAccountKey.json');
-const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8'));
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
+if (!admin.apps.length) {
+  try {
+    admin.initializeApp({
+      credential: admin.credential.applicationDefault()
+    });
+  } catch (error) {
+    console.error('Error initializing Firebase Admin:', error);
+    console.log('\nTo run this script locally, you need:');
+    console.log('1. Set GOOGLE_APPLICATION_CREDENTIALS environment variable, OR');
+    console.log('2. Run: gcloud auth application-default login');
+    process.exit(1);
+  }
+}
 
 const db = admin.firestore();
 

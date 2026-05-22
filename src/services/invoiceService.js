@@ -1,6 +1,6 @@
-import { 
-  collection, 
-  doc, 
+import {
+  collection,
+  doc,
   getDoc, 
   addDoc, 
   updateDoc,
@@ -12,14 +12,13 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db, auth } from './firebase';
-import { getFunctions, httpsCallable } from 'firebase/functions';
-import app from './firebase';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import CompanyService from './companyService';
 import CustomerService from './customerService';
 import JobManagementService from './jobManagementService';
 import InvoiceTemplateService from './invoiceTemplateService';
+import { getFunctionUrl } from '../config/firebaseConfig';
 
 /**
  * Invoice Service for generating and managing invoices
@@ -860,7 +859,7 @@ class InvoiceService {
 
       // Use HTTP endpoint instead of callable function to work around v2 auth bug
       // This pattern matches the Workside approach - manual token extraction
-      const functionUrl = `https://us-central1-mi-factotum-field-service.cloudfunctions.net/sendInvoiceEmail`;
+      const functionUrl = getFunctionUrl('sendInvoiceEmail');
       
       console.log('Calling Cloud Function via HTTP with invoiceId:', invoiceId);
       console.log('Auth state check - currentUser:', auth.currentUser?.uid);

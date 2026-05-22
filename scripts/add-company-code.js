@@ -1,38 +1,21 @@
 /**
  * Script to add a company code to "Bakersfield Pest" company
  * Run with: node scripts/add-company-code.js
- * 
- * Requires: serviceAccountKey.json in the miFactotumWeb directory
  */
 
 import admin from 'firebase-admin';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // Initialize Firebase Admin
 if (!admin.apps.length) {
   try {
-    // Try to use service account key file (if running locally)
-    const serviceAccountPath = path.join(__dirname, '..', 'serviceAccountKey.json');
-    if (fs.existsSync(serviceAccountPath)) {
-      const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-      });
-    } else {
-      // Try Application Default Credentials (for Cloud Functions or local with gcloud auth)
-      admin.initializeApp();
-    }
+    admin.initializeApp({
+      credential: admin.credential.applicationDefault()
+    });
   } catch (error) {
     console.error('Error initializing Firebase Admin:', error);
     console.log('\nTo run this script locally, you need:');
-    console.log('1. serviceAccountKey.json in the miFactotumWeb directory, OR');
-    console.log('2. Set GOOGLE_APPLICATION_CREDENTIALS environment variable, OR');
-    console.log('3. Run: gcloud auth application-default login');
+    console.log('1. Set GOOGLE_APPLICATION_CREDENTIALS environment variable, OR');
+    console.log('2. Run: gcloud auth application-default login');
     process.exit(1);
   }
 }

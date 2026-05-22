@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from './firebase';
 import InvitationService from './invitationService';
+import { getFunctionUrl } from '../config/firebaseConfig';
 
 class CompanyService {
   // Get current user ID
@@ -118,8 +119,7 @@ class CompanyService {
 
   static async claimPendingCompanyOwnership() {
     try {
-      const projectId = 'mi-factotum-field-service';
-      const claimOwnershipUrl = `https://us-central1-${projectId}.cloudfunctions.net/claimCompanyOwnership`;
+      const claimOwnershipUrl = getFunctionUrl('claimCompanyOwnership');
       const token = await auth.currentUser?.getIdToken();
 
       if (!token) {
@@ -161,8 +161,7 @@ class CompanyService {
 
   static async sendTeamMemberInvitationEmail(invitation) {
     try {
-      const projectId = 'mi-factotum-field-service';
-      const sendInviteEmailUrl = `https://us-central1-${projectId}.cloudfunctions.net/sendInvitationEmail`;
+      const sendInviteEmailUrl = getFunctionUrl('sendInvitationEmail');
       const token = await auth.currentUser?.getIdToken();
 
       if (!token) {

@@ -14,6 +14,7 @@ import {
   BellIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import { APP_INFO } from '../constants/appInfo';
 
 const CustomerPortalLayout = ({ children }) => {
   const navigate = useNavigate();
@@ -315,7 +316,7 @@ const CustomerPortalLayout = ({ children }) => {
 
           <div className="flex flex-col items-center justify-between pt-8 border-t border-gray-200 md:flex-row">
             <p className="text-sm text-gray-600">
-              © 2026 Workside Software. All rights reserved.
+              {APP_INFO.COPYRIGHT_FULL}
             </p>
             <p className="mt-4 text-sm text-gray-600 md:mt-0">
               Logged in as: <span className="font-medium text-gray-900">{customer?.name}</span>

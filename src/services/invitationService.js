@@ -16,9 +16,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db, auth } from './firebase';
-
-const PROJECT_ID = 'mi-factotum-field-service';
-const FUNCTIONS_BASE_URL = `https://us-central1-${PROJECT_ID}.cloudfunctions.net`;
+import { getFunctionUrl } from '../config/firebaseConfig';
 
 class InvitationService {
   static getCurrentUserId() {
@@ -61,7 +59,7 @@ class InvitationService {
   }
 
   static getFunctionUrl(name) {
-    return `${FUNCTIONS_BASE_URL}/${name}`;
+    return getFunctionUrl(name);
   }
 
   // Create an invitation

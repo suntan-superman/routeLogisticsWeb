@@ -47,3 +47,6 @@ combined-users-drivers-*.csv
 *.keystore
 *.key
 *.apk
+
+# Local Netlify folder
+.netlify

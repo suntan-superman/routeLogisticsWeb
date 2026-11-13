@@ -8,6 +8,13 @@ async function deliverMail(db, ref, transport, from, now = Date.now()) {
   const mail = await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref), data = snap.data();
     if (!data || !['queued', 'sending'].includes(data.status) || data.availableAt > now) return null;
+    if (data.staffLoginChallengeId) {
+      const challenge = await tx.get(db.doc(`rlStaffLoginChallenges/${data.staffLoginChallengeId}`));
+      const latest = challenge.exists ? await tx.get(db.doc(`rlStaffLoginRequests/${challenge.get('emailHash')}`)) : null;
+      if (!challenge.exists || challenge.get('consumed') || challenge.get('expiresAt').toMillis() <= now || latest?.get('challengeId') !== challenge.id) {
+        tx.update(ref, { status: 'cancelled' }); return null;
+      }
+    }
     if (data.invitationId) {
       const [member, secret] = await Promise.all([tx.get(db.collection('teamMembers').doc(data.invitationId)), tx.get(db.collection('rlInviteSecrets').doc(data.invitationId))]);
       if (member.get('status') !== 'pending' || secret.get('codeHash') !== data.invitationHash) { tx.update(ref, { status: 'cancelled' }); return null; }

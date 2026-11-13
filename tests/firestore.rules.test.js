@@ -182,6 +182,16 @@ test('member can read own team record; unrelated user cannot', async () => {
   await assertFails(getDoc(doc(as('solo1'), 'teamMembers/t1')));
 });
 
+test('staff login challenges, resend state and mail are inaccessible to all client roles', async () => {
+  for (const name of ['rlStaffLoginChallenges', 'rlStaffLoginRequests', 'rlMail']) {
+    await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), `${name}/secret`), { email: 'person@example.test', codeHash: 'secret' }));
+    for (const client of [owner(), manager(), tech(), env.unauthenticatedContext().firestore()]) {
+      await assertFails(getDoc(doc(client, `${name}/secret`)));
+      await assertFails(setDoc(doc(client, `${name}/forged`), { consumed: false }));
+    }
+  }
+});
+
 test('unknown collections are denied', async () => {
   await assertFails(setDoc(doc(owner(), 'secrets/x'), { a: 1 }));
 });

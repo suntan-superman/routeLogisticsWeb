@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import EstimateTemplateService from '../services/estimateTemplateService';
+import { useConfirm } from '../components/ConfirmProvider';
 import { 
   DocumentTextIcon, 
   PlusIcon,
@@ -14,6 +15,7 @@ import {
 import toast from 'react-hot-toast';
 
 const EstimateTemplatesPage = () => {
+  const confirm = useConfirm();
   const [templates, setTemplates] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -157,7 +159,8 @@ const EstimateTemplatesPage = () => {
   };
 
   const handleDeleteTemplate = async (templateId) => {
-    if (!window.confirm('Are you sure you want to delete this template?')) {
+    const ok = await confirm({ title: 'Delete template?', message: "This estimate template will be permanently removed. This can't be undone.", confirmText: 'Delete template' });
+    if (!ok) {
       return;
     }
 

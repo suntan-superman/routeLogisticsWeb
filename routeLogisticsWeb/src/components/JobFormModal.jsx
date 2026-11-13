@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import JobManagementService from '../services/jobManagementService';
+import { buildJobEdit } from '../services/jobChanges';
+import { auth } from '../services/firebase';
 
 const SERVICE_TYPES = [
   'General Pest Control',
@@ -28,7 +30,17 @@ const input =
   'mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm';
 const label = 'block text-sm font-medium text-gray-700';
 
-const emptyForm = (defaults) => ({
+const emptyForm = (defaults, job) => (job ? {
+  customerId: job.customerId || '',
+  serviceType: job.serviceType || '',
+  date: job.date || todayStr(),
+  time: job.time || '09:00',
+  estimatedDuration: String(job.estimatedDuration ?? '1'),
+  address: job.address || '',
+  totalCost: job.totalCost === undefined || job.totalCost === null ? '' : String(job.totalCost),
+  priority: job.priority || 'medium',
+  notes: job.notes || ''
+} : {
   customerId: '',
   serviceType: '',
   date: todayStr(),
@@ -41,8 +53,10 @@ const emptyForm = (defaults) => ({
   ...defaults
 });
 
-const JobFormModal = ({ customers, defaults, onClose, onCreated }) => {
-  const [form, setForm] = useState(() => emptyForm(defaults));
+const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
+  const isEdit = !!job;
+  const [form, setForm] = useState(() => emptyForm(defaults, job));
+  const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [pastAck, setPastAck] = useState(false);
 
@@ -57,7 +71,8 @@ const JobFormModal = ({ customers, defaults, onClose, onCreated }) => {
     setForm((f) => ({ ...f, [field]: value }));
   };
 
-  const isPast = !!form.date && !!form.time && new Date(`${form.date}T${form.time}`) < new Date();
+  const timeChanged = !isEdit || form.date !== job.date || form.time !== job.time;
+  const isPast = timeChanged && !!form.date && !!form.time && new Date(`${form.date}T${form.time}`) < new Date();
 
   const customerAddress = (c) =>
     [c.address, c.city, [c.state, c.zipCode].filter(Boolean).join(' ')].filter(Boolean).join(', ');
@@ -82,7 +97,7 @@ const JobFormModal = ({ customers, defaults, onClose, onCreated }) => {
     }
 
     setSaving(true);
-    const result = await JobManagementService.createJob({
+    const details = {
       customerId: customer.id,
       customerName: customer.name,
       customerPhone: customer.phone || '',
@@ -94,7 +109,24 @@ const JobFormModal = ({ customers, defaults, onClose, onCreated }) => {
       totalCost: cost,
       priority: form.priority,
       notes: form.notes.trim()
-    });
+    };
+
+    if (isEdit) {
+      const by = auth.currentUser?.displayName || auth.currentUser?.email || 'Unknown';
+      const edit = buildJobEdit(job, details, { by, reason });
+      if (!edit) {
+        setSaving(false);
+        toast('No changes to save');
+        return onClose();
+      }
+      const res = await JobManagementService.updateJob(job.id, edit);
+      setSaving(false);
+      if (!res.success) return toast.error(res.error || 'Could not update job');
+      toast.success('Job updated – flagged as modified from original');
+      return onCreated({ ...job, ...edit });
+    }
+
+    const result = await JobManagementService.createJob(details);
     setSaving(false);
     if (!result.success) return toast.error(result.error || 'Could not create job');
     toast.success('Job scheduled');
@@ -105,7 +137,7 @@ const JobFormModal = ({ customers, defaults, onClose, onCreated }) => {
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-gray-900/50 p-4 sm:py-12">
       <form onSubmit={submit} className="w-full max-w-xl rounded-xl bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-          <h3 className="text-lg font-semibold text-gray-900">Schedule New Job</h3>
+          <h3 className="text-lg font-semibold text-gray-900">{isEdit ? 'Edit Job' : 'Schedule New Job'}</h3>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600" aria-label="Close">
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -201,6 +233,21 @@ const JobFormModal = ({ customers, defaults, onClose, onCreated }) => {
           </div>
         </div>
 
+        {isEdit && (
+          <div className="mx-6 mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+            <label className={label}>Reason for change <span className="font-normal text-gray-400">(optional)</span></label>
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              className={input}
+              placeholder="e.g. Customer added a second treatment area"
+            />
+            <p className="mt-2 text-xs text-gray-500">
+              Changes are recorded and the job is flagged as modified from the original.
+            </p>
+          </div>
+        )}
+
         {isPast && (
           <div className={`mx-6 mb-4 rounded-lg border p-3 text-sm ${pastAck ? 'border-amber-400 bg-amber-100 text-amber-900' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
             <strong>This date and time is in the past.</strong>{' '}
@@ -221,7 +268,7 @@ const JobFormModal = ({ customers, defaults, onClose, onCreated }) => {
             type="submit" disabled={saving}
             className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
           >
-            {saving ? 'Scheduling…' : pastAck ? 'Schedule anyway' : 'Schedule Job'}
+            {saving ? 'Saving…' : pastAck ? 'Schedule anyway' : isEdit ? 'Save Changes' : 'Schedule Job'}
           </button>
         </div>
       </form>

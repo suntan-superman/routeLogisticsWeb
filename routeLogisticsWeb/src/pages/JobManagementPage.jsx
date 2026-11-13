@@ -3,6 +3,8 @@ import { motion } from 'framer-motion';
 import JobManagementService from '../services/jobManagementService';
 import CustomerService from '../services/customerService';
 import JobFormModal from '../components/JobFormModal';
+import JobChangeHistory, { ModifiedBadge } from '../components/JobChangeHistory';
+import { useConfirm } from '../components/ConfirmProvider';
 import { 
   ClipboardDocumentListIcon, 
   PlusIcon,
@@ -29,6 +31,7 @@ import { canManage } from '../services/tenancy';
 
 const JobManagementPage = () => {
   const navigate = useNavigate();
+  const confirm = useConfirm();
 
   const handleCreateInvoice = async (job) => {
     const res = await createInvoiceFromJob(job);
@@ -213,10 +216,14 @@ const JobManagementPage = () => {
     setIsLoading(false);
   };
 
-  const handleDeleteJob = async (jobId) => {
-    if (!window.confirm('Are you sure you want to delete this job?')) {
-      return;
-    }
+  const handleDeleteJob = async (job) => {
+    const jobId = job.id;
+    const ok = await confirm({
+      title: 'Delete this job?',
+      message: `${job.serviceType || 'This job'} for ${job.customerName || 'this customer'} will be permanently removed. This can't be undone.`,
+      confirmText: 'Delete job'
+    });
+    if (!ok) return;
 
     setIsLoading(true);
     try {
@@ -613,7 +620,7 @@ const JobManagementPage = () => {
                   <tr key={job.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div>
-                        <div className="text-sm font-medium text-gray-900">{job.serviceType || 'Service'}</div>
+                        <div className="text-sm font-medium text-gray-900">{job.serviceType || 'Service'}<ModifiedBadge job={job} /></div>
                         <div className="text-sm text-gray-500 flex items-center">
                           <MapPinIcon className="h-3 w-3 mr-1" />
                           {job.address || 'No address'}
@@ -652,13 +659,15 @@ const JobManagementPage = () => {
                         >
                           <EyeIcon className="h-4 w-4" />
                         </button>
-                        <button
-                          onClick={() => openEditModal(job)}
-                          className="text-gray-600 hover:text-gray-900"
-                          title="Edit Job"
-                        >
-                          <PencilIcon className="h-4 w-4" />
-                        </button>
+                        {canManage() && ['scheduled', 'in-progress'].includes(job.status) && (
+                          <button
+                            onClick={() => openEditModal(job)}
+                            className="text-gray-600 hover:text-gray-900"
+                            title="Edit Job"
+                          >
+                            <PencilIcon className="h-4 w-4" />
+                          </button>
+                        )}
                         <button
                           onClick={() => openStatusModal(job)}
                           className="text-blue-600 hover:text-blue-900"
@@ -666,13 +675,15 @@ const JobManagementPage = () => {
                         >
                           <CheckCircleIcon className="h-4 w-4" />
                         </button>
-                        <button
-                          onClick={() => handleDeleteJob(job.id)}
-                          className="text-red-600 hover:text-red-900"
-                          title="Delete Job"
-                        >
-                          <TrashIcon className="h-4 w-4" />
-                        </button>
+                        {canManage() && (
+                          <button
+                            onClick={() => handleDeleteJob(job)}
+                            className="text-red-600 hover:text-red-900"
+                            title="Delete Job"
+                          >
+                            <TrashIcon className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -776,6 +787,7 @@ const JobManagementPage = () => {
                   </div>
                 )}
 
+                <JobChangeHistory job={selectedJob} />
                 <div className="border-t pt-4"><JobPhotos job={selectedJob} /></div>
                 <div className="border-t pt-4"><JobApplicationLog job={selectedJob} /></div>
               </div>
@@ -936,6 +948,20 @@ const JobManagementPage = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {showEditModal && selectedJob && (
+        <JobFormModal
+          job={selectedJob}
+          customers={customers}
+          onClose={() => { setShowEditModal(false); setSelectedJob(null); }}
+          onCreated={() => {
+            setShowEditModal(false);
+            setSelectedJob(null);
+            loadJobs();
+            loadStats();
+          }}
+        />
       )}
 
       {showNewJob && (

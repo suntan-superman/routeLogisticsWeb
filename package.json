@@ -6,7 +6,7 @@
     "test:e2e": "firebase emulators:exec --only auth,firestore,functions --project demo-routelogistics \"node --test tests/syncclaims.e2e.test.js\"",
     "test:functions": "cd functions && node --test",
     "test": "npm run test:functions && npm run test:web && npm run test:rules",
-    "test:web": "node --test routeLogisticsWeb/src/services/invoiceMath.test.js routeLogisticsWeb/src/utils/format.test.js"
+    "test:web": "node --test routeLogisticsWeb/src/services/invoiceMath.test.js routeLogisticsWeb/src/utils/format.test.js routeLogisticsWeb/src/services/jobChanges.test.js"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^4.0.1",

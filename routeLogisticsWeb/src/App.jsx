@@ -23,6 +23,7 @@ import ServicePlansPage from './pages/ServicePlansPage';
 // Components
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
+import { ConfirmProvider } from './components/ConfirmProvider';
 
 // Create a client
 // Register Syncfusion license
@@ -44,6 +45,7 @@ function App() {
     <HelmetProvider>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
+          <ConfirmProvider>
           <Router>
             <div className="min-h-screen bg-gray-50">
               <Routes>
@@ -150,6 +152,7 @@ function App() {
               />
             </div>
           </Router>
+          </ConfirmProvider>
         </AuthProvider>
       </QueryClientProvider>
     </HelmetProvider>

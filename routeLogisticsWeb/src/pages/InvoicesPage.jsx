@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { listInvoices, markInvoiceSent, markInvoicePaid, voidInvoice, deleteDraftInvoice } from '../services/invoiceService';
 import { isOverdue } from '../services/invoiceMath';
 import { canManage } from '../services/tenancy';
+import { useConfirm } from '../components/ConfirmProvider';
 import { useAuth } from '../contexts/AuthContext';
 
 const money = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0);
@@ -43,6 +44,7 @@ const InvoicesPage = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const manage = canManage();
+  const confirm = useConfirm();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -124,10 +126,10 @@ const InvoicesPage = () => {
                       {manage && inv.status === 'draft' && <button className="text-blue-600 hover:underline" onClick={() => act(() => markInvoiceSent(inv.id), 'Marked as sent')}>Mark sent</button>}
                       {manage && inv.status === 'sent' && <button className="text-green-600 hover:underline" onClick={() => act(() => markInvoicePaid(inv.id), 'Marked as paid')}>Mark paid</button>}
                       {manage && (inv.status === 'draft' || inv.status === 'sent') && (
-                        <button className="text-red-600 hover:underline" onClick={() => window.confirm('Void this invoice?') && act(() => voidInvoice(inv.id), 'Invoice voided')}>Void</button>
+                        <button className="text-red-600 hover:underline" onClick={async () => (await confirm({ title: 'Void this invoice?', message: 'A voided invoice can no longer be paid or edited.', confirmText: 'Void invoice' })) && act(() => voidInvoice(inv.id), 'Invoice voided')}>Void</button>
                       )}
                       {manage && inv.status === 'draft' && (
-                        <button className="text-gray-500 hover:underline" onClick={() => window.confirm('Delete this draft?') && act(() => deleteDraftInvoice(inv.id), 'Draft deleted')}>Delete</button>
+                        <button className="text-gray-500 hover:underline" onClick={async () => (await confirm({ title: 'Delete this draft?', message: "The draft invoice will be permanently removed.", confirmText: 'Delete draft' })) && act(() => deleteDraftInvoice(inv.id), 'Draft deleted')}>Delete</button>
                       )}
                     </td>
                   </tr>

@@ -4,6 +4,7 @@ import CustomerService from '../services/customerService';
 import { listServicePlans, createServicePlan, updateServicePlan, deleteServicePlan, generateNextJob, FREQUENCIES } from '../services/servicePlanService';
 import { listServiceLogs, logsToCsv } from '../services/serviceLogService';
 import { canManage } from '../services/tenancy';
+import { useConfirm } from '../components/ConfirmProvider';
 
 const input = 'mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm';
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -18,6 +19,7 @@ const ServicePlansPage = () => {
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState({ start: '', end: '' });
   const manage = canManage();
+  const confirm = useConfirm();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -58,7 +60,8 @@ const ServicePlansPage = () => {
   };
 
   const remove = async (plan) => {
-    if (!window.confirm(`Delete the plan for ${plan.customerName}?`)) return;
+    const ok = await confirm({ title: 'Delete service plan?', message: `The recurring plan for ${plan.customerName} will be removed. Already scheduled jobs are not affected.`, confirmText: 'Delete plan' });
+    if (!ok) return;
     const res = await deleteServicePlan(plan.id);
     if (!res.success) return toast.error(res.error);
     load();

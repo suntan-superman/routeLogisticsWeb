@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import CustomerService from '../services/customerService';
+import { useConfirm } from '../components/ConfirmProvider';
 import { formatPhone } from '../utils/format';
 import { 
   UsersIcon, 
@@ -16,6 +17,7 @@ import {
 import toast from 'react-hot-toast';
 
 const CustomerManagementPage = () => {
+  const confirm = useConfirm();
   const [customers, setCustomers] = useState([]);
   const [filteredCustomers, setFilteredCustomers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -198,7 +200,8 @@ const CustomerManagementPage = () => {
   };
 
   const handleDeleteCustomer = async (customerId) => {
-    if (!window.confirm('Are you sure you want to delete this customer?')) {
+    const ok = await confirm({ title: 'Delete customer?', message: "This customer will be permanently removed. Their existing jobs and invoices are not deleted. This can't be undone.", confirmText: 'Delete customer' });
+    if (!ok) {
       return;
     }
 

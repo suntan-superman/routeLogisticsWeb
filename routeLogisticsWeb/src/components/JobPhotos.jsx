@@ -2,11 +2,13 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { uploadJobPhoto, listJobPhotos, deleteJobPhoto } from '../services/photoService';
 import { canManage } from '../services/tenancy';
+import { useConfirm } from './ConfirmProvider';
 
 const JobPhotos = ({ job }) => {
   const [photos, setPhotos] = useState([]);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef(null);
+  const confirm = useConfirm();
 
   const load = useCallback(async () => {
     try {
@@ -42,7 +44,8 @@ const JobPhotos = ({ job }) => {
   };
 
   const remove = async (photo) => {
-    if (!window.confirm('Delete this photo?')) return;
+    const ok = await confirm({ title: 'Delete photo?', message: "This photo will be permanently removed from the job.", confirmText: 'Delete photo' });
+    if (!ok) return;
     try {
       await deleteJobPhoto(photo);
       setPhotos((p) => p.filter((x) => x.id !== photo.id));

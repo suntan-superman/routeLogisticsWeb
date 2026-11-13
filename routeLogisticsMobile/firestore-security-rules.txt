@@ -1,0 +1,2 @@
+DEPRECATED: the canonical rules are /firestore.rules and /storage.rules at the repo root. Deploy with 'firebase deploy --only firestore,storage'. Do not edit rules here.
+

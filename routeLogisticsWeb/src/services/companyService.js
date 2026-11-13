@@ -1,0 +1,320 @@
+import { 
+  collection, 
+  doc, 
+  getDoc, 
+  setDoc, 
+  updateDoc, 
+  getDocs, 
+  query, 
+  where,
+  addDoc,
+  deleteDoc
+} from 'firebase/firestore';
+import { db } from './firebase';
+import { auth } from './firebase';
+import { syncTenancy } from './tenancy';
+
+class CompanyService {
+  // Get current user ID
+  static getCurrentUserId() {
+    const user = auth.currentUser;
+    if (!user) {
+      throw new Error('No user is currently signed in');
+    }
+    return user.uid;
+  }
+
+  // Create a new company
+  static async createCompany(companyData) {
+    try {
+      const userId = this.getCurrentUserId();
+      
+      const company = {
+        ...companyData,
+        ownerId: userId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        isActive: true
+      };
+
+      // Add company to companies collection
+      const docRef = await addDoc(collection(db, 'companies'), company);
+      
+      // Update user profile with company ID
+      await updateDoc(doc(db, 'users', userId), {
+        companyId: docRef.id,
+        updatedAt: new Date().toISOString()
+      });
+
+      // Server mints owner claims and backfills existing data with the new companyId.
+      await syncTenancy();
+
+      return {
+        success: true,
+        companyId: docRef.id,
+        company: { id: docRef.id, ...company }
+      };
+    } catch (error) {
+      console.error('Error creating company:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  // Get company by ID
+  static async getCompany(companyId) {
+    try {
+      const companyDoc = await getDoc(doc(db, 'companies', companyId));
+      
+      if (!companyDoc.exists()) {
+        return {
+          success: false,
+          error: 'Company not found'
+        };
+      }
+
+      return {
+        success: true,
+        company: { id: companyDoc.id, ...companyDoc.data() }
+      };
+    } catch (error) {
+      console.error('Error getting company:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  // Get company by user ID
+  static async getCompanyByUserId(userId) {
+    try {
+      const q = query(
+        collection(db, 'companies'),
+        where('ownerId', '==', userId)
+      );
+      
+      const querySnapshot = await getDocs(q);
+      
+      if (querySnapshot.empty) {
+        return {
+          success: false,
+          error: 'No company found for this user'
+        };
+      }
+
+      const companyDoc = querySnapshot.docs[0];
+      return {
+        success: true,
+        company: { id: companyDoc.id, ...companyDoc.data() }
+      };
+    } catch (error) {
+      console.error('Error getting company by user ID:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  // Update company
+  static async updateCompany(companyId, updates) {
+    try {
+      const userId = this.getCurrentUserId();
+      
+      // Verify user owns the company
+      const companyResult = await this.getCompany(companyId);
+      if (!companyResult.success) {
+        return companyResult;
+      }
+
+      if (companyResult.company.ownerId !== userId) {
+        return {
+          success: false,
+          error: 'Unauthorized to update this company'
+        };
+      }
+
+      const updatedData = {
+        ...updates,
+        updatedAt: new Date().toISOString()
+      };
+
+      await updateDoc(doc(db, 'companies', companyId), updatedData);
+
+      return {
+        success: true,
+        company: { ...companyResult.company, ...updatedData }
+      };
+    } catch (error) {
+      console.error('Error updating company:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  // Add team member to company
+  static async addTeamMember(companyId, userEmail, role = 'technician') {
+    try {
+      const userId = this.getCurrentUserId();
+      
+      // Verify user owns the company
+      const companyResult = await this.getCompany(companyId);
+      if (!companyResult.success || companyResult.company.ownerId !== userId) {
+        return {
+          success: false,
+          error: 'Unauthorized to add team members'
+        };
+      }
+
+      if (!['technician', 'manager', 'admin'].includes(role)) {
+        return { success: false, error: 'Invalid role' };
+      }
+      const email = (userEmail || '').trim().toLowerCase();
+      if (!email) {
+        return { success: false, error: 'Email is required' };
+      }
+
+      // Create team member record
+      const teamMember = {
+        companyId,
+        email,
+        role,
+        invitedBy: userId,
+        status: 'pending', // pending, active, inactive
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      const docRef = await addDoc(collection(db, 'teamMembers'), teamMember);
+
+      return {
+        success: true,
+        teamMemberId: docRef.id,
+        teamMember: { id: docRef.id, ...teamMember }
+      };
+    } catch (error) {
+      console.error('Error adding team member:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  // Get team members for a company
+  static async getTeamMembers(companyId) {
+    try {
+      const q = query(
+        collection(db, 'teamMembers'),
+        where('companyId', '==', companyId)
+      );
+      
+      const querySnapshot = await getDocs(q);
+      const teamMembers = [];
+      
+      querySnapshot.forEach((doc) => {
+        teamMembers.push({ id: doc.id, ...doc.data() });
+      });
+
+      return {
+        success: true,
+        teamMembers
+      };
+    } catch (error) {
+      console.error('Error getting team members:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  // Update team member
+  static async updateTeamMember(teamMemberId, updates) {
+    try {
+      const userId = this.getCurrentUserId();
+      
+      // Get team member to verify permissions
+      const teamMemberDoc = await getDoc(doc(db, 'teamMembers', teamMemberId));
+      if (!teamMemberDoc.exists()) {
+        return {
+          success: false,
+          error: 'Team member not found'
+        };
+      }
+
+      const teamMember = teamMemberDoc.data();
+      const companyResult = await this.getCompany(teamMember.companyId);
+      
+      if (!companyResult.success || companyResult.company.ownerId !== userId) {
+        return {
+          success: false,
+          error: 'Unauthorized to update this team member'
+        };
+      }
+
+      const updatedData = {
+        ...updates,
+        updatedAt: new Date().toISOString()
+      };
+
+      await updateDoc(doc(db, 'teamMembers', teamMemberId), updatedData);
+
+      return {
+        success: true,
+        teamMember: { ...teamMember, ...updatedData }
+      };
+    } catch (error) {
+      console.error('Error updating team member:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  // Remove team member
+  static async removeTeamMember(teamMemberId) {
+    try {
+      const userId = this.getCurrentUserId();
+      
+      // Get team member to verify permissions
+      const teamMemberDoc = await getDoc(doc(db, 'teamMembers', teamMemberId));
+      if (!teamMemberDoc.exists()) {
+        return {
+          success: false,
+          error: 'Team member not found'
+        };
+      }
+
+      const teamMember = teamMemberDoc.data();
+      const companyResult = await this.getCompany(teamMember.companyId);
+      
+      if (!companyResult.success || companyResult.company.ownerId !== userId) {
+        return {
+          success: false,
+          error: 'Unauthorized to remove this team member'
+        };
+      }
+
+      await deleteDoc(doc(db, 'teamMembers', teamMemberId));
+
+      return {
+        success: true
+      };
+    } catch (error) {
+      console.error('Error removing team member:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+}
+
+export default CompanyService;

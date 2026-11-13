@@ -1,0 +1,179 @@
+rules_version = '2';
+
+// Single source of truth for Firestore security. Deploy with `firebase deploy --only firestore`.
+// Tenancy model:
+//  - Solo/legacy docs: owned by `userId` and have no `companyId`.
+//  - Company docs: carry `companyId`; access comes from the `companyId` and `role`
+//    custom claims, which are minted only by the `syncClaims` Cloud Function.
+// Clients can never write `role`, `companyId` claims, or change `companyId` on data docs.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function uid() {
+      return request.auth.uid;
+    }
+    function claimCompany() {
+      return request.auth.token.get('companyId', null);
+    }
+    function claimRole() {
+      return request.auth.token.get('role', null);
+    }
+    function isManager() {
+      return claimRole() in ['owner', 'admin', 'manager'];
+    }
+    function isStaff() {
+      return claimRole() in ['owner', 'admin', 'manager', 'technician'];
+    }
+
+    // Data doc helpers (d = resource.data or request.resource.data)
+    function isSolo(d) {
+      return d.get('companyId', null) == null && d.get('userId', null) == uid();
+    }
+    function inCompany(d) {
+      return claimCompany() != null && d.get('companyId', null) == claimCompany();
+    }
+    function readable(d) {
+      return signedIn() && (isSolo(d) || (inCompany(d) && isStaff()));
+    }
+    function manageable(d) {
+      return signedIn() && (isSolo(d) || (inCompany(d) && isManager()));
+    }
+    // Ownership and tenancy fields may not be changed by clients.
+    function tenancyUnchanged() {
+      return request.resource.data.get('userId', null) == resource.data.get('userId', null)
+        && request.resource.data.get('companyId', null) == resource.data.get('companyId', null);
+    }
+    // New docs must be attributed to the caller and, if tenant-scoped, to the caller's company.
+    function validCreate(allowTechnician) {
+      return signedIn()
+        && request.resource.data.get('userId', null) == uid()
+        && (request.resource.data.get('companyId', null) == null
+            || (request.resource.data.companyId == claimCompany()
+                && (isManager() || (allowTechnician && isStaff()))));
+    }
+
+    // ---------- users ----------
+    match /users/{userId} {
+      allow read: if signedIn() && uid() == userId;
+      allow create: if signedIn() && uid() == userId
+        && request.resource.data.get('role', null) == null
+        && request.resource.data.get('companyId', null) == null;
+      // role/legacy flags are server-managed; companyId may only point at a company the user owns.
+      allow update: if signedIn() && uid() == userId
+        && request.resource.data.get('role', null) == resource.data.get('role', null)
+        && request.resource.data.get('legacyBackfilledAt', null) == resource.data.get('legacyBackfilledAt', null)
+        && (request.resource.data.get('companyId', null) == resource.data.get('companyId', null)
+            || (request.resource.data.get('companyId', null) != null
+                && get(/databases/$(database)/documents/companies/$(request.resource.data.companyId)).data.ownerId == uid()));
+      allow delete: if false;
+    }
+
+    // ---------- companies ----------
+    match /companies/{companyId} {
+      allow read: if signedIn()
+        && (resource.data.ownerId == uid() || claimCompany() == companyId);
+      allow create: if signedIn()
+        && request.resource.data.ownerId == uid()
+        && get(/databases/$(database)/documents/users/$(uid())).data.get('companyId', null) == null;
+      allow update: if signedIn()
+        && resource.data.ownerId == uid()
+        && request.resource.data.ownerId == resource.data.ownerId;
+      allow delete: if false;
+    }
+
+    // ---------- team members ----------
+    // Invites are created by the owner; activation (setting `uid`) happens only in Cloud Functions.
+    match /teamMembers/{teamMemberId} {
+      allow read: if signedIn()
+        && (get(/databases/$(database)/documents/companies/$(resource.data.companyId)).data.ownerId == uid()
+            || resource.data.get('uid', null) == uid());
+      allow create: if signedIn()
+        && get(/databases/$(database)/documents/companies/$(request.resource.data.companyId)).data.ownerId == uid()
+        && request.resource.data.role in ['technician', 'manager', 'admin']
+        && request.resource.data.status == 'pending'
+        && request.resource.data.get('uid', null) == null
+        && request.resource.data.email is string;
+      allow update: if signedIn()
+        && get(/databases/$(database)/documents/companies/$(resource.data.companyId)).data.ownerId == uid()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'status', 'updatedAt'])
+        && request.resource.data.role in ['technician', 'manager', 'admin']
+        && request.resource.data.status in ['pending', 'inactive'];
+      allow delete: if signedIn()
+        && get(/databases/$(database)/documents/companies/$(resource.data.companyId)).data.ownerId == uid();
+    }
+
+    // ---------- customers ----------
+    match /customers/{id} {
+      allow read: if readable(resource.data);
+      allow create: if validCreate(false);
+      allow update: if manageable(resource.data) && tenancyUnchanged();
+      allow delete: if manageable(resource.data);
+    }
+
+    // ---------- jobs ----------
+    match /jobs/{id} {
+      function validStatus(s) {
+        return s in ['scheduled', 'in-progress', 'completed', 'cancelled'];
+      }
+      function technicianFields() {
+        return ['status', 'notes', 'completedAt', 'actualWorkDone', 'actualHours',
+                'completionNotes', 'cancelledAt', 'cancellationReason', 'updatedAt'];
+      }
+      function statusOk() {
+        return !('status' in request.resource.data)
+          || (validStatus(request.resource.data.status)
+              && (request.resource.data.status == resource.data.get('status', request.resource.data.status)
+                  || !(resource.data.get('status', 'scheduled') in ['completed', 'cancelled'])
+                  || isManager() || isSolo(resource.data)));
+      }
+
+      allow read: if readable(resource.data);
+      allow create: if validCreate(false)
+        && validStatus(request.resource.data.get('status', 'scheduled'));
+      allow update: if tenancyUnchanged() && statusOk()
+        && (manageable(resource.data)
+            || (inCompany(resource.data) && claimRole() == 'technician'
+                && request.resource.data.diff(resource.data).affectedKeys().hasOnly(technicianFields())));
+      allow delete: if manageable(resource.data);
+    }
+
+    // ---------- appointments ----------
+    match /appointments/{id} {
+      allow read: if readable(resource.data);
+      allow create: if validCreate(false);
+      allow update: if manageable(resource.data) && tenancyUnchanged();
+      allow delete: if manageable(resource.data);
+    }
+
+    // ---------- photos (technicians may add proof-of-service photos) ----------
+    match /photos/{id} {
+      allow read: if readable(resource.data);
+      allow create: if validCreate(true);
+      allow update: if manageable(resource.data) && tenancyUnchanged();
+      allow delete: if manageable(resource.data);
+    }
+
+    // ---------- estimates ----------
+    match /estimates/{id} {
+      allow read: if readable(resource.data);
+      allow create: if validCreate(false);
+      allow update: if manageable(resource.data) && tenancyUnchanged();
+      allow delete: if manageable(resource.data);
+    }
+
+    // ---------- estimate templates ----------
+    match /estimateTemplates/{id} {
+      allow read: if readable(resource.data);
+      allow create: if validCreate(false);
+      allow update: if manageable(resource.data) && tenancyUnchanged();
+      allow delete: if manageable(resource.data);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

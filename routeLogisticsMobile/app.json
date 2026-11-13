@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Route Logistics",
+    "slug": "route-logistics",
+    "version": "1.0.0",
+    "buildNumber": "1",
+    "orientation": "portrait",
+    "icon": "./assets/routeLogistics_logo.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/routeLogistics_logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.workside.routelogistics",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.workside.routelogistics"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "f9057758-a4f9-4652-b8b7-7ca3267f98dd"
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+rules_version = '2';
+
+// Paths: users/{uid}/** for solo users, companies/{companyId}/** for company members
+// (company membership comes from the `companyId` custom claim minted by the syncClaims function).
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+    function validUpload() {
+      return request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /users/{userId}/{allPaths=**} {
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow write: if signedIn() && request.auth.uid == userId && validUpload();
+    }
+
+    match /companies/{companyId}/{allPaths=**} {
+      allow read: if signedIn() && request.auth.token.get('companyId', null) == companyId;
+      allow write: if signedIn() && request.auth.token.get('companyId', null) == companyId && validUpload();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

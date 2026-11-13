@@ -1,0 +1,15 @@
+{
+  "name": "route-logistics-root",
+  "private": true,
+  "scripts": {
+    "test:rules": "firebase emulators:exec --only firestore --project demo-routelogistics \"node --test tests/firestore.rules.test.js\"",
+    "test:e2e": "firebase emulators:exec --only auth,firestore,functions --project demo-routelogistics \"node --test tests/syncclaims.e2e.test.js\"",
+    "test:functions": "cd functions && node --test",
+    "test": "npm run test:functions && npm run test:rules"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "firebase": "^11.10.0",
+    "firebase-tools": "^14.19.1"
+  }
+}

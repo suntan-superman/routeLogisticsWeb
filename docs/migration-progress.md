@@ -1,5 +1,7 @@
 # RouteLogistics migration progress — November 12, 2026
 
+**Subsequent ten-phase release:** See [accelerated production progress](accelerated-production-progress.md) for the new company/membership/customer fixes, payment/accounting integrations, routing, foreground location and offline queues. It supersedes the remaining-work and Storage-revocation statements in this earlier report; historical evidence below is preserved.
+
 This report records the autonomous implementation run against the two existing plans. RouteLogistics was the only source tree edited; mifactotum was used as read-only reference. Work stayed on the existing `main` branch and shared Firebase project `mi-factotum-field-service`, without a staging environment.
 
 Checked items in the plans mean implementation is present and locally verified. They do not imply every feature is enabled in production. Deployment results are recorded below. The complete roadmap is not finished.

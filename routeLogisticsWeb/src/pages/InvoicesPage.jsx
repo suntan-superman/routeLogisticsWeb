@@ -7,6 +7,8 @@ import { useConfirm } from '../components/ConfirmProvider';
 import { useAuth } from '../contexts/AuthContext';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../services/firebase';
+import InvoicePayment from '../components/InvoicePayment';
+import { testPaymentsConfigured } from '../services/paymentConfig';
 
 const money = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -45,6 +47,7 @@ const InvoicesPage = () => {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [paymentInvoice, setPaymentInvoice] = useState(null);
   const manage = canManage();
   const confirm = useConfirm();
 
@@ -128,12 +131,15 @@ const InvoicesPage = () => {
                     <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-semibold capitalize ${BADGE[status]}`}>{status}</span></td>
                     <td className="px-4 py-3 text-right">{money(inv.total)}</td>
                     <td className="px-4 py-3 space-x-2 whitespace-nowrap">
+                      {manage && inv.status === 'sent' && testPaymentsConfigured && <button className="text-primary-700 underline" onClick={() => setPaymentInvoice(inv.id)}>Test card payment</button>}
+                      {manage && inv.paymentLock && <button className="text-amber-700 underline" onClick={async () => { if (!(await confirm({ title: 'Cancel payment attempt?', message: 'This cancels an uncompleted card payment and unlocks invoice changes. It does not issue a refund.', confirmText: 'Cancel attempt' }))) return; try { await httpsCallable(functions, 'rlCancelInvoicePayment')({ invoiceId: inv.id }); await load(); } catch (error) { toast.error(error.message); } }}>Cancel payment attempt</button>}
+                      {inv.testPaymentStatus && <span className="text-xs text-gray-500">Test: {inv.testPaymentStatus}</span>}
                       <button className="text-primary-600 hover:underline" onClick={() => printInvoice(inv, userProfile?.businessName)}>Print</button>
                       {manage && ['draft', 'sent'].includes(inv.status) && <button className="text-primary-600 hover:underline" onClick={() => email(inv.id)}>Email invoice</button>}
                       {manage && inv.status === 'draft' && <button className="text-blue-600 hover:underline" onClick={() => act(() => markInvoiceSent(inv.id), 'Marked as sent')}>Mark sent</button>}
-                      {manage && inv.status === 'sent' && <button className="text-green-600 hover:underline" onClick={() => act(() => markInvoicePaid(inv.id), 'Marked as paid')}>Mark paid</button>}
+                      {manage && inv.status === 'sent' && !inv.paymentLock && <button className="text-green-600 hover:underline" onClick={() => act(() => markInvoicePaid(inv.id), 'Marked as paid')}>Mark paid</button>}
                       {manage && (inv.status === 'draft' || inv.status === 'sent') && (
-                        <button className="text-red-600 hover:underline" onClick={async () => (await confirm({ title: 'Void this invoice?', message: 'A voided invoice can no longer be paid or edited.', confirmText: 'Void invoice' })) && act(() => voidInvoice(inv.id), 'Invoice voided')}>Void</button>
+                        <button disabled={!!inv.paymentLock} title={inv.paymentLock ? 'Cancel the payment attempt first' : undefined} className="text-red-600 hover:underline disabled:opacity-50" onClick={async () => (await confirm({ title: 'Void this invoice?', message: 'A voided invoice can no longer be paid or edited.', confirmText: 'Void invoice' })) && act(() => voidInvoice(inv.id), 'Invoice voided')}>Void</button>
                       )}
                       {manage && inv.status === 'draft' && (
                         <button className="text-gray-500 hover:underline" onClick={async () => (await confirm({ title: 'Delete this draft?', message: "The draft invoice will be permanently removed.", confirmText: 'Delete draft' })) && act(() => deleteDraftInvoice(inv.id), 'Draft deleted')}>Delete</button>
@@ -146,6 +152,7 @@ const InvoicesPage = () => {
           </table>
         )}
       </div>
+      {paymentInvoice && <InvoicePayment invoiceId={paymentInvoice} onClose={() => setPaymentInvoice(null)} onRefresh={load} />}
     </div>
   );
 };

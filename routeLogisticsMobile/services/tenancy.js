@@ -1,13 +1,17 @@
 import { where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { auth, functions } from '../constants/firebase';
+import NetInfo from '@react-native-community/netinfo';
 let claims = null;
 export const getClaims = () => claims;
 export async function syncTenancy(user = auth.currentUser) {
   claims = null;
   if (!user) return null;
   const existing = await user.getIdTokenResult();
+  if (auth.currentUser?.uid !== user.uid) return null;
   claims = existing.claims.companyId ? existing.claims : null;
+  const network = await NetInfo.fetch();
+  if (network.isConnected === false || network.isInternetReachable === false) return claims;
   try {
     await httpsCallable(functions, 'syncClaims')();
     const fresh = await user.getIdTokenResult(true);

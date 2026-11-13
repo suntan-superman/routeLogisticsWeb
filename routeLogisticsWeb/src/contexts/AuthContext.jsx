@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { auth, db } from '../services/firebase';
 import { 
   signInWithEmailAndPassword, 
@@ -8,8 +9,8 @@ import {
   updateProfile,
   sendEmailVerification
 } from 'firebase/auth';
-import { syncTenancy, loadClaims } from '../services/tenancy';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { syncTenancy, loadClaims, getClaims } from '../services/tenancy';
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import toast from 'react-hot-toast';
 
 const AuthContext = createContext();
@@ -28,16 +29,34 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [emailVerified, setEmailVerified] = useState(false);
   const [sessionVersion, setSessionVersion] = useState(0);
+  const [company, setCompany] = useState(null);
+  const generation = useRef(0);
+  const queryClient = useQueryClient();
+  const authorizedCompany = async () => {
+    const id = getClaims()?.companyId;
+    if (!id) return null;
+    const snap = await getDoc(doc(db, 'companies', id));
+    return snap.exists() ? { ...snap.data(), id: snap.id } : null;
+  };
+  useEffect(() => {
+    if (!company?.id || !currentUser) return;
+    const accountId = currentUser.uid;
+    return onSnapshot(doc(db, 'companies', company.id), (snap) => {
+      if (auth.currentUser?.uid === accountId) setCompany(snap.exists() ? { ...snap.data(), id: snap.id } : null);
+    }, () => setCompany(null));
+  }, [company?.id, currentUser]);
   const refreshSession = async () => {
     const user = auth.currentUser;
     if (!user) return;
-    await user.reload();
-    await user.getIdToken(true);
-    await syncTenancy();
-    const profile = await getDoc(doc(db, 'users', user.uid));
-    setUserProfile(profile.exists() ? profile.data() : null);
-    setEmailVerified(user.emailVerified);
-    setSessionVersion((version) => version + 1);
+    const ticket = ++generation.current;
+    setLoading(true); setCompany(null); queryClient.clear();
+    try {
+      await user.reload(); await user.getIdToken(true); await syncTenancy();
+      const [profile, activeCompany] = await Promise.all([getDoc(doc(db, 'users', user.uid)), authorizedCompany()]);
+      if (ticket !== generation.current || auth.currentUser?.uid !== user.uid) return;
+      setUserProfile(profile.exists() ? profile.data() : null); setCompany(activeCompany);
+      setEmailVerified(user.emailVerified); setSessionVersion((version) => version + 1);
+    } finally { if (ticket === generation.current) setLoading(false); }
   };
 
   // Sign up function
@@ -180,6 +199,7 @@ export const AuthProvider = ({ children }) => {
 
       await setDoc(doc(db, 'users', currentUser.uid), updatedProfile, { merge: true });
       setUserProfile(updatedProfile);
+      if (updates.companyId) await refreshSession();
       
       toast.success('Profile updated successfully');
       return { success: true };
@@ -193,7 +213,9 @@ export const AuthProvider = ({ children }) => {
   // Listen for auth state changes
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      const ticket = ++generation.current;
       setLoading(true);
+      setCompany(null); setUserProfile(null); queryClient.clear();
       setCurrentUser(user);
       setEmailVerified(user?.emailVerified === true);
       
@@ -206,10 +228,10 @@ export const AuthProvider = ({ children }) => {
           console.error('Error resolving tenancy:', error);
         }
         try {
-          const userDoc = await getDoc(doc(db, 'users', user.uid));
-          if (userDoc.exists()) {
-            setUserProfile(userDoc.data());
-          }
+          const [userDoc, activeCompany] = await Promise.all([getDoc(doc(db, 'users', user.uid)), authorizedCompany()]);
+          if (ticket !== generation.current || auth.currentUser?.uid !== user.uid) return;
+          setUserProfile(userDoc.exists() ? userDoc.data() : null);
+          setCompany(activeCompany);
         } catch (error) {
           console.error('Error fetching user profile:', error);
         }
@@ -218,14 +240,14 @@ export const AuthProvider = ({ children }) => {
         setUserProfile(null);
       }
       
-      setLoading(false);
+      if (ticket === generation.current) setLoading(false);
     });
 
     return unsubscribe;
-  }, []);
+  }, [queryClient]);
 
   const value = {
-    currentUser,
+    currentUser, company,
     userProfile,
     loading,
     signup,

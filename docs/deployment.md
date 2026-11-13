@@ -50,6 +50,8 @@ Keep the existing `VITE_FIREBASE_*` values in the hosting environment. Sentry an
 
 ## Mobile on the Mac
 
+The accelerated release additionally uses Expo Location (foreground only), FileSystem/Crypto and NetInfo for explicit work sharing and durable offline queues. Follow the [configuration and device acceptance checklist](accelerated-production-progress.md) before enabling provider integrations or distributing native builds. Public Maps and test Stripe keys belong in Netlify; backend SMTP/Stripe/QuickBooks secrets belong in Firebase Secret Manager. The release keeps those provider switches disabled pending verification.
+
 Keep `com.workside.routelogistics` for both application identifiers and the existing Expo project. Install from `routeLogisticsMobile/package-lock.json`. The Expo config now includes image-picker permissions and datetime-picker native configuration.
 
 If native folders are generated through Expo, apply the current config with the existing prebuild workflow before opening the generated iOS workspace in Xcode. Do not use `--clean` on a native project with uncommitted manual changes. Select the existing signing team, build, and run on a device; manage App Store submission through the existing workflow.

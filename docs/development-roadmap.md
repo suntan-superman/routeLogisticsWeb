@@ -1,5 +1,9 @@
 # Prioritized Development List
 
+## Accelerated implementation update — November 12, 2026
+
+The subsequent ten-phase directive is implemented as described in [accelerated production progress](accelerated-production-progress.md): company headers, atomic invitations/removal, legacy customer compatibility, Stripe test payments, RL QuickBooks OAuth/mappings/reconciliation, Maps routing, foreground location and persistent native offline queues. Provider credentials/acceptance and physical-device checks remain explicit blockers to full operational readiness. This supersedes older gap statements below.
+
 ## Implementation update — November 12, 2026
 
 The historical priorities below remain the backlog; their 2025 dates are not current commitments. See [migration progress and code review](migration-progress.md) for the two completed eight-phase batches, live Acme data audit, validation, deployment status, and remaining work. Checked items indicate implemented code; email-dependent features are deliberately inactive at the user's request.

@@ -6,8 +6,7 @@ import {
   getDocs, 
   query, 
   where,
-  addDoc,
-  deleteDoc
+  addDoc
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { auth } from './firebase';
@@ -181,7 +180,7 @@ class CompanyService {
       const teamMembers = [];
       
       querySnapshot.forEach((doc) => {
-        teamMembers.push({ id: doc.id, ...doc.data() });
+        if (!['removed', 'superseded'].includes(doc.data().status)) teamMembers.push({ ...doc.data(), id: doc.id });
       });
 
       return {
@@ -204,42 +203,9 @@ class CompanyService {
     } catch (error) { return { success: false, error: error.message }; }
   }
 
-  // Remove team member
+  // Removal is audited and revokes access without deleting the original record.
   static async removeTeamMember(teamMemberId) {
-    try {
-      const userId = this.getCurrentUserId();
-      
-      // Get team member to verify permissions
-      const teamMemberDoc = await getDoc(doc(db, 'teamMembers', teamMemberId));
-      if (!teamMemberDoc.exists()) {
-        return {
-          success: false,
-          error: 'Team member not found'
-        };
-      }
-
-      const teamMember = teamMemberDoc.data();
-      const companyResult = await this.getCompany(teamMember.companyId);
-      
-      if (!companyResult.success || companyResult.company.ownerId !== userId) {
-        return {
-          success: false,
-          error: 'Unauthorized to remove this team member'
-        };
-      }
-
-      await deleteDoc(doc(db, 'teamMembers', teamMemberId));
-
-      return {
-        success: true
-      };
-    } catch (error) {
-      console.error('Error removing team member:', error);
-      return {
-        success: false,
-        error: error.message
-      };
-    }
+    return this.updateTeamMember(teamMemberId, { action: 'remove' });
   }
 }
 

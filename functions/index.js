@@ -1,7 +1,7 @@
 const { initializeApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
 const { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
 const { resolveClaims } = require('./claims');
@@ -16,6 +16,11 @@ const { portalHandlers } = require('./portal');
 const { drainMail } = require('./mail');
 const { invoiceEmailHandlers } = require('./invoiceEmail');
 const { ownershipHandler } = require('./ownership');
+const { paymentHandlers } = require('./payments');
+const { routeHandlers } = require('./routes');
+const { locationHandlers } = require('./locations');
+const { offlineHandler } = require('./offline');
+const { quickBooksHandlers } = require('./quickbooks');
 
 initializeApp();
 const db = getFirestore();
@@ -119,6 +124,43 @@ exports.rlQueueInvoiceReminders = onSchedule({ schedule: 'every day 09:00', time
 const recurring = recurringHandlers(db);
 exports.generateServicePlanJob = onCall(recurring.generateServicePlanJob);
 exports.rlGenerateRecurringJobs = onSchedule({ schedule: 'every day 04:00', timeZone: 'Etc/UTC', timeoutSeconds: 540 }, recurring.generateRecurringJobs);
+
+const stripeEnabled = () => process.env.RL_STRIPE_ENABLED === 'true';
+const stripeMode = () => process.env.RL_STRIPE_MODE || 'test';
+const stripeSecrets = stripeEnabled() ? ['RL_STRIPE_SECRET_KEY'] : [];
+const payments = paymentHandlers(db, () => {
+  const key = process.env.RL_STRIPE_SECRET_KEY || '';
+  if (!key.startsWith(stripeMode() === 'test' ? 'sk_test_' : 'sk_live_')) throw new HttpsError('failed-precondition', 'Stripe credentials do not match the configured mode.');
+  return new (require('stripe'))(key, { timeout: 20_000, maxNetworkRetries: 1 });
+}, { enabled: stripeEnabled, mode: stripeMode, liveApproved: () => process.env.RL_STRIPE_LIVE_APPROVED === 'true' });
+exports.rlCreateInvoicePayment = onCall({ secrets: stripeSecrets }, payments.create);
+exports.rlGetInvoicePaymentStatus = onCall(payments.status);
+exports.rlCancelInvoicePayment = onCall({ secrets: stripeSecrets }, payments.cancel);
+exports.rlStripeWebhook = onRequest({ secrets: stripeEnabled() ? [...stripeSecrets, 'RL_STRIPE_WEBHOOK_SECRET'] : [] }, (req, res) => payments.webhook(req, res, process.env.RL_STRIPE_WEBHOOK_SECRET));
+const routing = routeHandlers(db);
+exports.rlGetRoutingTeam = onCall(routing.team);
+exports.rlGetDailyRoute = onCall(routing.get);
+exports.rlApplyJobOperation = onCall(offlineHandler(db));
+exports.rlSaveDailyRoute = onCall(routing.save);
+const locations = locationHandlers(db);
+exports.rlUpdateWorkLocation = onCall(locations.update);
+exports.rlGetTeamLocations = onCall(locations.list);
+exports.rlSetLocationRetention = onCall(locations.retention);
+exports.rlCleanupLocations = onSchedule({ schedule: 'every 60 minutes', maxInstances: 1, timeoutSeconds: 540 }, locations.cleanup);
+const qbEnabled = () => process.env.RL_QB_ENABLED === 'true';
+const qbSecrets = qbEnabled() ? ['RL_QB_CLIENT_ID', 'RL_QB_CLIENT_SECRET'] : [];
+const qb = quickBooksHandlers(db, { enabled: qbEnabled, environment: () => process.env.RL_QB_ENV || 'sandbox', writesEnabled: () => process.env.RL_QB_WRITES_ENABLED === 'true', clientId: () => process.env.RL_QB_CLIENT_ID, clientSecret: () => process.env.RL_QB_CLIENT_SECRET, webhookSecret: () => process.env.RL_QB_WEBHOOK_VERIFIER, redirectUri: () => process.env.RL_QB_REDIRECT_URI || 'https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlQuickBooksOAuthCallback', appUrl: () => appUrl.value() });
+exports.rlQuickBooksStatus = onCall(qb.status);
+exports.rlQuickBooksConnect = onCall({ secrets: qbSecrets }, qb.begin);
+exports.rlQuickBooksOAuthCallback = onRequest({ secrets: qbSecrets }, qb.callback);
+exports.rlQuickBooksDisconnect = onCall({ secrets: qbSecrets }, qb.disconnect);
+exports.rlQuickBooksSettings = onCall({ secrets: qbSecrets }, qb.settings);
+exports.rlQuickBooksAdopt = onCall({ secrets: qbSecrets }, qb.adopt);
+exports.rlQuickBooksPreview = onCall({ secrets: qbSecrets }, qb.preview);
+exports.rlQuickBooksSync = onCall({ secrets: qbSecrets }, qb.sync);
+exports.rlQuickBooksReconcile = onCall({ secrets: qbSecrets }, qb.reconcile);
+exports.rlQuickBooksWebhook = onRequest({ secrets: qbEnabled() ? ['RL_QB_WEBHOOK_VERIFIER'] : [] }, qb.webhook);
+exports.rlQuickBooksProcessEvents = onSchedule({ schedule: 'every 5 minutes', secrets: qbSecrets, maxInstances: 1, timeoutSeconds: 540 }, qb.drain);
 
 // Re-evaluates a member's claims when their invite is deactivated or removed, and revokes live sessions.
 async function reevaluateMember(uid) {

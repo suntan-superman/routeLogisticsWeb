@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { formatCustomerDate, legacyDate } from '../utils/legacyCustomer';
 import { motion as Motion } from 'framer-motion';
 import CustomerService from '../services/customerService';
 import { useConfirm } from '../components/ConfirmProvider';
@@ -122,7 +123,7 @@ const CustomerManagementPage = () => {
         case 'name':
           return (a.name || '').localeCompare(b.name || '');
         case 'createdAt':
-          return new Date(b.createdAt) - new Date(a.createdAt);
+          return (legacyDate(b.createdAt)?.getTime() || 0) - (legacyDate(a.createdAt)?.getTime() || 0);
         case 'totalSpent':
           return (b.totalSpent || 0) - (a.totalSpent || 0);
         default:
@@ -304,13 +305,7 @@ const CustomerManagementPage = () => {
     }).format(amount || 0);
   };
 
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
-  };
+  const formatDate = formatCustomerDate;
 
   return (
     <Motion.div
@@ -514,7 +509,7 @@ const CustomerManagementPage = () => {
                           </div>
                         </div>
                         <div className="ml-4">
-                          <div className="text-sm font-medium text-gray-900">{customer.name || 'Unnamed'}</div>
+                          <div className="text-sm font-medium text-gray-900">{customer.name || 'Name not provided'}</div>
                           <div className="text-sm text-gray-500">Added {formatDate(customer.createdAt)}</div>
                         </div>
                       </div>
@@ -897,7 +892,7 @@ const CustomerManagementPage = () => {
                     </div>
                   </div>
                   <div className="ml-4">
-                    <h4 className="text-lg font-medium text-gray-900">{selectedCustomer.name || 'Unnamed'}</h4>
+                    <h4 className="text-lg font-medium text-gray-900">{selectedCustomer.name || 'Name not provided'}</h4>
                     <p className="text-sm text-gray-500">Customer since {formatDate(selectedCustomer.createdAt)}</p>
                   </div>
                 </div>

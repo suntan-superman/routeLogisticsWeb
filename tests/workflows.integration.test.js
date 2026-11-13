@@ -5,7 +5,7 @@ const path = require('node:path');
 const req = createRequire(path.resolve(__dirname, '../functions/package.json'));
 const { initializeApp, deleteApp } = req('firebase-admin/app');
 const { getFirestore, Timestamp } = req('firebase-admin/firestore');
-const { invitationHandlers } = require('../functions/invitations');
+const { invitationHandlers, memberIdFor } = require('../functions/invitations');
 const { recurringHandlers } = require('../functions/recurring');
 const { customerHandlers } = require('../functions/customers');
 const { portalHandlers, otpHash } = require('../functions/portal');
@@ -23,6 +23,26 @@ before(async () => {
   await db.doc('users/workflow-owner').set({ companyId: 'workflow-co' });
 });
 after(() => deleteApp(app));
+test('concurrent reissue retains a legacy membership identity, archives duplicates, and invalidates old links', async () => {
+  const email = 'legacy-reissue@workflows.test';
+  await db.doc('teamMembers/legacy-reissue').set({ companyId: 'workflow-co', email: email.toUpperCase(), role: 'field_tech', status: 'pending', originalField: 'preserved' });
+  const handlers = invitationHandlers(db, async () => ({}), () => 'https://rl.test', () => false);
+  const request = { auth: owner, data: { companyId: 'workflow-co', email, role: 'technician' } };
+  const first = await handlers.sendTeamInviteEmail(request);
+  assert.equal(first.teamMemberId, 'legacy-reissue');
+  await db.doc(`teamMembers/${memberIdFor('workflow-co', email)}`).set({ companyId: 'workflow-co', email, role: 'technician', status: 'pending' });
+  const results = await Promise.all([handlers.sendTeamInviteEmail(request), handlers.sendTeamInviteEmail(request)]);
+  assert.ok(results.every((result) => result.teamMemberId === first.teamMemberId));
+  const records = await db.collection('teamMembers').where('companyId', '==', 'workflow-co').get();
+  const matching = records.docs.filter((d) => d.get('email').toLowerCase() === email);
+  assert.equal(matching.filter((d) => d.get('status') === 'pending').length, 1);
+  assert.equal((await db.doc('teamMembers/legacy-reissue').get()).get('originalField'), 'preserved');
+  const code = new URLSearchParams(new URL(first.inviteUrl).hash.slice(1)).get('code');
+  await assert.rejects(handlers.acceptTeamInvite({ auth: { uid: 'legacy-reissue-user', token: { email, email_verified: true } }, data: { inviteId: first.teamMemberId, code } }));
+  await handlers.manageTeamMember({ auth: owner, data: { memberId: first.teamMemberId, action: 'remove' } });
+  assert.equal((await db.doc('teamMembers/legacy-reissue').get()).get('status'), 'removed');
+  await assert.rejects(handlers.manageTeamMember({ auth: member, data: { memberId: first.teamMemberId, action: 'remove' } }));
+});
 test('disabled email creates a usable invitation link without queuing mail and blocks email-dependent actions', async () => {
   const mailBefore = (await db.collection('rlMail').get()).size;
   const invites = invitationHandlers(db, async () => ({}), () => 'https://rl.test', () => false);

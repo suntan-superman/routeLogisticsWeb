@@ -41,6 +41,18 @@ const owner = () => as('owner1', { companyId: 'c1', role: 'owner' });
 const tech = () => as('tech1', { companyId: 'c1', role: 'technician', membershipId: 't1' });
 const manager = () => as('mgr1', { companyId: 'c1', role: 'manager', membershipId: 'm1' });
 
+test('membership removal requires the audited callable', async () => {
+  await assertFails(deleteDoc(doc(owner(), 'teamMembers/t1')));
+});
+test('invoice payment locks and accounting fields are server-owned', async () => {
+  await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), 'invoices/locked'), { userId: 'owner1', companyId: 'c1', status: 'sent', total: 20, paymentLock: 'attempt' }));
+  await assertFails(updateDoc(doc(owner(), 'invoices/locked'), { total: 1 }));
+  await assertFails(updateDoc(doc(owner(), 'invoices/locked'), { status: 'paid' }));
+  await assertFails(updateDoc(doc(owner(), 'invoices/locked'), { qbBalance: 0 }));
+  await assertFails(updateDoc(doc(owner(), 'invoices/locked'), { paymentLock: null }));
+  await assertSucceeds(updateDoc(doc(owner(), 'invoices/locked'), { notes: 'Call customer' }));
+});
+
 // ---- users: privilege escalation ----
 test('user cannot self-assign a role on signup', async () => {
   await assertFails(setDoc(doc(as('new1'), 'users/new1'), { email: 'n@x.com', role: 'admin' }));

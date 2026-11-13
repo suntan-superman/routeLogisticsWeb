@@ -13,6 +13,7 @@ export async function loadClaims(user) {
     return null;
   }
   const token = await user.getIdTokenResult();
+  if (auth.currentUser?.uid !== user.uid) return null;
   claims = token.claims.companyId ? { companyId: token.claims.companyId, role: token.claims.role } : null;
   return claims;
 }

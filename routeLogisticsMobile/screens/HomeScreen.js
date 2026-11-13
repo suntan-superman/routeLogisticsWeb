@@ -11,8 +11,11 @@ import {
   TextInput,
   Platform,
   KeyboardAvoidingView,
+  Image,
 } from 'react-native';
 import JobPhotos from '../components/JobPhotos';
+import WorkLocation from '../components/WorkLocation';
+import OfflineStatus from '../components/OfflineStatus';
 import { canManage, localDate } from '../services/tenancy';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
@@ -683,13 +686,12 @@ const HomeScreen = ({ navigation }) => {
         actualHours: actualHours || selectedJob.duration,
         completionNotes,
         completedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
       };
 
       const result = await JobService.updateJob(selectedJob.id, completionData);
 
       if (result.success) {
-        Alert.alert('Success', 'Job completed successfully!');
+        Alert.alert('Saved', result.queued ? 'Completion saved on this device. Check sync status before leaving this job.' : 'Job completed successfully!');
         setShowJobCompletionModal(false);
         setShowJobDetailsModal(false);
         // Reload jobs to show updated status
@@ -745,6 +747,8 @@ const HomeScreen = ({ navigation }) => {
           <Text style={styles.factotumText}>Route</Text>
           <Text style={styles.factotumText}> Logistics</Text>
         </Text>
+        <Text style={{ color: '#fff', fontSize: 13 }} numberOfLines={1}>{user?.companyName || 'Personal workspace'}</Text>
+        {user?.companyLogo?.startsWith('https://') && <Image source={{ uri: user.companyLogo }} accessibilityLabel="Company logo" style={{ width: 32, height: 32, resizeMode: 'contain' }} />}
         {/* <Text style={styles.welcomeText}>My Handyman</Text> */}
         <Text style={styles.welcomeText}>{t('welcome')}, {user?.name || 'User'}!</Text>
       </View>
@@ -762,6 +766,8 @@ const HomeScreen = ({ navigation }) => {
 
       <View style={styles.contentContainer}>
         <ScrollView style={styles.scrollContent}>
+          <WorkLocation jobs={jobs} />
+          <OfflineStatus onSynced={() => loadJobs()} />
           {/* Service Cards */}
           <View style={styles.servicesContainer}>
             <Text style={styles.sectionTitle}>{t('yourServices')}</Text>

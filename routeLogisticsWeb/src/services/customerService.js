@@ -9,12 +9,14 @@ import {
   deleteDoc,
   orderBy,
   limit,
-  startAfter
+  startAfter,
+  documentId
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { auth } from './firebase';
 import { scopeWhere, tenantFields, isInScope } from './tenancy';
 import { csvCell } from '../utils/customerCsv';
+import { customerView, customerActive, legacyDate } from '../utils/legacyCustomer';
 
 class CustomerService {
   // Get current user ID
@@ -68,7 +70,7 @@ class CustomerService {
       let q = query(
         collection(db, 'customers'),
         scopeWhere(),
-        orderBy('name', 'asc'),
+        orderBy(documentId()),
         limit(limitCount)
       );
 
@@ -80,7 +82,7 @@ class CustomerService {
       const customers = [];
       
       querySnapshot.forEach((doc) => {
-        customers.push({ id: doc.id, ...doc.data() });
+        customers.push(customerView(doc.id, doc.data()));
       });
 
       return {
@@ -159,7 +161,7 @@ class CustomerService {
 
       return {
         success: true,
-        customer: { id: customerDoc.id, ...customerData }
+        customer: customerView(customerDoc.id, customerData)
       };
     } catch (error) {
       console.error('Error getting customer:', error);
@@ -305,10 +307,10 @@ class CustomerService {
       querySnapshot.forEach((doc) => {
         const data = doc.data();
         totalCustomers++;
-        if (data.isActive) {
+        if (customerActive(data)) {
           activeCustomers++;
         }
-        totalRevenue += data.totalSpent || 0;
+        totalRevenue += Number.isFinite(Number(data.totalSpent)) ? Number(data.totalSpent) : 0;
       });
 
       return {
@@ -354,7 +356,7 @@ class CustomerService {
           customer.city || '',
           customer.state || '',
           customer.zipCode || '',
-          customer.createdAt || ''
+          legacyDate(customer.createdAt)?.toISOString() || ''
         ];
         csvRows.push(row.map(csvCell).join(','));
       });

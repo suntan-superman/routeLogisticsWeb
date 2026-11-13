@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { AppState } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { isOffline } from '../services/offline';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../constants/firebase';
@@ -16,11 +18,22 @@ export function AuthProvider({ children }) {
     const ticket = ++generation.current;
     if (!account) { await syncTenancy(null); setUser(null); setSessionError(''); setIsLoading(false); return { success: true }; }
     try {
-      if (reload) { await account.reload(); await account.getIdToken(true); }
+      const offline = await isOffline();
+      if (reload && !offline) { await account.reload(); await account.getIdToken(true); }
       const claims = await syncTenancy(account);
+      const cacheKey = `rl-session-v1:${account.uid}`;
+      if (offline) {
+        const saved = JSON.parse(await AsyncStorage.getItem(cacheKey) || 'null');
+        if (!saved || saved.companyId !== (claims?.companyId || null) || saved.role !== (claims?.role || null)) throw new Error('Connect once to load your current workspace.');
+        const current = { ...saved, emailVerified: account.emailVerified, offline: true };
+        if (ticket === generation.current && auth.currentUser?.uid === account.uid) { setUser(current); setSessionError(''); }
+        return { success: true, user: current };
+      }
       const profile = await getDoc(doc(db, 'users', account.uid));
       const data = profile.exists() ? profile.data() : {};
-      const current = { ...data, id: account.uid, email: account.email, name: account.displayName || data.name || 'User', emailVerified: account.emailVerified, companyId: claims?.companyId || null, role: claims?.role || null };
+      const company = claims?.companyId ? await getDoc(doc(db, 'companies', claims.companyId)) : null;
+      const current = { ...data, id: account.uid, email: account.email, name: account.displayName || data.name || 'User', emailVerified: account.emailVerified, companyId: claims?.companyId || null, role: claims?.role || null, membershipId: claims?.membershipId || null, companyName: company?.get('name') || '', companyLogo: company?.get('logo') || '' };
+      await AsyncStorage.setItem(cacheKey, JSON.stringify(current));
       if (ticket === generation.current && auth.currentUser?.uid === account.uid) { setUser(current); setSessionError(''); }
       return { success: true, user: current };
     } catch (error) {
@@ -45,7 +58,9 @@ export function AuthProvider({ children }) {
     return { ...loaded, needsEmailVerification: !auth.currentUser?.emailVerified };
   };
   const signOut = async () => {
+    const uid = auth.currentUser?.uid;
     const result = await AuthService.signOut();
+    if (result.success && uid) await AsyncStorage.removeItem(`rl-session-v1:${uid}`);
     if (result.success) { generation.current++; setUser(null); setSessionError(''); await syncTenancy(null); }
     return result;
   };

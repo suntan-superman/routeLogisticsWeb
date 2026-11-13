@@ -14,23 +14,35 @@ function checkInvitation(invite, caller, code, now = Date.now()) {
 async function createInvitation(db, { companyId, email: input, role, invitedBy, companyName, appUrl, queueEmail = true }, now = Date.now()) {
   const email = normalizeEmail(input);
   if (!validEmail(email) || !MEMBER_ROLES.includes(role)) throw new HttpsError('invalid-argument', 'Enter a valid email and select a team role.');
-  const id = memberIdFor(companyId, email);
-  const ref = db.collection('teamMembers').doc(id);
+  const identityId = memberIdFor(companyId, email);
+  const identityRef = db.collection('rlMembershipIdentities').doc(identityId);
+  const audit = db.collection('rlMembershipAudit').doc();
   const code = randomBytes(32).toString('hex');
-  const inviteUrl = `${appUrl.replace(/\/$/, '')}/accept-invite?id=${id}#code=${code}`;
   const member = { companyId, email, role, invitedBy, status: 'pending', schemaVersion: 2, expiresAt: now + INVITE_LIFETIME_MS, updatedAt: new Date(now).toISOString() };
-  await db.runTransaction(async (tx) => {
-    const old = await tx.get(ref);
-    if (old.get('status') === 'active') throw new HttpsError('already-exists', 'This person is already an active member.');
-    const duplicates = await tx.get(db.collection('teamMembers').where('companyId', '==', companyId).where('email', '==', email));
-    if (duplicates.docs.some((d) => d.id !== id && d.get('status') === 'active')) throw new HttpsError('already-exists', 'This person already has an active membership.');
-    tx.set(ref, { ...member, createdAt: old.get('createdAt') || member.updatedAt });
+  const { id, inviteUrl } = await db.runTransaction(async (tx) => {
+    const [identity, company, all] = await Promise.all([tx.get(identityRef), tx.get(db.collection('companies').doc(companyId)), tx.get(db.collection('teamMembers').where('companyId', '==', companyId))]);
+    if (company.get('ownerId') !== invitedBy) throw new HttpsError('permission-denied', 'Only the current owner can issue invitations.');
+    // Include mixed-case legacy emails. The identity document serializes concurrent calls.
+    const matches = all.docs.filter((d) => normalizeEmail(d.get('email')) === email);
+    if (matches.some((d) => d.get('status') === 'active')) throw new HttpsError('already-exists', 'This person already has an active membership. Manage their existing role instead.');
+    const old = matches.find((d) => d.id === identity.get('memberId')) || matches.find((d) => d.id === identityId) || matches.filter((d) => d.get('status') === 'pending').sort((a, b) => a.id.localeCompare(b.id))[0] || matches[0];
+    const id = old?.id || identityId, ref = db.collection('teamMembers').doc(id);
+    const inviteUrl = `${appUrl.replace(/\/$/, '')}/accept-invite?id=${id}#code=${code}`;
+    tx.create(audit, { companyId, actorId: invitedBy, action: 'invite-reissue', memberId: id, createdAt: new Date(now) });
+    for (const record of matches.filter((d) => d.id === id || d.get('status') === 'pending')) {
+      tx.create(audit.collection('originals').doc(record.id), { path: record.ref.path, data: record.data() });
+      if (record.id !== id) tx.update(record.ref, { status: 'superseded', supersededBy: id, updatedAt: member.updatedAt });
+    }
+    tx.set(identityRef, { companyId, email, memberId: id, updatedAt: new Date(now) });
+    tx.set(ref, { ...(old?.data() || {}), ...member, uid: null, activatedAt: null, supersededBy: null, createdAt: old?.get('createdAt') || member.updatedAt });
     tx.set(db.collection('rlInviteSecrets').doc(id), { codeHash: hash(code) });
     if (queueEmail) tx.create(db.collection('rlMail').doc(), {
+      invitationId: id, invitationHash: hash(code),
       to: email, subject: `Join ${companyName || 'your team'} on Route Logistics`,
       text: `You have been invited as ${role}. Sign in or create an account using ${email}, verify your email, and accept your invitation:\n\n${inviteUrl}\n\nThis link expires in 7 days.`,
       status: 'queued', availableAt: now, createdAt: new Date(now), expiresAt: new Date(now + INVITE_LIFETIME_MS),
     });
+    return { id, inviteUrl };
   });
   return { teamMemberId: id, teamMember: { id, ...member }, inviteUrl, deliveryStatus: queueEmail ? 'queued' : 'disabled' };
 }
@@ -71,12 +83,17 @@ function invitationHandlers(db, applyClaims, appUrl, emailEnabled = () => true) 
       if (!snap.exists) throw new HttpsError('not-found', 'Member not found.');
       await requireCompanyOwner(db, request, snap.get('companyId'));
       await rateLimit(db, 'manage-member', request.auth.uid);
+      const removal = request.data.action === 'remove';
       const { role, status } = request.data;
-      if (!MEMBER_ROLES.includes(role) || !['active', 'inactive', 'pending'].includes(status)) throw new HttpsError('invalid-argument', 'Invalid role or status.');
+      if (!removal && (!MEMBER_ROLES.includes(role) || !['active', 'inactive', 'pending'].includes(status))) throw new HttpsError('invalid-argument', 'Invalid role or status.');
       await db.runTransaction(async (tx) => {
-        const current = await tx.get(ref);
-        if (status !== 'inactive' && current.get('status') !== status) throw new HttpsError('failed-precondition', 'Send a new invitation to reactivate a member.');
-        tx.update(ref, { role, status, updatedAt: new Date().toISOString() });
+        const [current, company] = await Promise.all([tx.get(ref), tx.get(db.collection('companies').doc(snap.get('companyId')))]);
+        if (!current.exists || company.get('ownerId') !== request.auth.uid || current.get('companyId') !== company.id) throw new HttpsError('permission-denied', 'Company ownership changed. Refresh and try again.');
+        if (current.get('uid') === company.get('ownerId')) throw new HttpsError('failed-precondition', 'Transfer ownership before removing the owner.');
+        if (['removed', 'superseded'].includes(current.get('status'))) throw new HttpsError('failed-precondition', 'This membership is archived. Refresh the team list.');
+        if (!removal && status !== 'inactive' && current.get('status') !== status) throw new HttpsError('failed-precondition', 'Send a new invitation to reactivate a member.');
+        tx.create(db.collection('rlMembershipAudit').doc(), { action: removal ? 'remove' : 'update', companyId: company.id, actorId: request.auth.uid, path: ref.path, original: current.data(), createdAt: new Date() });
+        tx.update(ref, { ...(removal ? { status: 'removed', removedAt: new Date().toISOString() } : { role, status }), updatedAt: new Date().toISOString() });
       });
       if (snap.get('uid')) await applyClaims(snap.get('uid'), snap.get('email'), true);
       return { success: true };

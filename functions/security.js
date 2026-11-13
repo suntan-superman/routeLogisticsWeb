@@ -50,4 +50,14 @@ async function requireManager(db, request, data) {
   }
   throw new HttpsError('permission-denied', 'Manager permission required.');
 }
-module.exports = { hash, normalizeEmail, validEmail, documentId, requireAuth, rateLimit, requireCompanyOwner, requireManager };
+async function requireStaff(db, request, companyId) {
+  const { uid, token } = requireAuth(request, true);
+  if (!companyId || token.companyId !== companyId) throw new HttpsError('permission-denied', 'Company access required.');
+  const company = await db.collection('companies').doc(documentId(companyId)).get();
+  if (company.get('ownerId') === uid) return { role: 'owner', uid, company };
+  const memberId = documentId(token.membershipId, 'membership');
+  const member = await db.collection('teamMembers').doc(memberId).get();
+  if (member.get('uid') !== uid || member.get('companyId') !== companyId || member.get('status') !== 'active' || !['admin', 'manager', 'technician'].includes(member.get('role'))) throw new HttpsError('permission-denied', 'Active company membership required.');
+  return { role: member.get('role'), uid, memberId, company };
+}
+module.exports = { hash, normalizeEmail, validEmail, documentId, requireAuth, rateLimit, requireCompanyOwner, requireManager, requireStaff };

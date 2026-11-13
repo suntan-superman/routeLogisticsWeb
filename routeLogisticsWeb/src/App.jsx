@@ -26,6 +26,9 @@ const CustomerPortalPage = lazy(() => import('./pages/CustomerPortalPage'));
 
 const NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
+const RoutesPage = lazy(() => import('./pages/RoutesPage'));
+const TeamLocationsPage = lazy(() => import('./pages/TeamLocationsPage'));
+const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
 
 // Components
 import Layout from './components/Layout';
@@ -86,6 +89,9 @@ function App() {
                 <Route path="/portal" element={<CustomerPortalPage />} />
                 <Route path="/privacy" element={<PrivacyPage />} />
                 <Route path="/notifications" element={<ProtectedRoute><Layout><NotificationsPage /></Layout></ProtectedRoute>} />
+                <Route path="/routes" element={<ProtectedRoute><Layout><RoutesPage /></Layout></ProtectedRoute>} />
+                <Route path="/team-locations" element={<ProtectedRoute><Layout><TeamLocationsPage /></Layout></ProtectedRoute>} />
+                <Route path="/integrations" element={<ProtectedRoute><Layout><IntegrationsPage /></Layout></ProtectedRoute>} />
 
                 <Route path="/company-setup" element={
                   <ProtectedRoute>

@@ -9,6 +9,7 @@ import {
   HomeIcon, 
   BuildingOfficeIcon, 
   UsersIcon, 
+  UserGroupIcon,
   DocumentTextIcon,
   ClipboardDocumentListIcon,
   ChartBarIcon,
@@ -20,7 +21,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 const Layout = ({ children }) => {
-  const { userProfile, logout: signOut } = useAuth();
+  const { userProfile, company, logout: signOut } = useAuth();
   // Unregister this device's push token while still signed in so the next user on it isn't notified.
   const logout = async () => {
     await disablePush().catch(() => {});
@@ -36,9 +37,12 @@ const Layout = ({ children }) => {
     { name: 'Estimate Templates', href: '/estimate-templates', icon: DocumentTextIcon },
     { name: 'Jobs', href: '/jobs', icon: ClipboardDocumentListIcon },
     { name: 'Calendar', href: '/calendar', icon: CalendarIcon },
+    { name: 'Daily Routes', href: '/routes', icon: ArrowPathIcon },
+    { name: 'Team Locations', href: '/team-locations', icon: UserGroupIcon },
     { name: 'Service Plans', href: '/service-plans', icon: ArrowPathIcon },
     { name: 'Invoices', href: '/invoices', icon: BanknotesIcon },
     { name: 'Reports', href: '/reports', icon: ChartBarIcon },
+    { name: 'Integrations', href: '/integrations', icon: ArrowPathIcon },
     { name: 'Notifications', href: '/notifications', icon: ClipboardDocumentListIcon },
   ];
 
@@ -184,12 +188,15 @@ const Layout = ({ children }) => {
           >
             <Bars3Icon className="h-6 w-6" />
           </button>
-          <div className="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
-            <div className="flex flex-1"></div>
+          <div className="flex min-w-0 flex-1 gap-x-4 self-stretch lg:gap-x-6">
+            <div className="flex min-w-0 flex-1 items-center gap-3" aria-label="Active company">
+              {company?.logo && /^https:\/\//i.test(company.logo) && <img key={company.logo} src={company.logo} alt="" className="h-9 w-9 shrink-0 object-contain" onError={(event) => { event.currentTarget.style.display = 'none'; }} />}
+              <div className="min-w-0"><p className="truncate text-base font-semibold text-gray-900" title={company?.name}>{company?.name || 'Personal workspace'}</p><p className="text-xs text-gray-500">Route Logistics</p></div>
+            </div>
             <div className="flex items-center gap-x-4 lg:gap-x-6">
               <NotificationToggle />
               <div className="hidden lg:block lg:h-6 lg:w-px lg:bg-gray-200" />
-              <div className="flex items-center gap-x-2">
+              <div className="hidden xl:flex items-center gap-x-2">
                 <span className="text-sm text-gray-500">Welcome back,</span>
                 <span className="text-sm font-medium text-gray-900">{userProfile?.name || 'User'}</span>
               </div>

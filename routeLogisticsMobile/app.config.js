@@ -9,7 +9,7 @@ export default {
     icon: "./assets/icon.png",
     userInterfaceStyle: "light",
     newArchEnabled: true,
-    plugins: ["@react-native-community/datetimepicker", ["expo-image-picker", {
+    plugins: ["@react-native-community/datetimepicker", ["expo-location", { locationWhenInUsePermission: "Share your location with your company only while you choose to work with this app open.", isIosBackgroundLocationEnabled: false, isAndroidBackgroundLocationEnabled: false, isAndroidForegroundServiceEnabled: false }], ["expo-image-picker", {
       photosPermission: "Choose photos to document completed jobs.",
       cameraPermission: "Take photos to document completed jobs.",
       microphonePermission: false

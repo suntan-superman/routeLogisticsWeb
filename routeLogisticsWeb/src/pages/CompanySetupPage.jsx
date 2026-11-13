@@ -155,7 +155,7 @@ const CompanySetupPage = () => {
     try {
       const result = await CompanyService.addTeamMember(company.id, newMemberEmail, newMemberRole);
       if (result.success) {
-        setTeamMembers(prev => [...prev.filter((m) => m.id !== result.teamMemberId), result.teamMember]);
+        await loadCompanyData();
         setInviteLink(result.inviteUrl);
         setInviteDelivery(result.deliveryStatus);
         setNewMemberEmail('');
@@ -171,12 +171,13 @@ const CompanySetupPage = () => {
   };
 
   const handleRemoveTeamMember = async (memberId) => {
+    if (isLoading || !(await confirm({ title: 'Remove team member?', message: 'This removes the member from the team and revokes company access. Their history is retained. Deactivate instead to keep a visible inactive entry.', confirmText: 'Remove member', danger: true }))) return;
     setIsLoading(true);
     try {
       const result = await CompanyService.removeTeamMember(memberId);
       if (result.success) {
         setTeamMembers(prev => prev.filter(member => member.id !== memberId));
-        toast.success('Team member removed successfully!');
+        toast.success('Member removed; company access revoked.');
       } else {
         toast.error(result.error);
       }
@@ -364,6 +365,7 @@ const CompanySetupPage = () => {
                 </button>
               </div>
 
+              <p className="mb-3 text-sm text-gray-600">{teamMembers.length} team members · {teamMembers.filter((member) => member.status === 'pending').length} pending invitations</p>
               <div className="space-y-2">
                 {serviceCategories.map((category, index) => (
                   <div key={index} className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded-md">
@@ -432,30 +434,32 @@ const CompanySetupPage = () => {
                       <div className="flex-shrink-0">
                         <div className="h-8 w-8 bg-gray-300 rounded-full flex items-center justify-center">
                           <span className="text-gray-600 text-sm font-medium">
-                            {member.email.charAt(0).toUpperCase()}
+                            {member.email?.charAt(0).toUpperCase() || '?'}
                           </span>
                         </div>
                       </div>
                       <div className="ml-3">
                         <p className="text-sm font-medium text-gray-900">{member.email}</p>
                         <select aria-label={`Role for ${member.email}`} value={member.role} disabled={isLoading || !isOwner} onChange={(e) => updateMember(member, { role: e.target.value })} className="mt-1 rounded border-gray-300 text-sm">
+                          {!['technician', 'manager', 'admin'].includes(member.role) && <option value={member.role}>Select an RL role</option>}
                           <option value="technician">Technician</option><option value="manager">Manager</option><option value="admin">Admin</option>
                         </select>
                       </div>
                     </div>
                     <div className="flex items-center space-x-2">
-                      {isOwner && member.status !== 'active' && <button disabled={isLoading} type="button" className="text-primary-700 text-sm" onClick={() => resendInvite(member)}>Send new invite</button>}
+                      {isOwner && member.status !== 'active' && <button disabled={isLoading || !['technician', 'manager', 'admin'].includes(member.role)} type="button" className="text-primary-700 text-sm disabled:opacity-50" onClick={() => resendInvite(member)}>Send new invite</button>}
                       {isOwner && member.status !== 'inactive' && <button disabled={isLoading} type="button" className="text-amber-700 text-sm" onClick={() => updateMember(member, { status: 'inactive' })}>Deactivate</button>}
                       <span className={`px-2 py-1 text-xs rounded-full ${
                         member.status === 'active' ? 'bg-green-100 text-green-800' :
                         member.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
                         'bg-gray-100 text-gray-800'
                       }`}>
-                        {member.status}
+                        {member.status === 'inactive' ? 'deactivated' : member.status}
                       </span>
                       <button
                         type="button"
                         onClick={() => handleRemoveTeamMember(member.id)}
+                        disabled={isLoading || !isOwner}
                         className="text-red-600 hover:text-red-800 text-sm"
                       >
                         Remove

@@ -18,7 +18,7 @@ function AppContent() {
   if (isLoading) return <View style={styles.center}><ActivityIndicator /><Text>Loading Route Logistics…</Text></View>;
   if (sessionError) return <View style={styles.center}><Text>{sessionError}</Text><Button title="Retry" onPress={refreshUser} /><Button title="Sign out" onPress={signOut} /></View>;
   if (isAuthenticated && !user.emailVerified) return <EmailVerificationScreen />;
-  if (isAuthenticated) return screen === 'settings' ? <SettingsScreen navigation={navigation} /> : <HomeScreen key={`${user.id}:${user.companyId || 'solo'}:${user.role || 'solo'}`} navigation={navigation} />;
+  if (isAuthenticated) return screen === 'settings' ? <SettingsScreen navigation={navigation} /> : <HomeScreen key={`${user.id}:${user.companyId || 'solo'}:${user.role || 'solo'}:${user.membershipId || ''}`} navigation={navigation} />;
   return screen === 'signup' ? <SignUpScreen navigation={navigation} /> : <LoginScreen navigation={navigation} />;
 }
 export default function App() {

@@ -10,15 +10,32 @@
     {
       "source": "functions",
       "codebase": "routelogistics",
-      "ignore": ["node_modules", ".git", "*.local", "*.test.js", "*-debug.log"],
+      "ignore": [
+        "node_modules",
+        ".git",
+        "*.local",
+        "*.test.js",
+        "*-debug.log"
+      ],
       "runtime": "nodejs22"
     }
   ],
   "emulators": {
-    "auth": { "port": 9099 },
-    "firestore": { "port": 8080 },
-    "functions": { "port": 5001 },
-    "ui": { "enabled": false },
-    "singleProjectMode": true
+    "auth": {
+      "port": 9099
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "functions": {
+      "port": 5001
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true,
+    "storage": {
+      "port": 9199
+    }
   }
 }

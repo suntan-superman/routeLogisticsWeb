@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { onAuthStateChanged, signInWithCustomToken, signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { portalAuth, portalFunctions, portalReady } from '../services/portal';
+import InvoicePayment from '../components/InvoicePayment';
+import { testPaymentsConfigured } from '../services/paymentConfig';
 const call = (name, data) => httpsCallable(portalFunctions, name)(data).then((result) => result.data);
 const money = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
 
@@ -11,6 +13,7 @@ export default function CustomerPortalPage() {
   const [email, setEmail] = useState(''), [code, setCode] = useState(''), [challenge, setChallenge] = useState(null);
   const [busy, setBusy] = useState(true), [message, setMessage] = useState(''), [error, setError] = useState('');
   const [hasMore, setHasMore] = useState(false);
+  const [paymentInvoice, setPaymentInvoice] = useState(null);
   const load = async () => {
     setBusy(true); setError('');
     try { const data = await call('getCustomerPortal'); setAccounts(data.accounts); setHasMore(data.hasMoreAccounts); }
@@ -18,7 +21,7 @@ export default function CustomerPortalPage() {
     finally { setBusy(false); }
   };
   useEffect(() => onAuthStateChanged(portalAuth, (current) => {
-    setUser(current); setAccounts([]);
+    setUser(current); setAccounts([]); setPaymentInvoice(null);
     if (current) load(); else setBusy(false);
   }), []);
   const submit = async (event) => {
@@ -60,5 +63,7 @@ export default function CustomerPortalPage() {
     </>}
     {message && <p role="status" className="mt-4">{message}</p>}
     {error && <p role="alert" className="mt-4 text-red-700">{error}</p>}
+    {user && testPaymentsConfigured && accounts.some((a) => a.invoices.some((i) => i.status === 'sent')) && <section className="mt-6 rounded border p-4"><h2 className="font-semibold">Test card payments</h2><p className="mb-3 text-sm">No real money is collected. Invoice balances remain unchanged.</p>{accounts.flatMap((a) => a.invoices.filter((i) => i.status === 'sent' && i.total >= 0.5).map((invoice) => <button className="mr-3 underline" key={invoice.id} onClick={() => setPaymentInvoice(invoice.id)}>Test payment for {invoice.invoiceNumber}</button>))}</section>}
+    {paymentInvoice && <InvoicePayment invoiceId={paymentInvoice} functionClient={portalFunctions} onClose={() => setPaymentInvoice(null)} onRefresh={load} />}
   </main>;
 }

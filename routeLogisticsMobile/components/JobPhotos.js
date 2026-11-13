@@ -2,20 +2,21 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, Button, Image, ScrollView, Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
-import { collection, doc, setDoc, getDocs, query, where, limit, serverTimestamp } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../constants/firebase';
-import { scopeWhere, tenantFields } from '../services/tenancy';
+import { collection, getDocs, query, where, limit } from 'firebase/firestore';
+import { db } from '../constants/firebase';
+import { scopeWhere } from '../services/tenancy';
+import { cachedRead, savePhotoOffline, queuedWork, subscribeOffline } from '../services/offline';
 
 export default function JobPhotos({ job }) {
   const [photos, setPhotos] = useState([]), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const load = async () => {
     try {
-      const snap = await getDocs(query(collection(db, 'photos'), scopeWhere(), where('jobId', '==', job.id), limit(100)));
-      setPhotos(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      const saved = await cachedRead(`photos:${job.id}`, async () => { const snap = await getDocs(query(collection(db, 'photos'), scopeWhere(), where('jobId', '==', job.id), limit(100))); return snap.docs.map((d) => ({ id: d.id, ...d.data() })); }).catch(() => []);
+      const local = (await queuedWork()).filter((row) => row.kind === 'photo' && row.jobId === job.id && !['synced', 'discarded'].includes(row.state)).map((row) => ({ id: row.id, url: row.localUri, caption: `Photo ${row.state}` }));
+      setPhotos([...saved, ...local.filter((row) => !saved.some((photo) => photo.id === row.id))]);
     } catch (e) { setError(e.message); }
   };
-  useEffect(() => { if (job?.id) load(); }, [job?.id]);
+  useEffect(() => { if (job?.id) load(); return subscribeOffline(load); }, [job?.id]);
   const capture = async (camera) => {
     setBusy(true); setError('');
     try {
@@ -25,28 +26,16 @@ export default function JobPhotos({ job }) {
       const asset = result.assets[0];
       const dimension = asset.width >= asset.height ? 'width' : 'height';
       const compressed = await manipulateAsync(asset.uri, [{ resize: { [dimension]: Math.min(1600, asset[dimension]) } }], { compress: 0.8, format: SaveFormat.JPEG });
-      const response = await fetch(compressed.uri);
-      const blob = await response.blob();
-      try {
-        if (blob.size >= 10 * 1024 * 1024) throw new Error('This image is too large. Choose a smaller photo.');
-        const attribution = tenantFields();
-        const metadata = doc(collection(db, 'photos'));
-        const base = attribution.companyId ? `companies/${attribution.companyId}` : `users/${attribution.userId}`;
-        const storagePath = `${base}/jobs/${job.id}/${metadata.id}.jpg`;
-        const file = ref(storage, storagePath);
-        await uploadBytes(file, blob, { contentType: 'image/jpeg' });
-        const url = await getDownloadURL(file);
-        await setDoc(metadata, { ...attribution, jobId: job.id, customerId: job.customerId || null, storagePath, url, caption: '', createdAt: serverTimestamp() });
-        await load();
-      } finally { blob.close?.(); }
-    } catch (e) { setError(e.message); Alert.alert('Photo upload failed', e.message); }
+      await savePhotoOffline(job, compressed.uri);
+      await load();
+    } catch (e) { setError(e.message); Alert.alert('Could not save photo', e.message); }
     finally { setBusy(false); }
   };
   if (!job?.id) return null;
   return <View style={{ marginVertical: 16 }}>
     <Text style={{ fontWeight: '700', fontSize: 18, marginBottom: 8 }}>Job photos</Text>
-    <View style={{ flexDirection: 'row', gap: 12 }}><Button title={busy ? 'Uploading…' : 'Take photo'} disabled={busy} onPress={() => capture(true)} /><Button title="Choose photo" disabled={busy} onPress={() => capture(false)} /></View>
-    <Text style={{ color: '#64748b', marginVertical: 6 }}>Photos upload while online and are visible to your team on web and mobile.</Text>
+    <View style={{ flexDirection: 'row', gap: 12 }}><Button title={busy ? 'Saving…' : 'Take photo'} disabled={busy} onPress={() => capture(true)} /><Button title="Choose photo" disabled={busy} onPress={() => capture(false)} /></View>
+    <Text style={{ color: '#64748b', marginVertical: 6 }}>Photos stay on this device until uploaded. Sync resumes while the app is open and connected.</Text>
     {!!error && <Text accessibilityRole="alert" style={{ color: '#b91c1c' }}>{error}</Text>}
     <ScrollView horizontal>{photos.map((photo) => <Image key={photo.id} accessibilityLabel={photo.caption || 'Job photo'} source={{ uri: photo.url }} style={{ width: 140, height: 140, margin: 5, borderRadius: 8 }} />)}</ScrollView>
   </View>;

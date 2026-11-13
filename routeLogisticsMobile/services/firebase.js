@@ -9,7 +9,8 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, updateDoc, collection, addDoc, getDocs, deleteDoc, query, where, orderBy } from 'firebase/firestore';
 import { auth, db } from '../constants/firebase';
-import { scopeWhere, tenantFields, localDate } from './tenancy';
+import { scopeWhere, tenantFields, localDate, getClaims } from './tenancy';
+import { cachedRead, overlayJobs, readCache, writeCache, saveJobOffline, isOffline } from './offline';
 
 export class AuthService {
   // Check if Firebase Auth is available
@@ -314,14 +315,9 @@ export class CustomerService {
         orderBy('createdAt', 'desc')
       );
 
-      const querySnapshot = await getDocs(q);
-      const customers = [];
-
-      querySnapshot.forEach((doc) => {
-        customers.push({
-          id: doc.id,
-          ...doc.data()
-        });
+      const customers = await cachedRead('customers', async () => {
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map((row) => { const data = row.data(); return { id: row.id, name: data.name?.trim() || data.displayName || [data.firstName, data.lastName].filter(Boolean).join(' ') || 'Name not provided', phone: data.phone || data.phoneNumber || '', email: data.email || '', address: typeof data.address === 'string' ? data.address : data.address?.street || '', city: data.city || '', state: data.state || '', zipCode: data.zipCode || '' }; });
       });
 
       return {
@@ -650,21 +646,22 @@ export class JobService {
       const q = query(
         collection(db, 'jobs'),
         scopeWhere(),
+        ...(getClaims()?.role === 'technician' ? [where('assignedTo', '==', getClaims().membershipId)] : []),
         where('date', '>=', startDate),
         where('date', '<=', endDate),
         orderBy('date', 'asc'),
         orderBy('time', 'asc')
       );
 
-      const querySnapshot = await getDocs(q);
-      const jobs = [];
-
-      querySnapshot.forEach((doc) => {
-        jobs.push({
-          id: doc.id,
-          ...doc.data(),
-        });
+      const loaded = await cachedRead(`jobs:${startDate}:${endDate}`, async () => {
+        const snapshot = await getDocs(q);
+        const data = snapshot.docs.map((row) => ({ id: row.id, ...row.data() }));
+        const bases = await readCache('job-bases') || {};
+        data.forEach((job) => { bases[job.id] = job; });
+        await writeCache('job-bases', bases);
+        return data;
       });
+      const jobs = await overlayJobs(loaded);
 
       return { success: true, jobs };
     } catch (error) {
@@ -705,6 +702,9 @@ export class JobService {
   // Update a job
   static async updateJob(jobId, jobData) {
     try {
+      const supported = ['status', 'notes', 'actualWorkDone', 'actualHours', 'completionNotes', 'completedAt'];
+      if (Object.keys(jobData).every((key) => supported.includes(key))) return await saveJobOffline(jobId, jobData);
+      if (await isOffline()) throw new Error('Scheduling and pricing changes require an internet connection. Work notes and completion details can be saved offline.');
       const userId = this.getCurrentUserId();
       if (!userId) {
         return {
@@ -723,7 +723,7 @@ export class JobService {
       return {
         success: false,
         error: {
-          message: 'Failed to update job',
+          message: error.message || 'Failed to update job',
           code: error.code
         }
       };

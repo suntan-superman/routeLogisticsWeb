@@ -15,6 +15,15 @@ service firebase.storage {
     function isManagerRole() {
       return request.auth.token.get('role', null) in ['owner', 'admin', 'manager'];
     }
+    function activeCompany(companyId) {
+      return signedIn() && request.auth.token.get('companyId', null) == companyId
+        && (firestore.get(/databases/(default)/documents/companies/$(companyId)).data.ownerId == request.auth.uid
+          || (request.auth.token.get('membershipId', null) != null
+            && firestore.get(/databases/(default)/documents/teamMembers/$(request.auth.token.membershipId)).data.uid == request.auth.uid
+            && firestore.get(/databases/(default)/documents/teamMembers/$(request.auth.token.membershipId)).data.companyId == companyId
+            && firestore.get(/databases/(default)/documents/teamMembers/$(request.auth.token.membershipId)).data.status == 'active'
+            && firestore.get(/databases/(default)/documents/teamMembers/$(request.auth.token.membershipId)).data.role == request.auth.token.get('role', null)));
+    }
 
     match /users/{userId}/{allPaths=**} {
       allow read: if signedIn() && request.auth.uid == userId;
@@ -23,9 +32,9 @@ service firebase.storage {
     }
 
     match /companies/{companyId}/{allPaths=**} {
-      allow read: if signedIn() && request.auth.token.get('companyId', null) == companyId;
-      allow create, update: if signedIn() && request.auth.token.get('companyId', null) == companyId && validUpload();
-      allow delete: if signedIn() && request.auth.token.get('companyId', null) == companyId && isManagerRole();
+      allow read: if activeCompany(companyId);
+      allow create, update: if activeCompany(companyId) && validUpload();
+      allow delete: if activeCompany(companyId) && isManagerRole();
     }
 
     match /{allPaths=**} {

@@ -2,7 +2,7 @@
   "name": "route-logistics-root",
   "private": true,
   "scripts": {
-    "test:rules": "firebase emulators:exec --only firestore --project demo-routelogistics \"node --test --test-concurrency=1 tests/firestore.rules.test.js tests/workflows.integration.test.js\"",
+    "test:rules": "firebase emulators:exec --only firestore,storage --project demo-routelogistics \"node --test --test-concurrency=1 tests/firestore.rules.test.js tests/workflows.integration.test.js tests/payments.integration.test.js tests/fieldwork.integration.test.js tests/quickbooks.integration.test.js tests/storage.rules.test.js\"",
     "test:e2e": "node scripts/prepare-emulators.js && firebase emulators:exec --only auth,firestore,functions --project demo-routelogistics \"node --test tests/syncclaims.e2e.test.js\"",
     "test:functions": "cd functions && node --test",
     "test": "npm run test:functions && npm run test:web && npm run test:rules",

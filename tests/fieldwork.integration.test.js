@@ -1,0 +1,54 @@
+const { test, before, after } = require('node:test');
+const assert = require('node:assert/strict');
+const req = require('node:module').createRequire(require('node:path').resolve(__dirname, '../functions/package.json'));
+const { initializeApp, deleteApp } = req('firebase-admin/app');
+const { getFirestore } = req('firebase-admin/firestore');
+const { routeHandlers } = require('../functions/routes');
+const { locationHandlers } = require('../functions/locations');
+const { offlineHandler } = require('../functions/offline');
+let app, db, routes, locations, apply;
+const owner = { uid: 'field-owner', token: { companyId: 'field-co', role: 'owner', email_verified: true } }, tech = { uid: 'field-tech', token: { companyId: 'field-co', membershipId: 'field-member', role: 'technician', email_verified: true } };
+const request = (data, auth = tech) => ({ auth, data });
+before(async () => {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('Emulator required');
+  app = initializeApp({ projectId: 'demo-routelogistics' }, 'fieldwork-tests'); db = getFirestore(app);
+  await db.doc('companies/field-co').set({ ownerId: owner.uid });
+  await db.doc('teamMembers/field-member').set({ companyId: 'field-co', uid: tech.uid, role: 'technician', status: 'active' });
+  await db.doc('customers/field-customer').set({ companyId: 'field-co', latitude: 40, longitude: -120, name: 'Test customer' });
+  await db.doc('jobs/field-job').set({ companyId: 'field-co', userId: owner.uid, customerId: 'field-customer', assignedTo: 'field-member', date: '2026-11-13', time: '09:00', status: 'in-progress', updatedAt: '2026-11-13T00:00:00.000Z' });
+  routes = routeHandlers(db); locations = locationHandlers(db); apply = offlineHandler(db);
+});
+after(() => deleteApp(app));
+test('daily routes enforce assignment and optimistic revision without provider calls', async () => {
+  const data = { memberId: 'field-member', date: '2026-11-13' };
+  assert.equal((await routes.get(request(data))).stops.length, 1);
+  await assert.rejects(routes.get(request({ ...data, memberId: owner.uid })), { code: 'permission-denied' });
+  assert.equal((await routes.save(request({ ...data, jobIds: ['field-job'], revision: 0 }))).revision, 1);
+  await assert.rejects(routes.save(request({ ...data, jobIds: ['field-job'], revision: 0 })), { code: 'aborted' });
+  await assert.rejects(routes.save(request({ ...data, jobIds: ['field-job', 'field-job'], revision: 1 })), { code: 'invalid-argument' });
+});
+test('location sharing is explicit, manager-only, stoppable and expires', async () => {
+  const session = await locations.update(request({ action: 'start', jobId: 'field-job' }));
+  await locations.update(request({ action: 'position', sessionId: session.sessionId, latitude: 40, longitude: -120, accuracy: 15 }));
+  await assert.rejects(locations.list(request({})), { code: 'permission-denied' });
+  assert.equal((await locations.list(request({}, owner))).locations[0].sharing, true);
+  await locations.update(request({ action: 'stop', sessionId: session.sessionId }));
+  await assert.rejects(locations.update(request({ action: 'position', sessionId: session.sessionId, latitude: 40, longitude: -120, accuracy: 15 })), { code: 'failed-precondition' });
+  await locations.retention(request({ companyId: 'field-co', hours: 1 }, owner));
+  const rows = await db.collection('rlLocations').where('companyId', '==', 'field-co').get(); await rows.docs[0].ref.update({ expiresAt: new Date(0) });
+  assert.equal((await locations.list(request({}, owner))).locations.length, 0);
+  assert.equal((await locations.cleanup()).removed, 1);
+});
+test('offline operations are idempotent, expose conflicts and cannot change tenant or assignment', async () => {
+  const data = { operationId: 'operation-000000000001', jobId: 'field-job', expectedVersion: '2026-11-13T00:00:00.000Z', patch: { notes: 'Saved offline' } };
+  const results = await Promise.all([apply(request(data)), apply(request(data))]);
+  assert.equal(results[0].status, 'synced'); assert.equal(results[0].version, results[1].version);
+  await assert.rejects(apply(request({ ...data, patch: { notes: 'Different payload' } })), { code: 'already-exists' });
+  const conflict = await apply(request({ ...data, operationId: 'operation-000000000002', patch: { status: 'completed' } }));
+  assert.equal(conflict.status, 'conflict'); assert.equal(conflict.server.notes, 'Saved offline');
+  await assert.rejects(apply(request({ ...data, operationId: 'operation-000000000003', patch: { companyId: 'other' } })), { code: 'invalid-argument' });
+  await db.doc('jobs/field-job').update({ assignedTo: 'someone-else' });
+  await assert.rejects(apply(request(data)), { code: 'permission-denied' });
+  await db.doc('teamMembers/field-member').update({ status: 'removed' });
+  await assert.rejects(routes.get(request({ memberId: 'field-member', date: '2026-11-13' })), { code: 'permission-denied' });
+});

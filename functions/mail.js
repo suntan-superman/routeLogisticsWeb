@@ -8,6 +8,10 @@ async function deliverMail(db, ref, transport, from, now = Date.now()) {
   const mail = await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref), data = snap.data();
     if (!data || !['queued', 'sending'].includes(data.status) || data.availableAt > now) return null;
+    if (data.invitationId) {
+      const [member, secret] = await Promise.all([tx.get(db.collection('teamMembers').doc(data.invitationId)), tx.get(db.collection('rlInviteSecrets').doc(data.invitationId))]);
+      if (member.get('status') !== 'pending' || secret.get('codeHash') !== data.invitationHash) { tx.update(ref, { status: 'cancelled' }); return null; }
+    }
     if (data.invoiceId) {
       const invoice = await tx.get(db.collection('invoices').doc(data.invoiceId));
       if (!invoice.exists || invoice.get('status') !== 'sent') { tx.update(ref, { status: 'cancelled' }); return null; }

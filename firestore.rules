@@ -105,8 +105,7 @@ service cloud.firestore {
             || resource.data.get('uid', null) == uid()
             || (inCompany(resource.data) && isManager()));
       allow create, update: if false; // Owner-authorized callables validate roles and invitation lifecycle.
-      allow delete: if signedIn()
-        && get(/databases/$(database)/documents/companies/$(resource.data.companyId)).data.ownerId == uid();
+      allow delete: if false; // Audited removal is performed by manageTeamMember.
     }
 
     // ---------- customers ----------
@@ -182,12 +181,19 @@ service cloud.firestore {
       function validInvoiceStatus(s) {
         return s in ['draft', 'sent', 'paid', 'void'];
       }
+      function paymentFields() {
+        return ['paymentLock', 'paymentStatus', 'paymentIntentId', 'amountRefunded', 'paymentUpdatedAt', 'testPaymentStatus', 'testPaymentUpdatedAt', 'qbTestPaymentStatus', 'qbBalance', 'qbPaymentReview', 'qbReconciledAt', 'paidVia'];
+      }
       allow read: if readable(resource.data);
       allow create: if validCreate(false)
+        && !request.resource.data.keys().hasAny(paymentFields())
         && validInvoiceStatus(request.resource.data.get('status', 'draft'))
         && request.resource.data.get('total', 0) is number
         && request.resource.data.get('total', 0) >= 0;
       allow update: if manageable(resource.data) && tenancyUnchanged()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(paymentFields())
+        && (resource.data.get('paymentLock', null) == null
+          || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['total', 'currency', 'customerId', 'status', 'lineItems', 'subtotal', 'tax', 'taxRate']))
         && resource.data.get('status', 'draft') != 'paid'
         && validInvoiceStatus(request.resource.data.get('status', 'draft'))
         && request.resource.data.get('total', 0) is number && request.resource.data.get('total', 0) >= 0;

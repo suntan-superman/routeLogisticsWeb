@@ -1,4 +1,4 @@
-import React, { useContext, useState, useEffect, useMemo } from 'react';
+import React, { useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,10 @@ import {
   Platform,
   KeyboardAvoidingView,
   Image,
+  AppState,
+  RefreshControl,
 } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 import JobPhotos from '../components/JobPhotos';
 import FieldWorkTools from '../components/FieldWorkTools';
 import MyRoute from '../components/MyRoute';
@@ -63,6 +66,7 @@ const HomeScreen = ({ navigation }) => {
   const [jobs, setJobs] = useState([]);
   const [isLoadingJobs, setIsLoadingJobs] = useState(false);
   const [activeFilter, setActiveFilter] = useState('day'); // 'day', 'week', 'month'
+  const jobsRequest = useRef(0), jobsMounted = useRef(true);
 
   // Dropdown states
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
@@ -113,11 +117,6 @@ const HomeScreen = ({ navigation }) => {
   useEffect(() => {
     if (managing) loadCustomers();
   }, [managing]);
-
-  // Load jobs when filter changes
-  useEffect(() => {
-    loadJobs();
-  }, [activeFilter]);
 
   // Data availability checks
   const hasCustomers = customers.length > 0;
@@ -172,7 +171,9 @@ const HomeScreen = ({ navigation }) => {
   };
 
   // Load jobs from Firebase based on active filter
-  const loadJobs = async () => {
+  const loadJobs = useCallback(async () => {
+    if (!jobsMounted.current) return;
+    const request = ++jobsRequest.current;
     setIsLoadingJobs(true); setJobsError('');
     try {
       let result;
@@ -190,17 +191,40 @@ const HomeScreen = ({ navigation }) => {
           result = await JobService.getTodaysJobs();
       }
 
+      if (!jobsMounted.current || request !== jobsRequest.current) return;
       if (result.success) {
         setJobs(result.jobs);
       } else {
         setJobs([]); setJobsError(result.error?.message || result.error || 'Could not load your schedule.');
       }
     } catch (error) {
-      setJobs([]); setJobsError('Could not load your schedule. Please refresh.');
+      if (jobsMounted.current && request === jobsRequest.current) {
+        setJobs([]); setJobsError('Could not load your schedule. Please refresh.');
+      }
     } finally {
-      setIsLoadingJobs(false);
+      if (jobsMounted.current && request === jobsRequest.current) setIsLoadingJobs(false);
     }
-  };
+  }, [activeFilter, user.id, user.companyId, user.role, user.membershipId]);
+
+  // Remote assignments are fetched when returning to work or reconnecting.
+  // Only the latest request for the current filter/workspace may update the list.
+  useEffect(() => {
+    jobsMounted.current = true;
+    loadJobs();
+    let previousState = AppState.currentState, connected = null;
+    const app = AppState.addEventListener('change', state => {
+      const returning = state === 'active' && previousState !== 'active';
+      previousState = state;
+      if (returning) loadJobs();
+    });
+    const network = NetInfo.addEventListener(state => {
+      const online = state.isConnected !== false && state.isInternetReachable !== false;
+      const reconnected = connected === false && online;
+      connected = online;
+      if (reconnected && AppState.currentState === 'active') loadJobs();
+    });
+    return () => { jobsMounted.current = false; jobsRequest.current++; app.remove(); network(); };
+  }, [loadJobs]);
 
   // Add customer to Firebase
   const addCustomerToFirebase = async (customerData) => {
@@ -749,7 +773,7 @@ const HomeScreen = ({ navigation }) => {
         </View>
         <IconButton icon="settings-outline" label="Open settings" onPress={() => navigation.navigate('settings')} />
       </View>
-      <ScrollView contentContainerStyle={{ padding: 22, paddingTop: 12, gap: 18, paddingBottom: 30, width: '100%', maxWidth: 760, alignSelf: 'center' }}>
+      <ScrollView refreshControl={<RefreshControl refreshing={isLoadingJobs} onRefresh={loadJobs} tintColor={palette.accent} colors={[palette.accent]} />} contentContainerStyle={{ padding: 22, paddingTop: 12, gap: 18, paddingBottom: 30, width: '100%', maxWidth: 760, alignSelf: 'center' }}>
         <View style={{ gap: 6 }}><Text style={{ color: palette.text, fontSize: 28, fontWeight: '700', letterSpacing: -0.6 }}>{t('welcome')}, {user.name?.split(' ')[0]}.</Text><Text style={{ color: palette.secondary, fontSize: 14, textTransform: 'capitalize' }}>{user.role || 'Independent business'} · {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</Text></View>
         <GlassCard>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
@@ -762,7 +786,8 @@ const HomeScreen = ({ navigation }) => {
             <View style={{ width: 44, height: 44, borderRadius: 15, backgroundColor: palette.input, alignItems: 'center', justifyContent: 'center' }}><Ionicons name={job.status === 'completed' ? 'checkmark-outline' : 'briefcase-outline'} size={21} color={palette.accent} /></View>
             <View style={{ flex: 1, gap: 4 }}><Text style={{ color: palette.text, fontSize: 15, fontWeight: '600' }}>{job.customerName || job.serviceType || 'Scheduled job'}</Text><Text style={{ color: palette.secondary, fontSize: 12 }}>{[job.time, job.serviceType, job.status].filter(Boolean).join(' · ')}</Text></View><Ionicons name="chevron-forward" size={17} color={palette.secondary} />
           </TouchableOpacity>)}
-          <GlassButton secondary title="Refresh workspace" icon="refresh-outline" onPress={async () => { const result = await refreshUser(); if (result.success) loadJobs(); }} />
+          <GlassButton secondary title="Refresh jobs" icon="refresh-outline" disabled={isLoadingJobs} onPress={loadJobs} />
+          <GlassButton secondary title="Refresh workspace" icon="sync-outline" onPress={async () => { const result = await refreshUser(); if (result.success) loadJobs(); }} />
         </GlassCard>
         {managing && <View style={{ gap: 10 }}><Text style={{ color: palette.text, fontSize: 18, fontWeight: '700' }}>Manage work</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}><GlassButton title="Schedule service" icon="add-outline" onPress={handleScheduleServicePress} style={{ flexGrow: 1 }} /><GlassButton secondary title="Customers" icon="people-outline" onPress={() => setShowCustomerModal(true)} style={{ flexGrow: 1 }} /><GlassButton secondary title="Estimates" icon="document-text-outline" onPress={handleEstimatesPress} style={{ flexGrow: 1 }} /></View></View>}
         <WorkLocation jobs={jobs} />

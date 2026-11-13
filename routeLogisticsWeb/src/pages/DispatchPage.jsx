@@ -8,6 +8,7 @@ import RoutesPage from './RoutesPage';
 import JobPhotos from '../components/JobPhotos';
 
 const today = () => new Date().toLocaleDateString('en-CA');
+const locationLabels = { live: 'Live location', stale: 'Last location is stale', 'sharing-disabled': 'Location sharing is off', unavailable: 'No shared location' };
 export default function DispatchPage() {
   const { company, can } = useAuth();
   const [date, setDate] = useState(today), [jobs, setJobs] = useState([]), [team, setTeam] = useState([]), [locations, setLocations] = useState([]);
@@ -44,7 +45,7 @@ export default function DispatchPage() {
       });
       locations.filter(location => member === 'all' || member === location.memberId).forEach(location => {
         const pin = new PinElement({ background: location.state === 'live' ? '#0f766e' : '#475569', glyph: 'T', glyphColor: '#ffffff' });
-        const marker = new AdvancedMarkerElement({ map: map.current, position: { lat: location.lat, lng: location.lng }, title: `${location.name} · ${location.state} · ${location.updatedAt}`, content: pin.element });
+        const marker = new AdvancedMarkerElement({ map: map.current, position: { lat: location.lat, lng: location.lng }, title: `${location.name} · ${locationLabels[location.state] || locationLabels.unavailable} · ${location.updatedAt}`, content: pin.element });
         markers.current.push(marker); bounds.extend({ lat: location.lat, lng: location.lng });
       });
       if (!bounds.isEmpty()) map.current.fitBounds(bounds, 40);
@@ -108,8 +109,8 @@ export default function DispatchPage() {
         <label>Assigned to <select aria-label={`Assign ${job.customerName || job.id}`} className="rounded border-gray-300" value={job.assignedTo || ''} disabled={busy} onChange={e => assign(job, e.target.value)}><option value="">Unassigned</option>{team.map(row => <option value={row.id} key={row.id}>{row.name}</option>)}</select></label>
         {(jobAddress(job) || position(job)) && <a className="ml-3 underline" href={googleNavigation([{ ...job, address: jobAddress(job), location: position(job) }])} target="_blank" rel="noreferrer">Navigate</a>}
       </article>)}
-    </div><aside className="space-y-3"><h2 className="font-semibold">Team locations and routes</h2><p className="text-sm text-gray-600">Positions are shared voluntarily during work. Refresh to retrieve newer positions.</p>
-      {team.map(row => { const location = locations.find(item => item.memberId === row.id); const state = location?.state === 'live' && now - new Date(location.updatedAt) > 180000 ? 'stale' : location?.state || 'unavailable'; return <div key={row.id} className="rounded border bg-white p-3"><strong>{row.name}</strong><p>{state.replaceAll('-', ' ')}</p>{location && <p className="text-sm">Last fix: {new Date(location.updatedAt).toLocaleString()} · ±{Math.round(location.accuracy)} m</p>}<button className="underline" onClick={() => setRouteMember(row.id)}>Open daily route</button></div>; })}
+    </div><aside className="space-y-3"><h2 className="font-semibold">Team locations and routes</h2><p className="text-sm text-gray-600">Location status does not affect job assignments. Technicians choose to share their location in the mobile app after starting an assigned job. Refresh to retrieve newer positions.</p>
+      {team.map(row => { const location = locations.find(item => item.memberId === row.id); const state = location?.state === 'live' && now - new Date(location.updatedAt) > 180000 ? 'stale' : location?.state || 'unavailable'; return <div key={row.id} className="rounded border bg-white p-3"><strong>{row.name}</strong><p>{locationLabels[state] || locationLabels.unavailable}</p>{location && <p className="text-sm">Last fix: {new Date(location.updatedAt).toLocaleString()} · ±{Math.round(location.accuracy)} m</p>}<button className="underline" onClick={() => setRouteMember(row.id)}>Open daily route</button></div>; })}
     </aside></div>
     {selected && <section className="rounded border bg-white p-5 space-y-3" aria-label="Job details"><button onClick={() => setSelected(null)} className="float-right underline">Close details</button><h2 className="text-xl font-bold">{selected.customerName} · {selected.serviceType}</h2><p>{jobAddress(selected)} · {selected.date} {selected.time}</p><p>{selected.notes}</p><p>{selected.actualWorkDone || selected.completionNotes}</p><JobPhotos job={selected} /></section>}
     {routeMember && <section className="rounded border bg-white p-5"><button className="mb-4 underline" onClick={() => setRouteMember('')}>Close route planner</button><RoutesPage key={`${date}:${routeMember}`} initialDate={date} initialMemberId={routeMember} /></section>}

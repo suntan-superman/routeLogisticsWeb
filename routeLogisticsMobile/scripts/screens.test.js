@@ -10,8 +10,12 @@ const { workspacePermissions } = require('../services/workspacePolicy');
 global.IS_REACT_ACT_ENVIRONMENT = true;
 const root = path.resolve(__dirname, '..'), cache = new Map(), AuthContext = React.createContext(null);
 let currentAuth, changes = [], sent = [], verified = [], stored = new Map();
+let jobRequests = [], jobLoader = async () => ({ success: true, jobs: [] });
+const appListeners = new Set(), networkListeners = new Set();
 const pass = ({ children }) => children;
-const native = Object.fromEntries(['View','Text','TextInput','Pressable','TouchableOpacity','ScrollView','KeyboardAvoidingView','ActivityIndicator','Image','Switch','Button','StatusBar'].map(name => [name, name]));
+const native = Object.fromEntries(['View','Text','TextInput','Pressable','TouchableOpacity','ScrollView','KeyboardAvoidingView','ActivityIndicator','Image','Switch','Button','StatusBar','RefreshControl'].map(name => [name, name]));
+native.ScrollView = ({ refreshControl, children, ...props }) => React.createElement('ScrollView', props, refreshControl, children);
+native.AppState = { currentState: 'active', addEventListener: (_event, listener) => { appListeners.add(listener); return { remove: () => appListeners.delete(listener) }; } };
 Object.assign(native, { StyleSheet: { create: x => x, absoluteFill: {}, absoluteFillObject: {} }, Platform: { OS: 'ios', select: x => x.ios }, Alert: { alert() {} }, Linking: { openURL: async () => {} }, Modal: ({ visible, children }) => visible ? React.createElement('Modal', null, children) : null });
 const palette = { background: '#07120F', surface: '#14241F', glass: '#14241F', text: '#EFFAF5', secondary: '#B0C8BE', border: '#405D4E', input: '#14241F', accent: '#62E3B3', button: '#087B55', danger: '#FFAAA3', highlight: '#FFFFFF', glow: '#164D38' };
 function load(relative) {
@@ -27,6 +31,7 @@ function load(relative) {
     if (specifier === 'expo-linear-gradient') return { LinearGradient: 'LinearGradient' };
     if (specifier === '@expo/vector-icons') return { Ionicons: 'Icon', MaterialIcons: 'Icon', AntDesign: 'Icon', MaterialCommunityIcons: 'Icon' };
     if (specifier === '@react-native-community/datetimepicker') return () => null;
+    if (specifier === '@react-native-community/netinfo') return { addEventListener: listener => { networkListeners.add(listener); listener({ isConnected: true, isInternetReachable: true }); return () => networkListeners.delete(listener); } };
     if (specifier === '@react-native-async-storage/async-storage') return { getItem: async key => stored.get(key) || null, setItem: async (key, value) => stored.set(key, value), removeItem: async key => stored.delete(key) };
     if (specifier.endsWith('/contexts/AuthContext')) return { AuthContext, AuthProvider: pass, useAuth: () => currentAuth };
     if (specifier.endsWith('/contexts/LanguageContext')) return { LanguageProvider: pass, useLanguage: () => ({ t: key => key, language: 'en', changeLanguage() {} }) };
@@ -34,7 +39,7 @@ function load(relative) {
     if (specifier.endsWith('/constants/responsiveSizes')) return { FONT_SIZES: new Proxy({}, { get: () => 16 }), SPACING: new Proxy({}, { get: () => 12 }), BORDER_RADIUS: new Proxy({}, { get: () => 12 }), ICON_SIZES: new Proxy({}, { get: () => 20 }), hp: () => 20, wp: () => 20, rf: () => 16 };
     if (/\/components\/(JobPhotos|WorkLocation|OfflineStatus|FieldWorkTools|MyRoute)$/.test(specifier)) return () => null;
     if (specifier.endsWith('/services/tenancy')) return { canManage: () => currentAuth.permissions.canManage, localDate: () => '2026-11-13' };
-    if (specifier.endsWith('/services/firebase')) return { CustomerService: { getCustomers: async () => ({ success: true, customers: [] }) }, JobService: Object.fromEntries(['getTodaysJobs','getThisWeeksJobs','getThisMonthsJobs'].map(key => [key, async () => ({ success: true, jobs: [] })])), EstimateService: {} };
+    if (specifier.endsWith('/services/firebase')) return { CustomerService: { getCustomers: async () => ({ success: true, customers: [] }) }, JobService: Object.fromEntries(['getTodaysJobs','getThisWeeksJobs','getThisMonthsJobs'].map(key => [key, async () => { jobRequests.push(key); return jobLoader(key); }])), EstimateService: {} };
     if (specifier.startsWith('.')) {
       const resolved = path.resolve(path.dirname(filename), specifier);
       return load(resolved.endsWith('.js') ? resolved : resolved + '.js');
@@ -46,6 +51,7 @@ function load(relative) {
   return module.exports;
 }
 function account(role = 'technician', status = 'company') {
+  jobRequests = []; jobLoader = async () => ({ success: true, jobs: [] }); native.AppState.currentState = 'active';
   const user = { id: 'luis', name: 'Luis Gonzales', email: 'luis@example.com', emailVerified: true, companyId: status === 'company' ? 'acme' : null, role: status === 'company' ? role : null, membershipId: status === 'company' ? 'membership' : null,
     workspace: { status, invitations: [{ id: 'invite', companyName: 'Acme Pest Control', role: 'technician' }] }, companyName: 'Acme Pest Control', businessName: 'Acme Pest Control', businessPhone: '555-0100', businessAddress: '1 Main St', services: ['Termite Inspection', 'Rodent Control'] };
   currentAuth = { user, isAuthenticated: true, isLoading: false, permissions: workspacePermissions(user.workspace, user), refreshUser: async () => ({ success: true }), signOut: async () => {}, updateUserProfile: async () => ({ success: true }), requestStaffCode: async email => { sent.push(email); return { challengeId: 'c'.repeat(48), message: 'Check your inbox.' }; }, signInWithCode: async (...args) => { verified.push(args); return { success: true }; } };
@@ -108,4 +114,55 @@ test('mobile code sign-in calls the existing challenge flow and never saves code
   await press(tree, 'Sign in');
   assert.deepEqual(verified, [['c'.repeat(48), '123456']]); assert.equal(stored.size, 0);
   await act(async () => tree.unmount());
+});
+
+test('assigned work refreshes manually, on return and reconnect, using the selected period', async () => {
+  account();
+  const home = await render('screens/HomeScreen.js');
+  const result = label => ({ success: true, jobs: [{ id: label, customerName: label, serviceType: 'Inspection', status: 'scheduled' }] });
+  jobLoader = async () => result('New remote assignment');
+  await press(home, 'Refresh jobs');
+  assert.match(textOf(home), /New remote assignment/);
+  jobLoader = async () => result('After returning');
+  await act(async () => {
+    native.AppState.currentState = 'background'; appListeners.forEach(listener => listener('background'));
+    native.AppState.currentState = 'active'; appListeners.forEach(listener => listener('active'));
+  });
+  assert.match(textOf(home), /After returning/);
+  jobLoader = async () => result('After reconnecting');
+  await act(async () => {
+    networkListeners.forEach(listener => listener({ isConnected: false, isInternetReachable: false }));
+    networkListeners.forEach(listener => listener({ isConnected: true, isInternetReachable: true }));
+  });
+  assert.match(textOf(home), /After reconnecting/);
+  jobLoader = async () => result('After pulling');
+  const refresh = home.root.findAll(node => node.type === 'RefreshControl')[0];
+  await act(async () => refresh.props.onRefresh());
+  assert.match(textOf(home), /After pulling/);
+  await press(home, 'View schedule');
+  const week = home.root.findAll(node => node.type === 'TouchableOpacity' && node.findAll(child => child.type === 'Text' && child.props.children === 'week').length)[0];
+  await act(async () => week.props.onPress());
+  assert.equal(jobRequests.at(-1), 'getThisWeeksJobs');
+  await act(async () => {
+    native.AppState.currentState = 'background'; appListeners.forEach(listener => listener('background'));
+    native.AppState.currentState = 'active'; appListeners.forEach(listener => listener('active'));
+  });
+  assert.equal(jobRequests.at(-1), 'getThisWeeksJobs');
+  await act(async () => home.unmount());
+  assert.equal(appListeners.size, 0); assert.equal(networkListeners.size, 0);
+});
+
+test('a delayed older schedule response cannot overwrite a newer assignment refresh', async () => {
+  account();
+  let resolveFirst, calls = 0;
+  jobLoader = async () => ++calls === 1 ? new Promise(resolve => { resolveFirst = resolve; }) : { success: true, jobs: [{ id: 'new', customerName: 'Latest assignment', serviceType: 'Inspection', status: 'scheduled' }] };
+  const home = await render('screens/HomeScreen.js');
+  await act(async () => {
+    native.AppState.currentState = 'background'; appListeners.forEach(listener => listener('background'));
+    native.AppState.currentState = 'active'; appListeners.forEach(listener => listener('active'));
+  });
+  assert.match(textOf(home), /Latest assignment/);
+  await act(async () => resolveFirst({ success: true, jobs: [] }));
+  assert.match(textOf(home), /Latest assignment/);
+  await act(async () => home.unmount());
 });

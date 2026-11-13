@@ -21,7 +21,9 @@ before(async () => {
 after(() => deleteApp(app));
 test('daily routes enforce assignment and optimistic revision without provider calls', async () => {
   const data = { memberId: 'field-member', date: '2026-11-13' };
-  assert.equal((await routes.get(request(data))).stops.length, 1);
+  await db.doc('jobs/field-job').update({ estimatedDuration: 1.5 });
+  const result = await routes.get(request(data));
+  assert.equal(result.stops.length, 1); assert.equal(result.stops[0].durationMinutes, 90);
   await assert.rejects(routes.get(request({ ...data, memberId: owner.uid })), { code: 'permission-denied' });
   assert.equal((await routes.save(request({ ...data, jobIds: ['field-job'], revision: 0 }))).revision, 1);
   await assert.rejects(routes.save(request({ ...data, jobIds: ['field-job'], revision: 0 })), { code: 'aborted' });

@@ -29,7 +29,7 @@ export async function cachedRead(name, loader) {
   const scope = offlineScope();
   if (await isOffline()) { const cached = await readCache(name, scope); if (cached == null) throw new Error('Open this view online once to save it for offline use.'); return cached; }
   // Never use cached private records to conceal an online permission error.
-  const result = await loader();
+  const result = await loader(scope);
   if (offlineScope() !== scope) throw new Error('Your workspace changed. Reload this view.');
   await writeCache(name, result, scope); return result;
 }

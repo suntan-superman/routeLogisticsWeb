@@ -33,13 +33,13 @@ The current membership inventory has two distinct pending email identities and *
 - Expo SDK 54 dependency compatibility and both iOS/Android production JavaScript/Hermes exports pass. This does not certify a signed native binary or physical-device behavior.
 - Undefined-identifier, duplicate-key and unreachable-code checks pass across Functions, native JavaScript and scripts.
 - No production charge/refund, external accounting write, customer deletion, role promotion or customer data mutation was used for testing.
-- Scoped deployment of all **51 RL functions** succeeded and all are verified `ACTIVE`. All 80 project functions remain present, including every pre-existing MF function. Firestore/Storage rules and 38 repository indexes deployed; all 34 external legacy indexes were retained. Four additive indexes are still building; readiness and web publication verification will be recorded below.
+- Scoped deployment of all **51 RL functions** succeeded and all are verified `ACTIVE`. All 80 project functions remain present, including every pre-existing MF function. Firestore/Storage rules and 38 repository indexes deployed; all 34 external legacy indexes were retained. All 72 project indexes are verified `READY`.
 - New route, location, offline-operation and accounting status callables reject unauthenticated live requests with HTTP 401. Deployed provider flags are verified disabled.
 - Dependency audit counts remain unchanged: root 14 moderate; Functions 8 moderate; web 2 moderate; mobile 1 high, 11 moderate, 1 low. No critical findings. The existing mobile high advisory is Metro’s transitive build-time `image-size`; no forced incompatible upgrade was applied.
 
 ## Configuration still needed
 
-The user selected option 2 (“already configured”) for Netlify `VITE_GOOGLE_MAPS_API_KEY` and test `VITE_STRIPE_PUBLISHABLE_KEY`. These are browser build inputs and require a new Netlify build. Optional `VITE_GOOGLE_MAPS_MAP_ID` supplies a production map style. Restrict the Maps key to intended browser origins and enable Maps JavaScript/Routes APIs.
+The published build verifies both public keys match local configuration without exposing their values. The user selected option 2 (“already configured”) for Netlify `VITE_GOOGLE_MAPS_API_KEY` and test `VITE_STRIPE_PUBLISHABLE_KEY`. These are browser build inputs and require a new Netlify build. Optional `VITE_GOOGLE_MAPS_MAP_ID` supplies a production map style. Restrict the Maps key to intended browser origins and enable Maps JavaScript/Routes APIs.
 
 `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` currently appears in the web `.env`. Native GPS and external navigation do not use an embedded Maps SDK in this release, so no unused key is copied into the native bundle.
 
@@ -93,3 +93,9 @@ Disable integration flags and redeploy only the RL codebase to stop provider tra
 Remaining broader work includes full MFA/recovery, native push acceptance, background/offline-map support, full directory/search, invoice/PDF customization, bulk jobs, advanced reporting, major dependency upgrades, monitoring/alerts and backup restore drills. Historical roadmap dates are not new commitments.
 
 Primary references: [Google Routes JavaScript](https://developers.google.com/maps/documentation/javascript/routes/get-a-route), [Stripe PaymentIntents](https://docs.stripe.com/payments/payment-intents), [Stripe webhooks](https://docs.stripe.com/webhooks), [Intuit OAuth](https://developer.intuit.com/app/developer/qbo/docs/develop/authentication-and-authorization/oauth-2.0), [Intuit request IDs](https://static.developer.intuit.com/output_html/qbo/docs/learn/learn-basic-field-definitions.html).
+
+## Publication evidence — November 13, 2026
+
+Implementation commit `ed12343` is published on the existing `main` branch. All three [GitHub CI jobs](https://github.com/suntan-superman/routeLogisticsWeb/actions/runs/43390026898) passed. The live main bundle matches the local production build (`index-BuSTdgFW.js`); `/routes`, `/team-locations`, `/integrations`, `/portal` and `/privacy` return the current app, and payment/routing/map/location/accounting chunks load successfully. Public Maps and Stripe test key presence is verified without printing values. This verifies publication, not authenticated Maps/provider/device acceptance.
+
+The final compatibility follow-up uses `estimatedDuration` when calculating service-time arrival warnings, leaves optional actual work hours empty instead of copying estimates, and keeps asynchronous native cache writes bound to their original account/workspace. Its focused fieldwork checks pass; final CI is checked after publication.

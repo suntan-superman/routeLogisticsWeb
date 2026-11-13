@@ -653,12 +653,12 @@ export class JobService {
         orderBy('time', 'asc')
       );
 
-      const loaded = await cachedRead(`jobs:${startDate}:${endDate}`, async () => {
+      const loaded = await cachedRead(`jobs:${startDate}:${endDate}`, async (scope) => {
         const snapshot = await getDocs(q);
         const data = snapshot.docs.map((row) => ({ id: row.id, ...row.data() }));
-        const bases = await readCache('job-bases') || {};
+        const bases = await readCache('job-bases', scope) || {};
         data.forEach((job) => { bases[job.id] = job; });
-        await writeCache('job-bases', bases);
+        await writeCache('job-bases', bases, scope);
         return data;
       });
       const jobs = await overlayJobs(loaded);

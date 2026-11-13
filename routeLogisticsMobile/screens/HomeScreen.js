@@ -670,6 +670,10 @@ const HomeScreen = ({ navigation }) => {
       Alert.alert('Required Field', 'Please describe the work that was done.');
       return;
     }
+    if (actualHours.trim() && (!Number.isFinite(Number(actualHours)) || Number(actualHours) < 0 || Number(actualHours) > 744)) {
+      Alert.alert('Work hours', 'Enter valid actual work hours, or leave this optional field empty.');
+      return;
+    }
     setShowCompletionConfirmModal(true);
   };
 
@@ -683,7 +687,7 @@ const HomeScreen = ({ navigation }) => {
       const completionData = {
         status: 'completed',
         actualWorkDone,
-        actualHours: actualHours || selectedJob.duration,
+        ...(actualHours.trim() ? { actualHours: Number(actualHours) } : {}),
         completionNotes,
         completedAt: new Date().toISOString(),
       };

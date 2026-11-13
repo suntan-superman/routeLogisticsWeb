@@ -40,7 +40,8 @@ function routeHandlers(db) {
         const customer = data.customerId ? await db.doc(`customers/${documentId(data.customerId)}`).get() : null;
         const customerData = customer?.get('companyId') === scope.companyId ? customer.data() : {};
         const address = typeof data.address === 'string' && data.address.trim() ? data.address : [customerData.address, customerData.city, customerData.state, customerData.zipCode].filter((v) => typeof v === 'string' && v.trim()).join(', ');
-        stops.push({ id: job.id, customerName: data.customerName || customerData.name || [customerData.firstName, customerData.lastName].filter(Boolean).join(' ') || 'Customer', serviceType: data.serviceType || 'Service', time: data.time || '', windowStart: data.windowStart || data.time || '', windowEnd: data.windowEnd || '', durationMinutes: Math.max(0, Number(data.duration || 0) * 60), location: coordinates(data) || coordinates(customerData), address });
+        const hours = Number(data.estimatedDuration ?? data.duration ?? 0);
+        stops.push({ id: job.id, customerName: data.customerName || customerData.name || [customerData.firstName, customerData.lastName].filter(Boolean).join(' ') || 'Customer', serviceType: data.serviceType || 'Service', time: data.time || '', windowStart: data.windowStart || data.time || '', windowEnd: data.windowEnd || '', durationMinutes: Number.isFinite(hours) ? Math.max(0, hours * 60) : 0, location: coordinates(data) || coordinates(customerData), address });
       }
       stops.sort((a, b) => a.time.localeCompare(b.time) || a.id.localeCompare(b.id));
       const saved = await db.doc(`rlRoutes/${hash(`${scope.companyId}:${scope.memberId}:${scope.date}`)}`).get();

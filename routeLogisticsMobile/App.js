@@ -3,6 +3,7 @@ import { Text, ActivityIndicator, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import WorkQueryProvider from './contexts/WorkQueryProvider';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { ThemeProvider, useTheme } from './theme/ThemeProvider';
 import { GlassScreen, GlassCard, GlassButton } from './components/Glass';
@@ -28,5 +29,5 @@ function AppContent() {
   return <><StatusBar style={isDark ? 'light' : 'dark'} />{content}</>;
 }
 export default function App() {
-  return <SafeAreaProvider><ThemeProvider><LanguageProvider><AuthProvider><AppContent /></AuthProvider></LanguageProvider></ThemeProvider></SafeAreaProvider>;
+  return <SafeAreaProvider><ThemeProvider><LanguageProvider><AuthProvider><WorkQueryProvider><AppContent /></WorkQueryProvider></AuthProvider></LanguageProvider></ThemeProvider></SafeAreaProvider>;
 }

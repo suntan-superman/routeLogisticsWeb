@@ -31,6 +31,7 @@ npm run ios
 - **Framework**: React Native with Expo SDK 54
 - **Backend**: Firebase (Auth, Firestore, Storage)
 - **State Management**: React Context API
+- **Server data**: TanStack Query v5 for assigned work and daily routes
 - **Navigation**: React Navigation v7
 - **Storage**: AsyncStorage + Expo SecureStore
 
@@ -47,6 +48,42 @@ routeLogisticsMobile/
 ```
 
 ## Development
+
+### Assigned work and route refresh
+
+My Work and the technician's daily route use TanStack Query with a 30-second
+polling interval while Home is mounted, the app is active and connectivity is
+available. Returning to the app or reconnecting refreshes current data immediately.
+Settings unmounts Home, so its work queries stop polling. Manual Refresh jobs,
+Refresh route and pull-to-refresh remain available. Existing job-action and offline
+synchronization callbacks invalidate the shared work-query prefix, refreshing both
+the schedule and route. Background polling and closed-app push delivery are not
+enabled by this integration.
+
+Keys include Firebase project, user, company, role, membership, verification state
+and date range. A workspace change creates a fresh in-memory QueryClient and clears
+the previous client. The current local date rolls over on foreground or within a
+minute while active. Pending/unverified sessions cannot fetch company work.
+Authorization failures hide and clear work payloads, stop polling and refresh
+membership; delayed responses cannot restore denied data. Removed assignments close
+open job dialogs. Generic query-cache persistence is not enabled.
+
+The existing role-scoped offline read caches and durable work/photo/application
+queues remain responsible for offline storage and authorized replay. The query
+layer calls the existing safe workspace APIs. It does not add direct technician
+Firestore reads, change job assignments, enable GPS sharing or set staff availability.
+
+After pulling `main` on the Mac, run `npm ci` in `routeLogisticsMobile` and restart
+Metro with `npx expo start --dev-client --clear`. TanStack Query adds JavaScript
+dependencies only, so an existing compatible development client can be reloaded.
+Rebuild an installed release through Xcode to embed the updated JavaScript.
+No new environment variables or Firebase deployment are required.
+
+Validation: `npm test` includes real TanStack Query observer tests for polling,
+lifecycle and connectivity, midnight rollover, scope isolation, late responses,
+authorization errors, saved route order and offline reads. See TanStack's
+[React Native integration guide](https://tanstack.com/query/latest/docs/framework/react/react-native)
+for the AppState/focusManager and NetInfo/onlineManager integration.
 
 ### Prerequisites
 - Node.js 22 LTS and npm (use the committed `package-lock.json`)

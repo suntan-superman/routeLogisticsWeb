@@ -677,7 +677,7 @@ export class JobService {
 
       return { success: true, jobs };
     } catch (error) {
-      return { success: false, error: error.message, jobs: [] };
+      return { success: false, error: error.message, code: error.code, jobs: [] };
     }
   }
 

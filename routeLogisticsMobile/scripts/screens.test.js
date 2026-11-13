@@ -33,13 +33,15 @@ function load(relative) {
     if (specifier === '@react-native-community/datetimepicker') return () => null;
     if (specifier === '@react-native-community/netinfo') return { addEventListener: listener => { networkListeners.add(listener); listener({ isConnected: true, isInternetReachable: true }); return () => networkListeners.delete(listener); } };
     if (specifier === '@react-native-async-storage/async-storage') return { getItem: async key => stored.get(key) || null, setItem: async (key, value) => stored.set(key, value), removeItem: async key => stored.delete(key) };
-    if (specifier.endsWith('/contexts/AuthContext')) return { AuthContext, AuthProvider: pass, useAuth: () => currentAuth };
+    if (specifier === './AuthContext' || specifier.endsWith('/contexts/AuthContext')) return { AuthContext, AuthProvider: pass, useAuth: () => currentAuth };
     if (specifier.endsWith('/contexts/LanguageContext')) return { LanguageProvider: pass, useLanguage: () => ({ t: key => key, language: 'en', changeLanguage() {} }) };
     if (specifier.endsWith('/theme/ThemeProvider')) return { ThemeProvider: pass, useTheme: () => ({ palette, colors: load('constants/colors.js').COLORS, isDark: true, ready: true, mode: 'dark', changeMode: async value => changes.push(value), reduceTransparency: false }) };
     if (specifier.endsWith('/constants/responsiveSizes')) return { FONT_SIZES: new Proxy({}, { get: () => 16 }), SPACING: new Proxy({}, { get: () => 12 }), BORDER_RADIUS: new Proxy({}, { get: () => 12 }), ICON_SIZES: new Proxy({}, { get: () => 20 }), hp: () => 20, wp: () => 20, rf: () => 16 };
     if (/\/components\/(JobPhotos|WorkLocation|OfflineStatus|FieldWorkTools|MyRoute)$/.test(specifier)) return () => null;
     if (specifier.endsWith('/services/tenancy')) return { canManage: () => currentAuth.permissions.canManage, localDate: () => '2026-11-13' };
-    if (specifier.endsWith('/services/firebase')) return { CustomerService: { getCustomers: async () => ({ success: true, customers: [] }) }, JobService: Object.fromEntries(['getTodaysJobs','getThisWeeksJobs','getThisMonthsJobs'].map(key => [key, async () => { jobRequests.push(key); return jobLoader(key); }])), EstimateService: {} };
+    if (specifier === './offline' || specifier.endsWith('/services/offline')) return { cachedRead: (_key, loader) => loader() };
+    if (specifier === './workspaceApi' || specifier.endsWith('/services/workspaceApi')) return { callWorkspace: async () => ({ stops: [], saved: null }) };
+    if (specifier === './firebase' || specifier.endsWith('/services/firebase')) return { CustomerService: { getCustomers: async () => ({ success: true, customers: [] }) }, JobService: { getJobsByDateRange: async (startDate, endDate) => { const range = { startDate, endDate }; jobRequests.push(range); return jobLoader(range); } }, EstimateService: {} };
     if (specifier.startsWith('.')) {
       const resolved = path.resolve(path.dirname(filename), specifier);
       return load(resolved.endsWith('.js') ? resolved : resolved + '.js');
@@ -58,14 +60,21 @@ function account(role = 'technician', status = 'company') {
 }
 async function render(file) {
   let tree;
-  await act(async () => { tree = create(React.createElement(AuthContext.Provider, { value: currentAuth }, React.createElement(load(file).default, { navigation: { navigate() {}, goBack() {} } }))); });
+  await act(async () => {
+    let content = React.createElement(load(file).default, { navigation: { navigate() {}, goBack() {} } });
+    if (file !== 'App.js') content = React.createElement(load('contexts/WorkQueryProvider.js').default, null, content);
+    tree = create(React.createElement(AuthContext.Provider, { value: currentAuth }, content));
+  });
+  await settle();
   return tree;
 }
+const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
 const textOf = tree => JSON.stringify(tree.toJSON());
 async function press(tree, label) {
   const button = tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === label)[0];
   assert.ok(button, `Button '${label}' must exist`);
   await act(async () => button.props.onPress());
+  await settle();
 }
 test('pending staff see an explicit acceptance screen rather than the personal dashboard', async () => {
   account('technician', 'pending');
@@ -128,31 +137,37 @@ test('assigned work refreshes manually, on return and reconnect, using the selec
     native.AppState.currentState = 'background'; appListeners.forEach(listener => listener('background'));
     native.AppState.currentState = 'active'; appListeners.forEach(listener => listener('active'));
   });
+  await settle();
   assert.match(textOf(home), /After returning/);
   jobLoader = async () => result('After reconnecting');
   await act(async () => {
     networkListeners.forEach(listener => listener({ isConnected: false, isInternetReachable: false }));
     networkListeners.forEach(listener => listener({ isConnected: true, isInternetReachable: true }));
   });
+  await settle();
   assert.match(textOf(home), /After reconnecting/);
   jobLoader = async () => result('After pulling');
   const refresh = home.root.findAll(node => node.type === 'RefreshControl')[0];
   await act(async () => refresh.props.onRefresh());
+  await settle();
   assert.match(textOf(home), /After pulling/);
   await press(home, 'View schedule');
   const week = home.root.findAll(node => node.type === 'TouchableOpacity' && node.findAll(child => child.type === 'Text' && child.props.children === 'week').length)[0];
   await act(async () => week.props.onPress());
-  assert.equal(jobRequests.at(-1), 'getThisWeeksJobs');
+  await settle();
+  const { periodRange, localDay } = require('../services/workQueryPolicy');
+  assert.deepEqual(jobRequests.at(-1), periodRange('week', localDay()));
   await act(async () => {
     native.AppState.currentState = 'background'; appListeners.forEach(listener => listener('background'));
     native.AppState.currentState = 'active'; appListeners.forEach(listener => listener('active'));
   });
-  assert.equal(jobRequests.at(-1), 'getThisWeeksJobs');
+  await settle();
+  assert.deepEqual(jobRequests.at(-1), periodRange('week', localDay()));
   await act(async () => home.unmount());
   assert.equal(appListeners.size, 0); assert.equal(networkListeners.size, 0);
 });
 
-test('a delayed older schedule response cannot overwrite a newer assignment refresh', async () => {
+test('an overlapping foreground refresh shares the pending schedule request', async () => {
   account();
   let resolveFirst, calls = 0;
   jobLoader = async () => ++calls === 1 ? new Promise(resolve => { resolveFirst = resolve; }) : { success: true, jobs: [{ id: 'new', customerName: 'Latest assignment', serviceType: 'Inspection', status: 'scheduled' }] };
@@ -161,8 +176,25 @@ test('a delayed older schedule response cannot overwrite a newer assignment refr
     native.AppState.currentState = 'background'; appListeners.forEach(listener => listener('background'));
     native.AppState.currentState = 'active'; appListeners.forEach(listener => listener('active'));
   });
-  assert.match(textOf(home), /Latest assignment/);
-  await act(async () => resolveFirst({ success: true, jobs: [] }));
+  assert.equal(calls, 1);
+  await act(async () => resolveFirst({ success: true, jobs: [{ id: 'new', customerName: 'Latest assignment', serviceType: 'Inspection', status: 'scheduled' }] }));
+  await settle();
   assert.match(textOf(home), /Latest assignment/);
   await act(async () => home.unmount());
+});
+
+test('job details close when a refresh removes the assignment or denies access', async () => {
+  for (const denied of [false, true]) {
+    account();
+    jobLoader = async () => ({ success: true, jobs: [{ id: 'assigned', customerName: 'Private job details', serviceType: 'Inspection', status: 'scheduled' }] });
+    const home = await render('screens/HomeScreen.js');
+    const card = home.root.findAll(node => node.type === 'TouchableOpacity' && node.findAll(child => child.type === 'Text' && child.props.children === 'Private job details').length)[0];
+    await act(async () => { card.props.onPress(); await new Promise(resolve => setTimeout(resolve, 110)); });
+    assert.equal(home.root.findAllByType('Modal').length, 1);
+    jobLoader = async () => denied ? { success: false, error: 'Membership removed.', code: 'functions/permission-denied' } : { success: true, jobs: [] };
+    await press(home, 'Refresh jobs');
+    assert.equal(home.root.findAllByType('Modal').length, 0);
+    assert.doesNotMatch(textOf(home), /Private job details/);
+    await act(async () => home.unmount());
+  }
 });

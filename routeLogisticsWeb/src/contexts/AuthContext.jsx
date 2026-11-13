@@ -130,14 +130,10 @@ export const AuthProvider = ({ children }) => {
   // Sign in function
   const signin = async (email, password) => {
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const userCredential = await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
       const user = userCredential.user;
-      
-      // Fetch user profile
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
-      if (userDoc.exists()) {
-        setUserProfile(userDoc.data());
-      }
+      // onAuthStateChanged resolves claims and loads the profile. A profile read
+      // failure must not be reported as a rejected email/password sign-in.
       
       toast.success('Welcome back!');
       return { success: true, user };

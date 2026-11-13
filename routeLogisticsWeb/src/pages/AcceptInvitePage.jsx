@@ -27,6 +27,7 @@ export default function AcceptInvitePage() {
     <Link to="/" className="text-primary-700">Route Logistics</Link>
     <h1 className="my-6 text-3xl font-bold">Join your team</h1>
     <p className="mb-6">Use the email address your company owner invited. The owner has selected your team role.</p>
+    {!currentUser && <p className="mb-6 text-sm text-gray-600">Already have a mi Factotum or Route Logistics account? Sign in with that account's existing password. Use “Forgot password?” on the sign-in page if needed. New users choose a password when creating their account.</p>}
     {!inviteId || !code ? <p role="alert">This invitation link is incomplete. Ask the owner to send a new invitation.</p> : !currentUser ? <div className="flex gap-5">
       <Link className="text-primary-700 underline" to={`/login?next=${returnTo}`}>Sign in</Link>
       <Link className="text-primary-700 underline" to={`/signup?next=${returnTo}`}>Create a team account</Link>

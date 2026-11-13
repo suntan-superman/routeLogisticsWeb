@@ -11,7 +11,7 @@ test('company owner gets owner claims', () => {
 
 test('active membership yields its role', () => {
   const r = resolveClaims({ uid: 'u2' }, { ...empty, memberships: [{ id: 'm', companyId: 'c1', role: 'technician', status: 'active' }] });
-  assert.deepStrictEqual(r.claims, { companyId: 'c1', role: 'technician' });
+  assert.deepStrictEqual(r.claims, { companyId: 'c1', role: 'technician', membershipId: 'm' });
 });
 
 test('inactive membership yields no claims', () => {
@@ -25,10 +25,10 @@ test('invite is not activated for unverified email', () => {
   assert.strictEqual(r.activateInviteId, null);
 });
 
-test('invite activates for verified email', () => {
+test('verified email alone never activates an invitation', () => {
   const r = resolveClaims({ uid: 'u3', email: 'a@b.com', emailVerified: true }, { ...empty, invites: [{ id: 'i', companyId: 'c1', role: 'manager' }] });
-  assert.deepStrictEqual(r.claims, { companyId: 'c1', role: 'manager' });
-  assert.strictEqual(r.activateInviteId, 'i');
+  assert.strictEqual(r.claims, null);
+  assert.strictEqual(r.activateInviteId, null);
 });
 
 test('invite with privileged/unknown role is ignored', () => {

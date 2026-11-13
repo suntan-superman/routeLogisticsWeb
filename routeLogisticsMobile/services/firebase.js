@@ -9,6 +9,7 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, updateDoc, collection, addDoc, getDocs, deleteDoc, query, where, orderBy } from 'firebase/firestore';
 import { auth, db } from '../constants/firebase';
+import { scopeWhere, tenantFields, localDate } from './tenancy';
 
 export class AuthService {
   // Check if Firebase Auth is available
@@ -28,23 +29,24 @@ export class AuthService {
       if (!auth) {
         return { success: false, error: { message: 'Firebase auth not initialized' } };
       }
-      
+
       // Try to sign in with Firebase
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
-      
+
       // Get user data from Firestore
       const userDoc = await getDoc(doc(db, 'users', user.uid));
       const userData = userDoc.exists() ? userDoc.data() : {};
-      
+
       const completeUserData = {
-        id: user.uid,
-        email: user.email,
+
+
         name: user.displayName || userData.name || 'User',
-        emailVerified: user.emailVerified,
+
         ...userData,
+        id: user.uid, email: user.email, emailVerified: user.emailVerified,
       };
-      
+
       return {
         success: true,
         user: completeUserData,
@@ -67,14 +69,14 @@ export class AuthService {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
-      
+
       // Update profile with display name if provided
       if (userData.name) {
         await updateProfile(user, {
           displayName: userData.name
         });
       }
-      
+
       // Create user document in Firestore
       const userDocData = {
         name: userData.name || 'User',
@@ -84,9 +86,9 @@ export class AuthService {
         updatedAt: new Date().toISOString(),
         ...userData
       };
-      
+
       await setDoc(doc(db, 'users', user.uid), userDocData);
-      
+
       const completeUserData = {
         id: user.uid,
         email: user.email,
@@ -94,7 +96,7 @@ export class AuthService {
         emailVerified: user.emailVerified,
         ...userDocData
       };
-      
+
       return {
         success: true,
         user: completeUserData,
@@ -156,7 +158,7 @@ export class AuthService {
           error: { message: 'No user is currently signed in' }
         };
       }
-      
+
       await sendEmailVerification(user);
       return { success: true };
     } catch (error) {
@@ -176,7 +178,7 @@ export class AuthService {
     try {
       const user = auth.currentUser;
       if (!user) return false;
-      
+
       // Reload user to get fresh data
       await user.reload();
       return user.emailVerified;
@@ -201,20 +203,20 @@ export class AuthService {
           error: { message: 'No user is currently signed in' }
         };
       }
-      
+
       // Update Firebase Auth profile
       if (profileData.name) {
         await updateProfile(user, {
           displayName: profileData.name
         });
       }
-      
+
       // Update Firestore document
       await updateDoc(doc(db, 'users', user.uid), {
         ...profileData,
         updatedAt: new Date().toISOString()
       });
-      
+
       return { success: true };
     } catch (error) {
       console.error('Update profile error:', error);
@@ -242,7 +244,7 @@ export class AuthService {
       'auth/invalid-credential': 'Invalid email or password.',
       'auth/requires-recent-login': 'Please sign in again to complete this action.',
     };
-    
+
     return errorMessages[errorCode] || 'An unexpected error occurred. Please try again.';
   }
 }
@@ -267,13 +269,16 @@ export class CustomerService {
 
       const customerDoc = {
         ...customerData,
-        userId: userId,
+        email: (customerData.email || '').trim().toLowerCase(),
+        emailNormalized: (customerData.email || '').trim().toLowerCase(),
+        isActive: true,
+        ...tenantFields(),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
 
       const docRef = await addDoc(collection(db, 'customers'), customerDoc);
-      
+
       return {
         success: true,
         customer: {
@@ -305,13 +310,13 @@ export class CustomerService {
 
       const q = query(
         collection(db, 'customers'),
-        where('userId', '==', userId),
+        scopeWhere(),
         orderBy('createdAt', 'desc')
       );
-      
+
       const querySnapshot = await getDocs(q);
       const customers = [];
-      
+
       querySnapshot.forEach((doc) => {
         customers.push({
           id: doc.id,
@@ -408,10 +413,10 @@ export class EstimateService {
 
       // Generate estimate number
       const estimateNumber = await this.generateEstimateNumber();
-      
+
       const estimateDoc = {
         ...estimateData,
-        userId: userId,
+        ...tenantFields(),
         estimateNumber: estimateNumber,
         status: 'draft',
         createdAt: new Date().toISOString(),
@@ -420,7 +425,7 @@ export class EstimateService {
       };
 
       const docRef = await addDoc(collection(db, 'estimates'), estimateDoc);
-      
+
       return {
         success: true,
         estimate: {
@@ -443,29 +448,24 @@ export class EstimateService {
   static async getEstimates() {
     try {
       const userId = this.getCurrentUserId();
-      console.log('EstimateService - Current user ID:', userId);
-      
+
       if (!userId) {
-        console.log('EstimateService - No user ID found');
         return {
           success: false,
           error: { message: 'No user is currently signed in' }
         };
       }
 
-      console.log('EstimateService - Querying estimates for user:', userId);
       const q = query(
         collection(db, 'estimates'),
-        where('userId', '==', userId)
+        scopeWhere()
       );
-      
+
       const querySnapshot = await getDocs(q);
-      console.log('EstimateService - Query snapshot size:', querySnapshot.size);
-      
+
       const estimates = [];
-      
+
       querySnapshot.forEach((doc) => {
-        console.log('EstimateService - Found estimate:', doc.id);
         estimates.push({
           id: doc.id,
           ...doc.data()
@@ -479,7 +479,6 @@ export class EstimateService {
         return dateB - dateA;
       });
 
-      console.log('EstimateService - Returning estimates:', estimates.length);
       return {
         success: true,
         estimates: estimates
@@ -558,21 +557,21 @@ export class EstimateService {
       const year = new Date().getFullYear();
       const q = query(
         collection(db, 'estimates'),
-        where('userId', '==', userId),
+        scopeWhere(),
         where('estimateNumber', '>=', `EST-${year}-001`),
         where('estimateNumber', '<=', `EST-${year}-999`),
         orderBy('estimateNumber', 'desc')
       );
-      
+
       const querySnapshot = await getDocs(q);
       let nextNumber = 1;
-      
+
       if (!querySnapshot.empty) {
         const lastEstimate = querySnapshot.docs[0].data();
         const lastNumber = parseInt(lastEstimate.estimateNumber.split('-')[2]);
         nextNumber = lastNumber + 1;
       }
-      
+
       return `EST-${year}-${nextNumber.toString().padStart(3, '0')}`;
     } catch (error) {
       // Fallback to timestamp-based number
@@ -608,14 +607,17 @@ export class JobService {
 
       const jobDoc = {
         ...jobData,
-        userId: userId,
+        totalCost: Number(jobData.totalCost ?? jobData.estimatedCost) || 0,
+        estimatedDuration: Number(jobData.estimatedDuration ?? jobData.duration) || 1,
+        time: normalizeTime(jobData.time),
+        ...tenantFields(),
         status: 'scheduled',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
 
       const docRef = await addDoc(collection(db, 'jobs'), jobDoc);
-      
+
       return {
         success: true,
         job: {
@@ -647,23 +649,23 @@ export class JobService {
 
       const q = query(
         collection(db, 'jobs'),
-        where('userId', '==', userId),
+        scopeWhere(),
         where('date', '>=', startDate),
         where('date', '<=', endDate),
         orderBy('date', 'asc'),
         orderBy('time', 'asc')
       );
-      
+
       const querySnapshot = await getDocs(q);
       const jobs = [];
-      
+
       querySnapshot.forEach((doc) => {
         jobs.push({
           id: doc.id,
           ...doc.data(),
         });
       });
-      
+
       return { success: true, jobs };
     } catch (error) {
       return { success: false, error: error.message, jobs: [] };
@@ -672,7 +674,7 @@ export class JobService {
 
   // Get jobs for today
   static async getTodaysJobs() {
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDate();
     return this.getJobsByDateRange(today, today);
   }
 
@@ -681,10 +683,10 @@ export class JobService {
     const today = new Date();
     const startOfWeek = new Date(today.setDate(today.getDate() - today.getDay()));
     const endOfWeek = new Date(today.setDate(today.getDate() - today.getDay() + 6));
-    
+
     return this.getJobsByDateRange(
-      startOfWeek.toISOString().split('T')[0],
-      endOfWeek.toISOString().split('T')[0]
+      localDate(startOfWeek),
+      localDate(endOfWeek)
     );
   }
 
@@ -693,10 +695,10 @@ export class JobService {
     const today = new Date();
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
     const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-    
+
     return this.getJobsByDateRange(
-      startOfMonth.toISOString().split('T')[0],
-      endOfMonth.toISOString().split('T')[0]
+      localDate(startOfMonth),
+      localDate(endOfMonth)
     );
   }
 
@@ -715,7 +717,7 @@ export class JobService {
         ...jobData,
         updatedAt: new Date().toISOString(),
       });
-      
+
       return { success: true };
     } catch (error) {
       return {
@@ -754,3 +756,12 @@ export class JobService {
 }
 
 export default AuthService;
+
+function normalizeTime(value) {
+  const match = String(value || '').match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+  if (!match) throw new Error('Choose a valid job time.');
+  let hour = Number(match[1]);
+  if (match[3]) hour = hour % 12 + (match[3].toUpperCase() === 'PM' ? 12 : 0);
+  if (hour > 23 || Number(match[2]) > 59) throw new Error('Choose a valid job time.');
+  return `${String(hour).padStart(2, '0')}:${match[2]}`;
+}

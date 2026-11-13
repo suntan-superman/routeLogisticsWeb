@@ -1,7 +1,7 @@
 # Route Logistics - Field Service Management Platform
 
 **Version:** 1.0.0  
-**Last Updated:** January 2025  
+**Last Updated:** November 12, 2026
 **Platform:** React Native (Mobile) + React (Web)  
 **Backend:** Firebase (Firestore, Auth, Storage)
 
@@ -56,6 +56,10 @@ yarn dev
 ```
 
 ## Documentation Structure
+
+- [Migration progress and code review](./migration-progress.md) - Current implementation, Acme audit, verification, deployment status, and remaining work
+- [MF-to-RL migration plan](./mf-to-rl-migration-plan.md) - Migration scope and phase status
+- [Development roadmap](./development-roadmap.md) - Prioritized backlog and implementation status
 
 - [Architecture](./architecture.md) - System design and technical overview
 - [Mobile App](./mobile-app.md) - React Native application documentation

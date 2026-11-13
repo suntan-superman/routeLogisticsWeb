@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { returnPath } from '../utils/returnPath';
 import { useAuth } from '../contexts/AuthContext';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 
 const LoginPage = () => {
   const [email, setEmail] = useState('');
@@ -9,6 +10,7 @@ const LoginPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const { signin } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -17,7 +19,7 @@ const LoginPage = () => {
     const result = await signin(email, password);
     
     if (result.success) {
-      navigate('/');
+      navigate(returnPath(location.search) || '/');
     }
     
     setIsLoading(false);
@@ -25,7 +27,7 @@ const LoginPage = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <motion.div
+      <Motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
@@ -101,7 +103,7 @@ const LoginPage = () => {
             <p className="text-sm text-gray-600">
               Don't have an account?{' '}
               <Link
-                to="/signup"
+                to={returnPath(location.search) ? `/signup?next=${encodeURIComponent(returnPath(location.search))}` : '/signup'}
                 className="font-medium text-primary-600 hover:text-primary-500 transition-colors duration-200"
               >
                 Sign up here
@@ -109,7 +111,7 @@ const LoginPage = () => {
             </p>
           </div>
         </form>
-      </motion.div>
+      </Motion.div>
     </div>
   );
 };

@@ -6,3 +6,10 @@ dist/
 *-debug.log
 firebase-debug.log
 .firebase/
+.secret.local
+*-validation.log
+lint-review.log
+*-audit.json
+routeLogisticsMobile/.expo/
+routeLogisticsMobile/dist/
+.migration/

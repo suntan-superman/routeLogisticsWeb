@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
@@ -9,18 +9,23 @@ import { registerLicense } from '@syncfusion/ej2-base';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 // Pages
-import HomePage from './pages/HomePage';
-import LoginPage from './pages/LoginPage';
-import SignupPage from './pages/SignupPage';
-import LandingPage from './pages/LandingPage';
-import CompanySetupPage from './pages/CompanySetupPage';
-import CustomerManagementPage from './pages/CustomerManagementPage';
-import EstimateTemplatesPage from './pages/EstimateTemplatesPage';
-import JobManagementPage from './pages/JobManagementPage';
-import ReportsPage from './pages/ReportsPage';
-import CalendarPage from './pages/CalendarPage';
-import InvoicesPage from './pages/InvoicesPage';
-import ServicePlansPage from './pages/ServicePlansPage';
+const HomePage = lazy(() => import('./pages/HomePage'));
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const SignupPage = lazy(() => import('./pages/SignupPage'));
+const LandingPage = lazy(() => import('./pages/LandingPage'));
+const CompanySetupPage = lazy(() => import('./pages/CompanySetupPage'));
+const CustomerManagementPage = lazy(() => import('./pages/CustomerManagementPage'));
+const EstimateTemplatesPage = lazy(() => import('./pages/EstimateTemplatesPage'));
+const JobManagementPage = lazy(() => import('./pages/JobManagementPage'));
+const ReportsPage = lazy(() => import('./pages/ReportsPage'));
+const CalendarPage = lazy(() => import('./pages/CalendarPage'));
+const InvoicesPage = lazy(() => import('./pages/InvoicesPage'));
+const ServicePlansPage = lazy(() => import('./pages/ServicePlansPage'));
+const AcceptInvitePage = lazy(() => import('./pages/AcceptInvitePage'));
+const CustomerPortalPage = lazy(() => import('./pages/CustomerPortalPage'));
+
+const NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
+const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
 
 // Components
 import Layout from './components/Layout';
@@ -69,6 +74,7 @@ function App() {
           <ConfirmProvider>
           <Router>
             <div className="min-h-screen bg-gray-50">
+              <Suspense fallback={<div className="p-8" role="status">Loading…</div>}>
               <Routes>
                 {/* Public Routes */}
                 <Route path="/login" element={<LoginPage />} />
@@ -76,6 +82,10 @@ function App() {
                 {/* Protected Routes */}
                 <Route path="/" element={<HomeOrLanding />} />
                 <Route path="/signup" element={<SignupPage />} />
+                <Route path="/accept-invite" element={<AcceptInvitePage />} />
+                <Route path="/portal" element={<CustomerPortalPage />} />
+                <Route path="/privacy" element={<PrivacyPage />} />
+                <Route path="/notifications" element={<ProtectedRoute><Layout><NotificationsPage /></Layout></ProtectedRoute>} />
 
                 <Route path="/company-setup" element={
                   <ProtectedRoute>
@@ -144,6 +154,7 @@ function App() {
                 {/* Redirect any unknown routes to home */}
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
+              </Suspense>
               
               {/* Toast notifications */}
               <Toaster

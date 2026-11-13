@@ -76,22 +76,28 @@ test('owner gets owner claims and legacy data is backfilled', async () => {
   assert.strictEqual(job.fields.companyId.stringValue, 'co1');
 });
 
-test('invite is not accepted until the invitee email is verified', async () => {
-  await fsCreate('teamMembers', 'inv1', { companyId: 'co1', email: 'tech@example.com', role: 'technician', status: 'pending' });
+test('explicit invite acceptance requires verified email and refreshes membership claims', async () => {
+  await verifyEmail((await signIn('owner@example.com')).localId);
+  const owner = await signIn('owner@example.com');
+  const invoke = async (name, idToken, data) => {
+    const response = await fetch(`${FN}/${name}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` }, body: JSON.stringify({ data }) });
+    return response.json();
+  };
+  const invitation = await invoke('sendTeamInviteEmail', owner.idToken, { companyId: 'co1', email: 'tech@example.com', role: 'technician' });
+  assert.ok(invitation.result, JSON.stringify(invitation));
+  const code = new URLSearchParams(new URL(invitation.result.inviteUrl).hash.slice(1)).get('code');
+  const data = { inviteId: invitation.result.teamMemberId, code };
   const tech = await signUp('tech@example.com');
   await fsCreate('users', tech.localId, { email: 'tech@example.com' });
-
-  const unverified = await callSync(tech.idToken);
-  assert.strictEqual(unverified.result.claims, null);
-
+  assert.strictEqual((await callSync(tech.idToken)).result.claims, null);
+  assert.ok((await invoke('acceptTeamInvite', tech.idToken, data)).error);
   await verifyEmail(tech.localId);
-  const refreshed = await signIn('tech@example.com');
-  const verified = await callSync(refreshed.idToken);
-  assert.deepStrictEqual(verified.result.claims, { companyId: 'co1', role: 'technician' });
-
-  const member = await fsGet('teamMembers', 'inv1');
-  assert.strictEqual(member.fields.status.stringValue, 'active');
-  assert.strictEqual(member.fields.uid.stringValue, tech.localId);
+  const verified = await signIn('tech@example.com');
+  assert.strictEqual((await callSync(verified.idToken)).result.claims, null);
+  const accepted = await invoke('acceptTeamInvite', verified.idToken, data);
+  assert.deepStrictEqual(accepted.result.claims, { companyId: 'co1', role: 'technician', membershipId: invitation.result.teamMemberId });
+  const fresh = claimsOf((await signIn('tech@example.com')).idToken);
+  assert.strictEqual(fresh.membershipId, invitation.result.teamMemberId);
 });
 
 test('syncClaims rejects unauthenticated callers', async () => {

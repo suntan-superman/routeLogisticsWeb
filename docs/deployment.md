@@ -1,524 +1,63 @@
-# Deployment Documentation
+# RouteLogistics deployment
 
-## Overview
+Updated November 12, 2026. Use the existing main branch, Netlify/GitHub web deployment, Firebase project, and Mac/Xcode mobile workflow. No staging environment or additional branch is required. See [migration progress](migration-progress.md) for the actual deployment record and unfinished work.
 
-This document covers deployment procedures for both the mobile and web applications in the mi Factotum platform.
+## Validate the source
 
-## Deployment Architecture
+Use Node 22 and Java 21. From the repository root:
 
-```mermaid
-graph TB
-    subgraph "Development"
-        DEV[Local Development<br/>Firebase Emulators]
-    end
-    
-    subgraph "Staging"
-        STAGE[Staging Environment<br/>Firebase Preview]
-    end
-    
-    subgraph "Production"
-        PROD[Production Environment<br/>Firebase Hosting]
-        APPSTORE[App Store<br/>iOS]
-        PLAYSTORE[Google Play<br/>Android]
-    end
-    
-    DEV --> STAGE
-    STAGE --> PROD
-    DEV --> APPSTORE
-    DEV --> PLAYSTORE
+```powershell
+npm ci
+npm --prefix functions ci
+npm test
+npm run test:e2e
 ```
 
-## Mobile App Deployment
+In `routeLogisticsWeb`, run `npm ci --legacy-peer-deps`, `npm run lint`, and `npm run build`. In `routeLogisticsMobile`, run `npm ci`, `npx expo install --check`, and `npx expo export --platform ios --platform android --max-workers 2`.
 
-### Prerequisites
-- **EAS CLI**: `npm install -g eas-cli`
-- **Expo Account**: Registered with Expo
-- **Apple Developer Account**: For iOS deployment
-- **Google Play Console**: For Android deployment
+The emulator script creates ignored local configuration when absent. It uses the demo project, not production. Do not commit `.env.*`, `.secret.local`, migration reports, or deployment logs. `.env.example` files contain only placeholders.
 
-### EAS Build Configuration
+## Firebase backend
 
-#### eas.json
-```json
-{
-  "cli": {
-    "version": ">= 3.0.0"
-  },
-  "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal"
-    },
-    "preview": {
-      "distribution": "internal",
-      "ios": {
-        "simulator": true
-      }
-    },
-    "production": {
-      "ios": {
-        "autoIncrement": true
-      },
-      "android": {
-        "autoIncrement": true
-      }
-    }
-  },
-  "submit": {
-    "production": {}
-  }
-}
+The shared project is `mi-factotum-field-service`. MF uses the default function codebase; RL uses `routelogistics`. Always scope function deployment to RL:
+
+```powershell
+npx firebase deploy --only functions:routelogistics --project mi-factotum-field-service --non-interactive
+npx firebase deploy --only firestore:rules,firestore:indexes,storage --project mi-factotum-field-service --non-interactive
 ```
 
-### iOS Deployment
+Do not use an unscoped `--only functions` or force removal of legacy indexes. Rules are shared project-wide; the rules in this repository implement RL tenancy. Existing staff sessions should sign in/refresh claims after deployment to obtain the new `membershipId` claim. Wait for required composite indexes to become ready before considering query-dependent workflows verified.
 
-#### 1. Configure iOS Build
-```bash
-# Navigate to mobile app directory
-cd routeLogisticsMobile
+Configure non-secret values in ignored `functions/.env.mi-factotum-field-service`:
 
-# Configure EAS build
-eas build:configure
-
-# Build for iOS
-eas build --platform ios --profile production
+```dotenv
+RL_APP_URL=https://route-logistics.app
+RL_EMAIL_FROM=
+RL_EMAIL_ENABLED=false
 ```
 
-#### 2. App Store Configuration
-- **Bundle Identifier**: `com.prologixsa.mifactotum`
-- **App Name**: mi Factotum
-- **Version**: Auto-incremented via EAS
-- **Build Number**: Auto-incremented via EAS
+The origin above is the existing web package homepage. Use the actual canonical origin when configuring another deployment. Email is intentionally disabled. Owners can copy invitation links; OTP portal sign-in and invoice emails return an unavailable message. Firebase Auth verification emails use Firebase's separate configuration.
 
-#### 3. App Store Connect Setup
-1. Create app in App Store Connect
-2. Configure app metadata and screenshots
-3. Set up TestFlight for beta testing
-4. Submit for App Store review
+To enable SMTP later, configure `RL_SMTP_URL` in Firebase Secret Manager, use a verified sender for `RL_EMAIL_FROM`, set `RL_EMAIL_ENABLED=true`, and redeploy the RL codebase. The worker binds the secret only for enabled deployments. Use an authenticated TLS-capable SMTP connection URL and keep credentials out of source control/chat. Verify delivery with a controlled recipient and check portal custom-token signing permissions before enabling customer use. The runtime identity may need permission to sign tokens through IAM.
 
-#### 4. Production Deployment
-```bash
-# Submit to App Store
-eas submit --platform ios --profile production
-```
+The new server-owned collections are `rlInviteSecrets`, `rlMail`, `rlRateLimits`, `rlPortalChallenges`, `rlNotifications`, `rlOwnershipAudit`, and `rlMigrationRuns`. Clients cannot read secrets/outbox/challenges/audits; notification access is restricted to the recipient. TTL cleanup policies are not automatically provisioned by this deployment; see the retention notes in the progress report.
 
-### Android Deployment
+## Web publication
 
-#### 1. Configure Android Build
-```bash
-# Build for Android
-eas build --platform android --profile production
-```
+`netlify.toml` preserves the existing build configuration: Node 22, base directory `routeLogisticsWeb`, `npm run build`, output `dist`, and SPA redirects. Pushing the existing branch to GitHub triggers the user's configured web deployment. Deploy compatible backend/rules/index changes before publishing a frontend that calls them.
 
-#### 2. Google Play Configuration
-- **Package Name**: `com.prologixsa.mifactotum`
-- **App Name**: mi Factotum
-- **Version Code**: Auto-incremented via EAS
-- **Version Name**: Manual version management
+Keep the existing `VITE_FIREBASE_*` values in the hosting environment. Sentry and Firebase Performance are optional; `VITE_FIREBASE_PERFORMANCE_ENABLED=true` opts into Performance collection. Verify sign-in, invitation routing, customer list/import, jobs, photos, and public privacy/portal routes on the published build. Build success alone does not establish a successful hosting deployment.
 
-#### 3. Google Play Console Setup
-1. Create app in Google Play Console
-2. Configure app metadata and screenshots
-3. Set up internal testing track
-4. Submit for production review
+## Mobile on the Mac
 
-#### 4. Production Deployment
-```bash
-# Submit to Google Play
-eas submit --platform android --profile production
-```
+Keep `com.workside.routelogistics` for both application identifiers and the existing Expo project. Install from `routeLogisticsMobile/package-lock.json`. The Expo config now includes image-picker permissions and datetime-picker native configuration.
 
-### Environment Configuration
+If native folders are generated through Expo, apply the current config with the existing prebuild workflow before opening the generated iOS workspace in Xcode. Do not use `--clean` on a native project with uncommitted manual changes. Select the existing signing team, build, and run on a device; manage App Store submission through the existing workflow.
 
-#### app.config.js
-```javascript
-export default {
-  expo: {
-    name: "Route Logistics",
-    slug: "route-logistics",
-    version: "1.0.0",
-    orientation: "portrait",
-    icon: "./assets/icon.png",
-    userInterfaceStyle: "light",
-    splash: {
-      image: "./assets/splash-icon.png",
-      resizeMode: "contain",
-      backgroundColor: "#ffffff"
-    },
-    assetBundlePatterns: [
-      "**/*"
-    ],
-    ios: {
-      supportsTablet: true,
-      bundleIdentifier: "com.workside.routelogistics",
-      buildNumber: "1",
-      infoPlist: {
-        NSLocationWhenInUseUsageDescription: "This app needs location access to show nearby jobs."
-      }
-    },
-    android: {
-      adaptiveIcon: {
-        foregroundImage: "./assets/android-icon-foreground.png",
-        backgroundImage: "./assets/android-icon-background.png"
-      },
-      package: "com.workside.routelogistics",
-      versionCode: 1
-    },
-    web: {
-      favicon: "./assets/favicon.png"
-    },
-    extra: {
-      eas: {
-        projectId: "your-project-id"
-      }
-    }
-  }
-};
-```
+Validate real email verification, company claims, role restrictions, camera/library permissions, compressed uploads, airplane-mode behavior, and notification delivery. Both platform JavaScript bundles are checked in CI, but this run does not produce a signed native binary. Expo SDK major upgrades and remaining mobile dependency findings are tracked in the progress report.
 
-## Web App Deployment
+## Recovery and verification
 
-### Prerequisites
-- **Firebase CLI**: `npm install -g firebase-tools`
-- **Firebase Account**: Registered with Firebase
-- **Node.js**: Version 18+ required
-- **Yarn**: Package manager
+Migration originals are recorded transactionally under the migration run listed in the progress report. Review later edits before restoring a document. Source rollback should deploy a compatible combination of frontend, functions, and rules; reverting only the web app may restore obsolete invitation behavior. No automated production data restore is included.
 
-### Firebase Hosting Configuration
-
-#### firebase.json
-```json
-{
-  "hosting": {
-    "public": "dist",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ],
-    "headers": [
-      {
-        "source": "**/*.@(js|css)",
-        "headers": [
-          {
-            "key": "Cache-Control",
-            "value": "max-age=31536000"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-### Build Process
-
-#### 1. Install Dependencies
-```bash
-cd routeLogisticsWeb
-yarn install
-```
-
-#### 2. Build for Production
-```bash
-# Build the application
-yarn build
-
-# Preview the build
-yarn preview
-```
-
-#### 3. Deploy to Firebase
-```bash
-# Login to Firebase
-firebase login
-
-# Initialize Firebase project
-firebase init hosting
-
-# Deploy to Firebase Hosting
-firebase deploy --only hosting
-```
-
-### Environment Configuration
-
-#### Development Environment
-```bash
-# Start development server
-yarn dev
-
-# Uses local Firebase emulators
-# Firebase project: mi-factotum-field-service
-```
-
-#### Staging Environment
-```bash
-# Deploy to staging
-firebase hosting:channel:deploy staging
-
-# Access via: https://mi-factotum-field-service--staging.web.app
-```
-
-#### Production Environment
-```bash
-# Deploy to production
-firebase deploy --only hosting
-
-# Access via: https://mi-factotum-field-service.web.app
-```
-
-### Custom Domain Setup
-
-#### 1. Configure Custom Domain
-```bash
-# Add custom domain
-firebase hosting:sites:create your-domain.com
-
-# Configure DNS records
-# A record: 151.101.1.195
-# A record: 151.101.65.195
-```
-
-#### 2. SSL Certificate
-- Firebase automatically provisions SSL certificates
-- HTTPS enforcement enabled by default
-- Certificate renewal handled automatically
-
-## Firebase Configuration
-
-### Project Setup
-- **Project ID**: `mi-factotum-field-service`
-- **Region**: us-central1 (default)
-- **Plan**: Blaze (pay-as-you-go)
-
-### Services Configuration
-
-#### Authentication
-- **Providers**: Email/Password
-- **Domain**: `mi-factotum-field-service.firebaseapp.com`
-- **Settings**: Configured for both mobile and web
-
-#### Firestore Database
-- **Mode**: Native mode
-- **Location**: us-central1
-- **Security Rules**: Deployed via firestore-security-rules.txt
-
-#### Storage
-- **Location**: us-central1
-- **Rules**: User-specific access control
-- **Usage**: File uploads and document storage
-
-#### Hosting
-- **Domain**: `mi-factotum-field-service.web.app`
-- **Custom Domain**: Configured separately
-- **CDN**: Global content delivery
-
-### Environment Variables
-
-#### Mobile App
-```javascript
-// app.config.js
-export default {
-  expo: {
-    extra: {
-      firebaseApiKey: "AIzaSyAEHhLccanbJalSN0Zbdnvq_CwSSbpllrg",
-      firebaseAuthDomain: "mi-factotum-field-service.firebaseapp.com",
-      firebaseProjectId: "mi-factotum-field-service",
-      firebaseStorageBucket: "mi-factotum-field-service.firebasestorage.app",
-      firebaseMessagingSenderId: "1030013411579",
-      firebaseAppId: "1:1030013411579:web:37cdb1ce1e57c1e75c505e"
-    }
-  }
-};
-```
-
-#### Web App
-```javascript
-// src/services/firebase.js
-const firebaseConfig = {
-  apiKey: "AIzaSyAEHhLccanbJalSN0Zbdnvq_CwSSbpllrg",
-  authDomain: "mi-factotum-field-service.firebaseapp.com",
-  projectId: "mi-factotum-field-service",
-  storageBucket: "mi-factotum-field-service.firebasestorage.app",
-  messagingSenderId: "1030013411579",
-  appId: "1:1030013411579:web:37cdb1ce1e57c1e75c505e",
-  measurementId: "G-VS61WKSG39"
-};
-```
-
-## CI/CD Pipeline
-
-### GitHub Actions (TODO: Implement)
-
-#### Mobile App Pipeline
-```yaml
-name: Mobile App CI/CD
-on:
-  push:
-    branches: [main]
-    paths: ['routeLogisticsMobile/**']
-
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-      - name: Install dependencies
-        run: cd routeLogisticsMobile && yarn install
-      - name: Build for iOS
-        run: cd routeLogisticsMobile && eas build --platform ios --non-interactive
-      - name: Build for Android
-        run: cd routeLogisticsMobile && eas build --platform android --non-interactive
-```
-
-#### Web App Pipeline
-```yaml
-name: Web App CI/CD
-on:
-  push:
-    branches: [main]
-    paths: ['routeLogisticsWeb/**']
-
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-      - name: Install dependencies
-        run: cd routeLogisticsWeb && yarn install
-      - name: Build
-        run: cd routeLogisticsWeb && yarn build
-      - name: Deploy to Firebase
-        run: cd routeLogisticsWeb && firebase deploy --only hosting
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-```
-
-## Monitoring and Analytics
-
-### Firebase Analytics
-- **Mobile App**: Automatic event tracking
-- **Web App**: Custom event implementation
-- **Metrics**: User engagement, feature usage, performance
-
-### Error Monitoring
-- **Firebase Crashlytics**: Mobile app crash reporting
-- **Firebase Performance**: Performance monitoring
-- **Custom Logging**: Application-specific metrics
-
-### Uptime Monitoring
-- **Firebase Status**: Service availability
-- **Custom Monitoring**: Application health checks
-- **Alert System**: Automated notifications
-
-## Rollback Procedures
-
-### Mobile App Rollback
-```bash
-# Rollback to previous version
-eas build:list
-eas build:rollback --platform ios --build-id <build-id>
-eas build:rollback --platform android --build-id <build-id>
-```
-
-### Web App Rollback
-```bash
-# Rollback to previous deployment
-firebase hosting:releases:list
-firebase hosting:releases:rollback <release-id>
-```
-
-## Backup and Recovery
-
-### Data Backup
-- **Firestore**: Automatic backups enabled
-- **Storage**: Firebase Storage backups
-- **Configuration**: Version-controlled configuration
-
-### Disaster Recovery
-- **RTO**: 4 hours (Recovery Time Objective)
-- **RPO**: 1 hour (Recovery Point Objective)
-- **Backup Frequency**: Daily automated backups
-
-## Security Considerations
-
-### Deployment Security
-- **API Keys**: Environment-specific configuration
-- **Secrets Management**: Secure credential storage
-- **Access Control**: Limited deployment access
-- **Audit Logging**: Deployment activity tracking
-
-### Production Security
-- **HTTPS**: Enforced for all connections
-- **Security Headers**: Implemented via Firebase Hosting
-- **CSP**: Content Security Policy configured
-- **Rate Limiting**: Firebase-imposed limits
-
-## Performance Optimization
-
-### Mobile App Performance
-- **Bundle Size**: Optimized with EAS Build
-- **Asset Optimization**: Compressed images and assets
-- **Code Splitting**: Implemented for large features
-- **Caching**: Local data caching strategies
-
-### Web App Performance
-- **CDN**: Firebase Hosting global CDN
-- **Compression**: Gzip compression enabled
-- **Caching**: Browser caching strategies
-- **Bundle Optimization**: Vite's modern bundling
-
-## Troubleshooting
-
-### Common Deployment Issues
-
-#### Mobile App Issues
-- **Build Failures**: Check EAS build logs
-- **Certificate Issues**: Verify Apple Developer account
-- **Bundle Identifier**: Ensure consistency across configs
-- **Dependencies**: Verify package compatibility
-
-#### Web App Issues
-- **Build Failures**: Check Vite build logs
-- **Firebase Errors**: Verify Firebase configuration
-- **Domain Issues**: Check DNS configuration
-- **SSL Issues**: Verify certificate status
-
-### Debug Commands
-```bash
-# Mobile app debugging
-cd routeLogisticsMobile
-expo doctor
-eas build:list
-eas build:view <build-id>
-
-# Web app debugging
-cd routeLogisticsWeb
-yarn build --debug
-firebase hosting:channel:list
-firebase hosting:releases:list
-```
-
-## Future Enhancements
-
-### Planned Improvements
-- [ ] Automated CI/CD pipeline
-- [ ] Blue-green deployments
-- [ ] Canary releases
-- [ ] Automated testing integration
-- [ ] Performance monitoring dashboard
-- [ ] Automated rollback triggers
-- [ ] Multi-environment management
-- [ ] Infrastructure as Code (IaC)
+Check the Functions deployment exit status, all function states, scheduled-job states, index readiness, and the GitHub/hosting deployment result. Perform read-only or controlled-account smoke checks; do not use customer records as disposable test data.

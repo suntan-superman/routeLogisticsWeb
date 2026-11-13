@@ -2,7 +2,7 @@ import {
   collection, 
   doc, 
   getDoc, 
-  setDoc, 
+  runTransaction,
   updateDoc, 
   getDocs, 
   query, 
@@ -102,7 +102,7 @@ class JobManagementService {
   // Get job by ID
   static async getJob(jobId) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       const jobDoc = await getDoc(doc(db, 'jobs', jobId));
       
       if (!jobDoc.exists()) {
@@ -136,9 +136,9 @@ class JobManagementService {
   }
 
   // Update job
-  static async updateJob(jobId, updates) {
+  static async updateJob(jobId, updates, expectedUpdatedAt = undefined) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       // Verify user owns the job
       const jobResult = await this.getJob(jobId);
@@ -151,7 +151,16 @@ class JobManagementService {
         updatedAt: new Date().toISOString()
       };
 
-      await updateDoc(doc(db, 'jobs', jobId), updatedData);
+      if (expectedUpdatedAt !== undefined) {
+        await runTransaction(db, async (transaction) => {
+          const ref = doc(db, 'jobs', jobId);
+          const latest = await transaction.get(ref);
+          if (!latest.exists()) throw new Error('This job no longer exists.');
+          const version = (value) => value?.toMillis?.() ?? value ?? null;
+          if (version(latest.data().updatedAt) !== version(expectedUpdatedAt)) throw new Error('This job changed while you were editing. Close the form, refresh, and review the latest version before saving.');
+          transaction.update(ref, updatedData);
+        });
+      } else await updateDoc(doc(db, 'jobs', jobId), updatedData);
 
       return {
         success: true,
@@ -169,7 +178,7 @@ class JobManagementService {
   // Delete job
   static async deleteJob(jobId) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       // Verify user owns the job
       const jobResult = await this.getJob(jobId);
@@ -194,7 +203,7 @@ class JobManagementService {
   // Get jobs by status
   static async getJobsByStatus(status) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       const q = query(
         collection(db, 'jobs'),
@@ -227,7 +236,7 @@ class JobManagementService {
   // Get jobs by date range
   static async getJobsByDateRange(startDate, endDate) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       // Get all jobs and filter by date range
       const q = query(
@@ -298,7 +307,7 @@ class JobManagementService {
   // Search jobs
   static async searchJobs(searchTerm, limitCount = 20) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       // Get all jobs and filter client-side for now
       const result = await this.getJobs(1000); // Get more for search
@@ -333,7 +342,7 @@ class JobManagementService {
   // Get job statistics
   static async getJobStats() {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       const q = query(
         collection(db, 'jobs'),
@@ -471,7 +480,7 @@ class JobManagementService {
   // Get jobs by customer
   static async getJobsByCustomer(customerId) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       const q = query(
         collection(db, 'jobs'),

@@ -26,6 +26,19 @@ export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [sessionVersion, setSessionVersion] = useState(0);
+  const refreshSession = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+    await user.reload();
+    await user.getIdToken(true);
+    await syncTenancy();
+    const profile = await getDoc(doc(db, 'users', user.uid));
+    setUserProfile(profile.exists() ? profile.data() : null);
+    setEmailVerified(user.emailVerified);
+    setSessionVersion((version) => version + 1);
+  };
 
   // Sign up function
   const signup = async (email, password, userData) => {
@@ -180,7 +193,9 @@ export const AuthProvider = ({ children }) => {
   // Listen for auth state changes
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setLoading(true);
       setCurrentUser(user);
+      setEmailVerified(user?.emailVerified === true);
       
       if (user) {
         // Resolve tenancy claims before any data query runs so scope is correct from first render.
@@ -216,7 +231,7 @@ export const AuthProvider = ({ children }) => {
     signup,
     signin,
     logout,
-    updateUserProfile
+    updateUserProfile, refreshSession, emailVerified, sessionVersion
   };
 
   return (

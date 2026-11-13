@@ -12,6 +12,8 @@ import {
   Platform,
   KeyboardAvoidingView,
 } from 'react-native';
+import JobPhotos from '../components/JobPhotos';
+import { canManage, localDate } from '../services/tenancy';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../constants/colors';
@@ -27,7 +29,7 @@ const HomeScreen = ({ navigation }) => {
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showScheduleServiceModal, setShowScheduleServiceModal] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
-  
+
   // Schedule Service Form State
   const [selectedCustomer, setSelectedCustomer] = useState('');
   const [selectedService, setSelectedService] = useState('');
@@ -46,34 +48,32 @@ const HomeScreen = ({ navigation }) => {
   // Customer data from Firebase
   const [customers, setCustomers] = useState([]);
   const [isLoadingCustomers, setIsLoadingCustomers] = useState(false);
-  
+
   // Job/Schedule data from Firebase
   const [jobs, setJobs] = useState([]);
   const [isLoadingJobs, setIsLoadingJobs] = useState(false);
   const [activeFilter, setActiveFilter] = useState('day'); // 'day', 'week', 'month'
-  
+
   // Dropdown states
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [showServiceDropdown, setShowServiceDropdown] = useState(false);
-  
+
   // Job details modal
   const [showJobDetailsModal, setShowJobDetailsModal] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
-  
+
   // Job completion modal
   const [showJobCompletionModal, setShowJobCompletionModal] = useState(false);
   const [showCompletionConfirmModal, setShowCompletionConfirmModal] = useState(false);
   const [actualWorkDone, setActualWorkDone] = useState('');
   const [actualHours, setActualHours] = useState('');
   const [completionNotes, setCompletionNotes] = useState('');
-  const [jobPhotos, setJobPhotos] = useState([]);
-  
+
   // Job editing states
   const [showJobEditModal, setShowJobEditModal] = useState(false);
   const [editJobData, setEditJobData] = useState({});
-  const [editJobPhotos, setEditJobPhotos] = useState([]);
   const [isEditingJob, setIsEditingJob] = useState(false);
-  
+
   // Estimates states
   const [showEstimatesModal, setShowEstimatesModal] = useState(false);
   const [showCreateEstimateModal, setShowCreateEstimateModal] = useState(false);
@@ -95,16 +95,9 @@ const HomeScreen = ({ navigation }) => {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [selectedDateTime, setSelectedDateTime] = useState(new Date());
-  
-  const [photos, setPhotos] = useState([
-    { id: 1, jobId: 1, customer: 'John Smith', date: '2024-01-10', count: 3 },
-    { id: 2, jobId: 2, customer: 'Sarah Johnson', date: '2024-01-12', count: 2 },
-  ]);
-  
-  const [routes, setRoutes] = useState([
-    { id: 1, name: 'Downtown Route', stops: 3, distance: '12.5 miles' },
-    { id: 2, name: 'Suburbs Route', stops: 2, distance: '8.2 miles' },
-  ]);
+
+  const photos = [];
+  const routes = [];
 
   // Load customers and jobs when component mounts
   useEffect(() => {
@@ -187,7 +180,7 @@ const HomeScreen = ({ navigation }) => {
         default:
           result = await JobService.getTodaysJobs();
       }
-      
+
       if (result.success) {
         setJobs(result.jobs);
       } else {
@@ -331,12 +324,12 @@ const HomeScreen = ({ navigation }) => {
     if (Platform.OS === 'android') {
       setShowDatePicker(false);
     }
-    
+
     if (selectedDate) {
       setSelectedDateTime(selectedDate);
-      const dateString = selectedDate.toISOString().split('T')[0];
+      const dateString = localDate(selectedDate);
       setSelectedDate(dateString);
-      
+
       // If we're in edit mode, update the edit job data
       if (showJobEditModal) {
         setEditJobData({...editJobData, date: dateString});
@@ -363,23 +356,23 @@ const HomeScreen = ({ navigation }) => {
     if (Platform.OS === 'android') {
       setShowTimePicker(false);
     }
-    
+
     if (selectedTime) {
       // Round to nearest quarter hour
       const minutes = selectedTime.getMinutes();
       const roundedMinutes = Math.round(minutes / 15) * 15;
-      
+
       // Create new date with rounded time
       const roundedTime = new Date(selectedTime);
       roundedTime.setMinutes(roundedMinutes);
-      
+
       const timeString = roundedTime.toLocaleTimeString('en-US', {
         hour: 'numeric',
         minute: '2-digit',
         hour12: true
       });
       setSelectedTime(timeString);
-      
+
       // If we're in edit mode, update the edit job data
       if (showJobEditModal) {
         setEditJobData({...editJobData, time: timeString});
@@ -436,7 +429,7 @@ const HomeScreen = ({ navigation }) => {
   // Handle job selection for details
   const handleJobSelection = (job) => {
     setSelectedJob(job);
-    
+
     // On iOS, close schedule modal first to avoid modal stacking issues
     if (Platform.OS === 'ios') {
       setShowScheduleModal(false);
@@ -454,12 +447,12 @@ const HomeScreen = ({ navigation }) => {
     setActualWorkDone('');
     setActualHours('');
     setCompletionNotes('');
-    setJobPhotos([]);
     setShowJobCompletionModal(true);
   };
 
   // Handle job editing
   const handleJobEdit = (job) => {
+    if (!canManage()) { Alert.alert('Manager access required', 'Ask your manager to make this change.'); return; }
     setSelectedJob(job);
     setEditJobData({
       customerName: job.customerName || '',
@@ -471,7 +464,6 @@ const HomeScreen = ({ navigation }) => {
       notes: job.notes || '',
       status: job.status || 'scheduled'
     });
-    setEditJobPhotos(job.photos || []);
     setIsEditingJob(true);
     setShowJobEditModal(true);
   };
@@ -481,16 +473,15 @@ const HomeScreen = ({ navigation }) => {
     if (!selectedJob) return;
 
     setIsEditingJob(true);
-    
+
     try {
       const updatedJobData = {
         ...editJobData,
-        photos: editJobPhotos,
         updatedAt: new Date().toISOString()
       };
 
       const result = await JobService.updateJob(selectedJob.id, updatedJobData);
-      
+
       if (result.success) {
         Alert.alert('Success', 'Job updated successfully!');
         setShowJobEditModal(false);
@@ -506,32 +497,16 @@ const HomeScreen = ({ navigation }) => {
     }
   };
 
-  // Add photo to job editing
-  const addPhotoToJob = () => {
-    // TODO: Implement camera/photo picker
-    Alert.alert('Add Photo', 'Photo functionality coming soon!');
-  };
-
-  // Remove photo from job editing
-  const removePhotoFromJob = (photoIndex) => {
-    const newPhotos = editJobPhotos.filter((_, index) => index !== photoIndex);
-    setEditJobPhotos(newPhotos);
-  };
-
   // Load estimates from Firebase
   const loadEstimates = async () => {
     setIsLoadingEstimates(true);
     try {
-      console.log('Loading estimates...');
       const result = await EstimateService.getEstimates();
-      console.log('Estimates result:', result);
-      
+
       if (result.success) {
         setEstimates(result.estimates);
-        console.log('Estimates loaded:', result.estimates.length);
         // Don't show error if no estimates exist yet - this is normal for new users
         if (result.estimates.length === 0) {
-          console.log('No estimates found - this is normal for new users');
         }
       } else {
         console.error('EstimateService error:', result.error);
@@ -708,12 +683,11 @@ const HomeScreen = ({ navigation }) => {
         actualHours: actualHours || selectedJob.duration,
         completionNotes,
         completedAt: new Date().toISOString(),
-        photos: jobPhotos,
         updatedAt: new Date().toISOString(),
       };
 
       const result = await JobService.updateJob(selectedJob.id, completionData);
-      
+
       if (result.success) {
         Alert.alert('Success', 'Job completed successfully!');
         setShowJobCompletionModal(false);
@@ -731,12 +705,12 @@ const HomeScreen = ({ navigation }) => {
   // Schedule follow-up appointment
   const scheduleFollowUp = () => {
     if (!selectedJob) return;
-    
+
     // Pre-populate the schedule service form with customer info
     setSelectedCustomer(selectedJob.customerName);
     setSelectedService(selectedJob.serviceType);
     setNotes(`Follow-up for job completed on ${new Date().toLocaleDateString()}`);
-    
+
     setShowJobDetailsModal(false);
     setShowJobCompletionModal(false);
     setShowScheduleServiceModal(true);
@@ -753,7 +727,7 @@ const HomeScreen = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background.primary} />
-      
+
       {/* Header with Menu and Settings */}
       <View style={styles.headerContainer}>
       <View style={styles.header}>
@@ -791,7 +765,7 @@ const HomeScreen = ({ navigation }) => {
           {/* Service Cards */}
           <View style={styles.servicesContainer}>
             <Text style={styles.sectionTitle}>{t('yourServices')}</Text>
-            
+
             {user?.services && user.services.length > 0 ? (
               <View style={styles.servicesList}>
                 {user.services.map((service, index) => (
@@ -823,7 +797,7 @@ const HomeScreen = ({ navigation }) => {
         {/* Quick Actions - Fixed at Bottom */}
         <View style={styles.actionsContainer}>
           <Text style={styles.sectionTitle}>{t('quickActions')}</Text>
-          
+
           <View style={styles.actionButtons}>
             <TouchableOpacity 
               style={styles.actionButton}
@@ -871,7 +845,7 @@ const HomeScreen = ({ navigation }) => {
           <View style={styles.modalContent}>
               <Text style={styles.modalTitle}>{t('miFactotum')}</Text>
             <Text style={styles.modalSubtitle}>Choose an option</Text>
-            
+
             <TouchableOpacity 
               style={styles.modalButton}
               onPress={() => {
@@ -881,7 +855,7 @@ const HomeScreen = ({ navigation }) => {
             >
                 <Text style={styles.modalButtonText}>{t('customers')}</Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity 
               style={styles.modalButton}
               onPress={() => {
@@ -891,7 +865,7 @@ const HomeScreen = ({ navigation }) => {
             >
                 <Text style={styles.modalButtonText}>{t('signOut')}</Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity 
               style={[styles.modalButton, styles.modalCancelButton]}
               onPress={() => setShowMenuModal(false)}
@@ -920,7 +894,7 @@ const HomeScreen = ({ navigation }) => {
                 <MaterialIcons name="close" size={24} color={COLORS.text.primary} />
               </TouchableOpacity>
             </View>
-            
+
             <View style={styles.searchContainer}>
               <MaterialIcons name="search" size={20} color={COLORS.gray[500]} style={styles.searchIcon} />
               <TextInput
@@ -982,7 +956,7 @@ const HomeScreen = ({ navigation }) => {
 
             <View style={styles.customerForm}>
               <Text style={styles.formSectionTitle}>Add New Customer</Text>
-              
+
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>Name *</Text>
                 <TextInput
@@ -1041,7 +1015,7 @@ const HomeScreen = ({ navigation }) => {
                     address: customerAddress,
                     email: customerEmail || ''
                   };
-                  
+
                   const success = await addCustomerToFirebase(customerData);
                   if (success) {
                     Alert.alert('Success', 'Customer added successfully!');
@@ -1085,7 +1059,7 @@ const HomeScreen = ({ navigation }) => {
                   <MaterialIcons name="close" size={24} color={COLORS.text.primary} />
                 </TouchableOpacity>
               </View>
-              
+
               <ScrollView 
                 style={styles.scheduleForm}
                 nestedScrollEnabled={true}
@@ -1106,7 +1080,7 @@ const HomeScreen = ({ navigation }) => {
                     color={COLORS.gray[500]} 
                   />
                 </TouchableOpacity>
-                
+
                 {showCustomerDropdown && (
                   <View style={styles.dropdown}>
                     {customers.length === 0 ? (
@@ -1147,7 +1121,7 @@ const HomeScreen = ({ navigation }) => {
                     color={COLORS.gray[500]} 
                   />
                 </TouchableOpacity>
-                
+
                 {showServiceDropdown && (
                   <ScrollView 
                     style={styles.dropdown}
@@ -1262,7 +1236,7 @@ const HomeScreen = ({ navigation }) => {
                       };
 
                       const result = await JobService.addJob(jobData);
-                      
+
                       if (result.success) {
                         Alert.alert('Success', 'Service scheduled successfully!');
                         resetScheduleForm();
@@ -1311,7 +1285,7 @@ const HomeScreen = ({ navigation }) => {
                 <MaterialIcons name="close" size={24} color={COLORS.text.primary} />
               </TouchableOpacity>
             </View>
-            
+
             <View style={styles.filterContainer}>
               <TouchableOpacity 
                 style={[styles.filterButton, activeFilter === 'day' && styles.activeFilterButton]}
@@ -1402,9 +1376,10 @@ const HomeScreen = ({ navigation }) => {
                 <MaterialIcons name="close" size={24} color={COLORS.text.primary} />
               </TouchableOpacity>
             </View>
-            
+
             {selectedJob && (
               <ScrollView style={styles.jobDetailsContent}>
+                <JobPhotos job={selectedJob} />
                 <View style={styles.jobDetailRow}>
                   <Text style={styles.jobDetailLabel}>Customer:</Text>
                   <Text style={styles.jobDetailValue}>{selectedJob.customerName}</Text>
@@ -1443,7 +1418,7 @@ const HomeScreen = ({ navigation }) => {
                     {selectedJob.status || 'Scheduled'}
                   </Text>
                 </View>
-                
+
                 {selectedJob.status === 'completed' && (
                   <>
                     {selectedJob.actualWorkDone && (
@@ -1482,7 +1457,7 @@ const HomeScreen = ({ navigation }) => {
                 )}
               </ScrollView>
             )}
-            
+
             <View style={styles.modalActions}>
               <TouchableOpacity 
                 style={[styles.modalButton, styles.cancelButton]}
@@ -1490,11 +1465,13 @@ const HomeScreen = ({ navigation }) => {
               >
                 <Text style={styles.cancelButtonText}>Close</Text>
               </TouchableOpacity>
-              
-              {selectedJob?.status === 'scheduled' && (
+
+              {selectedJob?.status === 'scheduled' && <TouchableOpacity style={[styles.modalButton, styles.confirmButton]} onPress={async () => { const result = await JobService.updateJob(selectedJob.id, { status: 'in-progress' }); if (result.success) { setSelectedJob({ ...selectedJob, status: 'in-progress' }); loadJobs(); } else Alert.alert('Could not start job', result.error?.message || 'Try again.'); }}><Text style={styles.confirmButtonText}>Start</Text></TouchableOpacity>}
+              {['scheduled', 'in-progress'].includes(selectedJob?.status) && (
                 <>
                   <TouchableOpacity 
                     style={[styles.modalButton, styles.editButton]}
+                    disabled={!canManage()}
                     onPress={() => handleJobEdit(selectedJob)}
                   >
                     <Text style={styles.editButtonText}>Edit</Text>
@@ -1507,8 +1484,8 @@ const HomeScreen = ({ navigation }) => {
                   </TouchableOpacity>
                 </>
               )}
-              
-              {selectedJob?.status === 'completed' && (
+
+              {canManage() && selectedJob?.status === 'completed' && (
                 <TouchableOpacity 
                   style={[styles.modalButton, styles.followUpButton]}
                   onPress={scheduleFollowUp}
@@ -1539,8 +1516,9 @@ const HomeScreen = ({ navigation }) => {
                 <MaterialIcons name="close" size={24} color={COLORS.text.primary} />
               </TouchableOpacity>
             </View>
-            
+
             <ScrollView style={styles.completionForm}>
+              <JobPhotos job={selectedJob} />
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>What work was actually done? *</Text>
                 <TextInput
@@ -1576,18 +1554,8 @@ const HomeScreen = ({ navigation }) => {
                 />
               </View>
 
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Photos taken</Text>
-                <TouchableOpacity style={styles.photoButton}>
-                  <MaterialIcons name="camera-alt" size={24} color={COLORS.primary[500]} />
-                  <Text style={styles.photoButtonText}>Add Photos</Text>
-                </TouchableOpacity>
-                {jobPhotos.length > 0 && (
-                  <Text style={styles.photoCountText}>{jobPhotos.length} photos added</Text>
-                )}
-              </View>
             </ScrollView>
-            
+
             <View style={styles.modalActions}>
               <TouchableOpacity 
                 style={[styles.modalButton, styles.cancelButton]}
@@ -1630,7 +1598,7 @@ const HomeScreen = ({ navigation }) => {
             <Text style={styles.confirmModalMessage}>
               This will mark the job as completed and update the job status. This action cannot be undone.
             </Text>
-            
+
             <View style={styles.confirmModalActions}>
               <TouchableOpacity 
                 style={[styles.confirmModalButton, styles.confirmModalCancelButton]}
@@ -1743,7 +1711,7 @@ const HomeScreen = ({ navigation }) => {
                 <MaterialIcons name="close" size={24} color={COLORS.text.primary} />
               </TouchableOpacity>
             </View>
-            
+
             <KeyboardAvoidingView 
               behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
               style={styles.editForm}
@@ -1782,7 +1750,7 @@ const HomeScreen = ({ navigation }) => {
                       <MaterialIcons name="calendar-today" size={20} color={COLORS.primary[500]} />
                     </TouchableOpacity>
                   </View>
-                  
+
                   <View style={[styles.formGroup, styles.halfWidth]}>
                     <Text style={styles.formLabel}>Time *</Text>
                     <TouchableOpacity 
@@ -1808,7 +1776,7 @@ const HomeScreen = ({ navigation }) => {
                       onChangeText={(text) => setEditJobData({...editJobData, duration: text})}
                     />
                   </View>
-                  
+
                   <View style={[styles.formGroup, styles.halfWidth]}>
                     <Text style={styles.formLabel}>Estimated Cost</Text>
                     <TextInput
@@ -1875,32 +1843,10 @@ const HomeScreen = ({ navigation }) => {
                   />
                 </View>
 
-                <View style={styles.formGroup}>
-                  <Text style={styles.formLabel}>Photos</Text>
-                  <TouchableOpacity style={styles.photoButton} onPress={addPhotoToJob}>
-                    <MaterialIcons name="camera-alt" size={24} color={COLORS.primary[500]} />
-                    <Text style={styles.photoButtonText}>Add Photos</Text>
-                  </TouchableOpacity>
-                  
-                  {editJobPhotos.length > 0 && (
-                    <View style={styles.photoList}>
-                      {editJobPhotos.map((photo, index) => (
-                        <View key={index} style={styles.photoItem}>
-                          <Text style={styles.photoItemText}>Photo {index + 1}</Text>
-                          <TouchableOpacity 
-                            onPress={() => removePhotoFromJob(index)}
-                            style={styles.removePhotoButton}
-                          >
-                            <MaterialIcons name="close" size={16} color={COLORS.red[500]} />
-                          </TouchableOpacity>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                </View>
+                <JobPhotos job={selectedJob} />
               </ScrollView>
             </KeyboardAvoidingView>
-            
+
             <View style={styles.modalActions}>
               <TouchableOpacity 
                 style={[styles.modalButton, styles.cancelButton]}
@@ -1947,7 +1893,7 @@ const HomeScreen = ({ navigation }) => {
                 <MaterialIcons name="close" size={24} color={COLORS.text.primary} />
               </TouchableOpacity>
             </View>
-            
+
             <View style={styles.estimatesActions}>
               <TouchableOpacity 
                 style={styles.createEstimateButton}
@@ -1990,7 +1936,7 @@ const HomeScreen = ({ navigation }) => {
                         Valid until: {new Date(estimate.validUntil).toLocaleDateString()}
                       </Text>
                     )}
-                    
+
                     <View style={styles.estimateActions}>
                       <TouchableOpacity 
                         style={[styles.estimateActionButton, styles.secondaryButton]}
@@ -2058,7 +2004,7 @@ const HomeScreen = ({ navigation }) => {
                 </TouchableOpacity>
               </View>
             </View>
-            
+
             <KeyboardAvoidingView 
               behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
               style={styles.estimateForm}
@@ -2125,7 +2071,7 @@ const HomeScreen = ({ navigation }) => {
                       onChangeText={(text) => setEstimateData({...estimateData, laborHours: text})}
                     />
                   </View>
-                  
+
                   <View style={[styles.formGroup, styles.halfWidth]}>
                     <Text style={styles.formLabel}>Labor Rate ($/hr)</Text>
                     <TextInput
@@ -2173,7 +2119,7 @@ const HomeScreen = ({ navigation }) => {
                 </View>
               </ScrollView>
             </KeyboardAvoidingView>
-            
+
             <View style={styles.modalActions}>
               <TouchableOpacity 
                 style={[styles.modalButton, styles.cancelButton]}
@@ -2220,11 +2166,11 @@ const HomeScreen = ({ navigation }) => {
                 <MaterialIcons name="close" size={24} color={COLORS.text.primary} />
               </TouchableOpacity>
             </View>
-            
+
             <ScrollView style={styles.templateList}>
               <Text style={styles.templateTitle}>Choose a Template:</Text>
               <Text style={styles.templateDescription}>Select a template to auto-fill the estimate form</Text>
-              
+
               <TouchableOpacity 
                 style={styles.templateItem}
                 onPress={() => {
@@ -2238,7 +2184,7 @@ const HomeScreen = ({ navigation }) => {
                 </View>
                 <Text style={styles.templateDescription}>Weekly pool maintenance including water testing, cleaning, and equipment inspection</Text>
               </TouchableOpacity>
-              
+
               <TouchableOpacity 
                 style={styles.templateItem}
                 onPress={() => {
@@ -2252,7 +2198,7 @@ const HomeScreen = ({ navigation }) => {
                 </View>
                 <Text style={styles.templateDescription}>Comprehensive pest control treatment with inspection and preventive barrier treatment</Text>
               </TouchableOpacity>
-              
+
               <TouchableOpacity 
                 style={styles.templateItem}
                 onPress={() => {
@@ -2266,7 +2212,7 @@ const HomeScreen = ({ navigation }) => {
                 </View>
                 <Text style={styles.templateDescription}>Various repair and maintenance tasks including plumbing, electrical, and painting</Text>
               </TouchableOpacity>
-              
+
               <TouchableOpacity 
                 style={styles.templateItem}
                 onPress={() => {
@@ -2303,7 +2249,7 @@ const HomeScreen = ({ navigation }) => {
                 <MaterialIcons name="close" size={24} color={COLORS.text.primary} />
               </TouchableOpacity>
             </View>
-            
+
             <ScrollView style={styles.customerList}>
               {customers.length === 0 ? (
                 <View style={styles.emptyStateContainer}>
@@ -2330,7 +2276,7 @@ const HomeScreen = ({ navigation }) => {
                   </TouchableOpacity>
                 ))
               )}
-              
+
               <TouchableOpacity 
                 style={styles.addButton}
                 onPress={() => {
@@ -2365,7 +2311,7 @@ const HomeScreen = ({ navigation }) => {
                 <MaterialIcons name="close" size={24} color={COLORS.text.primary} />
               </TouchableOpacity>
             </View>
-            
+
             <ScrollView style={styles.customerList}>
               {user?.services && user.services.length > 0 ? (
                 user.services.map((service, index) => (
@@ -2713,17 +2659,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: SPACING.XLARGE,
   },
-  emptyStateText: {
-    fontSize: FONT_SIZES.MEDIUM,
-    fontWeight: '600',
-    color: COLORS.text.secondary,
-    marginTop: SPACING.MEDIUM,
-  },
-  emptyStateSubtext: {
-    fontSize: FONT_SIZES.SMALL,
-    color: COLORS.text.secondary,
-    marginTop: SPACING.TINY,
-  },
+
+
   // Schedule Service Modal Styles
   scheduleForm: {
     padding: SPACING.LARGE,
@@ -2732,10 +2669,7 @@ const styles = StyleSheet.create({
   formGroup: {
     marginBottom: SPACING.SMALL,
   },
-  formRow: {
-    flexDirection: 'row',
-    gap: SPACING.MEDIUM,
-  },
+
   formGroupHalf: {
     flex: 1,
   },
@@ -2745,25 +2679,9 @@ const styles = StyleSheet.create({
     color: COLORS.text.primary,
     marginBottom: SPACING.TINY,
   },
-  textInput: {
-    borderWidth: 1,
-    borderColor: COLORS.gray[300],
-    borderRadius: BORDER_RADIUS.SMALL,
-    paddingHorizontal: SPACING.SMALL,
-    paddingVertical: SPACING.TINY,
-    fontSize: FONT_SIZES.SMALL,
-    backgroundColor: COLORS.white,
-    color: COLORS.text.primary,
-    marginBottom: SPACING.TINY,
-    height: 36,
-  },
-  textArea: {
-    height: 60,
-    textAlignVertical: 'top',
-  },
-  halfWidth: {
-    flex: 1,
-  },
+
+
+
   customerSelector: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -3016,10 +2934,7 @@ const styles = StyleSheet.create({
     flex: 2,
     textAlign: 'right',
   },
-  statusText: {
-    color: COLORS.primary[500],
-    textTransform: 'capitalize',
-  },
+
   // Job Action Button Styles
   editButton: {
     flex: 1,

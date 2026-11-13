@@ -119,7 +119,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
         toast('No changes to save');
         return onClose();
       }
-      const res = await JobManagementService.updateJob(job.id, edit);
+      const res = await JobManagementService.updateJob(job.id, edit, job.updatedAt ?? null);
       setSaving(false);
       if (!res.success) return toast.error(res.error || 'Could not update job');
       toast.success('Job updated – flagged as modified from original');

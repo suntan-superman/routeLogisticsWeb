@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const { assignmentTarget, buildAssignmentMessage } = require('./notify');
 
-const member = { uid: 'u1', companyId: 'c1' };
+const member = { uid: 'u1', companyId: 'c1', status: 'active' };
 
 test('notifies the newly assigned member', () => {
   assert.strictEqual(assignmentTarget({ assignedTo: null }, { assignedTo: 'm1', companyId: 'c1' }, member), 'u1');

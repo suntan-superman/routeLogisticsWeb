@@ -2,7 +2,6 @@ import {
   collection, 
   doc, 
   getDoc, 
-  setDoc, 
   updateDoc, 
   getDocs, 
   query, 
@@ -13,6 +12,8 @@ import {
 import { db } from './firebase';
 import { auth } from './firebase';
 import { syncTenancy } from './tenancy';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from './firebase';
 
 class CompanyService {
   // Get current user ID
@@ -157,53 +158,11 @@ class CompanyService {
     }
   }
 
-  // Add team member to company
-  static async addTeamMember(companyId, userEmail, role = 'technician') {
+  static async addTeamMember(companyId, email, role = 'technician') {
     try {
-      const userId = this.getCurrentUserId();
-      
-      // Verify user owns the company
-      const companyResult = await this.getCompany(companyId);
-      if (!companyResult.success || companyResult.company.ownerId !== userId) {
-        return {
-          success: false,
-          error: 'Unauthorized to add team members'
-        };
-      }
-
-      if (!['technician', 'manager', 'admin'].includes(role)) {
-        return { success: false, error: 'Invalid role' };
-      }
-      const email = (userEmail || '').trim().toLowerCase();
-      if (!email) {
-        return { success: false, error: 'Email is required' };
-      }
-
-      // Create team member record
-      const teamMember = {
-        companyId,
-        email,
-        role,
-        invitedBy: userId,
-        status: 'pending', // pending, active, inactive
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-
-      const docRef = await addDoc(collection(db, 'teamMembers'), teamMember);
-
-      return {
-        success: true,
-        teamMemberId: docRef.id,
-        teamMember: { id: docRef.id, ...teamMember }
-      };
-    } catch (error) {
-      console.error('Error adding team member:', error);
-      return {
-        success: false,
-        error: error.message
-      };
-    }
+      const result = await httpsCallable(functions, 'sendTeamInviteEmail')({ companyId, email, role });
+      return { success: true, ...result.data };
+    } catch (error) { return { success: false, error: error.message }; }
   }
 
   // Get team members for a company
@@ -234,48 +193,11 @@ class CompanyService {
     }
   }
 
-  // Update team member
-  static async updateTeamMember(teamMemberId, updates) {
+  static async updateTeamMember(memberId, updates) {
     try {
-      const userId = this.getCurrentUserId();
-      
-      // Get team member to verify permissions
-      const teamMemberDoc = await getDoc(doc(db, 'teamMembers', teamMemberId));
-      if (!teamMemberDoc.exists()) {
-        return {
-          success: false,
-          error: 'Team member not found'
-        };
-      }
-
-      const teamMember = teamMemberDoc.data();
-      const companyResult = await this.getCompany(teamMember.companyId);
-      
-      if (!companyResult.success || companyResult.company.ownerId !== userId) {
-        return {
-          success: false,
-          error: 'Unauthorized to update this team member'
-        };
-      }
-
-      const updatedData = {
-        ...updates,
-        updatedAt: new Date().toISOString()
-      };
-
-      await updateDoc(doc(db, 'teamMembers', teamMemberId), updatedData);
-
-      return {
-        success: true,
-        teamMember: { ...teamMember, ...updatedData }
-      };
-    } catch (error) {
-      console.error('Error updating team member:', error);
-      return {
-        success: false,
-        error: error.message
-      };
-    }
+      await httpsCallable(functions, 'manageTeamMember')({ memberId, ...updates });
+      return { success: true };
+    } catch (error) { return { success: false, error: error.message }; }
   }
 
   // Remove team member

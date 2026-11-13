@@ -4,7 +4,7 @@
 // The member must belong to the same company as the job so assignments never leak across tenants.
 function assignmentTarget(before, after, member) {
   if (!after || !after.assignedTo || before?.assignedTo === after.assignedTo) return null;
-  if (!member || !member.uid) return null;
+  if (!member || !member.uid || member.status !== 'active') return null;
   if ((member.companyId || null) !== (after.companyId || null)) return null;
   return member.uid;
 }

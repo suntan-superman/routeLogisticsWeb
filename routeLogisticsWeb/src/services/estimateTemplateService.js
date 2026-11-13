@@ -2,11 +2,9 @@ import {
   collection, 
   doc, 
   getDoc, 
-  setDoc, 
   updateDoc, 
   getDocs, 
   query, 
-  where,
   addDoc,
   deleteDoc,
   orderBy
@@ -28,7 +26,7 @@ class EstimateTemplateService {
   // Create a new estimate template
   static async createTemplate(templateData) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       const template = {
         ...templateData,
         ...tenantFields(),
@@ -57,7 +55,7 @@ class EstimateTemplateService {
   // Get all templates for the current user
   static async getTemplates() {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       const q = query(
         collection(db, 'estimateTemplates'),
@@ -88,7 +86,7 @@ class EstimateTemplateService {
   // Get template by ID
   static async getTemplate(templateId) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       const templateDoc = await getDoc(doc(db, 'estimateTemplates', templateId));
       
       if (!templateDoc.exists()) {
@@ -124,7 +122,7 @@ class EstimateTemplateService {
   // Update template
   static async updateTemplate(templateId, updates) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       // Verify user owns the template
       const templateResult = await this.getTemplate(templateId);
@@ -155,7 +153,7 @@ class EstimateTemplateService {
   // Delete template
   static async deleteTemplate(templateId) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       // Verify user owns the template
       const templateResult = await this.getTemplate(templateId);
@@ -245,7 +243,7 @@ class EstimateTemplateService {
   // Get template statistics
   static async getTemplateStats() {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       const q = query(
         collection(db, 'estimateTemplates'),
@@ -297,7 +295,7 @@ class EstimateTemplateService {
   // Create default templates for new users
   static async createDefaultTemplates() {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       // Check if user already has templates
       const existingTemplates = await this.getTemplates();

@@ -1,4 +1,4 @@
-import React, { useState, useContext, useEffect } from 'react';
+import React, { useState, useContext } from 'react';
 import {
   View,
   Text,
@@ -18,26 +18,7 @@ const LoginScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [credentialsLoaded, setCredentialsLoaded] = useState(false);
-  const [secureStoreStatus, setSecureStoreStatus] = useState('Testing...');
-
-  const { signIn, loadSavedCredentials, saveCredentials, testSecureStore, clearSavedCredentials } = useContext(AuthContext);
-
-  // Load saved credentials when component mounts
-  useEffect(() => {
-    const loadCredentials = async () => {
-      const storeWorking = await testSecureStore();
-      
-      const result = await loadSavedCredentials();
-      if (result.success && result.credentials) {
-        setEmail(result.credentials.email);
-        setPassword(result.credentials.password);
-      }
-      setCredentialsLoaded(true);
-    };
-    
-    loadCredentials();
-  }, [loadSavedCredentials, testSecureStore]);
+  const { signIn } = useContext(AuthContext);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -49,17 +30,7 @@ const LoginScreen = ({ navigation }) => {
     try {
       const result = await signIn(email, password);
       if (result.success) {
-        // Save credentials for next time
-        await saveCredentials(email, password);
-        
-        const testLoad = await loadSavedCredentials();
-        if (testLoad.success) {
-          // console.log('✅ Immediate load test: Success!');
-        } else {
-          console.log('❌ Immediate load test: Failed!');
-        }
-        
-        // Navigation will be handled by AuthContext state change
+        setPassword('');
       } else {
         alert(result.error?.message || 'Login failed');
       }
@@ -73,25 +44,6 @@ const LoginScreen = ({ navigation }) => {
 
   const handleSignUpNavigation = () => {
     navigation.navigate('signup');
-  };
-
-  // Add manual credential clearing function for debugging
-  const handleClearCredentials = async () => {
-    try {
-      const result = await clearSavedCredentials();
-      if (result.success) {
-        // console.log('🧹 Manually cleared all saved credentials');
-        setEmail('');
-        setPassword('');
-        setCredentialsLoaded(false);
-        // alert('✅ Saved credentials cleared successfully!');
-      } else {
-        alert('❌ Failed to clear credentials');
-      }
-    } catch (error) {
-      console.error('Error clearing credentials:', error);
-      alert('❌ Error clearing credentials');
-    }
   };
 
   return (
@@ -112,12 +64,7 @@ const LoginScreen = ({ navigation }) => {
       </View>
 
       {/* Auto-fill Notice */}
-      {credentialsLoaded && email && password && (
-        <View style={styles.demoNotice}>
-          <Text style={styles.demoText}>✨ Auto-filled</Text>
-          <Text style={styles.demoSubtext}>Using your saved credentials</Text>
-        </View>
-      )}
+
 
       {/* Form */}
       <View style={styles.formContainer}>
@@ -188,16 +135,6 @@ const LoginScreen = ({ navigation }) => {
 
       {/* Footer */}
       <View style={styles.footerContainer}>
-        {/* Debug: Clear Credentials Button */}
-        <TouchableOpacity 
-          style={styles.debugButton}
-          onPress={handleClearCredentials}
-          disabled={isLoading}
-        >
-          <Text style={styles.debugButtonText}>🧹 Clear Saved Credentials</Text>
-        </TouchableOpacity>
-        
-        
         <Text style={styles.termsText}>
           By signing in, you agree to our Terms of Service and Privacy Policy
         </Text>

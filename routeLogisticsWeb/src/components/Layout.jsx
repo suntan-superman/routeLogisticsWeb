@@ -3,6 +3,8 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import NotificationToggle from './NotificationToggle';
 import { disablePush } from '../services/push';
+import EmailVerificationBanner from './EmailVerificationBanner';
+import ConnectionStatus from './ConnectionStatus';
 import { 
   HomeIcon, 
   BuildingOfficeIcon, 
@@ -37,6 +39,7 @@ const Layout = ({ children }) => {
     { name: 'Service Plans', href: '/service-plans', icon: ArrowPathIcon },
     { name: 'Invoices', href: '/invoices', icon: BanknotesIcon },
     { name: 'Reports', href: '/reports', icon: ChartBarIcon },
+    { name: 'Notifications', href: '/notifications', icon: ClipboardDocumentListIcon },
   ];
 
   const isCurrentPath = (path) => {
@@ -119,7 +122,7 @@ const Layout = ({ children }) => {
             <div className="flex items-center">
               <div className="flex-shrink-0">
                 <div className="h-8 w-8 bg-primary-500 rounded-lg flex items-center justify-center">
-                  <span className="text-white font-bold text-sm">MF</span>
+                  <span className="text-white font-bold text-sm">RL</span>
                 </div>
               </div>
               <div className="ml-3">
@@ -197,6 +200,8 @@ const Layout = ({ children }) => {
         {/* Page content */}
         <main className="py-6">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <EmailVerificationBanner />
+            <ConnectionStatus />
             {children}
           </div>
         </main>

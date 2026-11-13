@@ -10,7 +10,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     function signedIn() {
-      return request.auth != null;
+      return request.auth != null && request.auth.token.get('portal', false) != true;
     }
     function uid() {
       return request.auth.uid;
@@ -27,13 +27,22 @@ service cloud.firestore {
     function isStaff() {
       return claimRole() in ['owner', 'admin', 'manager', 'technician'];
     }
+    function activeCompanyAccess() {
+      return (claimRole() == 'owner'
+          && get(/databases/$(database)/documents/companies/$(claimCompany())).data.ownerId == uid())
+        || (request.auth.token.get('membershipId', null) != null
+          && get(/databases/$(database)/documents/teamMembers/$(request.auth.token.membershipId)).data.uid == uid()
+          && get(/databases/$(database)/documents/teamMembers/$(request.auth.token.membershipId)).data.companyId == claimCompany()
+          && get(/databases/$(database)/documents/teamMembers/$(request.auth.token.membershipId)).data.status == 'active'
+          && get(/databases/$(database)/documents/teamMembers/$(request.auth.token.membershipId)).data.role == claimRole());
+    }
 
     // Data doc helpers (d = resource.data or request.resource.data)
     function isSolo(d) {
       return d.get('companyId', null) == null && d.get('userId', null) == uid();
     }
     function inCompany(d) {
-      return claimCompany() != null && d.get('companyId', null) == claimCompany();
+      return signedIn() && claimCompany() != null && d.get('companyId', null) == claimCompany() && activeCompanyAccess();
     }
     function readable(d) {
       return signedIn() && (isSolo(d) || (inCompany(d) && isStaff()));
@@ -50,8 +59,9 @@ service cloud.firestore {
     function validCreate(allowTechnician) {
       return signedIn()
         && request.resource.data.get('userId', null) == uid()
-        && (request.resource.data.get('companyId', null) == null
-            || (request.resource.data.companyId == claimCompany()
+        && ((request.resource.data.get('companyId', null) == null && claimCompany() == null
+              && get(/databases/$(database)/documents/users/$(uid())).data.get('rlCompanyId', null) == null)
+            || (inCompany(request.resource.data)
                 && (isManager() || (allowTechnician && isStaff()))));
     }
 
@@ -60,9 +70,12 @@ service cloud.firestore {
       allow read: if signedIn() && uid() == userId;
       allow create: if signedIn() && uid() == userId
         && request.resource.data.get('role', null) == null
+        && request.resource.data.get('rlCompanyId', null) == null
+        && request.resource.data.get('legacyBackfilledAt', null) == null
         && request.resource.data.get('companyId', null) == null;
       // role/legacy flags are server-managed; companyId may only point at a company the user owns.
       allow update: if signedIn() && uid() == userId
+        && request.resource.data.get('rlCompanyId', null) == resource.data.get('rlCompanyId', null)
         && request.resource.data.get('role', null) == resource.data.get('role', null)
         && request.resource.data.get('legacyBackfilledAt', null) == resource.data.get('legacyBackfilledAt', null)
         && (request.resource.data.get('companyId', null) == resource.data.get('companyId', null)
@@ -74,7 +87,7 @@ service cloud.firestore {
     // ---------- companies ----------
     match /companies/{companyId} {
       allow read: if signedIn()
-        && (resource.data.ownerId == uid() || claimCompany() == companyId);
+        && (resource.data.ownerId == uid() || (claimCompany() == companyId && activeCompanyAccess()));
       allow create: if signedIn()
         && request.resource.data.ownerId == uid()
         && get(/databases/$(database)/documents/users/$(uid())).data.get('companyId', null) == null;
@@ -89,18 +102,9 @@ service cloud.firestore {
     match /teamMembers/{teamMemberId} {
       allow read: if signedIn()
         && (get(/databases/$(database)/documents/companies/$(resource.data.companyId)).data.ownerId == uid()
-            || resource.data.get('uid', null) == uid());
-      allow create: if signedIn()
-        && get(/databases/$(database)/documents/companies/$(request.resource.data.companyId)).data.ownerId == uid()
-        && request.resource.data.role in ['technician', 'manager', 'admin']
-        && request.resource.data.status == 'pending'
-        && request.resource.data.get('uid', null) == null
-        && request.resource.data.email is string;
-      allow update: if signedIn()
-        && get(/databases/$(database)/documents/companies/$(resource.data.companyId)).data.ownerId == uid()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'status', 'updatedAt'])
-        && request.resource.data.role in ['technician', 'manager', 'admin']
-        && request.resource.data.status in ['pending', 'inactive'];
+            || resource.data.get('uid', null) == uid()
+            || (inCompany(resource.data) && isManager()));
+      allow create, update: if false; // Owner-authorized callables validate roles and invitation lifecycle.
       allow delete: if signedIn()
         && get(/databases/$(database)/documents/companies/$(resource.data.companyId)).data.ownerId == uid();
     }
@@ -185,7 +189,8 @@ service cloud.firestore {
         && request.resource.data.get('total', 0) >= 0;
       allow update: if manageable(resource.data) && tenancyUnchanged()
         && resource.data.get('status', 'draft') != 'paid'
-        && validInvoiceStatus(request.resource.data.get('status', 'draft'));
+        && validInvoiceStatus(request.resource.data.get('status', 'draft'))
+        && request.resource.data.get('total', 0) is number && request.resource.data.get('total', 0) >= 0;
       allow delete: if manageable(resource.data) && resource.data.get('status', 'draft') == 'draft';
     }
 
@@ -219,6 +224,15 @@ service cloud.firestore {
         && resource.data.get('userId', null) == uid()
         && request.resource.data.get('userId', null) == uid()
         && request.resource.data.get('token', null) == resource.data.get('token', null);
+    }
+
+    match /rlNotifications/{id} {
+      allow read: if signedIn() && resource.data.userId == uid()
+        && (resource.data.get('companyId', null) == null || inCompany(resource.data));
+      allow update: if signedIn() && resource.data.userId == uid()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+        && request.resource.data.read is bool;
+      allow create, delete: if false;
     }
 
     match /{document=**} {

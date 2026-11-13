@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import CompanyService from '../services/companyService';
 import { getClaims } from '../services/tenancy';
@@ -12,13 +12,20 @@ import {
   PhotoIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../services/firebase';
+import { useConfirm } from '../components/ConfirmProvider';
 
 const CompanySetupPage = () => {
-  const { userProfile, updateUserProfile } = useAuth();
+  const { currentUser, updateUserProfile, refreshSession } = useAuth();
+  const confirm = useConfirm();
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [company, setCompany] = useState(null);
   const [teamMembers, setTeamMembers] = useState([]);
+  const [inviteLink, setInviteLink] = useState('');
+  const [inviteDelivery, setInviteDelivery] = useState('');
+  const [newOwnerId, setNewOwnerId] = useState('');
 
   // Form states
   const [companyData, setCompanyData] = useState({
@@ -33,7 +40,8 @@ const CompanySetupPage = () => {
     website: '',
     logo: '',
     primaryColor: '#10b981',
-    secondaryColor: '#6b7280'
+    secondaryColor: '#6b7280',
+    invoiceRemindersEnabled: false
   });
 
   const [serviceCategories, setServiceCategories] = useState([]);
@@ -49,7 +57,8 @@ const CompanySetupPage = () => {
     { id: 5, name: 'Templates', icon: DocumentTextIcon }
   ];
 
-  const companyId = userProfile?.companyId || getClaims()?.companyId;
+  const companyId = getClaims()?.companyId;
+  const isOwner = !companyId || company?.ownerId === currentUser?.uid;
 
   useEffect(() => {
     loadCompanyData();
@@ -75,7 +84,8 @@ const CompanySetupPage = () => {
           website: result.company.website || '',
           logo: result.company.logo || '',
           primaryColor: result.company.primaryColor || '#10b981',
-          secondaryColor: result.company.secondaryColor || '#6b7280'
+          secondaryColor: result.company.secondaryColor || '#6b7280',
+          invoiceRemindersEnabled: result.company.invoiceRemindersEnabled === true
         });
         setServiceCategories(result.company.serviceCategories || []);
         
@@ -145,9 +155,11 @@ const CompanySetupPage = () => {
     try {
       const result = await CompanyService.addTeamMember(company.id, newMemberEmail, newMemberRole);
       if (result.success) {
-        setTeamMembers(prev => [...prev, result.teamMember]);
+        setTeamMembers(prev => [...prev.filter((m) => m.id !== result.teamMemberId), result.teamMember]);
+        setInviteLink(result.inviteUrl);
+        setInviteDelivery(result.deliveryStatus);
         setNewMemberEmail('');
-        toast.success('Team member invited successfully!');
+        toast.success(result.deliveryStatus === 'queued' ? 'Invitation created and email queued. You can also copy the link.' : 'Invitation created. Copy the link to share it directly.');
       } else {
         toast.error(result.error);
       }
@@ -173,6 +185,35 @@ const CompanySetupPage = () => {
       toast.error('Error removing team member');
     }
     setIsLoading(false);
+  };
+
+  const updateMember = async (member, patch) => {
+    setIsLoading(true);
+    const result = await CompanyService.updateTeamMember(member.id, { role: member.role, status: member.status, ...patch });
+    if (result.success) await loadCompanyData();
+    else toast.error(result.error);
+    setIsLoading(false);
+  };
+  const resendInvite = async (member) => {
+    setIsLoading(true);
+    const result = await CompanyService.addTeamMember(company.id, member.email, member.role);
+    if (result.success) {
+      setInviteLink(result.inviteUrl);
+      setInviteDelivery(result.deliveryStatus);
+      toast.success('New invitation created. The previous link has expired.');
+      await loadCompanyData();
+    } else toast.error(result.error);
+    setIsLoading(false);
+  };
+  const transferOwnership = async () => {
+    const member = teamMembers.find((m) => m.id === newOwnerId);
+    if (!member || !(await confirm({ title: 'Transfer company ownership?', message: `${member.email} will own the company. You will remain an administrator.`, confirmText: 'Transfer ownership' }))) return;
+    setIsLoading(true);
+    try {
+      await httpsCallable(functions, 'transferCompanyOwnership')({ companyId: company.id, memberId: newOwnerId });
+      await refreshSession(); await loadCompanyData(); toast.success('Ownership transferred');
+    } catch (error) { toast.error(error.message); }
+    finally { setIsLoading(false); }
   };
 
   const nextStep = () => {
@@ -350,6 +391,7 @@ const CompanySetupPage = () => {
           <div className="space-y-6">
             <div>
               <h3 className="text-lg font-medium text-gray-900 mb-4">Team Members</h3>
+              {isOwner && <div className="mb-5 rounded border p-3"><label className="block text-sm">Transfer ownership to an active administrator<select className="mt-2 block w-full rounded border-gray-300" value={newOwnerId} onChange={(e) => setNewOwnerId(e.target.value)}><option value="">Select administrator</option>{teamMembers.filter((m) => m.status === 'active' && m.role === 'admin').map((m) => <option key={m.id} value={m.id}>{m.email}</option>)}</select></label><button type="button" disabled={!newOwnerId || isLoading} onClick={transferOwnership} className="mt-2 text-sm text-primary-700 underline disabled:opacity-50">Transfer ownership</button></div>}
               <p className="text-sm text-gray-600 mb-4">
                 Invite team members to join your company. They'll be able to access jobs and customers.
               </p>
@@ -396,10 +438,14 @@ const CompanySetupPage = () => {
                       </div>
                       <div className="ml-3">
                         <p className="text-sm font-medium text-gray-900">{member.email}</p>
-                        <p className="text-sm text-gray-500 capitalize">{member.role}</p>
+                        <select aria-label={`Role for ${member.email}`} value={member.role} disabled={isLoading || !isOwner} onChange={(e) => updateMember(member, { role: e.target.value })} className="mt-1 rounded border-gray-300 text-sm">
+                          <option value="technician">Technician</option><option value="manager">Manager</option><option value="admin">Admin</option>
+                        </select>
                       </div>
                     </div>
                     <div className="flex items-center space-x-2">
+                      {isOwner && member.status !== 'active' && <button disabled={isLoading} type="button" className="text-primary-700 text-sm" onClick={() => resendInvite(member)}>Send new invite</button>}
+                      {isOwner && member.status !== 'inactive' && <button disabled={isLoading} type="button" className="text-amber-700 text-sm" onClick={() => updateMember(member, { status: 'inactive' })}>Deactivate</button>}
                       <span className={`px-2 py-1 text-xs rounded-full ${
                         member.status === 'active' ? 'bg-green-100 text-green-800' :
                         member.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
@@ -553,14 +599,18 @@ const CompanySetupPage = () => {
     );
   }
 
+  if (company && !isOwner) return <div className="rounded-lg border bg-white p-6"><h1 className="text-2xl font-bold">{company.name}</h1><p className="mt-3">Company settings and invitations are managed by the owner.</p></div>;
+
   return (
-    <motion.div
+    <Motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}
       className="space-y-6"
     >
+      {company && isOwner && <label className="flex gap-3 rounded-lg border bg-white p-4"><input type="checkbox" checked={companyData.invoiceRemindersEnabled} onChange={(e) => handleInputChange('invoiceRemindersEnabled', e.target.checked)} />Send weekly overdue reminders to customers who have consented to invoice emails. Save company settings to apply.</label>}
       {/* Header */}
+      {inviteLink && <div className="rounded-lg border border-green-200 bg-green-50 p-4"><p className="mb-2">{inviteDelivery === 'queued' ? 'Invitation email queued. You can also share this link directly:' : 'Email delivery is disabled. Copy this invitation link to share it directly:'}</p><input aria-label="Invitation link" readOnly value={inviteLink} onFocus={(e) => e.target.select()} className="w-full rounded border-gray-300" /><button type="button" className="mt-2 underline" onClick={async () => { try { await navigator.clipboard.writeText(inviteLink); toast.success('Link copied'); } catch { toast.error('Select and copy the link above.'); } }}>Copy invitation link</button></div>}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center">
           <BuildingOfficeIcon className="h-8 w-8 text-primary-500 mr-3" />
@@ -653,7 +703,7 @@ const CompanySetupPage = () => {
           </div>
         </div>
       </div>
-    </motion.div>
+    </Motion.div>
   );
 };
 

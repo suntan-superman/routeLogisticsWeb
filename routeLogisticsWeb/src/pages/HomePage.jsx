@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import CustomerService from '../services/customerService';
 import JobManagementService from '../services/jobManagementService';
 import EstimateTemplateService from '../services/estimateTemplateService';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 import { 
   BuildingOfficeIcon, 
   UsersIcon, 
@@ -79,7 +79,7 @@ const HomePage = () => {
   return (
     <div className="space-y-6">
       {/* Welcome Section */}
-      <motion.div
+      <Motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
@@ -100,16 +100,16 @@ const HomePage = () => {
             </p>
           </div>
         </div>
-      </motion.div>
+      </Motion.div>
 
       {/* Stats Grid */}
-      <motion.div
+      <Motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay: 0.1 }}
         className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4"
       >
-        {stats.map((stat, index) => {
+        {stats.map((stat) => {
           const Icon = stat.icon;
           return (
             <div
@@ -136,10 +136,10 @@ const HomePage = () => {
             </div>
           );
         })}
-      </motion.div>
+      </Motion.div>
 
       {/* Quick Actions */}
-      <motion.div
+      <Motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay: 0.2 }}
@@ -153,7 +153,7 @@ const HomePage = () => {
         </div>
         <div className="p-6">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {quickActions.map((action, index) => {
+            {quickActions.map((action) => {
               const Icon = action.icon;
               return (
                 <Link
@@ -179,10 +179,10 @@ const HomePage = () => {
             })}
           </div>
         </div>
-      </motion.div>
+      </Motion.div>
 
       {/* Getting Started */}
-      <motion.div
+      <Motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay: 0.3 }}
@@ -212,7 +212,7 @@ const HomePage = () => {
             </div>
           </div>
         </div>
-      </motion.div>
+      </Motion.div>
     </div>
   );
 };

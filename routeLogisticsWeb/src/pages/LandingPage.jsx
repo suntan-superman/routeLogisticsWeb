@@ -19,14 +19,14 @@ const VARIANTS = {
     sub: 'Route Logistics puts scheduling, customers, invoices and your crew in one simple dashboard — built for teams who are done juggling spreadsheets.',
   },
   reddit: {
-    eyebrow: 'r/pestcontrol approved workflow',
+    eyebrow: 'Built for pest control workflows',
     headline: 'Field service software that doesn\u2019t make you hate Mondays.',
     sub: 'No bloated enterprise suite. Just scheduling, jobs, invoices and customer history that actually works for a small pest control crew.',
   },
   google: {
     eyebrow: 'Field service management software',
     headline: 'Scheduling, invoicing and customer management for pest control companies.',
-    sub: 'Route Logistics is field service software built around real pest control workflows: recurring service plans, job photos, and invoices your customers can pay.',
+    sub: 'Route Logistics is field service software built around real pest control workflows: recurring service plans, job photos, and invoices your customers can view.',
   },
   default: {
     eyebrow: 'Field service management, simplified',
@@ -81,6 +81,7 @@ const LandingPage = () => {
             <span className="font-bold text-gray-900 text-lg">Route Logistics</span>
           </div>
           <nav className="flex items-center gap-3">
+            <Link to="/portal" className="text-sm text-primary-700">Customer portal</Link>
             <Link to="/login" className="text-sm font-medium text-gray-700 hover:text-gray-900 px-3 py-2">
               Log in
             </Link>

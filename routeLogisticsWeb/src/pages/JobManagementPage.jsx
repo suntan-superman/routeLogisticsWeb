@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 import JobManagementService from '../services/jobManagementService';
 import CustomerService from '../services/customerService';
 import JobFormModal from '../components/JobFormModal';
@@ -161,13 +161,14 @@ const JobManagementPage = () => {
     // Apply sorting
     filtered.sort((a, b) => {
       switch (sortBy) {
-        case 'date':
+        case 'date': {
           const dateA = new Date(a.date);
           const dateB = new Date(b.date);
           if (dateA.getTime() === dateB.getTime()) {
             return (a.time || '').localeCompare(b.time || '');
           }
           return dateB - dateA;
+        }
         case 'status':
           return (a.status || '').localeCompare(b.status || '');
         case 'customer':
@@ -305,11 +306,12 @@ const JobManagementPage = () => {
     switch (filter) {
       case 'today':
         return { startDate: today, endDate: today };
-      case 'week':
+      case 'week': {
         const endOfWeek = new Date(startOfWeek);
         endOfWeek.setDate(startOfWeek.getDate() + 6);
         endOfWeek.setHours(23, 59, 59, 999);
         return { startDate: startOfWeek, endDate: endOfWeek };
+      }
       case 'month':
         return { startDate: startOfMonth, endDate: endOfMonth };
       default:
@@ -372,7 +374,7 @@ const JobManagementPage = () => {
   };
 
   return (
-    <motion.div
+    <Motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}
@@ -975,7 +977,7 @@ const JobManagementPage = () => {
           }}
         />
       )}
-    </motion.div>
+    </Motion.div>
   );
 };
 

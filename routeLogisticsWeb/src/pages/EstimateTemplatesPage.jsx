@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 import EstimateTemplateService from '../services/estimateTemplateService';
 import { useConfirm } from '../components/ConfirmProvider';
 import { 
@@ -269,7 +269,7 @@ const EstimateTemplatesPage = () => {
   };
 
   return (
-    <motion.div
+    <Motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}
@@ -1050,7 +1050,7 @@ const EstimateTemplatesPage = () => {
           </div>
         </div>
       )}
-    </motion.div>
+    </Motion.div>
   );
 };
 

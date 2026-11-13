@@ -1,5 +1,13 @@
 # Prioritized Development List
 
+## Implementation update — November 12, 2026
+
+The historical priorities below remain the backlog; their 2025 dates are not current commitments. See [migration progress and code review](migration-progress.md) for the two completed eight-phase batches, live Acme data audit, validation, deployment status, and remaining work. Checked items indicate implemented code; email-dependent features are deliberately inactive at the user's request.
+
+Implemented in this run: explicit invitations and live membership authorization, role management, callable rate limits, verified mobile sessions, compressed mobile job photos, customer CSV import/export, recurring-job scheduling, isolated customer portal, email/reminder infrastructure, ownership transfer, notification history, privacy notice, route-level code splitting, and expanded CI/emulator coverage.
+
+Partial items remain unchecked: full MFA/recovery, native push, background offline reconciliation, monitoring across both apps, custom invoice templates, bulk job operations, advanced reporting/search, and operational backup/alerting. Stripe, QuickBooks, directory/search, route optimization, and live location remain future work.
+
 ## High Priority (Q1 2025)
 
 ### Security & Compliance
@@ -8,39 +16,44 @@
   - Add backup codes for account recovery
   - Priority: Critical for production deployment
 
-- [ ] **Role-Based Access Control (RBAC)**
+- [x] **Role-Based Access Control (RBAC)**
   - Implement granular permissions system
   - Add role management for team members
   - Priority: Essential for multi-user environments
 
-- [ ] **API Rate Limiting**
+- [x] **API Rate Limiting**
   - Implement rate limiting for Firebase Functions
   - Add request throttling and abuse prevention
   - Priority: Prevent service abuse and ensure stability
 
 ### Core Functionality
-- [ ] **Photo Upload & Management**
+- [x] **Photo Upload & Management**
   - Implement Firebase Storage integration
   - Add image compression and optimization
+  - Implemented for web/mobile; native-device validation and offline upload retries remain separate work.
   - Priority: Critical for job documentation
 
 - [ ] **Push Notifications**
+  - Assignment/status FCM delivery and web notification history implemented; native token registration/device validation remain.
   - Implement Firebase Cloud Messaging
   - Add job status change notifications
   - Priority: Essential for real-time updates
 
 - [ ] **Offline Sync Improvements**
+  - Added offline guidance and web job-edit conflict detection; full background reconciliation remains.
   - Implement conflict resolution strategies
   - Add background sync capabilities
   - Priority: Critical for field technicians
 
 ### Performance & Reliability
 - [ ] **Performance Monitoring**
+  - Optional web Firebase Performance/custom trace implemented; native monitoring and real-user baseline remain.
   - Integrate Firebase Performance Monitoring
   - Add custom performance metrics
   - Priority: Essential for production monitoring
 
 - [ ] **Error Tracking & Reporting**
+  - Web Sentry privacy scrubbing improved; native coverage and production alerting remain.
   - Implement comprehensive error tracking
   - Add automated error reporting
   - Priority: Critical for debugging and stability
@@ -64,9 +77,10 @@
   - Priority: Important for business insights
 
 ### User Experience
-- [ ] **Customer Portal**
+- [x] **Customer Portal**
   - Create customer-facing web portal
   - Add job status tracking for customers
+  - OTP portal and invoice views implemented/tested; sign-in remains inactive while email delivery is disabled.
   - Priority: Important for customer satisfaction
 
 - [ ] **Advanced Search & Filtering**
@@ -75,6 +89,7 @@
   - Priority: Important for data management
 
 - [ ] **Bulk Operations**
+  - Customer CSV import/preview, deduplication, and paginated export implemented; bulk job actions remain.
   - Add bulk import/export functionality
   - Implement batch operations for jobs and customers
   - Priority: Important for efficiency
@@ -85,7 +100,7 @@
   - Add type safety and better IDE support
   - Priority: Important for code quality
 
-- [ ] **Automated Testing Pipeline**
+- [x] **Automated Testing Pipeline**
   - Implement comprehensive test suite
   - Add CI/CD with automated testing
   - Priority: Important for code quality

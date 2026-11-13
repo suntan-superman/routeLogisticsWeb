@@ -1,5 +1,7 @@
 # mi Factotum → Route Logistics: Feature Migration Plan
 
+**November 12, 2026 update:** Two eight-phase implementation batches are recorded in [migration progress](migration-progress.md), including code-review findings, validation, deployment status, and remaining limitations. Acme's additive customer migration is complete: 507 originals backed up, 507 records updated, repeat dry run reports zero remaining updates. Six legacy invitees still require explicit RL role selection. Email delivery is deliberately disabled at the user's request; owners can copy invitation links directly. The gap inventory below describes the starting point, not the current implementation.
+
 **Purpose:** Route Logistics (RL) is the intended production product going forward. mi Factotum (MF) is the precursor and will be retired, but it contains substantial functionality RL still lacks, plus real tenant data (e.g. Acme Pest Control) in the shared Firebase project `mi-factotum-field-service`. This plan inventories what MF has that RL doesn't, and sequences the work to bring RL to parity (and beyond) without depending on MF's code, tenancy model, or Cloud Functions.
 
 **Decision on record:** MF will not be kept running long-term. RL will not try to interoperate live with MF's `teamMembers`/`invitations` schema. Existing MF-created records (companies, team members, customers) must be migrated/re-created under RL's own claims-based tenancy model, one time, not continuously synced.
@@ -12,9 +14,9 @@ RL and MF currently share one Firestore project but use **incompatible tenancy m
 
 | | mi Factotum | Route Logistics |
 |---|---|---|
-| Tenancy source of truth | `users/{uid}.companyId` field, no custom claims | Firebase custom claims (`companyId`, `role`), synced via `syncClaims` |
+| Tenancy source of truth | `users/{uid}.companyId` field, no custom claims | Firebase custom claims (`companyId`, `role`, `membershipId`), synced via `syncClaims` and checked against live membership |
 | Roles | `field_tech`, `admin`, `customer`, etc. | `owner`, `admin`, `manager`, `technician` |
-| Invites | REST endpoints (`createCompanyInvitation`, `acceptInvitation`), `invitations` collection, no email-verification gate | `teamMembers` docs keyed by email, requires `emailVerified` before activation |
+| Invites | REST endpoints (`createCompanyInvitation`, `acceptInvitation`), `invitations` collection, no email-verification gate | Deterministic company/email `teamMembers` IDs, hashed server-only secrets, verified-email explicit acceptance |
 | Functions codebase | `functions:` (default), ~25 functions | `functions:routelogistics` (separate deploy target in the same project) |
 
 This is exactly the root cause of the "Acme Pest Control shows no data" issue investigated this session: Acme's company record and David Lopez's invite were created by MF, but David authenticated through RL, whose claims system never recognized the MF-shaped invite.
@@ -58,16 +60,19 @@ Grouped by priority. Source: `mifactotum/functions/index.js` (31 exported Cloud 
 
 ### Phase A — Stop the bleeding (this sprint)
 - [x] Public landing page + signup (done this session)
-- [ ] Add `/accept-invite` page in RL: user enters/clicks an invite link with a code, we verify it server-side (new `acceptTeamInvite` callable in `functions/routelogistics`), and activate the matching `teamMembers` doc + claims — replacing MF's REST flow with an RL-native equivalent.
-- [ ] Add an invite-sending UI to `CompanySetupPage`'s Team tab (currently can add a teamMember doc but there is no evidence an email is ever sent — confirm, then wire to a `sendTeamInviteEmail` function alongside the existing `notifyJobAssigned` pattern).
-- [ ] Add an "email not verified" banner + resend button, shown app-wide via `Layout`, when `currentUser.emailVerified === false`.
+- [x] Add `/accept-invite` page with server validation and explicit verified-email acceptance through `acceptTeamInvite`. Claims refresh after acceptance; pending invitations never activate automatically.
+- [x] Add owner invitation/reissue/role-management UI and `sendTeamInviteEmail`, backed by protected secrets and an email outbox. Delivery is disabled; copy/share links are available.
+- [x] Add an "email not verified" banner + resend/refresh buttons in web Layout and invitation acceptance, plus authoritative verification gating on mobile.
 - [ ] **One-time data migration script** (`scripts/migrate-mf-companies.js`, run manually, not deployed): for each MF-created company a real customer is using (starting with Acme `z7DJMjeigjG64YfN4H5h`), re-issue clean RL invites for its `teamMembers` and let each person accept through the new `/accept-invite` flow. Do **not** attempt to auto-convert `field_tech` → RL roles silently; prompt the owner to assign each member's RL role during acceptance.
+  - Script and Acme data-only apply complete. Audit: `rlMigrationRuns/DmMODGpey4aFsQMuTg1C`. Owner role selection and invitation acceptance remain; the owner chooses roles before creating the invite, so invitees cannot elevate their own privileges.
+- [x] Add audited ownership transfer to an active administrator, with recent-login and verified-owner checks. Lost-owner recovery remains an operator task.
 
 ### Phase B — Customer-facing value (next 1-2 sprints)
 - [ ] Stripe "Pay Now" on invoices (`createPaymentIntent` + webhook, ported into `functions/routelogistics`)
-- [ ] Minimal customer portal (job status + invoice view only, OTP login) — this is the single highest-leverage MF feature to port, since it's customer-facing and differentiates the product
-- [ ] Bulk customer CSV import
-- [ ] Scheduled recurring-job generation (convert existing manual trigger to a `onSchedule` function)
+- [x] Minimal customer portal (job status + invoice view, isolated OTP login); implemented and tested, with sign-in disabled until email is enabled.
+- [x] Bulk customer CSV import with validation, preview, tenant checks, and retry-safe deduplication; paginated export.
+- [x] Scheduled recurring-job generation with deterministic IDs and atomic plan advancement shared with the manual trigger.
+- [x] Invoice email/reminder infrastructure, customer consent and company opt-in; delivery remains disabled.
 
 ### Phase C — Differentiation (backlog)
 - [ ] Public directory / provider search (reuses Acme's existing `zipCodes`/`regionsServed`/`displayInDirectory` fields already in Firestore)
@@ -83,4 +88,4 @@ Grouped by priority. Source: `mifactotum/functions/index.js` (31 exported Cloud 
 ---
 
 ## 4. Immediate next action
-Confirm the Phase A `/accept-invite` + invite-email approach, then I'll implement it, re-point Acme's pending invites (David Lopez and `tech3@route-logistics.com`) through it, and verify Acme's data appears correctly for both accounts.
+Assign the six legacy candidates an explicit RL role using the private migration template or Company Settings, then issue direct invitation links and verify their accepted accounts can see Acme. SMTP/portal sign-in remains inactive per the user's choice. Next implementation priorities are full MFA recovery, Stripe payments, native offline/push work, and QuickBooks. See [the execution report](migration-progress.md) for deployment and Mac/Xcode checks.

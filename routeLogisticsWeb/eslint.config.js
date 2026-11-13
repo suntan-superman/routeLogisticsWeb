@@ -6,6 +6,7 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
   globalIgnores(['dist']),
+  { files: ['public/*-sw.js'], languageOptions: { globals: { ...globals.serviceworker, firebase: 'readonly' } } },
   {
     files: ['**/*.{js,jsx}'],
     extends: [
@@ -24,6 +25,7 @@ export default defineConfig([
     },
     rules: {
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      'react-refresh/only-export-components': ['error', { allowExportNames: ['useAuth', 'useConfirm'] }],
     },
   },
 ])

@@ -1,7 +1,8 @@
 import { collection, doc, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, limit, serverTimestamp } from 'firebase/firestore';
 import { db } from './firebase';
 import { scopeWhere, tenantFields } from './tenancy';
-import { addDays } from './invoiceMath';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from './firebase';
 
 const ok = (data = {}) => ({ success: true, ...data });
 const fail = (error) => {
@@ -74,30 +75,10 @@ export async function deleteServicePlan(id) {
   }
 }
 
-// Creates the next visit as a scheduled job and advances the plan. Job is written first so a failure
-// never skips a visit; a failure after that only risks a duplicate the manager can delete.
+// The server commits the visit and plan advancement atomically, with a deterministic job ID.
 export async function generateNextJob(plan) {
   try {
-    const jobRef = await addDoc(collection(db, 'jobs'), {
-      ...tenantFields(),
-      status: 'scheduled',
-      serviceType: plan.serviceType,
-      customerId: plan.customerId,
-      customerName: plan.customerName,
-      customerPhone: plan.customerPhone || '',
-      address: plan.address || '',
-      date: plan.nextServiceDate,
-      time: plan.time || '09:00',
-      totalCost: plan.price || 0,
-      notes: plan.notes || '',
-      servicePlanId: plan.id,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    const nextServiceDate = addDays(plan.nextServiceDate, plan.frequencyDays);
-    await updateServicePlan(plan.id, { nextServiceDate, lastJobId: jobRef.id, lastGeneratedFor: plan.nextServiceDate });
-    return ok({ jobId: jobRef.id, nextServiceDate });
-  } catch (error) {
-    return fail(error);
-  }
+    const result = await httpsCallable(functions, 'generateServicePlanJob')({ planId: plan.id, expectedDate: plan.nextServiceDate });
+    return ok(result.data);
+  } catch (error) { return fail(error); }
 }

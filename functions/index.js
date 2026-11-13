@@ -6,11 +6,26 @@ const { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } = require('fir
 const { getMessaging } = require('firebase-admin/messaging');
 const { resolveClaims } = require('./claims');
 const { assignmentTarget, buildAssignmentMessage, DEAD_TOKEN_CODES } = require('./notify');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { defineString } = require('firebase-functions/params');
+const { requireAuth, requireManager, rateLimit, normalizeEmail } = require('./security');
+const { invitationHandlers } = require('./invitations');
+const { recurringHandlers } = require('./recurring');
+const { customerHandlers } = require('./customers');
+const { portalHandlers } = require('./portal');
+const { drainMail } = require('./mail');
+const { invoiceEmailHandlers } = require('./invoiceEmail');
+const { ownershipHandler } = require('./ownership');
 
 initializeApp();
 const db = getFirestore();
 
-const TENANT_COLLECTIONS = ['customers', 'jobs', 'appointments', 'photos', 'estimates', 'estimateTemplates'];
+const TENANT_COLLECTIONS = ['customers', 'jobs', 'appointments', 'photos', 'estimates', 'estimateTemplates', 'invoices', 'servicePlans', 'serviceLogs'];
+const appUrl = defineString('RL_APP_URL', { default: 'https://route-logistics.app' });
+const emailFrom = defineString('RL_EMAIL_FROM', { default: '' });
+// Deployment dotenv controls both delivery and secret binding. Enabling email requires
+// redeploying after RL_SMTP_URL is configured; disabled deployments need no SMTP access.
+const emailEnabled = () => process.env.RL_EMAIL_ENABLED === 'true';
 
 async function loadTenancyData(uid, email) {
   const [companiesSnap, membershipsSnap, invitesSnap] = await Promise.all([
@@ -55,17 +70,20 @@ async function applyClaims(uid, email, emailVerified) {
     });
   }
 
-  await auth.setCustomUserClaims(uid, claims);
+  const account = await auth.getUser(uid);
+  const retained = { ...(account.customClaims || {}) };
+  delete retained.companyId;
+  delete retained.role;
+  delete retained.membershipId;
+  await auth.setCustomUserClaims(uid, { ...retained, ...claims });
 
   if (claims) {
     const userSnap = await userRef.get();
-    const updates = { companyId: claims.companyId };
-    if (userSnap.exists) {
-      await userRef.update(updates);
-    }
+    const updates = { companyId: claims.companyId, rlCompanyId: claims.companyId };
+    await userRef.set(updates, { merge: true });
     if (claims.role === 'owner' && !userSnap.get('legacyBackfilledAt')) {
       await backfillOwnerData(uid, claims.companyId);
-      await userRef.update({ legacyBackfilledAt: new Date().toISOString() });
+      await userRef.set({ legacyBackfilledAt: new Date().toISOString() }, { merge: true });
     }
   } else {
     const userSnap = await userRef.get();
@@ -78,13 +96,29 @@ async function applyClaims(uid, email, emailVerified) {
 
 // Callable the client invokes after sign-in / company creation / invite acceptance, then refreshes its ID token.
 exports.syncClaims = onCall(async (request) => {
-  if (!request.auth) {
-    throw new HttpsError('unauthenticated', 'Sign in required.');
-  }
-  const { uid, token } = request.auth;
-  const claims = await applyClaims(uid, token.email || null, token.email_verified === true);
+  const { uid, token } = requireAuth(request);
+  await rateLimit(db, 'sync-claims', uid, 60);
+  const claims = await applyClaims(uid, normalizeEmail(token.email) || null, token.email_verified === true);
   return { claims };
 });
+
+const invites = invitationHandlers(db, applyClaims, () => appUrl.value(), emailEnabled);
+exports.sendTeamInviteEmail = onCall(invites.sendTeamInviteEmail);
+exports.acceptTeamInvite = onCall(invites.acceptTeamInvite);
+exports.manageTeamMember = onCall(invites.manageTeamMember);
+exports.transferCompanyOwnership = onCall(ownershipHandler(db, applyClaims));
+exports.bulkImportCustomers = onCall(customerHandlers(db).bulkImportCustomers);
+const portal = portalHandlers(db, getAuth(), emailEnabled);
+exports.rlRequestCustomerOTP = onCall(portal.requestCustomerOTP);
+exports.rlVerifyCustomerOTP = onCall(portal.verifyCustomerOTP);
+exports.getCustomerPortal = onCall(portal.getCustomerPortal);
+exports.rlDeliverEmail = onSchedule({ schedule: 'every 1 minutes', secrets: emailEnabled() ? ['RL_SMTP_URL'] : [], timeoutSeconds: 120, maxInstances: 1 }, () => emailEnabled() ? drainMail(db, process.env.RL_SMTP_URL, emailFrom.value()) : undefined);
+const invoiceEmails = invoiceEmailHandlers(db, () => appUrl.value(), emailEnabled);
+exports.emailInvoice = onCall(invoiceEmails.emailInvoice);
+exports.rlQueueInvoiceReminders = onSchedule({ schedule: 'every day 09:00', timeZone: 'Etc/UTC', timeoutSeconds: 540 }, invoiceEmails.reminders);
+const recurring = recurringHandlers(db);
+exports.generateServicePlanJob = onCall(recurring.generateServicePlanJob);
+exports.rlGenerateRecurringJobs = onSchedule({ schedule: 'every day 04:00', timeZone: 'Etc/UTC', timeoutSeconds: 540 }, recurring.generateRecurringJobs);
 
 // Re-evaluates a member's claims when their invite is deactivated or removed, and revokes live sessions.
 async function reevaluateMember(uid) {
@@ -115,32 +149,50 @@ for (const name of TENANT_COLLECTIONS) {
     const userSnap = await db.collection('users').doc(data.userId).get();
     const companyId = userSnap.get('companyId');
     if (companyId) {
+      // Old claimless tokens must not turn technician-created solo docs into company jobs.
+      const account = await getAuth().getUser(data.userId);
+      try {
+        await requireManager(db, { auth: { uid: data.userId, token: account.customClaims || {} } }, { userId: data.userId, companyId });
+      } catch (error) {
+        if (error.code === 'permission-denied' || error.code === 'unauthenticated') return;
+        throw error;
+      }
       await event.data.ref.update({ companyId, stampedAt: FieldValue.serverTimestamp() });
     }
   });
 }
 
-// Push a notification to a technician when a job is assigned to them.
-exports.notifyJobAssigned = onDocumentUpdated('jobs/{jobId}', async (event) => {
-  const before = event.data.before.data();
-  const after = event.data.after.data();
-  if (!after?.assignedTo || before?.assignedTo === after.assignedTo) return;
-
-  const memberSnap = await db.collection('teamMembers').doc(after.assignedTo).get();
-  const uid = assignmentTarget(before, after, memberSnap.exists ? memberSnap.data() : null);
-  if (!uid) return;
-
+// Persist history even when a user has not registered a push device.
+async function publishNotification(uid, companyId, message, eventId) {
+  const { hash } = require('./security');
+  const ref = db.collection('rlNotifications').doc(hash(`${eventId}:${uid}`));
+  try {
+    await ref.create({ userId: uid, companyId: companyId || null, title: message.title, body: message.body, jobId: message.data.jobId, read: false, createdAt: FieldValue.serverTimestamp() });
+  } catch (error) { if (error.code !== 6 && error.code !== 'already-exists') throw error; }
   const tokensSnap = await db.collection('deviceTokens').where('userId', '==', uid).get();
-  if (tokensSnap.empty) return;
-
-  const { title, body, data } = buildAssignmentMessage(after, event.params.jobId);
-  const tokens = tokensSnap.docs.map((d) => d.get('token'));
-  const res = await getMessaging().sendEachForMulticast({ tokens, notification: { title, body }, data });
-
-  // Drop tokens FCM reports as permanently invalid so they are not retried forever.
-  const stale = [];
-  res.responses.forEach((r, i) => {
-    if (!r.success && DEAD_TOKEN_CODES.has(r.error?.code)) stale.push(tokensSnap.docs[i].ref.delete());
-  });
-  await Promise.all(stale);
+  for (let i = 0; i < tokensSnap.size; i += 500) {
+    const docs = tokensSnap.docs.slice(i, i + 500).filter((d) => typeof d.get('token') === 'string');
+    if (!docs.length) continue;
+    const result = await getMessaging().sendEachForMulticast({ tokens: docs.map((d) => d.get('token')), notification: { title: message.title, body: message.body }, data: message.data });
+    await Promise.all(result.responses.flatMap((r, index) => !r.success && DEAD_TOKEN_CODES.has(r.error?.code) ? [docs[index].ref.delete()] : []));
+  }
+}
+async function notifyAssignment(before, after, jobId, eventId) {
+  if (!after?.assignedTo || before?.assignedTo === after.assignedTo) return;
+  const member = await db.collection('teamMembers').doc(after.assignedTo).get();
+  const uid = assignmentTarget(before, after, member.exists ? member.data() : null);
+  if (uid) await publishNotification(uid, after.companyId, buildAssignmentMessage(after, jobId), eventId);
+}
+exports.notifyJobAssigned = onDocumentUpdated('jobs/{jobId}', (event) => notifyAssignment(event.data.before.data(), event.data.after.data(), event.params.jobId, event.id));
+exports.rlNotifyNewJobAssigned = onDocumentCreated('jobs/{jobId}', (event) => notifyAssignment(null, event.data.data(), event.params.jobId, event.id));
+exports.rlNotifyJobStatus = onDocumentUpdated('jobs/{jobId}', async (event) => {
+  const before = event.data.before.data(), after = event.data.after.data();
+  if (before.status === after.status || !after.companyId) return;
+  const company = await db.collection('companies').doc(after.companyId).get();
+  const uid = company.get('ownerId');
+  if (!uid) return;
+  await publishNotification(uid, after.companyId, {
+    title: 'Job status updated', body: `${after.serviceType || 'Service'}: ${after.status}`,
+    data: { type: 'job-status', jobId: event.params.jobId, url: '/jobs' },
+  }, event.id);
 });

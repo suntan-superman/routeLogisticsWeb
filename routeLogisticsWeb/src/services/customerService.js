@@ -2,11 +2,9 @@ import {
   collection, 
   doc, 
   getDoc, 
-  setDoc, 
   updateDoc, 
   getDocs, 
   query, 
-  where,
   addDoc,
   deleteDoc,
   orderBy,
@@ -16,6 +14,7 @@ import {
 import { db } from './firebase';
 import { auth } from './firebase';
 import { scopeWhere, tenantFields, isInScope } from './tenancy';
+import { csvCell } from '../utils/customerCsv';
 
 class CustomerService {
   // Get current user ID
@@ -30,10 +29,12 @@ class CustomerService {
   // Create a new customer
   static async createCustomer(customerData) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       const customer = {
         ...customerData,
+        email: (customerData.email || '').trim().toLowerCase(),
+        emailNormalized: (customerData.email || '').trim().toLowerCase(),
         ...tenantFields(),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -62,7 +63,7 @@ class CustomerService {
   // Get all customers for the current user
   static async getCustomers(limitCount = 50, lastDoc = null) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       let q = query(
         collection(db, 'customers'),
@@ -100,7 +101,7 @@ class CustomerService {
   // Search customers by name, email, or phone
   static async searchCustomers(searchTerm, limitCount = 20) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       // Get all customers and filter client-side for now
       // In production, you might want to use Algolia or similar for better search
@@ -136,7 +137,7 @@ class CustomerService {
   // Get customer by ID
   static async getCustomer(customerId) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       const customerDoc = await getDoc(doc(db, 'customers', customerId));
       
       if (!customerDoc.exists()) {
@@ -172,7 +173,7 @@ class CustomerService {
   // Update customer
   static async updateCustomer(customerId, updates) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       // Verify user owns the customer
       const customerResult = await this.getCustomer(customerId);
@@ -182,6 +183,7 @@ class CustomerService {
 
       const updatedData = {
         ...updates,
+        ...(updates.email !== undefined ? { email: updates.email.trim().toLowerCase(), emailNormalized: updates.email.trim().toLowerCase() } : {}),
         updatedAt: new Date().toISOString()
       };
 
@@ -203,7 +205,7 @@ class CustomerService {
   // Delete customer (soft delete)
   static async deleteCustomer(customerId) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       // Verify user owns the customer
       const customerResult = await this.getCustomer(customerId);
@@ -233,7 +235,7 @@ class CustomerService {
   // Permanently delete customer
   static async permanentlyDeleteCustomer(customerId) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       // Verify user owns the customer
       const customerResult = await this.getCustomer(customerId);
@@ -258,7 +260,7 @@ class CustomerService {
   // Restore soft-deleted customer
   static async restoreCustomer(customerId) {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       // Verify user owns the customer
       const customerResult = await this.getCustomer(customerId);
@@ -287,7 +289,7 @@ class CustomerService {
   // Get customer statistics
   static async getCustomerStats() {
     try {
-      const userId = this.getCurrentUserId();
+      this.getCurrentUserId();
       
       const q = query(
         collection(db, 'customers'),
@@ -327,37 +329,23 @@ class CustomerService {
     }
   }
 
-  // Import customers from CSV (placeholder for future implementation)
-  static async importCustomers(csvData) {
-    try {
-      // This would parse CSV and create multiple customers
-      // For now, return a placeholder
-      return {
-        success: false,
-        error: 'CSV import not yet implemented'
-      };
-    } catch (error) {
-      console.error('Error importing customers:', error);
-      return {
-        success: false,
-        error: error.message
-      };
-    }
-  }
-
   // Export customers to CSV (placeholder for future implementation)
   static async exportCustomers() {
     try {
-      const result = await this.getCustomers(1000);
-      if (!result.success) {
-        return result;
-      }
+      const customers = [];
+      let cursor = null;
+      do {
+        const result = await this.getCustomers(500, cursor);
+        if (!result.success) return result;
+        customers.push(...result.customers);
+        cursor = result.hasMore ? result.lastDoc : null;
+      } while (cursor);
 
       // Convert to CSV format
       const headers = ['Name', 'Email', 'Phone', 'Address', 'City', 'State', 'ZIP', 'Created Date'];
       const csvRows = [headers.join(',')];
       
-      result.customers.forEach(customer => {
+      customers.forEach(customer => {
         const row = [
           customer.name || '',
           customer.email || '',
@@ -368,7 +356,7 @@ class CustomerService {
           customer.zipCode || '',
           customer.createdAt || ''
         ];
-        csvRows.push(row.map(field => `"${field}"`).join(','));
+        csvRows.push(row.map(csvCell).join(','));
       });
 
       return {

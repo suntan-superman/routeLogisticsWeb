@@ -14,16 +14,10 @@ function resolveClaims(caller, data) {
 
   const active = data.memberships.find((m) => m.status === 'active' && MEMBER_ROLES.includes(m.role));
   if (active) {
-    return { claims: { companyId: active.companyId, role: active.role }, activateInviteId: null };
+    return { claims: { companyId: active.companyId, role: active.role, membershipId: active.id }, activateInviteId: null };
   }
 
-  // Invites are matched by email, so the email must be verified or anyone could claim another person's invite.
-  if (caller.email && caller.emailVerified) {
-    const invite = data.invites.find((i) => MEMBER_ROLES.includes(i.role));
-    if (invite) {
-      return { claims: { companyId: invite.companyId, role: invite.role }, activateInviteId: invite.id };
-    }
-  }
+  // Invitations grant no access until a verified user explicitly accepts their secret link.
 
   return { claims: null, activateInviteId: null };
 }

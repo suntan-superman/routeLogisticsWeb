@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 import { ScheduleComponent, ViewsDirective, ViewDirective, Day, Week, WorkWeek, Month, Agenda, Inject, Resize, DragAndDrop } from '@syncfusion/ej2-react-schedule';
 import JobManagementService from '../services/jobManagementService';
 import CustomerService from '../services/customerService';
@@ -187,7 +187,7 @@ const CalendarPage = () => {
   }
 
   return (
-    <motion.div
+    <Motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}
@@ -427,7 +427,7 @@ const CalendarPage = () => {
           }}
         />
       )}
-    </motion.div>
+    </Motion.div>
   );
 };
 

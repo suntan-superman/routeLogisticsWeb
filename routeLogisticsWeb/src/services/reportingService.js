@@ -1,12 +1,8 @@
 import { 
   collection, 
-  doc, 
-  getDoc, 
   getDocs, 
   query, 
-  where,
   orderBy,
-  limit
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { auth } from './firebase';
@@ -31,7 +27,7 @@ class ReportingService {
       // Get all data in parallel
       const [jobsResult, customersResult, estimatesResult] = await Promise.all([
         this.getJobsForAnalytics(userId, startDate, endDate),
-        this.getCustomersForAnalytics(userId),
+        this.getCustomersForAnalytics(),
         this.getEstimatesForAnalytics(userId, startDate, endDate)
       ]);
 
@@ -143,7 +139,7 @@ class ReportingService {
   }
 
   // Get customers for analytics
-  static async getCustomersForAnalytics(userId) {
+  static async getCustomersForAnalytics() {
     try {
       const q = query(
         collection(db, 'customers'),
@@ -220,11 +216,12 @@ class ReportingService {
         startDate = new Date(now.getFullYear(), now.getMonth(), 1);
         endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
         break;
-      case 'quarter':
+      case 'quarter': {
         const quarter = Math.floor(now.getMonth() / 3);
         startDate = new Date(now.getFullYear(), quarter * 3, 1);
         endDate = new Date(now.getFullYear(), quarter * 3 + 3, 0);
         break;
+      }
       case 'year':
         startDate = new Date(now.getFullYear(), 0, 1);
         endDate = new Date(now.getFullYear(), 11, 31);
@@ -252,7 +249,7 @@ class ReportingService {
     return totalRevenue / completedJobs.length;
   }
 
-  static calculateRevenueGrowth(jobs, range) {
+  static calculateRevenueGrowth(jobs) {
     // This would compare current period to previous period
     // For now, return a placeholder calculation
     const currentRevenue = this.calculateTotalRevenue(jobs);
@@ -398,7 +395,7 @@ class ReportingService {
     
     jobs.forEach(job => {
       const status = job.status || 'unknown';
-      if (breakdown.hasOwnProperty(status)) {
+      if (Object.hasOwn(breakdown, status)) {
         breakdown[status]++;
       }
     });
@@ -408,7 +405,7 @@ class ReportingService {
   }
 
   // Trend calculations
-  static calculateMonthlyTrends(jobs, range) {
+  static calculateMonthlyTrends(jobs) {
     const trends = [];
     const months = [];
     

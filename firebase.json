@@ -10,6 +10,7 @@
     {
       "source": "functions",
       "codebase": "routelogistics",
+      "ignore": ["node_modules", ".git", "*.local", "*.test.js", "*-debug.log"],
       "runtime": "nodejs22"
     }
   ],

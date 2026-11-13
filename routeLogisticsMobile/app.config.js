@@ -9,6 +9,11 @@ export default {
     icon: "./assets/icon.png",
     userInterfaceStyle: "light",
     newArchEnabled: true,
+    plugins: ["@react-native-community/datetimepicker", ["expo-image-picker", {
+      photosPermission: "Choose photos to document completed jobs.",
+      cameraPermission: "Take photos to document completed jobs.",
+      microphonePermission: false
+    }]],
     splash: {
       image: "./assets/splash-icon.png",
       resizeMode: "contain",

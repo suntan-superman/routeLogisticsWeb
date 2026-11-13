@@ -5,6 +5,8 @@ import { isOverdue } from '../services/invoiceMath';
 import { canManage } from '../services/tenancy';
 import { useConfirm } from '../components/ConfirmProvider';
 import { useAuth } from '../contexts/AuthContext';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../services/firebase';
 
 const money = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -63,6 +65,10 @@ const InvoicesPage = () => {
     if (!res.success) return toast.error(res.error || 'Action failed');
     toast.success(msg);
     load();
+  };
+  const email = async (invoiceId) => {
+    try { await httpsCallable(functions, 'emailInvoice')({ invoiceId }); toast.success('Invoice email queued'); await load(); }
+    catch (error) { toast.error(error.message); }
   };
 
   const summary = useMemo(() => {
@@ -123,6 +129,7 @@ const InvoicesPage = () => {
                     <td className="px-4 py-3 text-right">{money(inv.total)}</td>
                     <td className="px-4 py-3 space-x-2 whitespace-nowrap">
                       <button className="text-primary-600 hover:underline" onClick={() => printInvoice(inv, userProfile?.businessName)}>Print</button>
+                      {manage && ['draft', 'sent'].includes(inv.status) && <button className="text-primary-600 hover:underline" onClick={() => email(inv.id)}>Email invoice</button>}
                       {manage && inv.status === 'draft' && <button className="text-blue-600 hover:underline" onClick={() => act(() => markInvoiceSent(inv.id), 'Marked as sent')}>Mark sent</button>}
                       {manage && inv.status === 'sent' && <button className="text-green-600 hover:underline" onClick={() => act(() => markInvoicePaid(inv.id), 'Marked as paid')}>Mark paid</button>}
                       {manage && (inv.status === 'draft' || inv.status === 'sent') && (

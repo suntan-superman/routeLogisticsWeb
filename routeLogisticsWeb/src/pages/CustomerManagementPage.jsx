@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 import CustomerService from '../services/customerService';
 import { useConfirm } from '../components/ConfirmProvider';
 import { formatPhone } from '../utils/format';
@@ -15,12 +15,16 @@ import {
   FunnelIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import CustomerImport from '../components/CustomerImport';
+import { canManage } from '../services/tenancy';
 
 const CustomerManagementPage = () => {
   const confirm = useConfirm();
   const [customers, setCustomers] = useState([]);
   const [filteredCustomers, setFilteredCustomers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [lastCustomer, setLastCustomer] = useState(null);
+  const [hasMoreCustomers, setHasMoreCustomers] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -43,7 +47,8 @@ const CustomerManagementPage = () => {
     state: '',
     zipCode: '',
     notes: '',
-    isActive: true
+    isActive: true,
+    emailConsent: false
   });
 
   // Filter states
@@ -59,12 +64,14 @@ const CustomerManagementPage = () => {
     filterAndSortCustomers();
   }, [customers, searchTerm, activeFilter, sortBy]);
 
-  const loadCustomers = async () => {
+  const loadCustomers = async (append = false) => {
     setIsLoading(true);
     try {
-      const result = await CustomerService.getCustomers();
+      const result = await CustomerService.getCustomers(100, append ? lastCustomer : null);
       if (result.success) {
-        setCustomers(result.customers);
+        setCustomers((current) => append ? [...current, ...result.customers] : result.customers);
+        setLastCustomer(result.lastDoc);
+        setHasMoreCustomers(result.hasMore);
       } else {
         toast.error(result.error);
       }
@@ -143,7 +150,8 @@ const CustomerManagementPage = () => {
       state: '',
       zipCode: '',
       notes: '',
-      isActive: true
+      isActive: true,
+    emailConsent: false
     });
   };
 
@@ -255,6 +263,7 @@ const CustomerManagementPage = () => {
       state: customer.state || '',
       zipCode: customer.zipCode || '',
       notes: customer.notes || '',
+      emailConsent: customer.emailConsent === true,
       isActive: customer.isActive
     });
     setShowEditModal(true);
@@ -304,13 +313,15 @@ const CustomerManagementPage = () => {
   };
 
   return (
-    <motion.div
+    <Motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}
       className="space-y-6"
     >
       {/* Header */}
+      {canManage() && <CustomerImport onComplete={async () => { await loadCustomers(); await loadStats(); }} />}
+      {hasMoreCustomers && <div className="flex flex-wrap items-center gap-3 rounded border bg-white p-4"><p>Showing {customers.length} customers. Search and filters apply to loaded customers.</p><button disabled={isLoading} className="text-primary-700 underline" onClick={() => loadCustomers(true)}>Load more customers</button></div>}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center">
@@ -669,6 +680,7 @@ const CustomerManagementPage = () => {
                 </div>
                 
                 <div>
+                  <label className="mb-4 flex gap-2 text-sm"><input type="checkbox" checked={customerData.emailConsent === true} onChange={(e) => handleInputChange('emailConsent', e.target.checked)} />Customer has consented to invoice reminder emails</label>
                   <label className="block text-sm font-medium text-gray-700">Notes</label>
                   <textarea
                     value={customerData.notes}
@@ -805,6 +817,7 @@ const CustomerManagementPage = () => {
                 </div>
                 
                 <div>
+                  <label className="mb-4 flex gap-2 text-sm"><input type="checkbox" checked={customerData.emailConsent === true} onChange={(e) => handleInputChange('emailConsent', e.target.checked)} />Customer has consented to invoice reminder emails</label>
                   <label className="block text-sm font-medium text-gray-700">Notes</label>
                   <textarea
                     value={customerData.notes}
@@ -962,7 +975,7 @@ const CustomerManagementPage = () => {
           </div>
         </div>
       )}
-    </motion.div>
+    </Motion.div>
   );
 };
 

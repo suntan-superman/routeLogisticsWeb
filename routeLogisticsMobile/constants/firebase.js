@@ -1,7 +1,8 @@
 // Firebase configuration for Route Logistics
-// Environment variables should be set in your app.config.js or environment
+// Expo public configuration and runtime initialization share the same resolver.
 
 import { initializeApp } from 'firebase/app';
+import { getMobileFirebaseConfig } from './firebaseConfig';
 import { initializeAuth, getReactNativePersistence, connectAuthEmulator } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
@@ -9,15 +10,7 @@ import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Firebase configuration
-const firebaseConfig = {
-  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || "AIzaSyAEHhLccanbJalSN0Zbdnvq_CwSSbpllrg",
-  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || "mi-factotum-field-service.firebaseapp.com",
-  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || "mi-factotum-field-service",
-  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || "mi-factotum-field-service.firebasestorage.app",
-  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "1030013411579",
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || "1:1030013411579:web:37cdb1ce1e57c1e75c505e",
-  measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID || "G-VS61WKSG39"
-};
+const firebaseConfig = getMobileFirebaseConfig();
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);

@@ -6,14 +6,14 @@ React Native mobile application for field service technicians.
 
 ```bash
 # Install dependencies
-yarn install
+npm ci
 
 # Start development server
-yarn start
+npm start
 
 # Run on specific platform
-yarn android
-yarn ios
+npm run android
+npm run ios
 ```
 
 ## Features
@@ -49,29 +49,97 @@ routeLogisticsMobile/
 ## Development
 
 ### Prerequisites
-- Node.js 18+
-- Yarn package manager
-- Expo CLI
+- Node.js 22 LTS and npm (use the committed `package-lock.json`)
 - iOS Simulator (macOS) or Android Emulator
+- For native iOS builds: Xcode, its command-line tools, and CocoaPods
 
-### Environment Setup
-1. Install dependencies: `yarn install`
-2. Configure Firebase in `constants/firebase.js`
-3. Start development server: `yarn start`
-4. Scan QR code with Expo Go app or run on simulator
+### Firebase configuration
 
-### Building for Production
+The app uses the Firebase JavaScript SDK, not React Native Firebase.
+`constants/firebase.js` initializes the app, Auth with AsyncStorage persistence,
+Firestore, Storage, and Functions. It and `app.config.js` use the same public
+client configuration from `constants/firebaseConfig.js`.
+
+The checked-in client defaults were verified against the existing Firebase
+registration. A fresh Mac checkout needs **no Firebase environment variables**:
+
+| Setting | Existing value |
+| --- | --- |
+| Firebase project | `mi-factotum-field-service` |
+| Auth domain | `mi-factotum-field-service.firebaseapp.com` |
+| Storage bucket | `mi-factotum-field-service.firebasestorage.app` |
+| Messaging sender ID | `1030013411579` |
+| Firebase JS app ID | `1:1030013411579:web:37cdb1ce1e57c1e75c505e` |
+| Measurement ID | `G-VS61WKSG39` (Analytics is not initialized) |
+| iOS bundle identifier | `com.workside.routelogistics` |
+| EAS project ID | `a6b5d885-dd99-4435-bef0-b7ffe09a2890` |
+
+The existing Firebase-generated public client API key is retained. There is no
+new key to obtain. `GoogleService-Info.plist` is not required by this JS SDK
+integration. Do not add Firebase Admin credentials, a service-account JSON file,
+or backend `.env` files to the mobile app.
+
+Optional overrides are listed in `.env.example`. Expo reads `EXPO_PUBLIC_FIREBASE_*`
+from the mobile folder's environment files or build environment and embeds them
+in the native JavaScript bundle. They are public configuration, not secrets.
+`app.config.js` exposes the same resolved values in `extra.firebase` for inspection.
+The runtime uses the shared resolver directly.
+
+If the Mac already has a `.env`, `.env.local`, `.env.production`, or shell/EAS
+environment overrides, remove stale `YOUR_*` Firebase values so the defaults can
+apply, or replace them with this project's registered web-app client values.
+Do not replace unrelated settings. The resolver rejects placeholders and
+cross-project identifiers before building. Restart Metro or rebuild the app
+after changing environment variables; a previously built app does not pick up
+new values automatically.
+
+### First native iOS build on the Mac mini
+
+In the existing repository checkout (the folder may be named `routeLogisticsWeb`):
+
 ```bash
-# Install EAS CLI
-npm install -g eas-cli
+# Run from the repository root
+git switch main
+git pull --ff-only origin main
+cd routeLogisticsMobile
 
-# Configure EAS
-eas build:configure
+# Use Node.js 22 LTS; do not mix Yarn with the npm lockfile
+node --version
+npm ci
+node --test scripts/firebase-config.test.js
+npx expo install --check
+npx expo-doctor
+npx expo config --type public
 
-# Build for production
-eas build --platform ios
-eas build --platform android
+# Confirm the Firebase project, bundle identifier, and EAS ID above.
+# Build the production iOS JavaScript bundle before generating the native project.
+npx expo export --platform ios --max-workers 2
+
+# Generate/update the native iOS project and install its CocoaPods dependencies.
+npx expo prebuild --platform ios
+open ios/*.xcworkspace
 ```
+
+If Xcode or CocoaPods is missing, install it first. In Xcode, select the existing
+Apple development team under Signing & Capabilities, retain
+`com.workside.routelogistics`, and select a simulator or connected device to run.
+For distribution, select a generic iOS device and use **Product > Archive**.
+An Apple signing identity and provisioning profile are needed for device and
+distribution builds; Firebase server credentials are not.
+
+The command above intentionally omits `--clean`. Preserve any existing native
+customizations on the Mac before regenerating the native project. Xcode's build
+phase bundles the JS client configuration; a separate Firebase native plist
+does not configure this app.
+
+The existing EAS configuration is also retained if a cloud build is preferred:
+
+```bash
+npx eas-cli build --platform ios --profile production
+```
+
+Do not run `eas init` or create/link another EAS project. Any optional EAS
+environment overrides must use the same Firebase project as the defaults.
 
 ## Documentation
 

@@ -3,7 +3,6 @@
     "name": "Route Logistics",
     "slug": "route-logistics",
     "version": "1.0.0",
-    "buildNumber": "1",
     "orientation": "portrait",
     "icon": "./assets/routeLogistics_logo.png",
     "userInterfaceStyle": "light",
@@ -18,7 +17,8 @@
       "bundleIdentifier": "com.workside.routelogistics",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
@@ -33,7 +33,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "f9057758-a4f9-4652-b8b7-7ca3267f98dd"
+        "projectId": "a6b5d885-dd99-4435-bef0-b7ffe09a2890"
       }
     }
   }

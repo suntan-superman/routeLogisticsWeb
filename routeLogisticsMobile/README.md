@@ -115,8 +115,8 @@ npx expo config --type public
 # Build the production iOS JavaScript bundle before generating the native project.
 npx expo export --platform ios --max-workers 2
 
-# Generate/update the native iOS project and install its CocoaPods dependencies.
-npx expo prebuild --platform ios
+# Generate/update the native iOS project and explicitly refresh CocoaPods.
+npm run ios:prepare
 open ios/*.xcworkspace
 ```
 
@@ -126,6 +126,11 @@ Apple development team under Signing & Capabilities, retain
 For distribution, select a generic iOS device and use **Product > Archive**.
 An Apple signing identity and provisioning profile are needed for device and
 distribution builds; Firebase server credentials are not.
+
+`ios:prepare` runs Expo prebuild without its optional install step, then always
+runs `pod install` in `ios`. This also refreshes modules when the native project
+already exists and Expo would otherwise skip installing pods. `npm run ios`
+runs this preparation automatically before compiling and launching the app.
 
 The command above intentionally omits `--clean`. Preserve any existing native
 customizations on the Mac before regenerating the native project. Xcode's build
@@ -177,8 +182,48 @@ an opaque fallback when Reduce Transparency is enabled; Android uses translucent
 surfaces. The theme also applies to work status, job dialogs, and verification.
 
 **Rebuild the native app after pulling this update.** The new Expo blur, gradient,
-and system-UI modules require `npm ci`, `npx expo prebuild --platform ios`, and a
+and system-UI modules require `npm ci`, `npm run ios:prepare`, and a
 new Xcode build. A JavaScript reload of the older installed app is insufficient.
+
+### Fixing “Cannot find native module 'ExpoSystemUI'” on the Mac
+
+`expo-system-ui` is already a direct dependency at `~6.0.9`, the version required
+by the installed Expo SDK 54. The lockfile also includes `expo-blur` and
+`expo-linear-gradient`. The error means the running app cannot find the native
+module; installing JavaScript dependencies or clearing Metro alone cannot add
+that module to an existing binary. Expo documents the required native rebuild
+in its [local build guide](https://docs.expo.dev/guides/local-app-development/).
+
+Stop the running app in Xcode and stop Metro. From the existing Mac checkout:
+
+```bash
+# Repository root
+git pull --ff-only origin main
+cd routeLogisticsMobile
+npm ci
+npx expo install --check
+npm run ios:prepare
+grep -E 'ExpoSystemUI|ExpoBlur|ExpoLinearGradient' ios/Podfile.lock
+open ios/*.xcworkspace
+```
+
+The lockfile check should show all three pods. If a command fails, fix that
+failure before building. Open the `.xcworkspace`, select the Route Logistics
+scheme and your device, use **Product > Clean Build Folder**, then **Run** to
+install the rebuilt app. For a Debug build, start Metro in a second terminal
+with `npx expo start --clear` from `routeLogisticsMobile`. Alternatively,
+`npm run ios -- --device` prepares, builds, installs, and starts Metro.
+
+The scripts use the existing CocoaPods installation (`pod` must be on PATH).
+They do not delete the native project or change the bundle identifier, EAS
+project, or Firebase configuration. Windows checks can verify package
+compatibility, Apple autolinking, and the iOS JavaScript bundle; Xcode
+compilation and device launch still need to be verified on the Mac.
+
+Dependency validation on November 13, 2026: Expo version check passed, Expo
+Doctor passed all 18 checks, all 13 mobile tests passed, and the iOS Hermes
+bundle exported successfully. Apple autolinking resolved `ExpoSystemUI`,
+`ExpoBlur`, and `ExpoLinearGradient` from the committed dependency versions.
 
 Validation on November 13, 2026 used unit/screen tests, Auth/Firestore/Functions
 emulators, Expo Doctor, and iOS/Android bundle exports. Native rendering, signing,

@@ -44,6 +44,7 @@ const emptyForm = (defaults) => ({
 const JobFormModal = ({ customers, defaults, onClose, onCreated }) => {
   const [form, setForm] = useState(() => emptyForm(defaults));
   const [saving, setSaving] = useState(false);
+  const [pastAck, setPastAck] = useState(false);
 
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose();
@@ -51,7 +52,12 @@ const JobFormModal = ({ customers, defaults, onClose, onCreated }) => {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const set = (field, value) => setForm((f) => ({ ...f, [field]: value }));
+  const set = (field, value) => {
+    setPastAck(false);
+    setForm((f) => ({ ...f, [field]: value }));
+  };
+
+  const isPast = !!form.date && !!form.time && new Date(`${form.date}T${form.time}`) < new Date();
 
   const customerAddress = (c) =>
     [c.address, c.city, [c.state, c.zipCode].filter(Boolean).join(' ')].filter(Boolean).join(', ');
@@ -70,6 +76,10 @@ const JobFormModal = ({ customers, defaults, onClose, onCreated }) => {
     const cost = form.totalCost === '' ? 0 : Number(form.totalCost);
     const duration = Number(form.estimatedDuration);
     if (!(cost >= 0) || !(duration > 0)) return toast.error('Cost and duration must be valid numbers');
+    if (isPast && !pastAck) {
+      setPastAck(true);
+      return;
+    }
 
     setSaving(true);
     const result = await JobManagementService.createJob({
@@ -191,6 +201,15 @@ const JobFormModal = ({ customers, defaults, onClose, onCreated }) => {
           </div>
         </div>
 
+        {isPast && (
+          <div className={`mx-6 mb-4 rounded-lg border p-3 text-sm ${pastAck ? 'border-amber-400 bg-amber-100 text-amber-900' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+            <strong>This date and time is in the past.</strong>{' '}
+            {pastAck
+              ? 'Click "Schedule anyway" to confirm (e.g. an emergency call-out or after-the-fact entry).'
+              : 'You can still save it for an emergency call-out or after-the-fact entry, but you will be asked to confirm.'}
+          </div>
+        )}
+
         <div className="flex justify-end gap-3 border-t border-gray-200 bg-gray-50 px-6 py-4 rounded-b-xl">
           <button
             type="button" onClick={onClose}
@@ -202,7 +221,7 @@ const JobFormModal = ({ customers, defaults, onClose, onCreated }) => {
             type="submit" disabled={saving}
             className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
           >
-            {saving ? 'Scheduling…' : 'Schedule Job'}
+            {saving ? 'Scheduling…' : pastAck ? 'Schedule anyway' : 'Schedule Job'}
           </button>
         </div>
       </form>

@@ -14,6 +14,15 @@ import {
   PlusIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import '@syncfusion/ej2-base/styles/tailwind.css';
+import '@syncfusion/ej2-buttons/styles/tailwind.css';
+import '@syncfusion/ej2-popups/styles/tailwind.css';
+import '@syncfusion/ej2-inputs/styles/tailwind.css';
+import '@syncfusion/ej2-lists/styles/tailwind.css';
+import '@syncfusion/ej2-navigations/styles/tailwind.css';
+import '@syncfusion/ej2-dropdowns/styles/tailwind.css';
+import '@syncfusion/ej2-splitbuttons/styles/tailwind.css';
+import '@syncfusion/ej2-calendars/styles/tailwind.css';
 import '@syncfusion/ej2-react-schedule/styles/tailwind.css';
 import './calendar.css';
 import JobFormModal from '../components/JobFormModal';
@@ -238,6 +247,7 @@ const CalendarPage = () => {
           cellClick={onCellClick}
           cellDoubleClick={(args) => { args.cancel = true; }}
           eventDoubleClick={(args) => { args.cancel = true; }}
+          popupOpen={(args) => { if (args.type === 'Editor' || args.type === 'QuickInfo') args.cancel = true; }}
           showQuickInfo={false}
           startHour="06:00"
           endHour="21:00"

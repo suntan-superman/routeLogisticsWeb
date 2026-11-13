@@ -86,7 +86,7 @@ async function main(args) {
   }
   for (const invite of dataOnly ? [] : invitePlan) {
     const marker = run.collection('invitations').doc(hash(invite.email));
-    const result = await createInvitation(db, { ...invite, companyId, companyName: company.get('name'), invitedBy: owner.uid, appUrl: process.env.RL_APP_URL || 'https://route-logistics.app', queueEmail: false });
+    const result = await createInvitation(db, { ...invite, companyId, companyName: company.get('name'), invitedBy: owner.uid, appUrl: process.env.RL_APP_URL || 'https://route-logistics.com', queueEmail: false });
     await marker.set({ memberId: result.teamMemberId, email: invite.email, role: invite.role });
   }
   await run.update({ status: 'complete', completedAt: new Date() });

@@ -31,12 +31,12 @@ Do not use an unscoped `--only functions` or force removal of legacy indexes. Ru
 Configure non-secret values in ignored `functions/.env.mi-factotum-field-service`:
 
 ```dotenv
-RL_APP_URL=https://route-logistics.app
+RL_APP_URL=https://route-logistics.com
 RL_EMAIL_FROM=
 RL_EMAIL_ENABLED=false
 ```
 
-The origin above is the existing web package homepage. Use the actual canonical origin when configuring another deployment. Email is intentionally disabled. Owners can copy invitation links; OTP portal sign-in and invoice emails return an unavailable message. Firebase Auth verification emails use Firebase's separate configuration.
+The origin above was verified against Firebase's authorized domains and the live RouteLogistics site. The obsolete `.app` homepage did not resolve and was corrected. Copied invitation links use the owner's current browser origin. Email is intentionally disabled; OTP portal sign-in and invoice emails return an unavailable message. Firebase Auth verification emails use Firebase's separate configuration.
 
 To enable SMTP later, configure `RL_SMTP_URL` in Firebase Secret Manager, use a verified sender for `RL_EMAIL_FROM`, set `RL_EMAIL_ENABLED=true`, and redeploy the RL codebase. The worker binds the secret only for enabled deployments. Use an authenticated TLS-capable SMTP connection URL and keep credentials out of source control/chat. Verify delivery with a controlled recipient and check portal custom-token signing permissions before enabling customer use. The runtime identity may need permission to sign tokens through IAM.
 

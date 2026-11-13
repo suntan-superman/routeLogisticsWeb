@@ -161,7 +161,11 @@ class CompanyService {
   static async addTeamMember(companyId, email, role = 'technician') {
     try {
       const result = await httpsCallable(functions, 'sendTeamInviteEmail')({ companyId, email, role });
-      return { success: true, ...result.data };
+      // Directly shared links use the app the owner is actually visiting. Email links
+      // use the separately configured server origin when SMTP is enabled.
+      const invitation = new URL(result.data.inviteUrl);
+      const inviteUrl = new URL(`${invitation.pathname}${invitation.search}${invitation.hash}`, window.location.origin).href;
+      return { success: true, ...result.data, inviteUrl };
     } catch (error) { return { success: false, error: error.message }; }
   }
 

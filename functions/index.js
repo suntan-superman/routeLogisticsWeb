@@ -21,7 +21,7 @@ initializeApp();
 const db = getFirestore();
 
 const TENANT_COLLECTIONS = ['customers', 'jobs', 'appointments', 'photos', 'estimates', 'estimateTemplates', 'invoices', 'servicePlans', 'serviceLogs'];
-const appUrl = defineString('RL_APP_URL', { default: 'https://route-logistics.app' });
+const appUrl = defineString('RL_APP_URL', { default: 'https://route-logistics.com' });
 const emailFrom = defineString('RL_EMAIL_FROM', { default: '' });
 // Deployment dotenv controls both delivery and secret binding. Enabling email requires
 // redeploying after RL_SMTP_URL is configured; disabled deployments need no SMTP access.

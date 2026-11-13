@@ -21,7 +21,7 @@ async function deliverMail(db, ref, transport, from, now = Date.now()) {
   if (!mail) return;
   let accepted = false, code = '';
   try {
-    const result = await transport.sendMail({ from, to: mail.to, subject: mail.subject, text: mail.text, messageId: `<rl-${ref.id}@route-logistics.app>`, disableFileAccess: true, disableUrlAccess: true });
+    const result = await transport.sendMail({ from, to: mail.to, subject: mail.subject, text: mail.text, messageId: `<rl-${ref.id}@route-logistics.com>`, disableFileAccess: true, disableUrlAccess: true });
     accepted = result.accepted?.length > 0;
     if (!accepted) code = 'recipient-rejected';
   } catch (error) { code = String(error.code || 'smtp-error').slice(0, 60); }

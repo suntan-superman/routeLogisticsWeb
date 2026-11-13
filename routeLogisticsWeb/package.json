@@ -1,7 +1,7 @@
 {
   "name": "route-logistics-web",
   "description": "Route Logistics Field Service Platform - Web Dashboard",
-  "homepage": "https://route-logistics.app",
+  "homepage": "https://route-logistics.com",
   "private": true,
   "version": "0.0.0",
   "type": "module",

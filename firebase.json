@@ -9,8 +9,8 @@
   "functions": [
     {
       "source": "functions",
-      "codebase": "default",
-      "runtime": "nodejs20"
+      "codebase": "routelogistics",
+      "runtime": "nodejs22"
     }
   ],
   "emulators": {

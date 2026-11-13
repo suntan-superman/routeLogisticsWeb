@@ -41,6 +41,16 @@ const owner = () => as('owner1', { companyId: 'c1', role: 'owner' });
 const tech = () => as('tech1', { companyId: 'c1', role: 'technician', membershipId: 't1' });
 const manager = () => as('mgr1', { companyId: 'c1', role: 'manager', membershipId: 'm1' });
 
+test('a membership labeled owner cannot substitute for actual company ownership', async () => {
+  await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), 'teamMembers/fakeOwner'), {
+    companyId: 'c1', uid: 'notOwner', status: 'active', role: 'owner',
+  }));
+  const client = as('notOwner', { companyId: 'c1', membershipId: 'fakeOwner', role: 'owner' });
+  await assertFails(getDoc(doc(client, 'jobs/j1')));
+  await assertFails(getDoc(doc(client, 'companies/c1')));
+  await assertFails(updateDoc(doc(client, 'companies/c1'), { name: 'Changed' }));
+});
+
 test('membership removal requires the audited callable', async () => {
   await assertFails(deleteDoc(doc(owner(), 'teamMembers/t1')));
 });

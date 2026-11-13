@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { getClaims } from '../services/tenancy';
 import { readWorkspace, callWorkspace } from '../services/workspaceApi';
 import JobPhotos from '../components/JobPhotos';
 import JobApplicationLog from '../components/JobApplicationLog';
 import WorkLocation from '../components/WorkLocation';
+import { readWorkQueue, updateWorkQueue, settleWorkOperation } from '../utils/workQueue';
 const localDate = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
 const navigation = address => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
 export default function MyWorkPage() {
@@ -12,9 +13,10 @@ export default function MyWorkPage() {
   const claims = getClaims();
   const scope = `rl-my-work-v2:${currentUser.uid}:${claims?.companyId || 'solo'}:${role}:${claims?.membershipId || ''}`;
   const [date, setDate] = useState(localDate), [jobs, setJobs] = useState([]), [selected, setSelected] = useState(null), [customer, setCustomer] = useState(null);
-  const [route, setRoute] = useState([]), [queue, setQueue] = useState(() => JSON.parse(localStorage.getItem(`${scope}:queue`) || '[]'));
+  const [route, setRoute] = useState([]), [queue, setQueue] = useState(() => readWorkQueue(localStorage, `${scope}:queue`));
+  const synchronizing = useRef(null);
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [notes, setNotes] = useState('');
-  const persist = rows => { localStorage.setItem(`${scope}:queue`, JSON.stringify(rows)); setQueue(rows); };
+  const persist = async change => { const rows = await updateWorkQueue(localStorage, `${scope}:queue`, change); setQueue(rows); return rows; };
   const load = useCallback(async () => {
     setBusy(true); setMessage('');
     try {
@@ -42,18 +44,23 @@ export default function MyWorkPage() {
       setSelected(result.job); setCustomer(result.customer); setNotes(result.job.notes || '');
     } catch (e) { setSelected(null); setCustomer(null); setMessage(e.message); }
   };
-  const sync = useCallback(async () => {
-    if (!navigator.onLine) return;
-    const saved = JSON.parse(localStorage.getItem(`${scope}:queue`) || '[]');
-    for (const row of saved) {
-      if (row.state !== 'pending') continue;
-      try {
-        const result = await callWorkspace('rlApplyJobOperation', { operationId: row.id, jobId: row.jobId, patch: row.patch, expectedVersion: row.expectedVersion });
-        row.state = result.status; row.message = result.status === 'conflict' ? 'Job changed. Reopen it and review before making another update.' : '';
-        if (result.status === 'synced') { const next = saved.find(other => other !== row && other.jobId === row.jobId && other.state === 'pending'); if (next) next.expectedVersion = result.version; }
-      } catch (e) { if (['functions/unavailable','functions/deadline-exceeded'].includes(e.code)) break; row.state = 'failed'; row.message = e.message; }
-    }
-    localStorage.setItem(`${scope}:queue`, JSON.stringify(saved)); setQueue(saved);
+  const sync = useCallback(() => {
+    if (synchronizing.current) return synchronizing.current;
+    const drain = async () => {
+      if (!navigator.onLine) return;
+      for (let sent = 0; sent < 100; sent++) {
+        const row = readWorkQueue(localStorage, `${scope}:queue`).find(item => item.state === 'pending');
+        if (!row) break;
+        let result;
+        try {
+          result = await callWorkspace('rlApplyJobOperation', { operationId: row.id, jobId: row.jobId, patch: row.patch, expectedVersion: row.expectedVersion });
+          result.message = result.status === 'conflict' ? 'Job changed. Reopen it and review before making another update.' : '';
+        } catch (e) { if (['functions/unavailable','functions/deadline-exceeded'].includes(e.code)) break; result = { status: 'failed', message: e.message }; }
+        setQueue(await updateWorkQueue(localStorage, `${scope}:queue`, rows => settleWorkOperation(rows, row.id, result)));
+      }
+    };
+    synchronizing.current = drain().finally(() => { synchronizing.current = null; });
+    return synchronizing.current;
   }, [scope]);
   useEffect(() => { sync(); const reconnect = () => { sync().then(load); }; window.addEventListener('online', reconnect); return () => window.removeEventListener('online', reconnect); }, [sync, load]);
   const work = async status => {
@@ -61,7 +68,7 @@ export default function MyWorkPage() {
     if (queue.some(row => row.jobId === selected.id && ['failed','conflict'].includes(row.state))) { setMessage('Review the failed or conflicting change before submitting another update.'); return; }
     try {
       const patch = { notes, ...(status ? { status } : {}), ...(status === 'completed' ? { completedAt: new Date().toISOString(), completionNotes: notes } : {}) };
-      persist([...queue, { id: crypto.randomUUID(), jobId: selected.id, expectedVersion: selected.updatedAt || null, patch, state: 'pending' }]);
+      await persist(rows => [...rows, { id: crypto.randomUUID(), jobId: selected.id, expectedVersion: selected.updatedAt || null, patch, state: 'pending' }]);
       await sync(); await load(); setSelected(null); setCustomer(null);
     } catch (e) { setMessage(e.message); }
   };
@@ -75,6 +82,6 @@ export default function MyWorkPage() {
       {!['completed','cancelled'].includes(selected.status) && <div className="flex flex-wrap gap-3"><button className="btn-secondary" onClick={() => work()}>Save notes</button>{selected.status === 'scheduled' && <button className="btn-secondary" onClick={() => work('en-route')}>En route</button>}{['scheduled','en-route'].includes(selected.status) && <button className="btn-primary" onClick={() => work('in-progress')}>Start work</button>}<button className="btn-primary" onClick={() => work('completed')}>Complete job</button></div>}
       <WorkLocation job={selected} /><JobPhotos job={selected} /><JobApplicationLog job={selected} />
     </section>}
-    <section className="space-y-2"><h2 className="font-semibold">Saved work · {queue.filter(row => row.state === 'pending').length} awaiting sync</h2><button className="underline" onClick={() => sync().then(load)}>Synchronize now</button>{queue.filter(row => row.state !== 'synced').map(row => <div key={row.id} className="rounded border p-3"><p>{row.state}: {row.message || 'Saved on this device'}</p>{['failed','conflict'].includes(row.state) && <button className="underline" onClick={() => { if (window.confirm('Discard this local change? Your other saved work is retained.')) persist(queue.filter(item => item.id !== row.id)); }}>Discard after review</button>}</div>)}</section>
+    <section className="space-y-2"><h2 className="font-semibold">Saved work · {queue.filter(row => row.state === 'pending').length} awaiting sync</h2><button className="underline" onClick={() => sync().then(load)}>Synchronize now</button>{queue.filter(row => row.state !== 'synced').map(row => <div key={row.id} className="rounded border p-3"><p>{row.state}: {row.message || 'Saved on this device'}</p>{['failed','conflict'].includes(row.state) && <button className="underline" onClick={() => { if (window.confirm('Discard this local change? Your other saved work is retained.')) persist(rows => rows.filter(item => item.id !== row.id)).catch(e => setMessage(e.message)); }}>Discard after review</button>}</div>)}</section>
   </div>;
 }

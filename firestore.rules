@@ -31,7 +31,8 @@ service cloud.firestore {
     function activeCompanyAccess() {
       return request.auth.token.get('email_verified', false) == true && ((claimRole() == 'owner'
           && get(/databases/$(database)/documents/companies/$(claimCompany())).data.ownerId == uid())
-        || (request.auth.token.get('membershipId', null) != null
+        || (claimRole() in ['admin', 'manager', 'technician']
+          && request.auth.token.get('membershipId', null) != null
           && get(/databases/$(database)/documents/teamMembers/$(request.auth.token.membershipId)).data.uid == uid()
           && get(/databases/$(database)/documents/teamMembers/$(request.auth.token.membershipId)).data.companyId == claimCompany()
           && get(/databases/$(database)/documents/teamMembers/$(request.auth.token.membershipId)).data.status == 'active'

@@ -16,7 +16,8 @@ service firebase.storage {
       return signedIn() && request.auth.token.get('companyId', null) == companyId
         && request.auth.token.get('email_verified', false) == true
         && (firestore.get(/databases/(default)/documents/companies/$(companyId)).data.ownerId == request.auth.uid
-          || (request.auth.token.get('membershipId', null) != null
+          || (request.auth.token.get('role', null) in ['admin', 'manager', 'technician']
+            && request.auth.token.get('membershipId', null) != null
             && firestore.get(/databases/(default)/documents/teamMembers/$(request.auth.token.membershipId)).data.uid == request.auth.uid
             && firestore.get(/databases/(default)/documents/teamMembers/$(request.auth.token.membershipId)).data.companyId == companyId
             && firestore.get(/databases/(default)/documents/teamMembers/$(request.auth.token.membershipId)).data.status == 'active'

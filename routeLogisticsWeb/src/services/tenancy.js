@@ -33,6 +33,7 @@ export async function syncTenancy() {
   }
 }
 export function getScope() {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('Company management requires an internet connection. Saved field-work updates remain available in My Work.');
   const uid = auth.currentUser?.uid;
   if (!uid || !['company', 'solo'].includes(getWorkspace()?.status) || !auth.currentUser.emailVerified) throw new Error('Refresh your workspace or accept your invitation before continuing.');
   return claims ? { field: 'companyId', value: claims.companyId } : { field: 'userId', value: uid };

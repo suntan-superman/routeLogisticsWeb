@@ -38,7 +38,7 @@ Mobile keeps the existing bundle identifier, EAS project, Firebase client config
 
 Native jobs, photos and application logs use persistent queues and reauthorize on synchronization. Queues are scoped to identity/company/role/membership; old rich read caches and obsolete session caches are purged without deleting unsynchronized work. Caches from previous roles are removed on online workspace refresh. An offline device cannot learn of remote revocation until it reconnects; all writes and authenticated media fetches are checked online. Previously downloaded information cannot be remotely recalled.
 
-The browser persists assigned-job work updates for reconnect synchronization. Browser photo uploads and application submission currently require connectivity; the native app queues all three. There is no background location tracking. Manager operational report export and existing native estimate-to-job/PDF placeholders remain unimplemented.
+The browser uses memory-only Firestore caching and persists assigned-job work updates separately for reconnect synchronization. It no longer reads the old shared Firestore IndexedDB cache. That legacy database is retained because it may contain unsynchronized writes; recovering any such older writes requires explicit review before site data is cleared. Browser photo uploads and application submission currently require connectivity; the native app queues all three. There is no background location tracking. Manager operational report export and existing native estimate-to-job/PDF placeholders remain unimplemented.
 
 ## Complete screen and action inventory
 

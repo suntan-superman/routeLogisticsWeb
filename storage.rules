@@ -12,9 +12,6 @@ service firebase.storage {
         && request.resource.contentType.matches('image/.*');
     }
 
-    function isManagerRole() {
-      return request.auth.token.get('role', null) in ['owner', 'admin', 'manager'];
-    }
     function activeCompany(companyId) {
       return signedIn() && request.auth.token.get('companyId', null) == companyId
         && request.auth.token.get('email_verified', false) == true
@@ -26,13 +23,16 @@ service firebase.storage {
             && firestore.get(/databases/(default)/documents/teamMembers/$(request.auth.token.membershipId)).data.role == request.auth.token.get('role', null)));
     }
 
+    function ownUserPath(userId) {
+      return signedIn() && request.auth.uid == userId
+        && ((request.auth.token.get('companyId', null) == null
+          && firestore.get(/databases/(default)/documents/users/$(userId)).data.get('rlCompanyId', null) == null)
+          || (request.auth.token.get('companyId', null) != null
+            && activeCompany(request.auth.token.companyId) && request.auth.token.role in ['owner', 'admin']));
+    }
     match /users/{userId}/{allPaths=**} {
-      allow read: if signedIn() && request.auth.uid == userId && request.auth.token.get('companyId', null) == null
-        && firestore.get(/databases/(default)/documents/users/$(userId)).data.get('rlCompanyId', null) == null;
-      allow create, update: if signedIn() && request.auth.uid == userId && request.auth.token.get('companyId', null) == null
-        && firestore.get(/databases/(default)/documents/users/$(userId)).data.get('rlCompanyId', null) == null && validUpload();
-      allow delete: if signedIn() && request.auth.uid == userId && request.auth.token.get('companyId', null) == null
-        && firestore.get(/databases/(default)/documents/users/$(userId)).data.get('rlCompanyId', null) == null;
+      allow read, delete: if ownUserPath(userId);
+      allow create, update: if ownUserPath(userId) && validUpload();
     }
 
     match /companies/{companyId}/{allPaths=**} {

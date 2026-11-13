@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
+import { initializeFirestore, memoryLocalCache } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getFunctions } from 'firebase/functions';
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
@@ -34,18 +34,10 @@ if (import.meta.env.VITE_APPCHECK_SITE_KEY) {
   });
 }
 
-// Offline-first: reads are served from an IndexedDB cache and writes queue until the connection returns
-// (shared across tabs). Falls back to the default in-memory cache where IndexedDB is unavailable.
-const createDb = () => {
-  try {
-    return initializeFirestore(app, {
-      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
-    });
-  } catch (error) {
-    console.warn('Offline persistence unavailable; using in-memory cache', error);
-    return getFirestore(app);
-  }
-};
+// Full financial documents must not persist across browser sessions. Assigned
+// field-work projections and queued work have their own identity/role-scoped cache.
+// Do not clear the old IndexedDB database: it may contain unsynchronized writes.
+const createDb = () => initializeFirestore(app, { localCache: memoryLocalCache() });
 
 export const auth = getAuth(app);
 export const db = createDb();

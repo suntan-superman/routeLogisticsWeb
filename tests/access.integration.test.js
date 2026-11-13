@@ -89,6 +89,8 @@ test('photo bytes and application logs require current assignment; metadata neve
   const metadata = (await work.read(request('technician', { resource: 'photos', jobId: 'access-job' }))).photos[0];
   assert.equal(metadata.url, undefined); assert.equal(metadata.storagePath, undefined);
   assert.match((await photo(request('technician', { action: 'read', photoId: saved.id }))).dataUri, /^data:image\/jpeg;base64,/);
+  await db.doc('photos/access-legacy-photo').set({ companyId: 'access-co', userId: 'access-owner', jobId: 'access-job', storagePath: 'users/access-owner/jobs/access-job/legacy.jpg' });
+  assert.match((await photo(request('technician', { action: 'read', photoId: 'access-legacy-photo' }))).dataUri, /^data:image\/jpeg;base64,/);
   const application = request('technician', { jobId: 'access-job', operationId: 'application-operation-000001', record: { product: 'Product', targetPest: 'Ants', amount: 1, unit: 'oz', totalCost: 999 } });
   const record = await work.application(application); assert.deepEqual(await work.application(application), record);
   await assert.rejects(work.application({ ...application, data: { ...application.data, record: { ...application.data.record, amount: 2 } } }), { code: 'already-exists' });

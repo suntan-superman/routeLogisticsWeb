@@ -18,5 +18,9 @@ test('technicians cannot bypass authenticated photo delivery via Storage, includ
   await env.withSecurityRulesDisabled((ctx) => updateDoc(doc(ctx.firestore(), 'teamMembers/storage-member'), { status: 'removed' }));
   await assertFails(getMetadata(file)); await assertFails(uploadBytes(file, new Uint8Array([3]), { contentType: 'image/jpeg' }));
   const owner = env.authenticatedContext('storage-owner', { companyId: 'storage-co', role: 'owner', email_verified: true }).storage(); await assertSucceeds(getMetadata(ref(owner, file.fullPath)));
+  const legacy = ref(owner, 'users/storage-owner/jobs/legacy/photo.jpg');
+  await assertSucceeds(uploadBytes(legacy, new Uint8Array([1, 2]), { contentType: 'image/jpeg' }));
+  await assertSucceeds(getMetadata(legacy));
+  await assertFails(getMetadata(ref(storage, legacy.fullPath)));
   const other = env.authenticatedContext('other', { companyId: 'other', role: 'owner' }).storage(); await assertFails(getMetadata(ref(other, file.fullPath)));
 });

@@ -16,8 +16,9 @@ function jobPhotoHandler(db, bucketProvider = () => getStorage().bucket()) {
       if (scope.companyId ? photo.get('companyId') !== scope.companyId : photo.get('companyId') || photo.get('userId') !== scope.uid) throw new HttpsError('permission-denied', 'Photo unavailable.');
       const path = photo.get('storagePath');
       const legacyPrefix = `${scope.companyId ? `companies/${scope.companyId}` : `users/${scope.uid}`}/jobs/${job.id}/`;
+      const migratedPrefix = scope.companyId && job.get('userId') ? `users/${documentId(job.get('userId'))}/jobs/${job.id}/` : null;
       const privatePrefix = `rlJobPhotos/${scope.companyId || scope.uid}/${job.id}/`;
-      if (typeof path !== 'string' || (!path.startsWith(legacyPrefix) && !path.startsWith(privatePrefix))) throw new HttpsError('permission-denied', 'Photo path unavailable.');
+      if (typeof path !== 'string' || (!path.startsWith(legacyPrefix) && !path.startsWith(privatePrefix) && !(migratedPrefix && path.startsWith(migratedPrefix)))) throw new HttpsError('permission-denied', 'Photo path unavailable.');
       const file = bucketProvider().file(path);
       if (data.action === 'delete') {
         await db.collection('rlAudit').add({ action: 'photo.delete', photoId: photo.id, jobId: job.id, companyId: scope.companyId, actorId: scope.uid, createdAt: new Date().toISOString() });

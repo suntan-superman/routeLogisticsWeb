@@ -1,4 +1,4 @@
-import React, { useContext, useState, useEffect, useMemo } from 'react';
+import React, { useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,10 +13,10 @@ import {
   KeyboardAvoidingView,
   Image,
   RefreshControl,
+  BackHandler,
 } from 'react-native';
 import { useWorkJobs } from '../services/useWorkQueries';
-import JobPhotos from '../components/JobPhotos';
-import FieldWorkTools from '../components/FieldWorkTools';
+import JobWorkflow from '../components/JobWorkflow';
 import MyRoute from '../components/MyRoute';
 import WorkLocation from '../components/WorkLocation';
 import OfflineStatus from '../components/OfflineStatus';
@@ -29,6 +29,16 @@ import { AuthContext } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { CustomerService, JobService, EstimateService } from '../services/firebase';
 import { FONT_SIZES, SPACING, BUTTON_SIZES, BORDER_RADIUS, ICON_SIZES, CARD_SIZES, WIDTHS, HEIGHTS, hp, wp, rf } from '../constants/responsiveSizes';
+
+// A job workspace is an ordinary view; native camera/gallery owns presentation.
+function InlineJobPanel({ visible, keepMounted = false, label, priority = 10, children }) {
+  const { palette } = useTheme();
+  if (!visible && !keepMounted) return null;
+  return <View accessibilityLabel={label} accessibilityViewIsModal={visible}
+    accessibilityElementsHidden={!visible} importantForAccessibility={visible ? 'yes' : 'no-hide-descendants'}
+    pointerEvents={visible ? 'auto' : 'none'} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0,
+      zIndex: priority, display: visible ? 'flex' : 'none', backgroundColor: palette.background }}>{children}</View>;
+}
 
 const HomeScreen = ({ navigation }) => {
   const { user, signOut, permissions, refreshUser } = useContext(AuthContext);
@@ -69,16 +79,15 @@ const HomeScreen = ({ navigation }) => {
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [showServiceDropdown, setShowServiceDropdown] = useState(false);
 
-  // Job details modal
-  const [showJobDetailsModal, setShowJobDetailsModal] = useState(false);
+  // One selected job owns the entire details/photo/completion workflow.
   const [selectedJob, setSelectedJob] = useState(null);
-
-  // Job completion modal
-  const [showJobCompletionModal, setShowJobCompletionModal] = useState(false);
-  const [showCompletionConfirmModal, setShowCompletionConfirmModal] = useState(false);
-  const [actualWorkDone, setActualWorkDone] = useState('');
-  const [actualHours, setActualHours] = useState('');
-  const [completionNotes, setCompletionNotes] = useState('');
+  const [jobInteraction, setJobInteraction] = useState({ busy: false, hasDraft: false });
+  const jobInteractionRef = useRef(jobInteraction);
+  const onJobInteraction = useCallback(next => { jobInteractionRef.current = next; setJobInteraction(next); }, []);
+  const closeJobWorkflow = useCallback(() => {
+    setSelectedJob(null); setShowJobEditModal(false); setShowScheduleModal(true);
+    jobInteractionRef.current = { busy: false, hasDraft: false }; setJobInteraction(jobInteractionRef.current);
+  }, []);
 
   // Job editing states
   const [showJobEditModal, setShowJobEditModal] = useState(false);
@@ -167,16 +176,34 @@ const HomeScreen = ({ navigation }) => {
     }
   };
 
-  // A refreshed assignment list also controls open detail dialogs.
+  // Temporary read errors must not tear down a native picker or discard drafts.
+  // Confirmed removal or loss of workspace permission still closes private details.
   useEffect(() => {
-    if (!selectedJob || (work.canAccess && !work.isSuccess && !jobsError)) return;
-    const current = work.canAccess && !jobsError && jobs.find(job => job.id === selectedJob.id);
+    if (!selectedJob) return;
+    const denied = !work.canAccess;
+    const confirmed = work.isSuccess && !jobsError && !work.isFetching;
+    if (!denied && !confirmed) return;
+    const current = !denied && jobs.find(job => job.id === selectedJob.id);
     if (current) { if (current !== selectedJob) setSelectedJob(current); }
     else {
-      setSelectedJob(null); setShowJobDetailsModal(false); setShowJobEditModal(false);
-      setShowJobCompletionModal(false); setShowCompletionConfirmModal(false);
+      Alert.alert('Job access changed', denied ? 'Your company access has changed. Refresh your workspace before continuing.' : 'This job is no longer in your assigned schedule. Refresh the list or contact your manager.');
+      setSelectedJob(null); setShowJobEditModal(false); setShowScheduleModal(true);
     }
-  }, [jobs, jobsError, work.isSuccess, work.canAccess, selectedJob]);
+  }, [jobs, jobsError, work.isSuccess, work.isFetching, work.canAccess, selectedJob]);
+
+  useEffect(() => {
+    if (!selectedJob && !showScheduleModal && !showJobEditModal) return;
+    const subscription = BackHandler?.addEventListener('hardwareBackPress', () => {
+      if (jobInteractionRef.current.busy || jobInteractionRef.current.hasDraft) {
+        Alert.alert('Finish this job step', 'Save or discard the selected photo or completion draft before leaving.'); return true;
+      }
+      if (showJobEditModal) setShowJobEditModal(false);
+      else if (selectedJob) closeJobWorkflow();
+      else setShowScheduleModal(false);
+      return true;
+    });
+    return () => subscription?.remove();
+  }, [selectedJob, showScheduleModal, showJobEditModal, closeJobWorkflow]);
 
   // Add customer to Firebase
   const addCustomerToFirebase = async (customerData) => {
@@ -323,19 +350,7 @@ const HomeScreen = ({ navigation }) => {
     }
   };
 
-  const closeDatePicker = () => {
-    setShowDatePicker(false);
-    // Reopen appropriate modal on iOS
-    if (Platform.OS === 'ios') {
-      setTimeout(() => {
-        if (showJobEditModal) {
-          setShowJobEditModal(true);
-        } else {
-          setShowScheduleServiceModal(true);
-        }
-      }, 100);
-    }
-  };
+  const closeDatePicker = () => setShowDatePicker(false);
 
   const handleTimeChange = (event, selectedTime) => {
     // On Android, close immediately. On iOS, keep open until "Done" is pressed
@@ -366,74 +381,16 @@ const HomeScreen = ({ navigation }) => {
     }
   };
 
-  const closeTimePicker = () => {
-    setShowTimePicker(false);
-    // Reopen appropriate modal on iOS
-    if (Platform.OS === 'ios') {
-      setTimeout(() => {
-        if (showJobEditModal) {
-          setShowJobEditModal(true);
-        } else {
-          setShowScheduleServiceModal(true);
-        }
-      }, 100);
+  const closeTimePicker = () => setShowTimePicker(false);
+  const openDatePicker = () => setShowDatePicker(true);
+  const openTimePicker = () => setShowTimePicker(true);
+
+  // Job panels are ordinary views: no native presentation/dismissal race.
+  const handleJobSelection = job => {
+    if (jobInteractionRef.current.busy || jobInteractionRef.current.hasDraft) {
+      Alert.alert('Finish this job step', 'Save or discard your current draft before opening another job.'); return;
     }
-  };
-
-  const openDatePicker = () => {
-    // On iOS, close the current modal temporarily to show picker
-    if (Platform.OS === 'ios') {
-      if (showJobEditModal) {
-        setShowJobEditModal(false);
-      } else {
-        setShowScheduleServiceModal(false);
-      }
-      setTimeout(() => {
-        setShowDatePicker(true);
-      }, 100);
-    } else {
-      setShowDatePicker(true);
-    }
-  };
-
-  const openTimePicker = () => {
-    // On iOS, close the current modal temporarily to show picker
-    if (Platform.OS === 'ios') {
-      if (showJobEditModal) {
-        setShowJobEditModal(false);
-      } else {
-        setShowScheduleServiceModal(false);
-      }
-      setTimeout(() => {
-        setShowTimePicker(true);
-      }, 100);
-    } else {
-      setShowTimePicker(true);
-    }
-  };
-
-  // Handle job selection for details
-  const handleJobSelection = (job) => {
-    setSelectedJob(job);
-
-    // On iOS, close schedule modal first to avoid modal stacking issues
-    if (Platform.OS === 'ios') {
-      setShowScheduleModal(false);
-      setTimeout(() => {
-        setShowJobDetailsModal(true);
-      }, 100);
-    } else {
-      setShowJobDetailsModal(true);
-    }
-  };
-
-  // Handle job completion
-  const handleJobCompletion = (job) => {
-    setSelectedJob(job);
-    setActualWorkDone('');
-    setActualHours('');
-    setCompletionNotes('');
-    setShowJobCompletionModal(true);
+    setSelectedJob(job); setShowScheduleModal(false); setShowJobEditModal(false);
   };
 
   // Handle job editing
@@ -450,7 +407,7 @@ const HomeScreen = ({ navigation }) => {
       notes: job.notes || '',
       status: job.status || 'scheduled'
     });
-    setIsEditingJob(true);
+    setIsEditingJob(false);
     setShowJobEditModal(true);
   };
 
@@ -471,7 +428,6 @@ const HomeScreen = ({ navigation }) => {
       if (result.success) {
         Alert.alert('Success', 'Job updated successfully!');
         setShowJobEditModal(false);
-        setShowJobDetailsModal(false);
         loadJobs(); // Refresh the jobs list
       } else {
         Alert.alert('Error', result.error?.message || 'Failed to update job');
@@ -648,50 +604,6 @@ const HomeScreen = ({ navigation }) => {
     );
   };
 
-  // Show completion confirmation
-  const showCompletionConfirmation = () => {
-    if (!actualWorkDone) {
-      Alert.alert('Required Field', 'Please describe the work that was done.');
-      return;
-    }
-    if (actualHours.trim() && (!Number.isFinite(Number(actualHours)) || Number(actualHours) < 0 || Number(actualHours) > 744)) {
-      Alert.alert('Work hours', 'Enter valid actual work hours, or leave this optional field empty.');
-      return;
-    }
-    setShowCompletionConfirmModal(true);
-  };
-
-  // Complete job with actual work details
-  const completeJob = async () => {
-    if (!selectedJob) return;
-
-    setShowCompletionConfirmModal(false);
-
-    try {
-      const completionData = {
-        status: 'completed',
-        actualWorkDone,
-        ...(actualHours.trim() ? { actualHours: Number(actualHours) } : {}),
-        completionNotes,
-        completedAt: new Date().toISOString(),
-      };
-
-      const result = await JobService.updateJob(selectedJob.id, completionData);
-
-      if (result.success) {
-        Alert.alert('Saved', result.queued ? 'Completion saved on this device. Check sync status before leaving this job.' : 'Job completed successfully!');
-        setShowJobCompletionModal(false);
-        setShowJobDetailsModal(false);
-        // Reload jobs to show updated status
-        loadJobs();
-      } else {
-        Alert.alert('Error', result.error?.message || 'Failed to complete job');
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to complete job');
-    }
-  };
-
   // Schedule follow-up appointment
   const scheduleFollowUp = () => {
     if (!canManage()) { Alert.alert('Manager access required', 'Ask your manager to make this change.'); return; }
@@ -702,8 +614,7 @@ const HomeScreen = ({ navigation }) => {
     setSelectedService(selectedJob.serviceType);
     setNotes(`Follow-up for job completed on ${new Date().toLocaleDateString()}`);
 
-    setShowJobDetailsModal(false);
-    setShowJobCompletionModal(false);
+    setSelectedJob(null);
     setShowScheduleServiceModal(true);
   };
 
@@ -736,7 +647,7 @@ const HomeScreen = ({ navigation }) => {
           {!isLoadingJobs && !jobsError && !jobs.length && <Text style={{ color: palette.secondary, lineHeight: 22 }}>{permissions.isTechnician ? 'No jobs assigned for this period. Your manager assigns your work.' : 'No jobs scheduled for this period.'}</Text>}
           {jobs.slice(0, 4).map(job => <TouchableOpacity key={job.id} accessibilityRole="button" onPress={() => handleJobSelection(job)} style={{ borderTopWidth: 1, borderColor: palette.border, paddingTop: 12, flexDirection: 'row', gap: 12, alignItems: 'center' }}>
             <View style={{ width: 44, height: 44, borderRadius: 15, backgroundColor: palette.input, alignItems: 'center', justifyContent: 'center' }}><Ionicons name={job.status === 'completed' ? 'checkmark-outline' : 'briefcase-outline'} size={21} color={palette.accent} /></View>
-            <View style={{ flex: 1, gap: 4 }}><Text style={{ color: palette.text, fontSize: 15, fontWeight: '600' }}>{job.customerName || job.serviceType || 'Scheduled job'}</Text><Text style={{ color: palette.secondary, fontSize: 12 }}>{[job.time, job.serviceType, job.status].filter(Boolean).join(' · ')}</Text></View><Ionicons name="chevron-forward" size={17} color={palette.secondary} />
+            <View style={{ flex: 1, gap: 4 }}><Text style={{ color: palette.text, fontSize: 15, fontWeight: '600' }}>{job.customerName || job.serviceType || 'Scheduled job'}</Text><Text style={{ color: palette.secondary, fontSize: 12 }}>{[job.time, job.serviceType, job.status, job.syncState ? `sync: ${job.syncState}` : ''].filter(Boolean).join(' · ')}</Text>{!!job.syncError && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{job.syncError}</Text>}</View><Ionicons name="chevron-forward" size={17} color={palette.secondary} />
           </TouchableOpacity>)}
           <GlassButton secondary title="Refresh jobs" icon="refresh-outline" disabled={work.isFetching} onPress={loadJobs} />
           <GlassButton secondary title="Refresh workspace" icon="sync-outline" onPress={async () => { const result = await refreshUser(); if (result.success) loadJobs(); }} />
@@ -957,7 +868,7 @@ const HomeScreen = ({ navigation }) => {
       </Modal>
 
       {/* Schedule Service Modal */}
-      <Modal
+      <InlineJobPanel label="Schedule service" priority={20}
         visible={showScheduleServiceModal && managing}
         transparent={true}
         animationType="slide"
@@ -1184,11 +1095,11 @@ const HomeScreen = ({ navigation }) => {
           </View>
         </View>
         </KeyboardAvoidingView>
-      </Modal>
+      </InlineJobPanel>
 
       {/* Schedule List Modal */}
-      <Modal
-        visible={showScheduleModal}
+      <InlineJobPanel label="Job list" priority={10}
+        visible={showScheduleModal && !selectedJob}
         transparent={true}
         animationType="slide"
         onRequestClose={() => setShowScheduleModal(false)}
@@ -1197,7 +1108,7 @@ const HomeScreen = ({ navigation }) => {
           <View style={styles.bottomModalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Schedule</Text>
-              <TouchableOpacity 
+              <TouchableOpacity accessibilityLabel="Close job list"
                 onPress={() => setShowScheduleModal(false)}
                 style={styles.closeButton}
               >
@@ -1205,6 +1116,8 @@ const HomeScreen = ({ navigation }) => {
               </TouchableOpacity>
             </View>
 
+            {!!jobsError && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{jobsError}</Text>}
+            <GlassButton secondary title="Refresh schedule" disabled={work.isFetching} onPress={loadJobs} />
             <View style={styles.filterContainer}>
               <TouchableOpacity 
                 style={[styles.filterButton, activeFilter === 'day' && styles.activeFilterButton]}
@@ -1261,6 +1174,8 @@ const HomeScreen = ({ navigation }) => {
                     <View style={styles.scheduleDetails}>
                       <Text style={styles.scheduleTitle}>{job.serviceType} - {job.customerName}</Text>
                       <Text style={styles.scheduleLocation}>{job.date}</Text>
+                      <Text style={styles.scheduleLocation}>{job.status}{job.syncState ? ` · sync: ${job.syncState}` : ''}</Text>
+                      {!!job.syncError && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{job.syncError}</Text>}
                       <Text style={styles.scheduleDuration}>
                         {job.duration} hours
                         {job.estimatedCost && ` • $${job.estimatedCost}`}
@@ -1275,270 +1190,18 @@ const HomeScreen = ({ navigation }) => {
             </ScrollView>
           </View>
         </View>
-      </Modal>
+      </InlineJobPanel>
 
-      {/* Job Details Modal */}
-      <Modal
-        visible={showJobDetailsModal}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowJobDetailsModal(false)}
-      >
-        <View style={styles.bottomModalOverlay}>
-          <View style={styles.bottomModalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Job Details</Text>
-              <TouchableOpacity 
-                onPress={() => setShowJobDetailsModal(false)}
-                style={styles.closeButton}
-              >
-                <MaterialIcons name="close" size={24} color={COLORS.text.primary} />
-              </TouchableOpacity>
-            </View>
-
-            {selectedJob && (
-              <ScrollView style={styles.jobDetailsContent}>
-                <FieldWorkTools job={selectedJob} onChanged={loadJobs} /><JobPhotos job={selectedJob} />
-                <View style={styles.jobDetailRow}>
-                  <Text style={styles.jobDetailLabel}>Customer:</Text>
-                  <Text style={styles.jobDetailValue}>{selectedJob.customerName}</Text>
-                </View>
-                <View style={styles.jobDetailRow}>
-                  <Text style={styles.jobDetailLabel}>Service:</Text>
-                  <Text style={styles.jobDetailValue}>{selectedJob.serviceType}</Text>
-                </View>
-                <View style={styles.jobDetailRow}>
-                  <Text style={styles.jobDetailLabel}>Date:</Text>
-                  <Text style={styles.jobDetailValue}>{selectedJob.date}</Text>
-                </View>
-                <View style={styles.jobDetailRow}>
-                  <Text style={styles.jobDetailLabel}>Time:</Text>
-                  <Text style={styles.jobDetailValue}>{selectedJob.time}</Text>
-                </View>
-                <View style={styles.jobDetailRow}>
-                  <Text style={styles.jobDetailLabel}>Duration:</Text>
-                  <Text style={styles.jobDetailValue}>{selectedJob.duration} hours</Text>
-                </View>
-                {managing && selectedJob.estimatedCost && (
-                  <View style={styles.jobDetailRow}>
-                    <Text style={styles.jobDetailLabel}>Estimated Cost:</Text>
-                    <Text style={styles.jobDetailValue}>${selectedJob.estimatedCost}</Text>
-                  </View>
-                )}
-                {selectedJob.notes && (
-                  <View style={styles.jobDetailRow}>
-                    <Text style={styles.jobDetailLabel}>Notes:</Text>
-                    <Text style={styles.jobDetailValue}>{selectedJob.notes}</Text>
-                  </View>
-                )}
-                <View style={styles.jobDetailRow}>
-                  <Text style={styles.jobDetailLabel}>Status:</Text>
-                  <Text style={[styles.jobDetailValue, styles.statusText]}>
-                    {selectedJob.status || 'Scheduled'}
-                  </Text>
-                </View>
-
-                {selectedJob.status === 'completed' && (
-                  <>
-                    {selectedJob.actualWorkDone && (
-                      <View style={styles.jobDetailRow}>
-                        <Text style={styles.jobDetailLabel}>Work Done:</Text>
-                        <Text style={styles.jobDetailValue}>{selectedJob.actualWorkDone}</Text>
-                      </View>
-                    )}
-                    {selectedJob.actualHours && (
-                      <View style={styles.jobDetailRow}>
-                        <Text style={styles.jobDetailLabel}>Actual Hours:</Text>
-                        <Text style={styles.jobDetailValue}>{selectedJob.actualHours} hours</Text>
-                      </View>
-                    )}
-                    {selectedJob.completedAt && (
-                      <View style={styles.jobDetailRow}>
-                        <Text style={styles.jobDetailLabel}>Completed:</Text>
-                        <Text style={styles.jobDetailValue}>
-                          {new Date(selectedJob.completedAt).toLocaleDateString()}
-                        </Text>
-                      </View>
-                    )}
-                    {selectedJob.completionNotes && (
-                      <View style={styles.jobDetailRow}>
-                        <Text style={styles.jobDetailLabel}>Completion Notes:</Text>
-                        <Text style={styles.jobDetailValue}>{selectedJob.completionNotes}</Text>
-                      </View>
-                    )}
-                    {selectedJob.photos && selectedJob.photos.length > 0 && (
-                      <View style={styles.jobDetailRow}>
-                        <Text style={styles.jobDetailLabel}>Photos:</Text>
-                        <Text style={styles.jobDetailValue}>{selectedJob.photos.length} photos</Text>
-                      </View>
-                    )}
-                  </>
-                )}
-              </ScrollView>
-            )}
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => setShowJobDetailsModal(false)}
-              >
-                <Text style={styles.cancelButtonText}>Close</Text>
-              </TouchableOpacity>
-
-              {selectedJob?.status === 'scheduled' && <TouchableOpacity style={[styles.modalButton, styles.confirmButton]} onPress={async () => { const result = await JobService.updateJob(selectedJob.id, { status: 'in-progress' }); if (result.success) { setSelectedJob({ ...selectedJob, status: 'in-progress' }); loadJobs(); } else Alert.alert('Could not start job', result.error?.message || 'Try again.'); }}><Text style={styles.confirmButtonText}>Start</Text></TouchableOpacity>}
-              {['scheduled', 'en-route', 'in-progress'].includes(selectedJob?.status) && (
-                <>
-                  {managing && <TouchableOpacity
-                    style={[styles.modalButton, styles.editButton]}
-                    disabled={!canManage()}
-                    onPress={() => handleJobEdit(selectedJob)}
-                  >
-                    <Text style={styles.editButtonText}>Edit</Text>
-                  </TouchableOpacity>}
-                  <TouchableOpacity 
-                    style={[styles.modalButton, styles.confirmButton]}
-                    onPress={() => handleJobCompletion(selectedJob)}
-                  >
-                    <Text style={styles.confirmButtonText}>Complete</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-
-              {canManage() && selectedJob?.status === 'completed' && (
-                <TouchableOpacity 
-                  style={[styles.modalButton, styles.followUpButton]}
-                  onPress={scheduleFollowUp}
-                >
-                  <Text style={styles.followUpButtonText}>Schedule Follow-up</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Job Completion Modal */}
-      <Modal
-        visible={showJobCompletionModal}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowJobCompletionModal(false)}
-      >
-        <View style={styles.bottomModalOverlay}>
-          <View style={styles.bottomModalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Complete</Text>
-              <TouchableOpacity 
-                onPress={() => setShowJobCompletionModal(false)}
-                style={styles.closeButton}
-              >
-                <MaterialIcons name="close" size={24} color={COLORS.text.primary} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.completionForm}>
-              <JobPhotos job={selectedJob} />
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>What work was actually done? *</Text>
-                <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
-                  style={[styles.textInput, styles.textArea]}
-                  placeholder="Describe the work completed..."
-                  multiline
-                  numberOfLines={4}
-                  value={actualWorkDone}
-                  onChangeText={setActualWorkDone}
-                />
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Actual hours worked</Text>
-                <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
-                  style={styles.textInput}
-                  placeholder="2.5"
-                  keyboardType="numeric"
-                  value={actualHours}
-                  onChangeText={setActualHours}
-                />
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Completion notes</Text>
-                <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
-                  style={[styles.textInput, styles.textArea]}
-                  placeholder="Any additional notes about the completion..."
-                  multiline
-                  numberOfLines={3}
-                  value={completionNotes}
-                  onChangeText={setCompletionNotes}
-                />
-              </View>
-
-            </ScrollView>
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => setShowJobCompletionModal(false)}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[
-                  styles.modalButton, 
-                  styles.confirmButton,
-                  !actualWorkDone && styles.disabledButton
-                ]}
-                onPress={showCompletionConfirmation}
-                disabled={!actualWorkDone}
-              >
-                <Text style={[
-                  styles.confirmButtonText,
-                  !actualWorkDone && styles.disabledButtonText
-                ]}>
-                  Complete
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Completion Confirmation Modal */}
-      <Modal
-        visible={showCompletionConfirmModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowCompletionConfirmModal(false)}
-      >
-        <View style={styles.confirmModalOverlay}>
-          <View style={styles.confirmModalContent}>
-            <MaterialIcons name="check-circle" size={48} color={COLORS.primary[500]} />
-            <Text style={styles.confirmModalTitle}>Complete This Job?</Text>
-            <Text style={styles.confirmModalMessage}>
-              This will mark the job as completed and update the job status. This action cannot be undone.
-            </Text>
-
-            <View style={styles.confirmModalActions}>
-              <TouchableOpacity 
-                style={[styles.confirmModalButton, styles.confirmModalCancelButton]}
-                onPress={() => setShowCompletionConfirmModal(false)}
-              >
-                <Text style={styles.confirmModalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.confirmModalButton, styles.confirmModalConfirmButton]}
-                onPress={completeJob}
-              >
-                <Text style={styles.confirmModalConfirmText}>Yes, Complete</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {selectedJob && <InlineJobPanel visible={!showJobEditModal} keepMounted label="Job details">
+        <JobWorkflow key={selectedJob.id} job={selectedJob} onClose={closeJobWorkflow}
+          onChanged={loadJobs} onInteractionChange={onJobInteraction}
+          onEdit={managing ? () => handleJobEdit(selectedJob) : undefined}
+          onFollowUp={managing ? scheduleFollowUp : undefined} />
+      </InlineJobPanel>}
 
       {/* Date Picker Modal for iOS */}
       {Platform.OS === 'ios' && showDatePicker && (
-        <Modal
+        <InlineJobPanel label="Choose service date" priority={30}
           visible={showDatePicker}
           transparent={true}
           animationType="slide"
@@ -1561,7 +1224,7 @@ const HomeScreen = ({ navigation }) => {
               />
             </View>
           </View>
-        </Modal>
+        </InlineJobPanel>
       )}
 
       {/* Date Picker for Android */}
@@ -1577,7 +1240,7 @@ const HomeScreen = ({ navigation }) => {
 
       {/* Time Picker Modal for iOS */}
       {Platform.OS === 'ios' && showTimePicker && (
-        <Modal
+        <InlineJobPanel label="Choose service time" priority={30}
           visible={showTimePicker}
           transparent={true}
           animationType="slide"
@@ -1599,7 +1262,7 @@ const HomeScreen = ({ navigation }) => {
               />
             </View>
           </View>
-        </Modal>
+        </InlineJobPanel>
       )}
 
       {/* Time Picker for Android */}
@@ -1613,7 +1276,7 @@ const HomeScreen = ({ navigation }) => {
       )}
 
       {/* Job Edit Modal */}
-      <Modal
+      <InlineJobPanel label="Edit job" priority={20}
         visible={showJobEditModal && managing}
         transparent={true}
         animationType="slide"
@@ -1762,7 +1425,6 @@ const HomeScreen = ({ navigation }) => {
                   />
                 </View>
 
-                <JobPhotos job={selectedJob} />
               </ScrollView>
             </KeyboardAvoidingView>
 
@@ -1792,7 +1454,7 @@ const HomeScreen = ({ navigation }) => {
             </View>
           </View>
         </View>
-      </Modal>
+      </InlineJobPanel>
 
       {/* Estimates List Modal */}
       <Modal

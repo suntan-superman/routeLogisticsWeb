@@ -38,6 +38,8 @@ function load(relative) {
     if (specifier.endsWith('/theme/ThemeProvider')) return { ThemeProvider: pass, useTheme: () => ({ palette, colors: load('constants/colors.js').COLORS, isDark: true, ready: true, mode: 'dark', changeMode: async value => changes.push(value), reduceTransparency: false }) };
     if (specifier.endsWith('/constants/responsiveSizes')) return { FONT_SIZES: new Proxy({}, { get: () => 16 }), SPACING: new Proxy({}, { get: () => 12 }), BORDER_RADIUS: new Proxy({}, { get: () => 12 }), ICON_SIZES: new Proxy({}, { get: () => 20 }), hp: () => 20, wp: () => 20, rf: () => 16 };
     if (/\/components\/(JobPhotos|WorkLocation|OfflineStatus|FieldWorkTools|MyRoute)$/.test(specifier)) return () => null;
+    if (specifier.endsWith('/components/JobWorkflow')) return ({ job, onClose }) => React.createElement('View', null,
+      React.createElement('Text', null, job.customerName), React.createElement('Pressable', { accessibilityLabel: 'Close job details', onPress: onClose }, 'Close'));
     if (specifier.endsWith('/services/tenancy')) return { canManage: () => currentAuth.permissions.canManage, localDate: () => '2026-11-13' };
     if (specifier === './offline' || specifier.endsWith('/services/offline')) return { cachedRead: (_key, loader) => loader() };
     if (specifier === './workspaceApi' || specifier.endsWith('/services/workspaceApi')) return { callWorkspace: async () => ({ stops: [], saved: null }) };
@@ -189,12 +191,44 @@ test('job details close when a refresh removes the assignment or denies access',
     jobLoader = async () => ({ success: true, jobs: [{ id: 'assigned', customerName: 'Private job details', serviceType: 'Inspection', status: 'scheduled' }] });
     const home = await render('screens/HomeScreen.js');
     const card = home.root.findAll(node => node.type === 'TouchableOpacity' && node.findAll(child => child.type === 'Text' && child.props.children === 'Private job details').length)[0];
-    await act(async () => { card.props.onPress(); await new Promise(resolve => setTimeout(resolve, 110)); });
-    assert.equal(home.root.findAllByType('Modal').length, 1);
+    await act(async () => card.props.onPress());
+    assert.equal(home.root.findAll(node => node.type === 'View' && node.props.accessibilityLabel === 'Job details').length, 1);
+    assert.equal(home.root.findAllByType('Modal').length, 0);
     jobLoader = async () => denied ? { success: false, error: 'Membership removed.', code: 'functions/permission-denied' } : { success: true, jobs: [] };
     await press(home, 'Refresh jobs');
     assert.equal(home.root.findAllByType('Modal').length, 0);
+    assert.equal(home.root.findAll(node => node.type === 'View' && node.props.accessibilityLabel === 'Job details').length, 0);
     assert.doesNotMatch(textOf(home), /Private job details/);
     await act(async () => home.unmount());
   }
+});
+
+test('job details close and reopen repeatedly without native modal backdrops or delayed transitions', async () => {
+  account();
+  jobLoader = async () => ({ success: true, jobs: [
+    { id: 'first', customerName: 'First assigned job', status: 'scheduled' },
+    { id: 'second', customerName: 'Second assigned job', status: 'scheduled' },
+  ] });
+  const home = await render('screens/HomeScreen.js');
+  for (const name of ['First assigned job', 'First assigned job', 'Second assigned job', 'First assigned job']) {
+    const card = home.root.findAll(node => node.type === 'TouchableOpacity' && node.findAll(child => child.type === 'Text' && (child.props.children === name || (Array.isArray(child.props.children) && child.props.children.includes(name)))).length)[0];
+    assert.ok(card);
+    await act(async () => card.props.onPress());
+    assert.equal(home.root.findAllByType('Modal').length, 0);
+    const details = home.root.findAll(node => node.type === 'View' && node.props.accessibilityLabel === 'Job details')[0];
+    assert.match(JSON.stringify(details.props.children.props.job.customerName), new RegExp(name));
+    // A temporary background read error must retain the selected job screen.
+    jobLoader = async () => ({ success: false, error: 'Temporarily unavailable.', code: 'functions/unavailable' });
+    await press(home, 'Refresh jobs');
+    assert.equal(home.root.findAll(node => node.type === 'View' && node.props.accessibilityLabel === 'Job details').length, 1);
+    jobLoader = async () => ({ success: true, jobs: [
+      { id: 'first', customerName: 'First assigned job', status: 'scheduled' },
+      { id: 'second', customerName: 'Second assigned job', status: 'scheduled' },
+    ] });
+    await press(home, 'Close job details');
+    await press(home, 'Refresh jobs');
+    assert.equal(home.root.findAll(node => node.type === 'View' && node.props.accessibilityLabel === 'Job details').length, 0);
+    assert.equal(home.root.findAllByType('Modal').length, 0);
+  }
+  await act(async () => home.unmount());
 });

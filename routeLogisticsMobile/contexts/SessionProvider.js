@@ -12,6 +12,7 @@ import { syncTenancy, getWorkspace, restoreOfflineWorkspace } from '../services/
 import { companyProfile, serviceNames, workspacePermissions, parseInvitationLink } from '../services/workspacePolicy';
 import { requestStaffCode, signInWithStaffCode } from '../services/staffLogin';
 import { readWorkspace } from '../services/workspaceApi';
+import { isNativeInteractionActive, subscribeNativeInteraction } from '../services/nativeInteraction';
 
 export const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
@@ -64,8 +65,10 @@ export function AuthProvider({ children }) {
     return onAuthStateChanged(auth, account => { setIsLoading(true); hydrate(account); });
   }, [hydrate]);
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', state => { if (state === 'active' && auth.currentUser) refreshUser(); });
-    return () => subscription.remove();
+    const refresh = () => { if (AppState.currentState === 'active' && auth.currentUser && !isNativeInteractionActive()) refreshUser(); };
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') refresh(); });
+    const unsubscribe = subscribeNativeInteraction(active => { if (!active) refresh(); });
+    return () => { subscription.remove(); unsubscribe(); };
   }, [refreshUser]);
   const finishAuthentication = async result => {
     if (!result.success) return result;

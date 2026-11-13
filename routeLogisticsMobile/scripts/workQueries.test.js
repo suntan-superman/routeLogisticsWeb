@@ -186,3 +186,19 @@ test('an initial offline view can load its scoped saved route without polling or
   const reads = jobRequests.length;
   await tick(t, 90_000); assert.equal(routeRequests.length, 0); assert.equal(jobRequests.length, reads);
 });
+
+test('native picker interactions suspend polling and foreground refetch until the final owner releases', async t => {
+  await mount(t);
+  const { beginNativeInteraction, isNativeInteractionActive } = load('services/nativeInteraction.js');
+  let first, second;
+  await act(async () => { first = beginNativeInteraction(); second = beginNativeInteraction(); }); await settle(t);
+  const before = jobRequests.length, routeBefore = routeRequests.length;
+  await foreground(t, 'inactive'); await foreground(t, 'active'); await tick(t, 60_000);
+  assert.equal(jobRequests.length, before); assert.equal(routeRequests.length, routeBefore);
+  await act(async () => { first(); first(); }); await settle(t);
+  assert.equal(isNativeInteractionActive(), true);
+  await tick(t, 30_000); assert.equal(jobRequests.length, before);
+  await act(async () => second()); await settle(t);
+  assert.equal(isNativeInteractionActive(), false);
+  assert.ok(jobRequests.length > before); assert.ok(routeRequests.length > routeBefore);
+});

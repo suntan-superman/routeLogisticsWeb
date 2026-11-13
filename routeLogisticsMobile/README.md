@@ -51,6 +51,11 @@ routeLogisticsMobile/
 
 ### Assigned work and route refresh
 
+The camera, photo and completion navigation repair and exact Mac rebuild/device
+test procedure are documented in [mobile job workflow repair](../docs/mobile-job-workflow-repair.md).
+Job Details and its completion pages now share one view-based workspace and one
+photo owner, preserving drafts and showing synchronized/queued/error outcomes.
+
 My Work and the technician's daily route use TanStack Query with a 30-second
 polling interval while Home is mounted, the app is active and connectivity is
 available. Returning to the app or reconnecting refreshes current data immediately.

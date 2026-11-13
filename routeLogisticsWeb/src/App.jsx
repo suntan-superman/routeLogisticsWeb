@@ -6,11 +6,13 @@ import { HelmetProvider } from 'react-helmet-async';
 import { registerLicense } from '@syncfusion/ej2-base';
 
 // Contexts
-import { AuthProvider } from './contexts/AuthContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 // Pages
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
+import SignupPage from './pages/SignupPage';
+import LandingPage from './pages/LandingPage';
 import CompanySetupPage from './pages/CompanySetupPage';
 import CustomerManagementPage from './pages/CustomerManagementPage';
 import EstimateTemplatesPage from './pages/EstimateTemplatesPage';
@@ -40,6 +42,25 @@ const queryClient = new QueryClient({
   },
 });
 
+// Shows the marketing landing page to signed-out visitors, and the dashboard
+// to signed-in users, without changing either route's own loading/redirect logic.
+const HomeOrLanding = () => {
+  const { currentUser, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
+      </div>
+    );
+  }
+  if (!currentUser) return <LandingPage />;
+  return (
+    <Layout>
+      <HomePage />
+    </Layout>
+  );
+};
+
 function App() {
   return (
     <HelmetProvider>
@@ -53,14 +74,9 @@ function App() {
                 <Route path="/login" element={<LoginPage />} />
                 
                 {/* Protected Routes */}
-                <Route path="/" element={
-                  <ProtectedRoute>
-                    <Layout>
-                      <HomePage />
-                    </Layout>
-                  </ProtectedRoute>
-                } />
-                
+                <Route path="/" element={<HomeOrLanding />} />
+                <Route path="/signup" element={<SignupPage />} />
+
                 <Route path="/company-setup" element={
                   <ProtectedRoute>
                     <Layout>

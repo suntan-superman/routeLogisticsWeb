@@ -1,6 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import CustomerService from '../services/customerService';
+import JobManagementService from '../services/jobManagementService';
+import EstimateTemplateService from '../services/estimateTemplateService';
 import { motion } from 'framer-motion';
 import { 
   BuildingOfficeIcon, 
@@ -11,8 +14,36 @@ import {
   CurrencyDollarIcon
 } from '@heroicons/react/24/outline';
 
+const formatMoney = (n) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n || 0);
+
 const HomePage = () => {
   const { userProfile } = useAuth();
+  const [counts, setCounts] = useState({ customers: 0, activeJobs: 0, monthRevenue: 0, templates: 0 });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [cust, jobs, tmpl] = await Promise.all([
+        CustomerService.getCustomerStats(),
+        JobManagementService.getJobs(500),
+        EstimateTemplateService.getTemplateStats()
+      ]).catch(() => [null, null, null]);
+      if (cancelled) return;
+      const now = new Date();
+      const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const list = jobs?.success ? jobs.jobs : [];
+      setCounts({
+        customers: cust?.success ? cust.stats.totalCustomers : 0,
+        activeJobs: list.filter(j => j.status === 'scheduled' || j.status === 'in-progress').length,
+        monthRevenue: list
+          .filter(j => j.status === 'completed' && String(j.date || '').startsWith(monthKey))
+          .reduce((sum, j) => sum + (Number(j.totalCost) || 0), 0),
+        templates: tmpl?.success ? tmpl.stats.totalTemplates : 0
+      });
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const quickActions = [
     {
@@ -39,10 +70,10 @@ const HomePage = () => {
   ];
 
   const stats = [
-    { name: 'Total Customers', value: '0', icon: UsersIcon },
-    { name: 'Active Jobs', value: '0', icon: ClockIcon },
-    { name: 'Monthly Revenue', value: '$0', icon: CurrencyDollarIcon },
-    { name: 'Estimate Templates', value: '0', icon: DocumentTextIcon },
+    { name: 'Total Customers', value: String(counts.customers), icon: UsersIcon },
+    { name: 'Active Jobs', value: String(counts.activeJobs), icon: ClockIcon },
+    { name: 'Monthly Revenue', value: formatMoney(counts.monthRevenue), icon: CurrencyDollarIcon },
+    { name: 'Estimate Templates', value: String(counts.templates), icon: DocumentTextIcon },
   ];
 
   return (

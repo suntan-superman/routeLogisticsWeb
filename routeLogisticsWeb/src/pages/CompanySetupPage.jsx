@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import CompanyService from '../services/companyService';
+import { getClaims } from '../services/tenancy';
 import { 
   BuildingOfficeIcon, 
   CheckCircleIcon,
@@ -48,16 +49,18 @@ const CompanySetupPage = () => {
     { id: 5, name: 'Templates', icon: DocumentTextIcon }
   ];
 
+  const companyId = userProfile?.companyId || getClaims()?.companyId;
+
   useEffect(() => {
     loadCompanyData();
-  }, []);
+  }, [companyId]);
 
   const loadCompanyData = async () => {
-    if (!userProfile?.companyId) return;
+    if (!companyId) return;
     
     setIsLoading(true);
     try {
-      const result = await CompanyService.getCompany(userProfile.companyId);
+      const result = await CompanyService.getCompany(companyId);
       if (result.success) {
         setCompany(result.company);
         setCompanyData({
@@ -77,7 +80,7 @@ const CompanySetupPage = () => {
         setServiceCategories(result.company.serviceCategories || []);
         
         // Load team members
-        const teamResult = await CompanyService.getTeamMembers(userProfile.companyId);
+        const teamResult = await CompanyService.getTeamMembers(companyId);
         if (teamResult.success) {
           setTeamMembers(teamResult.teamMembers);
         }

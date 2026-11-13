@@ -8,7 +8,7 @@ export default ({ config }) => ({
   version: "1.0.0",
   orientation: "portrait",
   icon: "./assets/icon.png",
-  userInterfaceStyle: "light",
+  userInterfaceStyle: "automatic",
   newArchEnabled: true,
   plugins: ["expo-font", "@react-native-community/datetimepicker", ["expo-location", { locationWhenInUsePermission: "Share your location with your company only while you choose to work with this app open.", isIosBackgroundLocationEnabled: false, isAndroidBackgroundLocationEnabled: false, isAndroidForegroundServiceEnabled: false }], ["expo-image-picker", {
     photosPermission: "Choose photos to document completed jobs.",

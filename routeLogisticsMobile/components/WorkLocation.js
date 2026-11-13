@@ -1,3 +1,5 @@
+import { useTheme } from '../theme/ThemeProvider';
+import { GlassCard } from './Glass';
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, AppState, Text, TouchableOpacity, View } from 'react-native';
 import * as Location from 'expo-location';
@@ -7,6 +9,7 @@ import { useAuth } from '../contexts/AuthContext';
 const call = (data) => httpsCallable(functions, 'rlUpdateWorkLocation')(data).then((r) => r.data);
 
 export default function WorkLocation({ jobs = [] }) {
+  const { palette } = useTheme();
   const { user } = useAuth();
   const [sharing, setSharing] = useState(false), [busy, setBusy] = useState(false), [message, setMessage] = useState('');
   const watcher = useRef(null), session = useRef(null), mounted = useRef(true), lastUpdate = useRef(0);
@@ -41,5 +44,5 @@ export default function WorkLocation({ jobs = [] }) {
     finally { if (mounted.current) setBusy(false); }
   };
   const eligible = jobs.filter((job) => job.status === 'in-progress' && (user?.role !== 'technician' || job.assignedTo === user?.membershipId));
-  return <View style={{ margin: 12, padding: 12, borderRadius: 8, backgroundColor: sharing ? '#dcfce7' : '#f3f4f6' }}><Text style={{ fontWeight: '700' }}>{sharing ? 'Work location sharing is ON' : 'Work location sharing is OFF'}</Text>{sharing ? <TouchableOpacity onPress={stop}><Text style={{ color: '#b91c1c', paddingVertical: 10 }}>Stop sharing location</Text></TouchableOpacity> : eligible.slice(0, 5).map((job) => <TouchableOpacity disabled={busy} key={job.id} onPress={() => Alert.alert('Share work location?', 'Managers will see your last location while this app is open and this job is in progress. You can stop at any time.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Start sharing', onPress: () => start(job) }])}><Text style={{ color: '#047857', paddingVertical: 8 }}>Share while working: {job.customerName || job.serviceType}</Text></TouchableOpacity>)}{!sharing && !eligible.length && <Text>Start an assigned job to share your work location.</Text>}{!!message && <Text style={{ marginTop: 4 }}>{message}</Text>}</View>;
+  return <GlassCard contentStyle={{ padding: 16, gap: 7 }}><Text style={{ fontWeight: '700', fontSize: 14, color: palette.text }}>{sharing ? 'Work location sharing is ON' : 'Work location sharing is OFF'}</Text>{sharing ? <TouchableOpacity onPress={stop}><Text style={{ color: palette.danger, paddingVertical: 10 }}>Stop sharing location</Text></TouchableOpacity> : eligible.slice(0, 5).map((job) => <TouchableOpacity disabled={busy} key={job.id} onPress={() => Alert.alert('Share work location?', 'Managers will see your last location while this app is open and this job is in progress. You can stop at any time.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Start sharing', onPress: () => start(job) }])}><Text style={{ color: palette.accent, paddingVertical: 8 }}>Share while working: {job.customerName || job.serviceType}</Text></TouchableOpacity>)}{!sharing && !eligible.length && <Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 20 }}>Start an assigned job to share your work location.</Text>}{!!message && <Text style={{ marginTop: 4, color: palette.secondary, fontSize: 13, lineHeight: 20 }}>{message}</Text>}</GlassCard>;
 }

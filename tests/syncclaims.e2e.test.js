@@ -89,15 +89,24 @@ test('explicit invite acceptance requires verified email and refreshes membershi
   const data = { inviteId: invitation.result.teamMemberId, code };
   const tech = await signUp('tech@example.com');
   await fsCreate('users', tech.localId, { email: 'tech@example.com' });
-  assert.strictEqual((await callSync(tech.idToken)).result.claims, null);
+  const unverified = (await callSync(tech.idToken)).result;
+  assert.strictEqual(unverified.claims, null);
+  assert.deepStrictEqual(unverified.workspace, { status: 'verify-email' });
   assert.ok((await invoke('acceptTeamInvite', tech.idToken, data)).error);
   await verifyEmail(tech.localId);
   const verified = await signIn('tech@example.com');
-  assert.strictEqual((await callSync(verified.idToken)).result.claims, null);
+  const pending = (await callSync(verified.idToken)).result;
+  assert.strictEqual(pending.claims, null);
+  assert.strictEqual(pending.workspace.status, 'pending');
+  assert.strictEqual(pending.workspace.invitations[0].role, 'technician');
+  assert.strictEqual(pending.workspace.invitations[0].id, invitation.result.teamMemberId);
+  assert.ok(!JSON.stringify(pending.workspace).includes(code));
+  assert.strictEqual((await fsGet('teamMembers', invitation.result.teamMemberId)).fields.status.stringValue, 'pending');
   const accepted = await invoke('acceptTeamInvite', verified.idToken, data);
   assert.deepStrictEqual(accepted.result.claims, { companyId: 'co1', role: 'technician', membershipId: invitation.result.teamMemberId });
   const fresh = claimsOf((await signIn('tech@example.com')).idToken);
   assert.strictEqual(fresh.membershipId, invitation.result.teamMemberId);
+  assert.deepStrictEqual((await callSync((await signIn('tech@example.com')).idToken)).result.workspace, { status: 'company' });
 });
 
 test('syncClaims rejects unauthenticated callers', async () => {

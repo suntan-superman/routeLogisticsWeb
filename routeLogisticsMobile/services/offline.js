@@ -7,14 +7,14 @@ import { doc, getDocFromServer, setDoc, serverTimestamp } from 'firebase/firesto
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { auth, db, storage, functions } from '../constants/firebase';
 import { AppState } from 'react-native';
-import { getClaims, tenantFields } from './tenancy';
+import { getClaims, tenantFields, requireWorkspace } from './tenancy';
 import { createQueue, retryDelay } from './offlineQueueCore';
 
 const queues = new Map(), draining = new Set(), listeners = new Set();
 export const offlineVersion = (v) => v?.toDate ? v.toDate().toISOString() : v?.seconds != null ? new Date(v.seconds * 1000 + (v.nanoseconds || 0) / 1e6).toISOString() : v || null;
 export const isOffline = async () => { const net = await NetInfo.fetch(); return net.isConnected === false || net.isInternetReachable === false; };
 export function offlineScope() {
-  if (!auth.currentUser) throw new Error('Sign in required.');
+  requireWorkspace();
   const claims = getClaims();
   // Role and assignment changes cannot expose a previous manager's cached jobs.
   return `rl-offline-v1:${auth.app.options.projectId}:${auth.currentUser.uid}:${claims?.companyId || 'personal'}:${claims?.role || 'owner'}:${claims?.membershipId || ''}`;

@@ -9,7 +9,7 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, updateDoc, collection, addDoc, getDocs, deleteDoc, query, where, orderBy } from 'firebase/firestore';
 import { auth, db } from '../constants/firebase';
-import { scopeWhere, tenantFields, localDate, getClaims } from './tenancy';
+import { scopeWhere, tenantFields, localDate, getClaims, requireWorkspace }  from './tenancy';
 import { cachedRead, overlayJobs, readCache, writeCache, saveJobOffline, isOffline } from './offline';
 
 export class AuthService {
@@ -35,18 +35,8 @@ export class AuthService {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Get user data from Firestore
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
-      const userData = userDoc.exists() ? userDoc.data() : {};
-
-      const completeUserData = {
-
-
-        name: user.displayName || userData.name || 'User',
-
-        ...userData,
-        id: user.uid, email: user.email, emailVerified: user.emailVerified,
-      };
+      // SessionProvider loads the profile after synchronizing workspace claims.
+      const completeUserData = { id: user.uid, email: user.email, name: user.displayName || 'User', emailVerified: user.emailVerified };
 
       return {
         success: true,
@@ -260,6 +250,7 @@ export class CustomerService {
   // Add a new customer
   static async addCustomer(customerData) {
     try {
+      requireWorkspace(true);
       const userId = this.getCurrentUserId();
       if (!userId) {
         return {
@@ -338,6 +329,7 @@ export class CustomerService {
   // Update a customer
   static async updateCustomer(customerId, customerData) {
     try {
+      requireWorkspace(true);
       const userId = this.getCurrentUserId();
       if (!userId) {
         return {
@@ -366,6 +358,7 @@ export class CustomerService {
   // Delete a customer
   static async deleteCustomer(customerId) {
     try {
+      requireWorkspace(true);
       const userId = this.getCurrentUserId();
       if (!userId) {
         return {
@@ -399,6 +392,7 @@ export class EstimateService {
   // Add a new estimate
   static async addEstimate(estimateData) {
     try {
+      requireWorkspace(true);
       const userId = this.getCurrentUserId();
       if (!userId) {
         return {
@@ -495,6 +489,7 @@ export class EstimateService {
   // Update an estimate
   static async updateEstimate(estimateId, estimateData) {
     try {
+      requireWorkspace(true);
       const userId = this.getCurrentUserId();
       if (!userId) {
         return {
@@ -523,6 +518,7 @@ export class EstimateService {
   // Delete an estimate
   static async deleteEstimate(estimateId) {
     try {
+      requireWorkspace(true);
       const userId = this.getCurrentUserId();
       if (!userId) {
         return {
@@ -593,6 +589,7 @@ export class JobService {
   // Add a new job/appointment
   static async addJob(jobData) {
     try {
+      requireWorkspace(true);
       const userId = this.getCurrentUserId();
       if (!userId) {
         return {
@@ -704,6 +701,7 @@ export class JobService {
     try {
       const supported = ['status', 'notes', 'actualWorkDone', 'actualHours', 'completionNotes', 'completedAt'];
       if (Object.keys(jobData).every((key) => supported.includes(key))) return await saveJobOffline(jobId, jobData);
+      requireWorkspace(true);
       if (await isOffline()) throw new Error('Scheduling and pricing changes require an internet connection. Work notes and completion details can be saved offline.');
       const userId = this.getCurrentUserId();
       if (!userId) {
@@ -733,6 +731,7 @@ export class JobService {
   // Delete a job
   static async deleteJob(jobId) {
     try {
+      requireWorkspace(true);
       const userId = this.getCurrentUserId();
       if (!userId) {
         return {

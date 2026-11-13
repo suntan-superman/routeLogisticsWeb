@@ -1,4 +1,4 @@
-import React, { useContext, useState, useEffect } from 'react';
+import React, { useContext, useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -19,14 +19,19 @@ import OfflineStatus from '../components/OfflineStatus';
 import { canManage, localDate } from '../services/tenancy';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
-import { COLORS } from '../constants/colors';
+import { useTheme } from '../theme/ThemeProvider';
+import { GlassScreen, GlassCard, GlassButton, IconButton } from '../components/Glass';
 import { AuthContext } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { CustomerService, JobService, EstimateService } from '../services/firebase';
 import { FONT_SIZES, SPACING, BUTTON_SIZES, BORDER_RADIUS, ICON_SIZES, CARD_SIZES, WIDTHS, HEIGHTS, hp, wp, rf } from '../constants/responsiveSizes';
 
 const HomeScreen = ({ navigation }) => {
-  const { user, signOut } = useContext(AuthContext);
+  const { user, signOut, permissions, refreshUser } = useContext(AuthContext);
+  const { colors: COLORS, palette, isDark } = useTheme();
+  const styles = useMemo(() => createStyles(COLORS), [COLORS]);
+  const managing = permissions.canManage;
+  const [jobsError, setJobsError] = useState('');
   const { t } = useLanguage();
   const [showMenuModal, setShowMenuModal] = useState(false);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
@@ -104,9 +109,8 @@ const HomeScreen = ({ navigation }) => {
 
   // Load customers and jobs when component mounts
   useEffect(() => {
-    loadCustomers();
-    loadJobs();
-  }, []);
+    if (managing) loadCustomers();
+  }, [managing]);
 
   // Load jobs when filter changes
   useEffect(() => {
@@ -167,7 +171,7 @@ const HomeScreen = ({ navigation }) => {
 
   // Load jobs from Firebase based on active filter
   const loadJobs = async () => {
-    setIsLoadingJobs(true);
+    setIsLoadingJobs(true); setJobsError('');
     try {
       let result;
       switch (activeFilter) {
@@ -187,10 +191,10 @@ const HomeScreen = ({ navigation }) => {
       if (result.success) {
         setJobs(result.jobs);
       } else {
-        setJobs([]);
+        setJobs([]); setJobsError(result.error?.message || result.error || 'Could not load your schedule.');
       }
     } catch (error) {
-      setJobs([]);
+      setJobs([]); setJobsError('Could not load your schedule. Please refresh.');
     } finally {
       setIsLoadingJobs(false);
     }
@@ -235,6 +239,7 @@ const HomeScreen = ({ navigation }) => {
 
   // Data check handlers
   const handleScheduleServicePress = () => {
+    if (!canManage()) { Alert.alert('Manager access required', 'Ask your manager to make this change.'); return; }
     if (!hasCustomers) {
       Alert.alert(
         'No Customers Available',
@@ -529,6 +534,7 @@ const HomeScreen = ({ navigation }) => {
   };
 
   const handleEstimatesPress = () => {
+    if (!canManage()) { Alert.alert('Manager access required', 'Ask your manager to make this change.'); return; }
     loadEstimates();
     setShowEstimatesModal(true);
   };
@@ -710,6 +716,7 @@ const HomeScreen = ({ navigation }) => {
 
   // Schedule follow-up appointment
   const scheduleFollowUp = () => {
+    if (!canManage()) { Alert.alert('Manager access required', 'Ask your manager to make this change.'); return; }
     if (!selectedJob) return;
 
     // Pre-populate the schedule service form with customer info
@@ -731,118 +738,38 @@ const HomeScreen = ({ navigation }) => {
   };
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background.primary} />
-
-      {/* Header with Menu and Settings */}
-      <View style={styles.headerContainer}>
-      <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.menuButton}
-            onPress={() => {
-              setShowMenuModal(true);
-            }}
-          >
-            <Ionicons name="menu" size={24} color={COLORS.white} />
-          </TouchableOpacity>
-
-          <View style={styles.headerContent}>
-        <Text style={styles.logoText}>
-          <Text style={styles.factotumText}>Route</Text>
-          <Text style={styles.factotumText}> Logistics</Text>
-        </Text>
-        <Text style={{ color: '#fff', fontSize: 13 }} numberOfLines={1}>{user?.companyName || 'Personal workspace'}</Text>
-        {user?.companyLogo?.startsWith('https://') && <Image source={{ uri: user.companyLogo }} accessibilityLabel="Company logo" style={{ width: 32, height: 32, resizeMode: 'contain' }} />}
-        {/* <Text style={styles.welcomeText}>My Handyman</Text> */}
-        <Text style={styles.welcomeText}>{t('welcome')}, {user?.name || 'User'}!</Text>
-      </View>
-
-          <TouchableOpacity
-            style={styles.settingsButton}
-            onPress={() => {
-              navigation.navigate('settings');
-            }}
-          >
-            <Ionicons name="settings" size={24} color={COLORS.white} />
-          </TouchableOpacity>
+    <GlassScreen><View style={{ flex: 1 }}>
+      <View style={{ paddingHorizontal: 22, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <IconButton icon="menu-outline" label="Open menu" onPress={() => setShowMenuModal(true)} />
+        <View style={{ flex: 1, gap: 3 }}>
+          <Text style={{ color: palette.secondary, fontSize: 11, letterSpacing: 1.2, fontWeight: '700' }}>ROUTE LOGISTICS</Text>
+          <Text numberOfLines={1} style={{ color: palette.text, fontSize: 19, fontWeight: '700' }}>{user.companyName || user.businessName || 'My workspace'}</Text>
         </View>
+        <IconButton icon="settings-outline" label="Open settings" onPress={() => navigation.navigate('settings')} />
       </View>
-
-      <View style={styles.contentContainer}>
-        <ScrollView style={styles.scrollContent}>
-          <WorkLocation jobs={jobs} />
-          <OfflineStatus onSynced={() => loadJobs()} />
-          {/* Service Cards */}
-          <View style={styles.servicesContainer}>
-            <Text style={styles.sectionTitle}>{t('yourServices')}</Text>
-
-            {user?.services && user.services.length > 0 ? (
-              <View style={styles.servicesList}>
-                {user.services.map((service, index) => (
-                  <TouchableOpacity key={index} style={styles.serviceCard}>
-              <View style={styles.serviceIconContainer}>
-                      <MaterialIcons 
-                        name={getServiceIcon(service)} 
-                        size={ICON_SIZES.LARGE} 
-                        color={getServiceColor(service)} 
-                      />
-              </View>
-              <View style={styles.serviceContent}>
-                      <Text style={styles.serviceTitle}>{service}</Text>
-                      <Text style={styles.serviceDescription}>{getServiceDescription(service)}</Text>
-              </View>
-            </TouchableOpacity>
-                ))}
-              </View>
-            ) : (
-              <View style={styles.noServicesContainer}>
-                <MaterialIcons name="info" size={ICON_SIZES.LARGE} color={COLORS.gray[400]} />
-                <Text style={styles.noServicesText}>{t('noServicesSelected')}</Text>
-                <Text style={styles.noServicesSubtext}>{t('goToSettings')}</Text>
-              </View>
-            )}
+      <ScrollView contentContainerStyle={{ padding: 22, paddingTop: 12, gap: 18, paddingBottom: 30, width: '100%', maxWidth: 760, alignSelf: 'center' }}>
+        <View style={{ gap: 6 }}><Text style={{ color: palette.text, fontSize: 28, fontWeight: '700', letterSpacing: -0.6 }}>{t('welcome')}, {user.name?.split(' ')[0]}.</Text><Text style={{ color: palette.secondary, fontSize: 14, textTransform: 'capitalize' }}>{user.role || 'Independent business'} · {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</Text></View>
+        <GlassCard>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <View style={{ flex: 1, gap: 5 }}><Text style={{ color: palette.secondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 }}>Your schedule</Text><Text style={{ color: palette.text, fontSize: 23, fontWeight: '700' }}>{isLoadingJobs ? 'Loading…' : jobs.length + (jobs.length === 1 ? ' job' : ' jobs')}</Text></View>
+            <GlassButton secondary title="View schedule" icon="calendar-outline" onPress={handleSchedulePress} />
           </View>
-        </ScrollView>
-
-        {/* Quick Actions - Fixed at Bottom */}
-        <View style={styles.actionsContainer}>
-          <Text style={styles.sectionTitle}>{t('quickActions')}</Text>
-
-          <View style={styles.actionButtons}>
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={handleScheduleServicePress}
-            >
-              <MaterialIcons name="schedule" size={ICON_SIZES.MEDIUM} color={COLORS.primary[500]} />
-              <Text style={styles.actionButtonText}>{t('scheduleService')}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={handleSchedulePress}
-            >
-              <MaterialIcons name="event" size={ICON_SIZES.MEDIUM} color={COLORS.primary[500]} />
-              <Text style={styles.actionButtonText}>{t('schedule')}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={handleViewRoutesPress}
-            >
-              <MaterialIcons name="location-on" size={ICON_SIZES.MEDIUM} color={COLORS.primary[500]} />
-              <Text style={styles.actionButtonText}>{t('viewRoutes')}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={handleEstimatesPress}
-            >
-              <MaterialIcons name="description" size={ICON_SIZES.MEDIUM} color={COLORS.primary[500]} />
-              <Text style={styles.actionButtonText}>{t('estimates')}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+          {!!jobsError && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{jobsError}</Text>}
+          {!isLoadingJobs && !jobsError && !jobs.length && <Text style={{ color: palette.secondary, lineHeight: 22 }}>{permissions.isTechnician ? 'No jobs assigned for this period. Your manager assigns your work.' : 'No jobs scheduled for this period.'}</Text>}
+          {jobs.slice(0, 4).map(job => <TouchableOpacity key={job.id} accessibilityRole="button" onPress={() => handleJobSelection(job)} style={{ borderTopWidth: 1, borderColor: palette.border, paddingTop: 12, flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+            <View style={{ width: 44, height: 44, borderRadius: 15, backgroundColor: palette.input, alignItems: 'center', justifyContent: 'center' }}><Ionicons name={job.status === 'completed' ? 'checkmark-outline' : 'briefcase-outline'} size={21} color={palette.accent} /></View>
+            <View style={{ flex: 1, gap: 4 }}><Text style={{ color: palette.text, fontSize: 15, fontWeight: '600' }}>{job.customerName || job.serviceType || 'Scheduled job'}</Text><Text style={{ color: palette.secondary, fontSize: 12 }}>{[job.time, job.serviceType, job.status].filter(Boolean).join(' · ')}</Text></View><Ionicons name="chevron-forward" size={17} color={palette.secondary} />
+          </TouchableOpacity>)}
+          <GlassButton secondary title="Refresh workspace" icon="refresh-outline" onPress={async () => { const result = await refreshUser(); if (result.success) loadJobs(); }} />
+        </GlassCard>
+        {managing && <View style={{ gap: 10 }}><Text style={{ color: palette.text, fontSize: 18, fontWeight: '700' }}>Manage work</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}><GlassButton title="Schedule service" icon="add-outline" onPress={handleScheduleServicePress} style={{ flexGrow: 1 }} /><GlassButton secondary title="Customers" icon="people-outline" onPress={() => setShowCustomerModal(true)} style={{ flexGrow: 1 }} /><GlassButton secondary title="Estimates" icon="document-text-outline" onPress={handleEstimatesPress} style={{ flexGrow: 1 }} /></View></View>}
+        <WorkLocation jobs={jobs} />
+        <OfflineStatus onSynced={() => loadJobs()} />
+        <GlassCard><View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}><Ionicons name="construct-outline" size={22} color={palette.accent} /><Text style={{ color: palette.text, fontSize: 18, fontWeight: '700', flex: 1 }}>{user.companyId ? 'Company services' : 'Your services'}</Text><Text style={{ color: palette.accent, fontWeight: '700' }}>{user.services?.length || 0}</Text></View>
+          {user.services?.length ? user.services.slice(0, 6).map(service => <Text key={service} style={{ color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{service}</Text>) : <Text style={{ color: palette.secondary }}>{user.companyId ? 'Your company owner manages the service catalog.' : 'Add your business services in Settings.'}</Text>}
+          <GlassButton secondary title="Business details & all services" icon="arrow-forward-outline" onPress={() => navigation.navigate('settings')} />
+        </GlassCard>
+      </ScrollView>
 
       {/* Custom Menu Modal with Green Buttons */}
       <Modal
@@ -856,6 +783,7 @@ const HomeScreen = ({ navigation }) => {
               <Text style={styles.modalTitle}>{t('miFactotum')}</Text>
             <Text style={styles.modalSubtitle}>Choose an option</Text>
 
+            {managing && (
             <TouchableOpacity 
               style={styles.modalButton}
               onPress={() => {
@@ -865,6 +793,7 @@ const HomeScreen = ({ navigation }) => {
             >
                 <Text style={styles.modalButtonText}>{t('customers')}</Text>
             </TouchableOpacity>
+            )}
 
             <TouchableOpacity 
               style={styles.modalButton}
@@ -888,7 +817,7 @@ const HomeScreen = ({ navigation }) => {
 
       {/* Customer Management Modal */}
       <Modal
-        visible={showCustomerModal}
+        visible={showCustomerModal && managing}
         transparent={true}
         animationType="slide"
         onRequestClose={() => setShowCustomerModal(false)}
@@ -907,7 +836,7 @@ const HomeScreen = ({ navigation }) => {
 
             <View style={styles.searchContainer}>
               <MaterialIcons name="search" size={20} color={COLORS.gray[500]} style={styles.searchIcon} />
-              <TextInput
+              <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                 style={styles.searchInput}
                 placeholder="Search customers..."
                 placeholderTextColor={COLORS.gray[500]}
@@ -969,7 +898,7 @@ const HomeScreen = ({ navigation }) => {
 
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>Name *</Text>
-                <TextInput
+                <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                   style={styles.textInput}
                   placeholder="Customer Name"
                   value={customerName}
@@ -979,7 +908,7 @@ const HomeScreen = ({ navigation }) => {
 
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>Phone *</Text>
-                <TextInput
+                <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                   style={styles.textInput}
                   placeholder="(555) 123-4567"
                   keyboardType="phone-pad"
@@ -990,7 +919,7 @@ const HomeScreen = ({ navigation }) => {
 
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>Address *</Text>
-                <TextInput
+                <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                   style={[styles.textInput, styles.textArea]}
                   placeholder="123 Main St, City, State 12345"
                   multiline
@@ -1002,7 +931,7 @@ const HomeScreen = ({ navigation }) => {
 
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>Email (optional)</Text>
-                <TextInput
+                <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                   style={styles.textInput}
                   placeholder="customer@email.com"
                   keyboardType="email-address"
@@ -1049,7 +978,7 @@ const HomeScreen = ({ navigation }) => {
 
       {/* Schedule Service Modal */}
       <Modal
-        visible={showScheduleServiceModal}
+        visible={showScheduleServiceModal && managing}
         transparent={true}
         animationType="slide"
         onRequestClose={() => setShowScheduleServiceModal(false)}
@@ -1183,7 +1112,7 @@ const HomeScreen = ({ navigation }) => {
 
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>{t('expectedDuration')} *</Text>
-                <TextInput
+                <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                   style={styles.textInput}
                   placeholder="2"
                   keyboardType="numeric"
@@ -1194,7 +1123,7 @@ const HomeScreen = ({ navigation }) => {
 
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>{t('estimatedCost')}</Text>
-                <TextInput
+                <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                   style={styles.textInput}
                   placeholder="$150"
                   keyboardType="numeric"
@@ -1205,7 +1134,7 @@ const HomeScreen = ({ navigation }) => {
 
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>{t('notes')}</Text>
-                <TextInput
+                <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                   style={[styles.textInput, styles.textArea]}
                   placeholder="Additional notes..."
                   multiline
@@ -1479,13 +1408,13 @@ const HomeScreen = ({ navigation }) => {
               {selectedJob?.status === 'scheduled' && <TouchableOpacity style={[styles.modalButton, styles.confirmButton]} onPress={async () => { const result = await JobService.updateJob(selectedJob.id, { status: 'in-progress' }); if (result.success) { setSelectedJob({ ...selectedJob, status: 'in-progress' }); loadJobs(); } else Alert.alert('Could not start job', result.error?.message || 'Try again.'); }}><Text style={styles.confirmButtonText}>Start</Text></TouchableOpacity>}
               {['scheduled', 'in-progress'].includes(selectedJob?.status) && (
                 <>
-                  <TouchableOpacity 
+                  {managing && <TouchableOpacity
                     style={[styles.modalButton, styles.editButton]}
                     disabled={!canManage()}
                     onPress={() => handleJobEdit(selectedJob)}
                   >
                     <Text style={styles.editButtonText}>Edit</Text>
-                  </TouchableOpacity>
+                  </TouchableOpacity>}
                   <TouchableOpacity 
                     style={[styles.modalButton, styles.confirmButton]}
                     onPress={() => handleJobCompletion(selectedJob)}
@@ -1531,7 +1460,7 @@ const HomeScreen = ({ navigation }) => {
               <JobPhotos job={selectedJob} />
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>What work was actually done? *</Text>
-                <TextInput
+                <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                   style={[styles.textInput, styles.textArea]}
                   placeholder="Describe the work completed..."
                   multiline
@@ -1543,7 +1472,7 @@ const HomeScreen = ({ navigation }) => {
 
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>Actual hours worked</Text>
-                <TextInput
+                <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                   style={styles.textInput}
                   placeholder="2.5"
                   keyboardType="numeric"
@@ -1554,7 +1483,7 @@ const HomeScreen = ({ navigation }) => {
 
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>Completion notes</Text>
-                <TextInput
+                <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                   style={[styles.textInput, styles.textArea]}
                   placeholder="Any additional notes about the completion..."
                   multiline
@@ -1642,7 +1571,7 @@ const HomeScreen = ({ navigation }) => {
                   <Text style={styles.pickerDoneButton}>Done</Text>
                 </TouchableOpacity>
               </View>
-              <DateTimePicker
+              <DateTimePicker themeVariant={isDark ? 'dark' : 'light'}
                 value={selectedDateTime}
                 mode="date"
                 display="spinner"
@@ -1657,7 +1586,7 @@ const HomeScreen = ({ navigation }) => {
 
       {/* Date Picker for Android */}
       {Platform.OS === 'android' && showDatePicker && (
-        <DateTimePicker
+        <DateTimePicker themeVariant={isDark ? 'dark' : 'light'}
           value={selectedDateTime}
           mode="date"
           display="default"
@@ -1681,7 +1610,7 @@ const HomeScreen = ({ navigation }) => {
                   <Text style={styles.pickerDoneButton}>Done</Text>
                 </TouchableOpacity>
               </View>
-              <DateTimePicker
+              <DateTimePicker themeVariant={isDark ? 'dark' : 'light'}
                 value={selectedDateTime}
                 mode="time"
                 display="spinner"
@@ -1695,7 +1624,7 @@ const HomeScreen = ({ navigation }) => {
 
       {/* Time Picker for Android */}
       {Platform.OS === 'android' && showTimePicker && (
-        <DateTimePicker
+        <DateTimePicker themeVariant={isDark ? 'dark' : 'light'}
           value={selectedDateTime}
           mode="time"
           display="default"
@@ -1705,7 +1634,7 @@ const HomeScreen = ({ navigation }) => {
 
       {/* Job Edit Modal */}
       <Modal
-        visible={showJobEditModal}
+        visible={showJobEditModal && managing}
         transparent={true}
         animationType="slide"
         onRequestClose={() => setShowJobEditModal(false)}
@@ -1729,7 +1658,7 @@ const HomeScreen = ({ navigation }) => {
               <ScrollView style={styles.editFormContent}>
                 <View style={styles.formGroup}>
                   <Text style={styles.formLabel}>Customer Name *</Text>
-                  <TextInput
+                  <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                     style={styles.textInput}
                     placeholder="Enter customer name"
                     value={editJobData.customerName}
@@ -1739,7 +1668,7 @@ const HomeScreen = ({ navigation }) => {
 
                 <View style={styles.formGroup}>
                   <Text style={styles.formLabel}>Service Type *</Text>
-                  <TextInput
+                  <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                     style={styles.textInput}
                     placeholder="Enter service type"
                     value={editJobData.serviceType}
@@ -1778,7 +1707,7 @@ const HomeScreen = ({ navigation }) => {
                 <View style={styles.formRow}>
                   <View style={[styles.formGroup, styles.halfWidth]}>
                     <Text style={styles.formLabel}>Duration (hours)</Text>
-                    <TextInput
+                    <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                       style={styles.textInput}
                       placeholder="2.5"
                       keyboardType="numeric"
@@ -1789,7 +1718,7 @@ const HomeScreen = ({ navigation }) => {
 
                   <View style={[styles.formGroup, styles.halfWidth]}>
                     <Text style={styles.formLabel}>Estimated Cost</Text>
-                    <TextInput
+                    <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                       style={styles.textInput}
                       placeholder="150.00"
                       keyboardType="numeric"
@@ -1843,7 +1772,7 @@ const HomeScreen = ({ navigation }) => {
 
                 <View style={styles.formGroup}>
                   <Text style={styles.formLabel}>Notes</Text>
-                  <TextInput
+                  <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                     style={[styles.textInput, styles.textArea]}
                     placeholder="Additional notes..."
                     multiline
@@ -1887,7 +1816,7 @@ const HomeScreen = ({ navigation }) => {
 
       {/* Estimates List Modal */}
       <Modal
-        visible={showEstimatesModal}
+        visible={showEstimatesModal && managing}
         transparent={true}
         animationType="slide"
         onRequestClose={() => setShowEstimatesModal(false)}
@@ -1971,7 +1900,7 @@ const HomeScreen = ({ navigation }) => {
 
       {/* Create Estimate Modal */}
       <Modal
-        visible={showCreateEstimateModal}
+        visible={showCreateEstimateModal && managing}
         transparent={true}
         animationType="slide"
         onRequestClose={() => setShowCreateEstimateModal(false)}
@@ -2048,7 +1977,7 @@ const HomeScreen = ({ navigation }) => {
 
                 <View style={styles.formGroup}>
                   <Text style={styles.formLabel}>Scope of Work *</Text>
-                  <TextInput
+                  <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                     style={[styles.textInput, styles.textArea]}
                     placeholder="Describe the work to be performed..."
                     multiline
@@ -2060,7 +1989,7 @@ const HomeScreen = ({ navigation }) => {
 
                 <View style={styles.formGroup}>
                   <Text style={styles.formLabel}>Materials</Text>
-                  <TextInput
+                  <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                     style={[styles.textInput, styles.textArea]}
                     placeholder="List materials needed..."
                     multiline
@@ -2073,7 +2002,7 @@ const HomeScreen = ({ navigation }) => {
                 <View style={styles.formRow}>
                   <View style={[styles.formGroup, styles.halfWidth]}>
                     <Text style={styles.formLabel}>Labor Hours</Text>
-                    <TextInput
+                    <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                       style={styles.textInput}
                       placeholder="2.5"
                       keyboardType="numeric"
@@ -2084,7 +2013,7 @@ const HomeScreen = ({ navigation }) => {
 
                   <View style={[styles.formGroup, styles.halfWidth]}>
                     <Text style={styles.formLabel}>Labor Rate ($/hr)</Text>
-                    <TextInput
+                    <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                       style={styles.textInput}
                       placeholder="75.00"
                       keyboardType="numeric"
@@ -2096,7 +2025,7 @@ const HomeScreen = ({ navigation }) => {
 
                 <View style={styles.formGroup}>
                   <Text style={styles.formLabel}>Material Cost</Text>
-                  <TextInput
+                  <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                     style={styles.textInput}
                     placeholder="150.00"
                     keyboardType="numeric"
@@ -2107,7 +2036,7 @@ const HomeScreen = ({ navigation }) => {
 
                 <View style={styles.formGroup}>
                   <Text style={styles.formLabel}>Total Cost</Text>
-                  <TextInput
+                  <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                     style={styles.textInput}
                     placeholder="300.00"
                     keyboardType="numeric"
@@ -2118,7 +2047,7 @@ const HomeScreen = ({ navigation }) => {
 
                 <View style={styles.formGroup}>
                   <Text style={styles.formLabel}>Notes</Text>
-                  <TextInput
+                  <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                     style={[styles.textInput, styles.textArea]}
                     placeholder="Additional notes..."
                     multiline
@@ -2160,7 +2089,7 @@ const HomeScreen = ({ navigation }) => {
 
       {/* Template Selection Modal */}
       <Modal
-        visible={showTemplateModal}
+        visible={showTemplateModal && managing}
         transparent={true}
         animationType="slide"
         onRequestClose={() => setShowTemplateModal(false)}
@@ -2349,14 +2278,14 @@ const HomeScreen = ({ navigation }) => {
           </View>
         </View>
       </Modal>
-    </View>
+    </View></GlassScreen>
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (COLORS) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: COLORS.background.secondary,
   },
   headerContainer: {
     backgroundColor: COLORS.primary[500],
@@ -2422,7 +2351,7 @@ const styles = StyleSheet.create({
   },
   serviceCard: {
     flexDirection: 'row',
-    backgroundColor: '#ffffff',
+    backgroundColor: COLORS.background.secondary,
     borderRadius: BORDER_RADIUS.MEDIUM,
     padding: SPACING.MEDIUM,
     marginBottom: SPACING.MEDIUM,
@@ -2480,7 +2409,7 @@ const styles = StyleSheet.create({
     color: COLORS.text.tertiary,
   },
   actionsContainer: {
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.background.secondary,
     padding: SPACING.LARGE,
     borderTopWidth: 1,
     borderTopColor: COLORS.gray[200],
@@ -2519,7 +2448,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContent: {
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.background.secondary,
     borderRadius: BORDER_RADIUS.LARGE,
     padding: SPACING.LARGE,
     width: wp('80%'),
@@ -2564,14 +2493,14 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   bottomModalContent: {
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.background.secondary,
     borderTopLeftRadius: BORDER_RADIUS.LARGE,
     borderTopRightRadius: BORDER_RADIUS.LARGE,
     height: hp('90%'),
     paddingBottom: SPACING.LARGE,
   },
   templateModalContent: {
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.background.secondary,
     borderTopLeftRadius: BORDER_RADIUS.LARGE,
     borderTopRightRadius: BORDER_RADIUS.LARGE,
     maxHeight: hp('85%'),
@@ -2866,7 +2795,7 @@ const styles = StyleSheet.create({
   },
   // Dropdown Styles
   dropdown: {
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.background.secondary,
     borderRadius: BORDER_RADIUS.MEDIUM,
     borderWidth: 1,
     borderColor: COLORS.gray[300],
@@ -3008,7 +2937,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   pickerModalContent: {
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.background.secondary,
     borderTopLeftRadius: BORDER_RADIUS.LARGE,
     borderTopRightRadius: BORDER_RADIUS.LARGE,
     paddingBottom: SPACING.LARGE,
@@ -3037,7 +2966,7 @@ const styles = StyleSheet.create({
     padding: SPACING.LARGE,
   },
   confirmModalContent: {
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.background.secondary,
     borderRadius: BORDER_RADIUS.LARGE,
     padding: SPACING.XLARGE,
     alignItems: 'center',

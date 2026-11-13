@@ -42,7 +42,7 @@ function staffLoginHandlers(db, auth, emailEnabled = () => true) {
         batch.set(db.doc(`rlStaffLoginRequests/${emailHash}`), { challengeId, expiresAt: new Date(now + CODE_LIFETIME_MS) });
         batch.create(db.collection('rlMail').doc(), {
           staffLoginChallengeId: challengeId, to: email, subject: 'Your Route Logistics staff sign-in code',
-          text: `Your Route Logistics sign-in code is ${code}.\n\nIt expires in 10 minutes and can be used once. Only enter it on route-logistics.com. If you did not request this code, ignore this email.`,
+          text: `Your Route Logistics sign-in code is ${code}.\n\nIt expires in 10 minutes and can be used once. Only enter it in the Route Logistics mobile app or on route-logistics.com. If you did not request this code, ignore this email.`,
           status: 'queued', availableAt: now, createdAt: new Date(now), expiresAt: new Date(now + CODE_LIFETIME_MS),
         });
         await batch.commit();

@@ -106,7 +106,7 @@ cd routeLogisticsMobile
 # Use Node.js 22 LTS; do not mix Yarn with the npm lockfile
 node --version
 npm ci
-node --test scripts/firebase-config.test.js
+npm test
 npx expo install --check
 npx expo-doctor
 npx expo config --type public
@@ -140,6 +140,51 @@ npx eas-cli build --platform ios --profile production
 
 Do not run `eas init` or create/link another EAS project. Any optional EAS
 environment overrides must use the same Firebase project as the defaults.
+
+### Company access, sign-in, and appearance
+
+Email verification and company invitation acceptance are separate steps. A
+verified account with a pending invitation sees **Join your company**, with no
+personal-business management fallback. Open the **Join Acme Pest Control on
+Route Logistics** invitation email and press **Accept invitation** on the web,
+or paste the complete invitation link into the mobile acceptance screen and
+press **Accept invitation** there. The app never accepts invitations automatically.
+If acceptance happens in the browser, return to the app and refresh.
+
+`syncClaims` supplies a server-resolved workspace status alongside signed Firebase
+claims. Pending, unavailable, and unresolved workspaces cannot open operational
+screens. Active technicians see their assigned schedule and work completion/photo
+controls. Customer, estimate, and scheduling management require an owner, admin,
+or manager role; company settings remain owner-only. Firestore rules and existing
+Cloud Functions enforce company and role permissions independently of the UI.
+
+Home and Settings read business information and the service catalog from the
+active company document. Legacy service objects are displayed by their `name`;
+their accounting metadata is preserved. Staff personal profiles do not replace
+the shared company catalog. Company business edits open the existing web screen
+for the owner; technicians can edit their personal contact/preferences only.
+
+Login supports passwords and six-digit email codes through the existing
+`rlRequestStaffOTP` / `rlVerifyStaffOTP` functions. Codes expire after ten minutes,
+are single-use, and retain the server's retry limits. OTP does not verify an
+unverified email, accept an invitation, or grant a role. Passwords, codes, and
+invitation links are never saved by these screens. Remembered email and the
+System/Light/Dark appearance preference are stored locally with AsyncStorage.
+
+The Home, Settings, and Login screens use rounded glass cards, gradients, and
+theme colors inspired by the Merxus mobile components. iOS uses native blur with
+an opaque fallback when Reduce Transparency is enabled; Android uses translucent
+surfaces. The theme also applies to work status, job dialogs, and verification.
+
+**Rebuild the native app after pulling this update.** The new Expo blur, gradient,
+and system-UI modules require `npm ci`, `npx expo prebuild --platform ios`, and a
+new Xcode build. A JavaScript reload of the older installed app is insufficient.
+
+Validation on November 13, 2026 used unit/screen tests, Auth/Firestore/Functions
+emulators, Expo Doctor, and iOS/Android bundle exports. Native rendering, signing,
+and device testing still run on the Mac. The production audit found Acme's 15
+services and all 507 customers already present; Luis's invitation was pending.
+The audit and implementation do not accept invitations or alter customer records.
 
 ## Documentation
 

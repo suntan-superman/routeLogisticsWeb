@@ -1,8 +1,11 @@
+import { useTheme } from '../theme/ThemeProvider';
+import { GlassCard } from './Glass';
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Button, Alert, AppState } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { queuedWork, subscribeOffline, flushOffline, resolveOffline } from '../services/offline';
 export default function OfflineStatus({ onSynced }) {
+  const { palette } = useTheme();
   const [rows, setRows] = useState([]), [offline, setOffline] = useState(false);
   const onChanged = useRef(onSynced);
   onChanged.current = onSynced;
@@ -16,8 +19,8 @@ export default function OfflineStatus({ onSynced }) {
     return () => { mounted = false; unsubscribe(); network(); app.remove(); clearInterval(timer); };
   }, []);
   const pending = rows.filter((row) => !['synced', 'discarded'].includes(row.state));
-  return <View style={{ padding: 12, backgroundColor: offline || pending.length ? '#fff7ed' : '#f0fdf4', marginBottom: 12 }}>
-    <Text accessibilityRole="status">{offline ? 'Offline — saved work stays on this device' : 'Online'} · {pending.length} awaiting sync · {rows.filter((row) => row.state === 'synced').length} synced</Text>
-    {pending.map((row) => <View key={row.id} style={{ marginTop: 8 }}><Text>{row.kind === 'photo' ? 'Photo' : 'Job update'} · {row.state}</Text>{!!row.error && <Text>{row.error}</Text>}{row.state === 'conflict' && <Text>Online: {JSON.stringify(row.server)}{ '\n' }Your changes: {JSON.stringify(row.patch)}</Text>}{['failed', 'conflict'].includes(row.state) && <><Button title={row.state === 'conflict' ? 'Apply my changes after review' : 'Retry'} onPress={() => Alert.alert('Retry saved changes?', 'Changes will be checked against the latest job again before saving.', [{ text: 'Cancel' }, { text: 'Retry', onPress: () => resolveOffline(row.id, 'retry') }])} /><Button title="Discard this local change" color="#b91c1c" onPress={() => Alert.alert('Discard local change?', 'This removes the pending change from the sync queue. Other saved work is kept.', [{ text: 'Cancel' }, { text: 'Discard', style: 'destructive', onPress: () => resolveOffline(row.id, 'discard') }])} /></>}</View>)}
-  </View>;
+  return <GlassCard contentStyle={{ padding: 16, gap: 7 }}>
+    <Text accessibilityLiveRegion="polite" style={{ color: palette.secondary, fontSize: 12, lineHeight: 19 }}>{offline ? 'Offline — saved work stays on this device' : 'Online'} · {pending.length} awaiting sync · {rows.filter((row) => row.state === 'synced').length} synced</Text>
+    {pending.map((row) => <View key={row.id} style={{ marginTop: 8 }}><Text style={{ color: palette.secondary, fontSize: 13 }}>{row.kind === 'photo' ? 'Photo' : 'Job update'} · {row.state}</Text>{!!row.error && <Text style={{ color: palette.secondary, fontSize: 13 }}>{row.error}</Text>}{row.state === 'conflict' && <Text style={{ color: palette.secondary, fontSize: 13 }}>Online: {JSON.stringify(row.server)}{ '\n' }Your changes: {JSON.stringify(row.patch)}</Text>}{['failed', 'conflict'].includes(row.state) && <><Button title={row.state === 'conflict' ? 'Apply my changes after review' : 'Retry'} onPress={() => Alert.alert('Retry saved changes?', 'Changes will be checked against the latest job again before saving.', [{ text: 'Cancel' }, { text: 'Retry', onPress: () => resolveOffline(row.id, 'retry') }])} /><Button title="Discard this local change" color="#b91c1c" onPress={() => Alert.alert('Discard local change?', 'This removes the pending change from the sync queue. Other saved work is kept.', [{ text: 'Cancel' }, { text: 'Discard', style: 'destructive', onPress: () => resolveOffline(row.id, 'discard') }])} /></>}</View>)}
+  </GlassCard>;
 }

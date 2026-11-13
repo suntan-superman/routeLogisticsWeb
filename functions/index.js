@@ -5,6 +5,7 @@ const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https')
 const { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
 const { resolveClaims } = require('./claims');
+const { workspaceStatus } = require('./workspace');
 const { assignmentTarget, buildAssignmentMessage, DEAD_TOKEN_CODES } = require('./notify');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineString } = require('firebase-functions/params');
@@ -105,7 +106,8 @@ exports.syncClaims = onCall(async (request) => {
   const { uid, token } = requireAuth(request);
   await rateLimit(db, 'sync-claims', uid, 60);
   const claims = await applyClaims(uid, normalizeEmail(token.email) || null, token.email_verified === true);
-  return { claims };
+  const workspace = await workspaceStatus(db, { uid, email: normalizeEmail(token.email), emailVerified: token.email_verified === true }, claims);
+  return { claims, workspace };
 });
 
 const invites = invitationHandlers(db, applyClaims, () => appUrl.value(), emailEnabled);

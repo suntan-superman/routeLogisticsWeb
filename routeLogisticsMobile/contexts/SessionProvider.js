@@ -5,54 +5,66 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { isOffline } from '../services/offline';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from '../constants/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { auth, db, functions } from '../constants/firebase';
 import { AuthService } from '../services/firebase';
-import { syncTenancy } from '../services/tenancy';
+import { syncTenancy, getWorkspace, restoreOfflineWorkspace } from '../services/tenancy';
+import { companyProfile, serviceNames, workspacePermissions, parseInvitationLink } from '../services/workspacePolicy';
+import { requestStaffCode, signInWithStaffCode } from '../services/staffLogin';
 
 export const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
+const sessionKey = uid => `rl-session-v2:${uid}`;
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null), [isLoading, setIsLoading] = useState(true), [sessionError, setSessionError] = useState('');
   const generation = useRef(0);
   const hydrate = useCallback(async (account, reload = false) => {
     const ticket = ++generation.current;
     if (!account) { await syncTenancy(null); setUser(null); setSessionError(''); setIsLoading(false); return { success: true }; }
+    const isCurrent = () => ticket === generation.current && auth.currentUser?.uid === account.uid;
     try {
       const offline = await isOffline();
       if (reload && !offline) { await account.reload(); await account.getIdToken(true); }
+      if (!isCurrent()) return { success: true };
       const claims = await syncTenancy(account);
-      const cacheKey = `rl-session-v1:${account.uid}`;
+      if (!isCurrent()) return { success: true };
       if (offline) {
-        const saved = JSON.parse(await AsyncStorage.getItem(cacheKey) || 'null');
-        if (!saved || saved.companyId !== (claims?.companyId || null) || saved.role !== (claims?.role || null)) throw new Error('Connect once to load your current workspace.');
+        const saved = JSON.parse(await AsyncStorage.getItem(sessionKey(account.uid)) || 'null');
+        if (!saved) throw new Error('Connect once to load your current workspace.');
+        restoreOfflineWorkspace(saved, account);
         const current = { ...saved, emailVerified: account.emailVerified, offline: true };
-        if (ticket === generation.current && auth.currentUser?.uid === account.uid) { setUser(current); setSessionError(''); }
+        if (isCurrent()) { setUser(current); setSessionError(''); }
         return { success: true, user: current };
       }
       const profile = await getDoc(doc(db, 'users', account.uid));
       const data = profile.exists() ? profile.data() : {};
       const company = claims?.companyId ? await getDoc(doc(db, 'companies', claims.companyId)) : null;
-      const current = { ...data, id: account.uid, email: account.email, name: account.displayName || data.name || 'User', emailVerified: account.emailVerified, companyId: claims?.companyId || null, role: claims?.role || null, membershipId: claims?.membershipId || null, companyName: company?.get('name') || '', companyLogo: company?.get('logo') || '' };
-      await AsyncStorage.setItem(cacheKey, JSON.stringify(current));
-      if (ticket === generation.current && auth.currentUser?.uid === account.uid) { setUser(current); setSessionError(''); }
+      if (claims?.companyId && !company?.exists()) throw new Error('Your company could not be loaded. Ask the owner to check your membership.');
+      const current = {
+        ...data, services: serviceNames(data.services),
+        ...(company?.exists() ? companyProfile(company.data()) : { businessPhone: data.phoneNumber || '', businessAddress: data.address || '' }),
+        id: account.uid, email: account.email, name: account.displayName || data.name || 'User', emailVerified: account.emailVerified,
+        companyId: claims?.companyId || null, role: claims?.role || null, membershipId: claims?.membershipId || null, workspace: getWorkspace(), offline: false,
+      };
+      if (!isCurrent()) return { success: true };
+      await AsyncStorage.setItem(sessionKey(account.uid), JSON.stringify(current));
+      if (isCurrent()) { setUser(current); setSessionError(''); }
       return { success: true, user: current };
     } catch (error) {
-      if (ticket === generation.current) { setUser(null); setSessionError(error.message || 'Could not load your account.'); }
+      if (isCurrent()) { setUser(null); setSessionError(error.message || 'Could not load your account.'); }
       return { success: false, error: { message: error.message } };
     } finally { if (ticket === generation.current) setIsLoading(false); }
   }, []);
   const refreshUser = useCallback(() => hydrate(auth.currentUser, true), [hydrate]);
   useEffect(() => {
-    // Remove passwords saved by the legacy app; Firebase persists its own refresh session.
-    Promise.all(['savedCredentials', 'tempCredentials', 'userToken', 'userData'].map((key) => SecureStore.deleteItemAsync(key))).catch(() => {});
-    return onAuthStateChanged(auth, (account) => { setIsLoading(true); hydrate(account); });
+    Promise.all(['savedCredentials', 'tempCredentials', 'userToken', 'userData'].map(key => SecureStore.deleteItemAsync(key))).catch(() => {});
+    return onAuthStateChanged(auth, account => { setIsLoading(true); hydrate(account); });
   }, [hydrate]);
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', (state) => { if (state === 'active' && auth.currentUser) refreshUser(); });
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active' && auth.currentUser) refreshUser(); });
     return () => subscription.remove();
   }, [refreshUser]);
-  const authenticate = async (method, email, password, data) => {
-    const result = await method(email.trim(), password, data);
+  const finishAuthentication = async result => {
     if (!result.success) return result;
     const loaded = await hydrate(auth.currentUser);
     return { ...loaded, needsEmailVerification: !auth.currentUser?.emailVerified };
@@ -60,24 +72,36 @@ export function AuthProvider({ children }) {
   const signOut = async () => {
     const uid = auth.currentUser?.uid;
     const result = await AuthService.signOut();
-    if (result.success && uid) await AsyncStorage.removeItem(`rl-session-v1:${uid}`);
-    if (result.success) { generation.current++; setUser(null); setSessionError(''); await syncTenancy(null); }
+    if (result.success) {
+      generation.current++; setUser(null); setSessionError(''); await syncTenancy(null);
+      if (uid) await AsyncStorage.multiRemove([sessionKey(uid), `rl-session-v1:${uid}`]);
+    }
     return result;
   };
-  const updateUserProfile = async (data) => {
-    const allowed = Object.fromEntries(Object.entries(data).filter(([key]) => ['name', 'phoneNumber', 'businessName', 'address', 'services', 'serviceCategories', 'notificationsEnabled', 'emailNotifications', 'smsNotifications'].includes(key)));
+  const permissions = workspacePermissions(user?.workspace, user);
+  const updateUserProfile = async data => {
+    const personal = ['name', 'phoneNumber', 'notificationsEnabled', 'emailNotifications', 'smsNotifications'];
+    const business = ['businessName', 'address', 'services', 'serviceCategories'];
+    if (!permissions.canAccess || (user.companyId && business.some(key => key in data))) return { success: false, error: { message: 'Company information is managed by your company owner.' } };
+    const allowed = Object.fromEntries(Object.entries(data).filter(([key]) => personal.includes(key) || (!user.companyId && business.includes(key))));
     const result = await AuthService.updateUserProfile(allowed);
     if (result.success) await hydrate(auth.currentUser);
     return result;
   };
-  const value = { user, isAuthenticated: !!user, isLoading, sessionError, refreshUser,
-    signIn: (email, password) => authenticate(AuthService.signIn.bind(AuthService), email, password),
+  const value = { user, permissions, isAuthenticated: !!user, isLoading, sessionError, refreshUser,
+    signIn: async (email, password) => finishAuthentication(await AuthService.signIn(email.trim(), password)),
+    requestStaffCode,
+    signInWithCode: async (challengeId, code) => { await signInWithStaffCode(challengeId, code); return finishAuthentication({ success: true }); },
+    acceptInvitation: async link => {
+      await httpsCallable(functions, 'acceptTeamInvite')(parseInvitationLink(link));
+      return refreshUser();
+    },
     signUp: async (email, password, data) => {
-      const result = await authenticate(AuthService.signUp.bind(AuthService), email, password, data);
+      const result = await finishAuthentication(await AuthService.signUp(email.trim(), password, data));
       if (result.success) await AuthService.sendEmailVerification();
       return result;
     },
-    signOut, resetPassword: (email) => AuthService.resetPassword(email), updateUserProfile,
+    signOut, resetPassword: email => AuthService.resetPassword(email), updateUserProfile,
     sendEmailVerification: () => AuthService.sendEmailVerification(),
     isEmailVerified: async () => { const result = await refreshUser(); return result.user?.emailVerified === true; },
   };

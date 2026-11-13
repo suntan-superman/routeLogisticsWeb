@@ -1,500 +1,54 @@
-import React, { useState, useContext, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  StatusBar,
-  Alert,
-  Switch,
-  TextInput,
-} from 'react-native';
-import { MaterialIcons, Ionicons } from '@expo/vector-icons';
-import { COLORS } from '../constants/colors';
-import { AuthContext } from '../contexts/AuthContext';
+import React, { useEffect, useState } from 'react';
+import { View, Text, ScrollView, Pressable, Switch, Alert, Linking } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
-import { FONT_SIZES, SPACING, BORDER_RADIUS, hp, wp } from '../constants/responsiveSizes';
+import { useTheme } from '../theme/ThemeProvider';
+import { GlassScreen, GlassCard, GlassButton, GlassInput, IconButton } from '../components/Glass';
 import ServiceSelectionScreen from './ServiceSelectionScreen';
 
-const SettingsScreen = ({ navigation }) => {
-  const { user, updateUserProfile, signOut } = useContext(AuthContext);
-  const { t, language, changeLanguage } = useLanguage();
-  const [showServiceSelection, setShowServiceSelection] = useState(false);
-  const [userServices, setUserServices] = useState(user?.services || []);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [emailNotifications, setEmailNotifications] = useState(true);
-  const [smsNotifications, setSmsNotifications] = useState(false);
-  const [businessName, setBusinessName] = useState(user?.businessName || '');
-  const [phoneNumber, setPhoneNumber] = useState(user?.phoneNumber || '');
-  const [address, setAddress] = useState(user?.address || '');
-  const [isLoading, setIsLoading] = useState(false);
-
-  useEffect(() => {
-    if (user) {
-      setUserServices(user.services || []);
-      setBusinessName(user.businessName || '');
-      setPhoneNumber(user.phoneNumber || '');
-      setAddress(user.address || '');
-    }
-  }, [user]);
-
-  const handleServiceSelection = (services) => {
-    setUserServices(services);
-    setShowServiceSelection(false);
-    // Update user profile with new services
-    updateUserServices(services);
-  };
-
-  const updateUserServices = async (services) => {
-    setIsLoading(true);
+export default function SettingsScreen({ navigation }) {
+  const { user, permissions, updateUserProfile, signOut, refreshUser } = useAuth();
+  const { language, changeLanguage } = useLanguage();
+  const { palette, mode, changeMode } = useTheme();
+  const [name, setName] = useState(user.name || ''), [phone, setPhone] = useState(user.phoneNumber || '');
+  const [businessName, setBusinessName] = useState(user.businessName || ''), [address, setAddress] = useState(user.businessAddress || '');
+  const [notifications, setNotifications] = useState({}), [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState('');
+  const [selectServices, setSelectServices] = useState(false);
+  useEffect(() => { setName(user.name || ''); setPhone(user.phoneNumber || ''); setBusinessName(user.businessName || ''); setAddress(user.businessAddress || ''); setNotifications({ notificationsEnabled: user.notificationsEnabled ?? true, emailNotifications: user.emailNotifications ?? true, smsNotifications: user.smsNotifications ?? false }); }, [user]);
+  const save = async extra => {
+    setBusy(true); setMessage(''); setError('');
     try {
-      const result = await updateUserProfile({
-        services: services,
-        serviceCategories: getServiceCategories(services)
-      });
-      
-      if (result.success) {
-        Alert.alert('Success', 'Your services have been updated successfully.');
-      } else {
-        Alert.alert('Error', 'Failed to update services. Please try again.');
-      }
-    } catch (error) {
-      console.error('Error updating services:', error);
-      Alert.alert('Error', 'Failed to update services. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
+      const result = await updateUserProfile(extra || { name: name.trim(), phoneNumber: phone.trim(), ...notifications, ...(!user.companyId ? { businessName: businessName.trim(), address: address.trim() } : {}) });
+      if (!result.success) throw new Error(result.error?.message || 'Could not save your preferences.');
+      setMessage('Your changes are saved.');
+    } catch (failure) { setError(failure.message); }
+    finally { setBusy(false); }
   };
-
-  const getServiceCategories = (services) => {
-    // This would map services back to categories for easier filtering
-    return services;
-  };
-
-  const handleSaveProfile = async () => {
-    setIsLoading(true);
-    try {
-      const result = await updateUserProfile({
-        businessName,
-        phoneNumber,
-        address,
-        notificationsEnabled,
-        emailNotifications,
-        smsNotifications,
-      });
-      
-      if (result.success) {
-        Alert.alert('Success', 'Your profile has been updated successfully.');
-      } else {
-        Alert.alert('Error', 'Failed to update profile. Please try again.');
-      }
-    } catch (error) {
-      console.error('Error updating profile:', error);
-      Alert.alert('Error', 'Failed to update profile. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSignOut = () => {
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: async () => {
-            await signOut();
-          }
-        }
-      ]
-    );
-  };
-
-
-  // Show service selection screen if needed
-  if (showServiceSelection) {
-    return (
-      <ServiceSelectionScreen
-        navigation={navigation}
-        onServicesSelected={handleServiceSelection}
-        initialServices={userServices}
-      />
-    );
-  }
-
-  return (
-    <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background.primary} />
-      
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color={COLORS.white} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Settings</Text>
-        <View style={styles.placeholder} />
-      </View>
-
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Profile Information Section */}
-        <Text style={[styles.sectionTitle, { marginTop: SPACING.LARGE }]}>Profile Information</Text>
-        
-        <View style={styles.settingItem}>
-          <View style={styles.settingLeft}>
-            <MaterialIcons name="business" size={20} color={COLORS.primary[500]} style={styles.icon} />
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingTitle}>Business Name</Text>
-              <TextInput
-                style={styles.textInput}
-                value={businessName}
-                onChangeText={setBusinessName}
-                placeholder="Enter your business name"
-              />
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.settingItem}>
-          <View style={styles.settingLeft}>
-            <MaterialIcons name="phone" size={20} color={COLORS.primary[500]} style={styles.icon} />
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingTitle}>Phone Number</Text>
-              <TextInput
-                style={styles.textInput}
-                value={phoneNumber}
-                onChangeText={setPhoneNumber}
-                placeholder="Enter your phone number"
-                keyboardType="phone-pad"
-              />
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.settingItem}>
-          <View style={styles.settingLeft}>
-            <MaterialIcons name="location-on" size={20} color={COLORS.primary[500]} style={styles.icon} />
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingTitle}>Address</Text>
-              <TextInput
-                style={[styles.textInput, styles.textArea]}
-                value={address}
-                onChangeText={setAddress}
-                placeholder="Enter your business address"
-                multiline
-                numberOfLines={3}
-              />
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.settingItem}>
-          <View style={styles.settingLeft}>
-            <MaterialIcons name="language" size={20} color={COLORS.primary[500]} style={styles.icon} />
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingTitle}>Language</Text>
-              <View style={styles.languageSelector}>
-                <TouchableOpacity
-                  style={[styles.languageOption, language === 'English' && styles.languageOptionSelected]}
-                  onPress={() => changeLanguage('English')}
-                >
-                  <Text style={[styles.languageOptionText, language === 'English' && styles.languageOptionTextSelected]}>
-                    English
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.languageOption, language === 'Spanish' && styles.languageOptionSelected]}
-                  onPress={() => changeLanguage('Spanish')}
-                >
-                  <Text style={[styles.languageOptionText, language === 'Spanish' && styles.languageOptionTextSelected]}>
-                    Español
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </View>
-
-        {/* Spacer between Profile and Services */}
-        <View style={{ height: SPACING.SMALL }} />
-
-        {/* Services Section */}
-        <Text style={styles.sectionTitle}>Services</Text>
-        
-        <TouchableOpacity
-          style={styles.settingItem}
-          onPress={() => setShowServiceSelection(true)}
-        >
-          <View style={styles.settingLeft}>
-            <MaterialIcons name="build" size={20} color={COLORS.primary[500]} style={styles.icon} />
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingTitle}>Manage Services</Text>
-              <Text style={styles.settingSubtitle}>
-                {userServices.length} services selected
-              </Text>
-            </View>
-          </View>
-          <MaterialIcons name="arrow-forward-ios" size={16} color={COLORS.gray[500]} />
-        </TouchableOpacity>
-
-        {/* Spacer between Services and Notifications */}
-        <View style={{ height: SPACING.SMALL }} />
-
-        {/* Notifications Section */}
-        <Text style={styles.sectionTitle}>Notifications</Text>
-        
-        <View style={styles.settingItem}>
-          <View style={styles.settingLeft}>
-            <MaterialIcons name="notifications" size={20} color={COLORS.primary[500]} style={styles.icon} />
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingTitle}>Push Notifications</Text>
-              <Text style={styles.settingSubtitle}>Receive app notifications</Text>
-            </View>
-          </View>
-          <Switch
-            value={notificationsEnabled}
-            onValueChange={setNotificationsEnabled}
-            trackColor={{ false: COLORS.gray[300], true: COLORS.primary[300] }}
-            thumbColor={notificationsEnabled ? COLORS.primary[500] : COLORS.gray[500]}
-          />
-        </View>
-
-        <View style={styles.settingItem}>
-          <View style={styles.settingLeft}>
-            <MaterialIcons name="email" size={20} color={COLORS.primary[500]} style={styles.icon} />
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingTitle}>Email Notifications</Text>
-              <Text style={styles.settingSubtitle}>Receive email updates</Text>
-            </View>
-          </View>
-          <Switch
-            value={emailNotifications}
-            onValueChange={setEmailNotifications}
-            trackColor={{ false: COLORS.gray[300], true: COLORS.primary[300] }}
-            thumbColor={emailNotifications ? COLORS.primary[500] : COLORS.gray[500]}
-          />
-        </View>
-
-        <View style={styles.settingItem}>
-          <View style={styles.settingLeft}>
-            <MaterialIcons name="sms" size={20} color={COLORS.primary[500]} style={styles.icon} />
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingTitle}>SMS Notifications</Text>
-              <Text style={styles.settingSubtitle}>Receive text messages</Text>
-            </View>
-          </View>
-          <Switch
-            value={smsNotifications}
-            onValueChange={setSmsNotifications}
-            trackColor={{ false: COLORS.gray[300], true: COLORS.primary[300] }}
-            thumbColor={smsNotifications ? COLORS.primary[500] : COLORS.gray[500]}
-          />
-        </View>
-
-        {/* Spacer between Notifications and Account */}
-        <View style={{ height: SPACING.SMALL }} />
-
-        {/* Account Section */}
-        <Text style={styles.sectionTitle}>Account</Text>
-        
-        <View style={styles.settingItem}>
-          <View style={styles.settingLeft}>
-            <MaterialIcons name="email" size={20} color={COLORS.primary[500]} style={styles.icon} />
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingTitle}>Email Address</Text>
-              <Text style={styles.settingSubtitle}>{user?.email}</Text>
-            </View>
-          </View>
-          <MaterialIcons name="verified" size={16} color={COLORS.green[500]} />
-        </View>
-
-        <TouchableOpacity style={styles.settingItem}>
-          <View style={styles.settingLeft}>
-            <MaterialIcons name="lock" size={20} color={COLORS.primary[500]} style={styles.icon} />
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingTitle}>Change Password</Text>
-              <Text style={styles.settingSubtitle}>Update your password</Text>
-            </View>
-          </View>
-          <MaterialIcons name="arrow-forward-ios" size={16} color={COLORS.gray[500]} />
-        </TouchableOpacity>
-
-        {/* Spacer between Account and Save Button */}
-        <View style={{ height: SPACING.SMALL }} />
-
-        {/* Save Changes Button */}
-        <View style={styles.saveSection}>
-          <TouchableOpacity
-            style={[styles.saveButton, isLoading && styles.saveButtonDisabled]}
-            onPress={handleSaveProfile}
-            disabled={isLoading}
-          >
-            <Text style={styles.saveButtonText}>
-              {isLoading ? 'Saving...' : 'Save Changes'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Bottom padding */}
-        <View style={styles.bottomPadding} />
-      </ScrollView>
-    </View>
-  );
-};
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background.primary,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg,
-    paddingTop: hp('6%'),
-    paddingBottom: SPACING.lg,
-    backgroundColor: COLORS.primary[500],
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.gray[200],
-  },
-  backButton: {
-    padding: SPACING.sm,
-  },
-  headerTitle: {
-    fontSize: FONT_SIZES.lg,
-    fontWeight: '600',
-    color: COLORS.white,
-  },
-  placeholder: {
-    width: 40,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: SPACING.SMALL,
-  },
-  sectionTitle: {
-    fontSize: FONT_SIZES.SMALL,
-    fontWeight: 'bold',
-    color: COLORS.text.secondary,
-    marginTop: SPACING.SMALL,
-    marginBottom: SPACING.TINY,
-    textTransform: 'uppercase',
-    opacity: 0.9,
-  },
-  settingItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: SPACING.SMALL,
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.SMALL,
-    marginBottom: SPACING.TINY / 2,
-    shadowColor: COLORS.black,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  settingLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  icon: {
-    marginRight: SPACING.SMALL,
-    width: 18,
-  },
-  settingInfo: {
-    flex: 1,
-  },
-  settingTitle: {
-    fontSize: FONT_SIZES.SMALL,
-    fontWeight: '500',
-    color: COLORS.text.primary,
-  },
-  settingSubtitle: {
-    fontSize: FONT_SIZES.TINY,
-    color: COLORS.text.secondary,
-    marginTop: 1,
-  },
-  textInput: {
-    borderWidth: 1,
-    borderColor: COLORS.gray[300],
-    borderRadius: BORDER_RADIUS.SMALL,
-    paddingHorizontal: SPACING.SMALL,
-    paddingVertical: SPACING.TINY,
-    fontSize: FONT_SIZES.SMALL,
-    backgroundColor: COLORS.gray[50],
-    color: COLORS.text.primary,
-    marginTop: SPACING.TINY,
-  },
-  textArea: {
-    height: 40,
-    textAlignVertical: 'top',
-  },
-  saveSection: {
-    marginTop: SPACING.SMALL,
-    marginBottom: SPACING.SMALL,
-    paddingHorizontal: SPACING.SMALL,
-  },
-  saveButton: {
-    backgroundColor: COLORS.primary[500],
-    paddingVertical: SPACING.SMALL,
-    paddingHorizontal: SPACING.MEDIUM,
-    borderRadius: BORDER_RADIUS.SMALL,
-    alignItems: 'center',
-    shadowColor: COLORS.primary[500],
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  saveButtonDisabled: {
-    backgroundColor: COLORS.gray[400],
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  saveButtonText: {
-    fontSize: FONT_SIZES.SMALL,
-    fontWeight: '600',
-    color: COLORS.white,
-  },
-  bottomPadding: {
-    height: SPACING.SMALL,
-  },
-  // Language Selector Styles
-  languageSelector: {
-    flexDirection: 'row',
-    marginTop: SPACING.TINY,
-  },
-  languageOption: {
-    paddingHorizontal: SPACING.MEDIUM,
-    paddingVertical: SPACING.SMALL,
-    borderRadius: BORDER_RADIUS.SMALL,
-    borderWidth: 1,
-    borderColor: COLORS.gray[300],
-    marginRight: SPACING.SMALL,
-    backgroundColor: COLORS.white,
-  },
-  languageOptionSelected: {
-    backgroundColor: COLORS.primary[500],
-    borderColor: COLORS.primary[500],
-  },
-  languageOptionText: {
-    fontSize: FONT_SIZES.SMALL,
-    color: COLORS.text.primary,
-    fontWeight: '500',
-  },
-  languageOptionTextSelected: {
-    color: COLORS.white,
-  },
-});
-
-export default SettingsScreen;
+  const title = text => <Text style={{ fontSize: 13, fontWeight: '700', color: palette.secondary, letterSpacing: 1, textTransform: 'uppercase', marginTop: 8 }}>{text}</Text>;
+  const detail = (label, value, icon) => <View style={{ flexDirection: 'row', gap: 12, alignItems: 'flex-start' }}><Ionicons name={icon} size={20} color={palette.accent} /><View style={{ flex: 1, gap: 4 }}><Text style={{ color: palette.secondary, fontSize: 12 }}>{label}</Text><Text style={{ color: palette.text, fontSize: 15, lineHeight: 22 }}>{value || 'Not provided'}</Text></View></View>;
+  if (selectServices && !user.companyId && permissions.canManage) return <ServiceSelectionScreen navigation={{ goBack: () => setSelectServices(false) }} initialServices={user.services} onServicesSelected={services => { setSelectServices(false); save({ services, serviceCategories: services }); }} />;
+  return <GlassScreen>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 22, paddingVertical: 12 }}><IconButton icon="arrow-back" label="Back to Home" onPress={navigation.goBack} /><Text style={{ color: palette.text, fontSize: 24, fontWeight: '700' }}>Settings</Text></View>
+    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 22, paddingTop: 8, gap: 16, maxWidth: 680, width: '100%', alignSelf: 'center' }}>
+      <GlassCard><View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}><View style={{ width: 48, height: 48, backgroundColor: palette.input, borderRadius: 17, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="person-outline" size={24} color={palette.accent} /></View><View style={{ flex: 1, gap: 4 }}><Text style={{ color: palette.text, fontSize: 18, fontWeight: '700' }}>{user.name}</Text><Text style={{ color: palette.secondary, fontSize: 13 }}>{user.email}</Text></View></View><Text style={{ color: palette.accent, textTransform: 'capitalize', fontWeight: '600' }}>{user.companyName || user.businessName || 'Personal workspace'} · {user.role || 'Independent business'}</Text></GlassCard>
+      {title('Appearance')}
+      <GlassCard><Text style={{ color: palette.secondary, lineHeight: 21 }}>Choose your appearance. Saved only on this device.</Text><View style={{ flexDirection: 'row', gap: 8 }}>{[['system','phone-portrait-outline','System'],['light','sunny-outline','Light'],['dark','moon-outline','Dark']].map(([value,icon,label]) => <Pressable key={value} accessibilityRole="radio" accessibilityState={{ checked: mode === value }} disabled={busy} onPress={async () => { setBusy(true); try { await changeMode(value); } catch { setError('Could not save appearance on this device.'); } finally { setBusy(false); } }} style={{ flex: 1, alignItems: 'center', gap: 9, paddingVertical: 16, borderRadius: 16, borderWidth: 1, borderColor: mode === value ? palette.accent : palette.border, backgroundColor: mode === value ? palette.glow : palette.input }}><Ionicons name={icon} size={22} color={mode === value ? palette.accent : palette.secondary} /><Text style={{ color: mode === value ? palette.accent : palette.secondary, fontWeight: '600' }}>{label}</Text></Pressable>)}</View></GlassCard>
+      {title(user.companyId ? 'Company' : 'Business')}
+      <GlassCard>
+        {user.companyId ? <>{detail('Business name', user.businessName, 'business-outline')}{detail('Business phone', user.businessPhone, 'call-outline')}{detail('Business address', user.businessAddress, 'location-outline')}<Text style={{ color: palette.secondary, fontSize: 12, lineHeight: 19 }}>Shared company information is managed by the company owner.</Text>{permissions.canEditCompany && <GlassButton secondary title="Open company settings on the web" icon="open-outline" onPress={() => Linking.openURL('https://route-logistics.com/company-setup').catch(() => setError('Could not open the browser.'))} />}</> : <><GlassInput label="Business name" value={businessName} onChangeText={setBusinessName} /><GlassInput label="Business address" value={address} onChangeText={setAddress} multiline /></>}
+        <Text style={{ color: palette.text, fontWeight: '700', marginTop: 4 }}>Services · {user.services?.length || 0}</Text>
+        {user.services?.length ? user.services.map(service => <View key={service} style={{ flexDirection: 'row', gap: 9, alignItems: 'flex-start' }}><Ionicons name="checkmark-circle-outline" size={18} color={palette.accent} /><Text style={{ flex: 1, color: palette.secondary, lineHeight: 21 }}>{service}</Text></View>) : <Text style={{ color: palette.secondary }}>No services have been configured.</Text>}
+        {!user.companyId && permissions.canManage && <GlassButton secondary title="Manage services" icon="construct-outline" onPress={() => setSelectServices(true)} />}
+        {user.companyId && <GlassButton secondary title="Refresh company information" icon="refresh-outline" disabled={busy} onPress={async () => { setBusy(true); const result = await refreshUser(); if (!result.success) setError(result.error?.message); setBusy(false); }} />}
+      </GlassCard>
+      {title('Your profile')}
+      <GlassCard><GlassInput label="Display name" value={name} onChangeText={setName} editable={!busy} /><GlassInput label="Your phone number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" editable={!busy} /><Text style={{ color: palette.secondary, fontSize: 13 }}>Language</Text><View style={{ flexDirection: 'row', gap: 10 }}>{[['en','English'],['es','Español']].map(([value,label]) => <GlassButton key={value} secondary={language !== value} title={label} onPress={() => changeLanguage(value)} style={{ flex: 1 }} />)}</View></GlassCard>
+      {title('Notification preferences')}
+      <GlassCard>{[['notificationsEnabled','Push notifications'],['emailNotifications','Email notifications'],['smsNotifications','SMS notifications']].map(([key,label]) => <View key={key} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}><Text style={{ color: palette.text, flex: 1 }}>{label}</Text><Switch accessibilityLabel={label} value={!!notifications[key]} disabled={busy} onValueChange={value => setNotifications(current => ({ ...current, [key]: value }))} trackColor={{ false: palette.border, true: palette.button }} thumbColor="#FFFFFF" /></View>)}</GlassCard>
+      {!!error && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{error}</Text>}{!!message && <Text accessibilityLiveRegion="polite" style={{ color: palette.accent }}>{message}</Text>}
+      <GlassButton title="Save profile & preferences" busy={busy} onPress={() => save()} icon="checkmark" />
+      <GlassButton secondary title="Sign out" icon="log-out-outline" disabled={busy} onPress={() => Alert.alert('Sign out?', 'Your appearance preference stays on this device.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign out', onPress: signOut }])} />
+    </ScrollView>
+  </GlassScreen>;
+}

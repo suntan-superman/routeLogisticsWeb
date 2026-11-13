@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
-import { View, Text, Button, StyleSheet } from 'react-native';
+import { View, Text } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../theme/ThemeProvider';
+import { GlassScreen, GlassCard, GlassButton } from '../components/Glass';
 export default function EmailVerificationScreen() {
   const { user, sendEmailVerification, refreshUser, signOut } = useAuth();
+  const { palette } = useTheme();
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [sentAt, setSentAt] = useState(0);
-  const run = async (resend) => {
+  const run = async resend => {
     setBusy(true);
     try {
       if (resend) {
@@ -19,6 +22,5 @@ export default function EmailVerificationScreen() {
     } catch (error) { setMessage(error.message); }
     finally { setBusy(false); }
   };
-  return <View style={styles.page}><Text style={styles.title}>Verify your email</Text><Text>Open the verification link sent to {user?.email}, then return here.</Text><Button title="I verified my email" disabled={busy} onPress={() => run(false)} /><Button title="Resend verification email" disabled={busy} onPress={() => run(true)} /><Text accessibilityRole="alert">{message}</Text><Button title="Sign out" onPress={signOut} /></View>;
+  return <GlassScreen><View style={{ flex: 1, justifyContent: 'center', padding: 24 }}><GlassCard><Text style={{ color: palette.text, fontSize: 27, fontWeight: '700' }}>Verify your email</Text><Text style={{ color: palette.secondary, lineHeight: 23 }}>Open the verification link sent to {user?.email}, then return here.</Text><GlassButton title="I verified my email" busy={busy} onPress={() => run(false)} /><GlassButton secondary title="Resend verification email" disabled={busy} onPress={() => run(true)} /><Text accessibilityRole="alert" style={{ color: palette.secondary }}>{message}</Text><GlassButton secondary title="Sign out" onPress={signOut} /></GlassCard></View></GlassScreen>;
 }
-const styles = StyleSheet.create({ page: { flex: 1, justifyContent: 'center', padding: 28, gap: 18, backgroundColor: '#fff' }, title: { fontSize: 28, fontWeight: '700' } });

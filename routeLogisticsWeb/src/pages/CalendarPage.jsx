@@ -10,9 +10,14 @@ import {
   MapPinIcon,
   CurrencyDollarIcon,
   EyeIcon,
-  PencilIcon
+  PencilIcon,
+  PlusIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import '@syncfusion/ej2-react-schedule/styles/tailwind.css';
+import './calendar.css';
+import JobFormModal from '../components/JobFormModal';
+import { canManage } from '../services/tenancy';
 
 const CalendarPage = () => {
   const [scheduleData, setScheduleData] = useState([]);
@@ -20,6 +25,9 @@ const CalendarPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedJob, setSelectedJob] = useState(null);
   const [showJobModal, setShowJobModal] = useState(false);
+  const [showNewJob, setShowNewJob] = useState(false);
+  const [newJobDefaults, setNewJobDefaults] = useState({});
+  const [today] = useState(() => new Date());
 
   useEffect(() => {
     loadJobsAndCustomers();
@@ -38,9 +46,9 @@ const CalendarPage = () => {
         const customersData = customersResult.customers;
 
         // Transform jobs data for Syncfusion Schedule
-        const scheduleEvents = jobs.map(job => {
+        const scheduleEvents = jobs.filter(job => job.date).map(job => {
           const customer = customersData.find(c => c.id === job.customerId);
-          const startDate = new Date(`${job.date}T${job.time}`);
+          const startDate = new Date(`${job.date}T${job.time || '09:00'}`);
           const endDate = new Date(startDate.getTime() + (parseFloat(job.estimatedDuration) || 2) * 60 * 60 * 1000);
 
           return {
@@ -111,6 +119,19 @@ const CalendarPage = () => {
     setShowJobModal(true);
   };
 
+  const onCellClick = (args) => {
+    args.cancel = true;
+    if (!canManage()) return;
+    const start = args.startTime;
+    const p = (n) => String(n).padStart(2, '0');
+    const isDateOnly = start.getHours() === 0 && start.getMinutes() === 0;
+    setNewJobDefaults({
+      date: `${start.getFullYear()}-${p(start.getMonth() + 1)}-${p(start.getDate())}`,
+      time: isDateOnly ? '09:00' : `${p(start.getHours())}:${p(start.getMinutes())}`
+    });
+    setShowNewJob(true);
+  };
+
   const onEventRendered = (args) => {
     // Customize event appearance based on job data
     const jobData = args.data.JobData;
@@ -174,6 +195,15 @@ const CalendarPage = () => {
             </div>
           </div>
           <div className="flex items-center space-x-4">
+            {canManage() && (
+              <button
+                onClick={() => { setNewJobDefaults({}); setShowNewJob(true); }}
+                className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-md text-sm font-medium hover:bg-primary-700"
+              >
+                <PlusIcon className="h-4 w-4 mr-2" />
+                New Job
+              </button>
+            )}
             {/* Status Legend */}
             <div className="flex items-center space-x-4 text-sm">
               <div className="flex items-center">
@@ -198,15 +228,20 @@ const CalendarPage = () => {
       </div>
 
       {/* Calendar Component */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
         <ScheduleComponent
-          height="650px"
-          selectedDate={new Date()}
+          height="700px"
+          selectedDate={today}
           eventSettings={{ dataSource: scheduleData }}
           eventClick={onEventClick}
           eventRendered={onEventRendered}
-          showQuickInfo={true}
-          enableAdaptiveUI={true}
+          cellClick={onCellClick}
+          cellDoubleClick={(args) => { args.cancel = true; }}
+          eventDoubleClick={(args) => { args.cancel = true; }}
+          showQuickInfo={false}
+          startHour="06:00"
+          endHour="21:00"
+          workHours={{ highlight: true, start: '08:00', end: '17:00' }}
           allowDragAndDrop={false}
           allowResize={false}
           cssClass="custom-schedule"
@@ -371,52 +406,17 @@ const CalendarPage = () => {
         </div>
       )}
 
-      {/* Custom CSS for Syncfusion Schedule */}
-      <style jsx global>{`
-        .custom-schedule .e-schedule {
-          border: none;
-        }
-        
-        .custom-schedule .e-header-cells {
-          background-color: #f8fafc;
-          color: #374151;
-          font-weight: 600;
-        }
-        
-        .custom-schedule .e-content-table .e-content-row .e-content-cell {
-          border-color: #e5e7eb;
-        }
-        
-        .custom-schedule .e-appointment {
-          border-radius: 6px;
-          font-size: 12px;
-        }
-        
-        .custom-schedule .e-appointment .e-subject {
-          font-weight: 500;
-        }
-        
-        .custom-schedule .e-toolbar {
-          background-color: #ffffff;
-          border-bottom: 1px solid #e5e7eb;
-        }
-        
-        .custom-schedule .e-toolbar .e-btn {
-          background-color: #10b981;
-          border-color: #10b981;
-          color: white;
-        }
-        
-        .custom-schedule .e-toolbar .e-btn:hover {
-          background-color: #059669;
-          border-color: #059669;
-        }
-        
-        .custom-schedule .e-toolbar .e-btn.e-active {
-          background-color: #047857;
-          border-color: #047857;
-        }
-      `}</style>
+      {showNewJob && (
+        <JobFormModal
+          customers={customers}
+          defaults={newJobDefaults}
+          onClose={() => setShowNewJob(false)}
+          onCreated={() => {
+            setShowNewJob(false);
+            loadJobsAndCustomers();
+          }}
+        />
+      )}
     </motion.div>
   );
 };

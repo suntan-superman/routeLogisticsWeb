@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import JobManagementService from '../services/jobManagementService';
+import CustomerService from '../services/customerService';
+import JobFormModal from '../components/JobFormModal';
 import { 
   ClipboardDocumentListIcon, 
   PlusIcon,
@@ -36,6 +38,8 @@ const JobManagementPage = () => {
   };
 
   const [jobs, setJobs] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [showNewJob, setShowNewJob] = useState(false);
   const [filteredJobs, setFilteredJobs] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -71,6 +75,7 @@ const JobManagementPage = () => {
   useEffect(() => {
     loadJobs();
     loadStats();
+    CustomerService.getCustomers(500).then((r) => r.success && setCustomers(r.customers));
   }, []);
 
   useEffect(() => {
@@ -384,6 +389,15 @@ const JobManagementPage = () => {
               <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
               Export
             </button>
+            {canManage() && (
+              <button
+                onClick={() => setShowNewJob(true)}
+                className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-md text-sm font-medium hover:bg-primary-700"
+              >
+                <PlusIcon className="h-4 w-4 mr-2" />
+                New Job
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -922,6 +936,18 @@ const JobManagementPage = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {showNewJob && (
+        <JobFormModal
+          customers={customers}
+          onClose={() => setShowNewJob(false)}
+          onCreated={() => {
+            setShowNewJob(false);
+            loadJobs();
+            loadStats();
+          }}
+        />
       )}
     </motion.div>
   );

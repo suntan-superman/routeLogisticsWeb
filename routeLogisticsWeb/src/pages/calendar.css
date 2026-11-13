@@ -1,0 +1,93 @@
+/* Route Logistics overrides on top of the Syncfusion Tailwind theme. */
+.custom-schedule.e-schedule {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+  font-family: inherit;
+}
+
+.custom-schedule .e-schedule-toolbar {
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+  min-height: 56px;
+  padding: 0 8px;
+}
+
+.custom-schedule .e-schedule-toolbar .e-toolbar-items {
+  background: transparent;
+}
+
+.custom-schedule .e-schedule-toolbar .e-tbar-btn {
+  border-radius: 8px;
+  margin: 0 2px;
+}
+
+.custom-schedule .e-schedule-toolbar .e-tbar-btn:hover {
+  background: #ecfdf5;
+}
+
+.custom-schedule .e-schedule-toolbar .e-tbar-btn:hover .e-tbar-btn-text,
+.custom-schedule .e-schedule-toolbar .e-tbar-btn:hover .e-icons {
+  color: #047857;
+}
+
+.custom-schedule .e-schedule-toolbar .e-toolbar-item.e-active-view .e-tbar-btn {
+  background: #10b981;
+}
+
+.custom-schedule .e-schedule-toolbar .e-toolbar-item.e-active-view .e-tbar-btn-text,
+.custom-schedule .e-schedule-toolbar .e-toolbar-item.e-active-view .e-icons {
+  color: #fff;
+}
+
+.custom-schedule .e-schedule-toolbar .e-date-range .e-tbar-btn-text {
+  font-weight: 600;
+  font-size: 15px;
+  color: #111827;
+}
+
+.custom-schedule .e-schedule-toolbar .e-new,
+.custom-schedule .e-schedule-toolbar .e-add {
+  display: none;
+}
+
+.custom-schedule .e-header-cells {
+  background: #f9fafb;
+  color: #374151;
+  font-weight: 600;
+}
+
+.custom-schedule .e-current-day,
+.custom-schedule .e-current-date .e-date-header {
+  color: #059669;
+}
+
+.custom-schedule .e-date-header-wrap table tbody td.e-current-day {
+  background: #ecfdf5;
+}
+
+.custom-schedule .e-work-cells:hover {
+  background: #f0fdf4;
+  cursor: pointer;
+}
+
+.custom-schedule .e-current-time,
+.custom-schedule .e-current-timeline {
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
+.custom-schedule .e-appointment {
+  border-radius: 6px;
+  font-size: 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+}
+
+.custom-schedule .e-appointment .e-subject {
+  font-weight: 600;
+}
+
+.custom-schedule .e-appointment .e-location {
+  opacity: 0.9;
+}

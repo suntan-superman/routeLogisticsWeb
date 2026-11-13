@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import CustomerService from '../services/customerService';
+import { formatPhone } from '../utils/format';
 import { 
   UsersIcon, 
   PlusIcon,
@@ -126,7 +127,7 @@ const CustomerManagementPage = () => {
   const handleInputChange = (field, value) => {
     setCustomerData(prev => ({
       ...prev,
-      [field]: value
+      [field]: field === 'phone' ? formatPhone(value) : value
     }));
   };
 
@@ -567,10 +568,10 @@ const CustomerManagementPage = () => {
       {/* Add Customer Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-            <div className="mt-3">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-900">Add New Customer</h3>
+          <div className="relative top-12 mx-auto p-6 border w-full max-w-xl shadow-xl rounded-xl bg-white">
+            <div>
+              <div className="flex items-center justify-between mb-5">
+                <h3 className="text-lg font-semibold text-gray-900">Add New Customer</h3>
                 <button
                   onClick={() => {
                     setShowAddModal(false);
@@ -702,10 +703,10 @@ const CustomerManagementPage = () => {
       {/* Edit Customer Modal */}
       {showEditModal && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-            <div className="mt-3">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-900">Edit Customer</h3>
+          <div className="relative top-12 mx-auto p-6 border w-full max-w-xl shadow-xl rounded-xl bg-white">
+            <div>
+              <div className="flex items-center justify-between mb-5">
+                <h3 className="text-lg font-semibold text-gray-900">Edit Customer</h3>
                 <button
                   onClick={() => {
                     setShowEditModal(false);

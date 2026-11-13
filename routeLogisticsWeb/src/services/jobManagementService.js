@@ -15,7 +15,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { auth } from './firebase';
-import { scopeWhere, isInScope } from './tenancy';
+import { scopeWhere, isInScope, tenantFields } from './tenancy';
 
 class JobManagementService {
   // Get current user ID
@@ -25,6 +25,24 @@ class JobManagementService {
       throw new Error('No user is currently signed in');
     }
     return user.uid;
+  }
+
+  static async createJob(jobData) {
+    try {
+      const now = new Date().toISOString();
+      const job = {
+        ...jobData,
+        ...tenantFields(),
+        status: 'scheduled',
+        createdAt: now,
+        updatedAt: now
+      };
+      const docRef = await addDoc(collection(db, 'jobs'), job);
+      return { success: true, jobId: docRef.id, job: { id: docRef.id, ...job } };
+    } catch (error) {
+      console.error('Error creating job:', error);
+      return { success: false, error: error.message };
+    }
   }
 
   // Get all jobs for the current user's company

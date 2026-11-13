@@ -208,6 +208,19 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ---------- push notification device tokens (read by Cloud Functions via the Admin SDK) ----------
+    match /deviceTokens/{id} {
+      allow read, delete: if signedIn() && resource.data.get('userId', null) == uid();
+      allow create: if signedIn()
+        && request.resource.data.get('userId', null) == uid()
+        && request.resource.data.get('token', null) is string
+        && id == uid() + '_' + request.resource.data.token;
+      allow update: if signedIn()
+        && resource.data.get('userId', null) == uid()
+        && request.resource.data.get('userId', null) == uid()
+        && request.resource.data.get('token', null) == resource.data.get('token', null);
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

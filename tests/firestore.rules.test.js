@@ -207,3 +207,15 @@ test('servicePlans: frequency must be positive; technicians cannot write', async
   await assertSucceeds(setDoc(doc(owner(), 'servicePlans/p1'), { userId: 'owner1', companyId: 'c1', frequencyDays: 90 }));
   await assertFails(setDoc(doc(tech(), 'servicePlans/p2'), { userId: 'tech1', companyId: 'c1', frequencyDays: 30 }));
 });
+
+
+test('deviceTokens: only the owner can register, read or remove their token', async () => {
+  const solo = as('solo1');
+  await assertSucceeds(setDoc(doc(solo, 'deviceTokens/solo1_abc'), { userId: 'solo1', token: 'abc' }));
+  await assertFails(setDoc(doc(solo, 'deviceTokens/wrongid'), { userId: 'solo1', token: 'abc' }));
+  await assertFails(setDoc(doc(as('other1'), 'deviceTokens/other1_abc'), { userId: 'solo1', token: 'abc' }));
+  await assertFails(getDoc(doc(as('other1'), 'deviceTokens/solo1_abc')));
+  await assertSucceeds(getDoc(doc(solo, 'deviceTokens/solo1_abc')));
+  await assertFails(deleteDoc(doc(as('other1'), 'deviceTokens/solo1_abc')));
+  await assertSucceeds(deleteDoc(doc(solo, 'deviceTokens/solo1_abc')));
+});

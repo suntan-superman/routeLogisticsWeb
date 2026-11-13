@@ -3,7 +3,9 @@ const { getAuth } = require('firebase-admin/auth');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } = require('firebase-functions/v2/firestore');
+const { getMessaging } = require('firebase-admin/messaging');
 const { resolveClaims } = require('./claims');
+const { assignmentTarget, buildAssignmentMessage, DEAD_TOKEN_CODES } = require('./notify');
 
 initializeApp();
 const db = getFirestore();
@@ -117,3 +119,28 @@ for (const name of TENANT_COLLECTIONS) {
     }
   });
 }
+
+// Push a notification to a technician when a job is assigned to them.
+exports.notifyJobAssigned = onDocumentUpdated('jobs/{jobId}', async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  if (!after?.assignedTo || before?.assignedTo === after.assignedTo) return;
+
+  const memberSnap = await db.collection('teamMembers').doc(after.assignedTo).get();
+  const uid = assignmentTarget(before, after, memberSnap.exists ? memberSnap.data() : null);
+  if (!uid) return;
+
+  const tokensSnap = await db.collection('deviceTokens').where('userId', '==', uid).get();
+  if (tokensSnap.empty) return;
+
+  const { title, body, data } = buildAssignmentMessage(after, event.params.jobId);
+  const tokens = tokensSnap.docs.map((d) => d.get('token'));
+  const res = await getMessaging().sendEachForMulticast({ tokens, notification: { title, body }, data });
+
+  // Drop tokens FCM reports as permanently invalid so they are not retried forever.
+  const stale = [];
+  res.responses.forEach((r, i) => {
+    if (!r.success && DEAD_TOKEN_CODES.has(r.error?.code)) stale.push(tokensSnap.docs[i].ref.delete());
+  });
+  await Promise.all(stale);
+});

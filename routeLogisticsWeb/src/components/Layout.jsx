@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import NotificationToggle from './NotificationToggle';
+import { disablePush } from '../services/push';
 import { 
   HomeIcon, 
   BuildingOfficeIcon, 
@@ -16,7 +18,12 @@ import {
 } from '@heroicons/react/24/outline';
 
 const Layout = ({ children }) => {
-  const { userProfile, logout } = useAuth();
+  const { userProfile, logout: signOut } = useAuth();
+  // Unregister this device's push token while still signed in so the next user on it isn't notified.
+  const logout = async () => {
+    await disablePush().catch(() => {});
+    return signOut();
+  };
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -177,6 +184,7 @@ const Layout = ({ children }) => {
           <div className="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
             <div className="flex flex-1"></div>
             <div className="flex items-center gap-x-4 lg:gap-x-6">
+              <NotificationToggle />
               <div className="hidden lg:block lg:h-6 lg:w-px lg:bg-gray-200" />
               <div className="flex items-center gap-x-2">
                 <span className="text-sm text-gray-500">Welcome back,</span>

@@ -211,3 +211,15 @@
 2. **Market Leadership**: Achieve feature parity with leading competitors
 3. **Scalability**: Prepare for 10x user growth
 4. **Ecosystem**: Build comprehensive third-party integration ecosystem
+
+## P1 status (complete)
+- Offline cache (Firestore persistent multi-tab cache)
+- Job photos (compressed upload, Storage rules)
+- Invoices (draft/sent/paid/void, print)
+- Pest-control: service plans with visit scheduling, application logs with CSV export
+- Push notifications on job assignment (functions:routelogistics notifyJobAssigned). Requires VITE_FIREBASE_VAPID_KEY in .env and Netlify.
+
+Deploy functions ONLY with: firebase deploy --only functions:routelogistics (never plain --only functions; it would delete another codebase's functions).
+
+## Remaining
+- Mobile job screens/photo capture, Stripe payments, PDF/email invoices, MFA, rate limiting, performance monitoring.

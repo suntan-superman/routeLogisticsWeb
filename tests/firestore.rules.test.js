@@ -172,3 +172,38 @@ test('member can read own team record; unrelated user cannot', async () => {
 test('unknown collections are denied', async () => {
   await assertFails(setDoc(doc(owner(), 'secrets/x'), { a: 1 }));
 });
+
+
+// ---- P1: invoices, service plans, service logs ----
+test('invoices: managers write, technicians read only, paid is immutable', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'invoices/i1'), { userId: 'owner1', companyId: 'c1', status: 'draft', total: 100 });
+    await setDoc(doc(ctx.firestore(), 'invoices/iPaid'), { userId: 'owner1', companyId: 'c1', status: 'paid', total: 100 });
+  });
+  await assertSucceeds(getDoc(doc(tech(), 'invoices/i1')));
+  await assertFails(updateDoc(doc(tech(), 'invoices/i1'), { status: 'paid' }));
+  await assertFails(setDoc(doc(tech(), 'invoices/iNew'), { userId: 'tech1', companyId: 'c1', status: 'draft', total: 5 }));
+  await assertSucceeds(updateDoc(doc(owner(), 'invoices/i1'), { status: 'sent' }));
+  await assertFails(updateDoc(doc(owner(), 'invoices/iPaid'), { total: 1 }));
+  await assertFails(updateDoc(doc(owner(), 'invoices/i1'), { status: 'bogus' }));
+  await assertFails(setDoc(doc(owner(), 'invoices/neg'), { userId: 'owner1', companyId: 'c1', status: 'draft', total: -1 }));
+  await assertFails(deleteDoc(doc(owner(), 'invoices/iPaid')));
+});
+
+test('invoices: other tenants cannot read', async () => {
+  await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), 'invoices/i1'), { userId: 'owner1', companyId: 'c1', status: 'draft', total: 1 }));
+  await assertFails(getDoc(doc(as('x', { companyId: 'c2', role: 'owner' }), 'invoices/i1')));
+});
+
+test('serviceLogs: technicians can add, nobody can delete', async () => {
+  await assertSucceeds(setDoc(doc(tech(), 'serviceLogs/l1'), { userId: 'tech1', companyId: 'c1', product: 'Termidor', epaRegNo: '7969-210' }));
+  await assertFails(deleteDoc(doc(owner(), 'serviceLogs/l1')));
+  await assertFails(updateDoc(doc(tech(), 'serviceLogs/l1'), { product: 'x' }));
+  await assertSucceeds(updateDoc(doc(owner(), 'serviceLogs/l1'), { notes: 'ok' }));
+});
+
+test('servicePlans: frequency must be positive; technicians cannot write', async () => {
+  await assertFails(setDoc(doc(owner(), 'servicePlans/p0'), { userId: 'owner1', companyId: 'c1', frequencyDays: 0 }));
+  await assertSucceeds(setDoc(doc(owner(), 'servicePlans/p1'), { userId: 'owner1', companyId: 'c1', frequencyDays: 90 }));
+  await assertFails(setDoc(doc(tech(), 'servicePlans/p2'), { userId: 'tech1', companyId: 'c1', frequencyDays: 30 }));
+});

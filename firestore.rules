@@ -172,6 +172,42 @@ service cloud.firestore {
       allow delete: if manageable(resource.data);
     }
 
+    // ---------- invoices ----------
+    // Paid invoices are immutable (void by issuing a new document); only drafts may be deleted.
+    match /invoices/{id} {
+      function validInvoiceStatus(s) {
+        return s in ['draft', 'sent', 'paid', 'void'];
+      }
+      allow read: if readable(resource.data);
+      allow create: if validCreate(false)
+        && validInvoiceStatus(request.resource.data.get('status', 'draft'))
+        && request.resource.data.get('total', 0) is number
+        && request.resource.data.get('total', 0) >= 0;
+      allow update: if manageable(resource.data) && tenancyUnchanged()
+        && resource.data.get('status', 'draft') != 'paid'
+        && validInvoiceStatus(request.resource.data.get('status', 'draft'));
+      allow delete: if manageable(resource.data) && resource.data.get('status', 'draft') == 'draft';
+    }
+
+    // ---------- recurring service plans ----------
+    match /servicePlans/{id} {
+      allow read: if readable(resource.data);
+      allow create: if validCreate(false)
+        && request.resource.data.get('frequencyDays', 0) is number
+        && request.resource.data.get('frequencyDays', 0) > 0;
+      allow update: if manageable(resource.data) && tenancyUnchanged();
+      allow delete: if manageable(resource.data);
+    }
+
+    // ---------- service / chemical application logs ----------
+    // Regulatory records: technicians may add them, but nobody may delete them from the client.
+    match /serviceLogs/{id} {
+      allow read: if readable(resource.data);
+      allow create: if validCreate(true);
+      allow update: if manageable(resource.data) && tenancyUnchanged();
+      allow delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

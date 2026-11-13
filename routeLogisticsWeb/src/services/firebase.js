@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getFunctions } from 'firebase/functions';
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
@@ -34,8 +34,21 @@ if (import.meta.env.VITE_APPCHECK_SITE_KEY) {
   });
 }
 
+// Offline-first: reads are served from an IndexedDB cache and writes queue until the connection returns
+// (shared across tabs). Falls back to the default in-memory cache where IndexedDB is unavailable.
+const createDb = () => {
+  try {
+    return initializeFirestore(app, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    });
+  } catch (error) {
+    console.warn('Offline persistence unavailable; using in-memory cache', error);
+    return getFirestore(app);
+  }
+};
+
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+export const db = createDb();
 export const storage = getStorage(app);
 export const functions = getFunctions(app);
 

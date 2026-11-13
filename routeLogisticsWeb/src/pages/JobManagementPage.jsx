@@ -19,8 +19,22 @@ import {
   ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import { useNavigate } from 'react-router-dom';
+import JobPhotos from '../components/JobPhotos';
+import JobApplicationLog from '../components/JobApplicationLog';
+import { createInvoiceFromJob } from '../services/invoiceService';
+import { canManage } from '../services/tenancy';
 
 const JobManagementPage = () => {
+  const navigate = useNavigate();
+
+  const handleCreateInvoice = async (job) => {
+    const res = await createInvoiceFromJob(job);
+    if (!res.success) return toast.error(res.error || 'Could not create invoice');
+    toast.success(res.existing ? 'Opening existing invoice' : 'Invoice created');
+    navigate('/invoices');
+  };
+
   const [jobs, setJobs] = useState([]);
   const [filteredJobs, setFilteredJobs] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -747,9 +761,20 @@ const JobManagementPage = () => {
                     </div>
                   </div>
                 )}
+
+                <div className="border-t pt-4"><JobPhotos job={selectedJob} /></div>
+                <div className="border-t pt-4"><JobApplicationLog job={selectedJob} /></div>
               </div>
               
               <div className="flex justify-end space-x-3 mt-6">
+                {canManage() && selectedJob.status === 'completed' && (
+                  <button
+                    onClick={() => handleCreateInvoice(selectedJob)}
+                    className="px-4 py-2 border border-primary-600 text-primary-700 rounded-md hover:bg-primary-50"
+                  >
+                    Create Invoice
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setShowViewModal(false);

@@ -17,6 +17,8 @@ import EstimateTemplatesPage from './pages/EstimateTemplatesPage';
 import JobManagementPage from './pages/JobManagementPage';
 import ReportsPage from './pages/ReportsPage';
 import CalendarPage from './pages/CalendarPage';
+import InvoicesPage from './pages/InvoicesPage';
+import ServicePlansPage from './pages/ServicePlansPage';
 
 // Components
 import Layout from './components/Layout';
@@ -105,6 +107,22 @@ function App() {
                   </ProtectedRoute>
                 } />
                 
+                <Route path="/invoices" element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <InvoicesPage />
+                    </Layout>
+                  </ProtectedRoute>
+                } />
+
+                <Route path="/service-plans" element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <ServicePlansPage />
+                    </Layout>
+                  </ProtectedRoute>
+                } />
+
                 {/* Redirect any unknown routes to home */}
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>

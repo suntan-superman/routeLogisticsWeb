@@ -9,6 +9,8 @@ import {
   ClipboardDocumentListIcon,
   ChartBarIcon,
   CalendarIcon,
+  BanknotesIcon,
+  ArrowPathIcon,
   Bars3Icon,
   XMarkIcon
 } from '@heroicons/react/24/outline';
@@ -25,6 +27,8 @@ const Layout = ({ children }) => {
     { name: 'Estimate Templates', href: '/estimate-templates', icon: DocumentTextIcon },
     { name: 'Jobs', href: '/jobs', icon: ClipboardDocumentListIcon },
     { name: 'Calendar', href: '/calendar', icon: CalendarIcon },
+    { name: 'Service Plans', href: '/service-plans', icon: ArrowPathIcon },
+    { name: 'Invoices', href: '/invoices', icon: BanknotesIcon },
     { name: 'Reports', href: '/reports', icon: ChartBarIcon },
   ];
 

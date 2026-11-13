@@ -11,7 +11,7 @@ const { create, act } = mobileRequire('react-test-renderer');
 const { transformSync } = webRequire('esbuild');
 global.IS_REACT_ACT_ENVIRONMENT = true;
 let role, customers, writes;
-const user = { uid: 'test-user', getIdTokenResult: async () => ({ claims: { companyId: 'test-company', role } }) };
+const user = { uid: 'test-user', emailVerified: true, getIdToken: async () => 'test-token', getIdTokenResult: async () => ({ claims: { companyId: 'test-company', role, membershipId: 'test-member' } }) };
 const service = {
   getCustomers: async () => ({ success: true, customers, hasMore: false }),
   getCustomerStats: async () => ({ success: true, stats: { totalCustomers: customers.length } }),
@@ -31,7 +31,7 @@ function load(relative) {
     if (specifier.endsWith('/ConfirmProvider')) return { useConfirm: () => async () => true };
     if (specifier.endsWith('/CustomerImport')) return () => React.createElement('aside', null, 'Import customers');
     if (specifier === 'firebase/firestore') return { where() {} };
-    if (specifier === 'firebase/functions') return { httpsCallable() {} };
+    if (specifier === 'firebase/functions') return { httpsCallable: () => async () => ({ data: { workspace: { status: 'company' } } }) };
     if (specifier === './firebase') return { auth: { currentUser: user }, functions: {} };
     if (specifier.startsWith('.')) {
       const resolved = path.resolve(path.dirname(filename), specifier);
@@ -39,14 +39,14 @@ function load(relative) {
     }
     throw new Error(`Unexpected dependency: ${specifier}`);
   };
-  const { code } = transformSync(fs.readFileSync(filename, 'utf8'), { loader: filename.endsWith('.jsx') ? 'jsx' : 'js', format: 'cjs' });
+  const { code } = transformSync(fs.readFileSync(filename, 'utf8'), { loader: filename.endsWith('.json') ? 'json' : filename.endsWith('.jsx') ? 'jsx' : 'js', format: 'cjs' });
   new Function('require', 'module', 'exports', code)(mockRequire, module, module.exports);
   cache.set(filename, module.exports);
   return module.exports;
 }
 const Page = load('pages/CustomerManagementPage.jsx').default;
 const tenancy = load('services/tenancy.js');
-async function setRole(value) { role = value; await tenancy.loadClaims(user); }
+async function setRole(value) { role = value; await tenancy.syncTenancy(); }
 async function render(value, records = [{ id: 'active', name: 'Active customer', isActive: true }, { id: 'inactive', name: 'Inactive customer', isActive: false }]) {
   await setRole(value); customers = records; writes = [];
   let tree;
@@ -57,7 +57,7 @@ const text = node => typeof node === 'string' ? node : (node.children || []).map
 const buttons = (tree, label) => tree.root.findAll(node => node.type === 'button' && text(node).trim() === label);
 const icons = (tree, name) => tree.root.findAllByType(name);
 
-test('technician can view customers but has no add, import, edit, deactivate or restore controls', async () => {
+test('customer component has no technician mutation controls even if mounted outside the route guard', async () => {
   const tree = await render('technician');
   for (const label of ['Add Customer', 'Restore']) assert.equal(buttons(tree, label).length, 0);
   assert.equal(tree.root.findAllByType('aside').length, 0);

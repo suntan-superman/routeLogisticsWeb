@@ -17,7 +17,7 @@ import {
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import CustomerImport from '../components/CustomerImport';
-import { canManage } from '../services/tenancy';
+import { canManage, can } from '../services/tenancy';
 
 const CustomerManagementPage = () => {
   const confirm = useConfirm();
@@ -320,7 +320,7 @@ const CustomerManagementPage = () => {
       className="space-y-6"
     >
       {/* Header */}
-      {canManage() && <CustomerImport onComplete={async () => { await loadCustomers(); await loadStats(); }} />}
+      {can('customers.export') && <CustomerImport onComplete={async () => { await loadCustomers(); await loadStats(); }} />}
       {hasMoreCustomers && <div className="flex flex-wrap items-center gap-3 rounded border bg-white p-4"><p>Showing {customers.length} customers. Search and filters apply to loaded customers.</p><button disabled={isLoading} className="text-primary-700 underline" onClick={() => loadCustomers(true)}>Load more customers</button></div>}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between">
@@ -332,13 +332,13 @@ const CustomerManagementPage = () => {
             </div>
           </div>
           <div className="flex space-x-3">
-            <button
+            {can('customers.export') && <button
               onClick={exportCustomers}
               className="flex items-center px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
             >
               <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
               Export
-            </button>
+            </button>}
             {canManage() && <button
               onClick={() => setShowAddModal(true)}
               className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
@@ -400,7 +400,7 @@ const CustomerManagementPage = () => {
           </div>
         </div>
 
-        <div className="bg-white overflow-hidden shadow-sm rounded-lg border border-gray-200">
+        {can('reports.financial') && <div className="bg-white overflow-hidden shadow-sm rounded-lg border border-gray-200">
           <div className="p-5">
             <div className="flex items-center">
               <div className="flex-shrink-0">
@@ -414,7 +414,7 @@ const CustomerManagementPage = () => {
               </div>
             </div>
           </div>
-        </div>
+        </div>}
       </div>
 
       {/* Search and Filters */}
@@ -451,7 +451,7 @@ const CustomerManagementPage = () => {
             >
               <option value="name">Sort by Name</option>
               <option value="createdAt">Sort by Date Added</option>
-              <option value="totalSpent">Sort by Total Spent</option>
+              {can('reports.financial') && <option value="totalSpent">Sort by Total Spent</option>}
             </select>
           </div>
         </div>
@@ -496,7 +496,7 @@ const CustomerManagementPage = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Location</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Spent</th>
+                  {can('reports.financial') && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Spent</th>}
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
@@ -528,9 +528,9 @@ const CustomerManagementPage = () => {
                         {customer.address ? `${customer.address}, ${customer.city}, ${customer.state} ${customer.zipCode}` : '-'}
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {can('reports.financial') && <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {formatCurrency(customer.totalSpent)}
-                    </td>
+                    </td>}
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                         customer.isActive 
@@ -921,10 +921,10 @@ const CustomerManagementPage = () => {
                         }
                       </dd>
                     </div>
-                    <div>
+                    {can('reports.financial') && <div>
                       <dt className="text-sm font-medium text-gray-500">Total Spent</dt>
                       <dd className="text-sm text-gray-900">{formatCurrency(selectedCustomer.totalSpent)}</dd>
-                    </div>
+                    </div>}
                     <div>
                       <dt className="text-sm font-medium text-gray-500">Total Jobs</dt>
                       <dd className="text-sm text-gray-900">{selectedCustomer.totalJobs || 0}</dd>

@@ -1,11 +1,10 @@
+import { readWorkspace, callWorkspace } from './workspaceApi';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 import { httpsCallable } from 'firebase/functions';
-import { doc, getDocFromServer, setDoc, serverTimestamp } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { auth, db, storage, functions } from '../constants/firebase';
+import { auth, functions } from '../constants/firebase';
 import { AppState } from 'react-native';
 import { getClaims, tenantFields, requireWorkspace } from './tenancy';
 import { createQueue, retryDelay } from './offlineQueueCore';
@@ -23,8 +22,8 @@ export function subscribeOffline(callback) { listeners.add(callback); return () 
 function notify() { listeners.forEach((callback) => callback()); }
 function queue(scope = offlineScope()) { if (!queues.has(scope)) queues.set(scope, createQueue(AsyncStorage, `${scope}:queue`, notify)); return queues.get(scope); }
 export const queuedWork = () => queue().read();
-export const readCache = async (name, scope = offlineScope()) => JSON.parse(await AsyncStorage.getItem(`${scope}:cache:${name}`) || 'null');
-export const writeCache = (name, data, scope = offlineScope()) => AsyncStorage.setItem(`${scope}:cache:${name}`, JSON.stringify(data));
+export const readCache = async (name, scope = offlineScope()) => JSON.parse(await AsyncStorage.getItem(`${scope}:cache:policy2:${name}`) || 'null');
+export const writeCache = (name, data, scope = offlineScope()) => AsyncStorage.setItem(`${scope}:cache:policy2:${name}`, JSON.stringify(data));
 export async function cachedRead(name, loader) {
   const scope = offlineScope();
   if (await isOffline()) { const cached = await readCache(name, scope); if (cached == null) throw new Error('Open this view online once to save it for offline use.'); return cached; }
@@ -40,7 +39,7 @@ export async function overlayJobs(jobs) {
 export async function saveJobOffline(jobId, patch) {
   const scope = offlineScope(), jobs = await readCache('job-bases', scope) || {};
   let base = jobs[jobId];
-  if (!base && !(await isOffline())) { const snap = await getDocFromServer(doc(db, 'jobs', jobId)); if (snap.exists()) base = { id: snap.id, ...snap.data() }; }
+  if (!base && !(await isOffline())) base = (await readWorkspace('jobs', { id: jobId })).job;
   if (!base) throw new Error('Open this job online before editing it offline.');
   const id = Crypto.randomUUID();
   await queue(scope).add({ id, kind: 'job', jobId, patch, expectedVersion: offlineVersion(base.updatedAt), createdAt: Date.now() });
@@ -58,22 +57,26 @@ export async function savePhotoOffline(job, uri) {
   void flushOffline().catch(() => {}); return id;
 }
 async function sendPhoto(row, scope) {
-  const job = await getDocFromServer(doc(db, 'jobs', row.jobId));
-  const claims = getClaims();
-  if (!job.exists() || (row.attribution.companyId ? job.data().companyId !== row.attribution.companyId : job.data().userId !== auth.currentUser?.uid) || (claims?.role === 'technician' && job.data().assignedTo !== claims.membershipId)) throw new Error('This job is no longer assigned to you.');
-  const metadata = doc(db, 'photos', row.id), existing = await getDocFromServer(metadata);
-  if (existing.exists()) return { status: 'synced' };
-  const blob = await (await fetch(row.localUri)).blob();
-  try {
-    if (blob.size >= 10 * 1024 * 1024) throw new Error('Photo exceeds 10 MB.');
-    if (offlineScope() !== scope) throw new Error('Workspace changed.');
-    const file = ref(storage, row.storagePath);
-    await uploadBytes(file, blob, { contentType: 'image/jpeg' });
-    const url = await getDownloadURL(file);
-    if (offlineScope() !== scope) throw new Error('Workspace changed.');
-    await setDoc(metadata, { ...row.attribution, jobId: row.jobId, customerId: row.customerId, storagePath: row.storagePath, url, caption: '', createdAt: serverTimestamp() });
-    return { status: 'synced' };
-  } finally { blob.close?.(); }
+  if (offlineScope() !== scope) throw new Error('Workspace changed.');
+  const base64 = await FileSystem.readAsStringAsync(row.localUri, { encoding: FileSystem.EncodingType.Base64 });
+  await callWorkspace('rlJobPhoto', { action: 'upload', operationId: row.id, jobId: row.jobId, base64 });
+  return { status: 'synced' };
+}
+export async function saveApplicationOffline(jobId, record) {
+  const scope = offlineScope(), id = Crypto.randomUUID();
+  await queue(scope).add({ id, kind: 'application', jobId, record, createdAt: Date.now() });
+  void flushOffline().catch(() => {}); return { success: true, queued: true };
+}
+export async function purgeLegacyReadCaches() {
+  const keys = await AsyncStorage.getAllKeys();
+  const legacy = keys.filter(key => (key.startsWith('rl-offline-v1:') && key.includes(':cache:') && !key.includes(':cache:policy2:')) || /^rl-session-v[12]:/.test(key));
+  if (legacy.length) await AsyncStorage.multiRemove(legacy);
+  // Pending queues and their local photos are deliberately retained for authorized replay.
+}
+export async function purgeOtherRoleCaches(uid, currentScope) {
+  const prefix = `rl-offline-v1:${auth.app.options.projectId}:${uid}:`;
+  const keys = (await AsyncStorage.getAllKeys()).filter(key => key.startsWith(prefix) && key.includes(':cache:') && (!currentScope || !key.startsWith(`${currentScope}:cache:`)));
+  if (keys.length) await AsyncStorage.multiRemove(keys);
 }
 export async function flushOffline() {
   const scope = offlineScope(), work = queue(scope);
@@ -91,7 +94,7 @@ export async function flushOffline() {
       if (row.kind === 'job' && earlier) continue;
       await work.patch(row.id, { state: 'syncing' });
       try {
-        const result = row.kind === 'job' ? (await httpsCallable(functions, 'rlApplyJobOperation')({ operationId: row.id, jobId: row.jobId, patch: row.patch, expectedVersion: row.expectedVersion })).data : await sendPhoto(row, scope);
+        const result = row.kind === 'job' ? (await httpsCallable(functions, 'rlApplyJobOperation')({ operationId: row.id, jobId: row.jobId, patch: row.patch, expectedVersion: row.expectedVersion })).data : row.kind === 'application' ? await callWorkspace('rlRecordApplication', { jobId: row.jobId, operationId: row.id, record: row.record }).then(() => ({ status: 'synced' })) : await sendPhoto(row, scope);
         await work.edit((rows) => {
           const current = rows.find((entry) => entry.id === row.id);
           Object.assign(current, { state: result.status, server: result.server || null, serverVersion: result.version || null, error: result.status === 'conflict' ? 'This job changed online. Review before retrying.' : '' });

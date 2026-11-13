@@ -44,8 +44,9 @@ const SignUpScreen = ({ navigation }) => {
       return;
     }
 
-    // Show service selection first
-    setShowServiceSelection(true);
+    // Create a personal login first. Company services come from the accepted
+    // invitation; independent users configure services later in Settings.
+    await performSignUp([]);
   };
 
   const handleServiceSelection = (services) => {

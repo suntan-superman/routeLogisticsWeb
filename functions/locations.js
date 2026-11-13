@@ -53,7 +53,8 @@ function locationHandlers(db) {
         const owner = data.userId === staff.company.get('ownerId');
         const member = owner ? null : await db.doc(`teamMembers/${documentId(data.memberId)}`).get();
         if (!owner && (member.get('status') !== 'active' || member.get('companyId') !== token.companyId || member.get('uid') !== data.userId)) continue;
-        locations.push({ id: row.id, name: owner ? 'Company owner' : member.get('name') || member.get('email'), lat: data.lat, lng: data.lng, accuracy: data.accuracy, updatedAt: new Date(updatedAt).toISOString(), sharing: data.sharing && data.sessionExpiresAt.toMillis() > now, stale: now - updatedAt > 180000 });
+        const stale = now - updatedAt > 180000 || data.sessionExpiresAt.toMillis() <= now;
+        locations.push({ id: row.id, memberId: data.memberId, name: owner ? 'Company owner' : member.get('name') || member.get('email'), lat: data.lat, lng: data.lng, accuracy: data.accuracy, updatedAt: new Date(updatedAt).toISOString(), sharing: data.sharing && !stale, stale, state: !data.sharing ? 'sharing-disabled' : stale ? 'stale' : 'live' });
       }
       return { locations, retentionHours: hours, truncated: snap.size > 500 };
     },

@@ -11,11 +11,12 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { auth } from './firebase';
-import { scopeWhere, tenantFields, isInScope } from './tenancy';
+import { scopeWhere, tenantFields, isInScope, requireCapability } from './tenancy';
 
 class EstimateTemplateService {
   // Get current user ID
   static getCurrentUserId() {
+    requireCapability('estimates.manage');
     const user = auth.currentUser;
     if (!user) {
       throw new Error('No user is currently signed in');

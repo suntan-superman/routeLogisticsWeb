@@ -14,7 +14,7 @@ function buildAssignmentMessage(job, jobId) {
   return {
     title: 'New job assigned',
     body: [job.serviceType || 'Service', job.customerName, when].filter(Boolean).join(' · '),
-    data: { type: 'job-assigned', jobId: String(jobId), url: '/jobs' },
+    data: { type: 'job-assigned', jobId: String(jobId), url: '/' },
   };
 }
 

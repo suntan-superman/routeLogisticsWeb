@@ -17,6 +17,7 @@ service firebase.storage {
     }
     function activeCompany(companyId) {
       return signedIn() && request.auth.token.get('companyId', null) == companyId
+        && request.auth.token.get('email_verified', false) == true
         && (firestore.get(/databases/(default)/documents/companies/$(companyId)).data.ownerId == request.auth.uid
           || (request.auth.token.get('membershipId', null) != null
             && firestore.get(/databases/(default)/documents/teamMembers/$(request.auth.token.membershipId)).data.uid == request.auth.uid
@@ -26,16 +27,23 @@ service firebase.storage {
     }
 
     match /users/{userId}/{allPaths=**} {
-      allow read: if signedIn() && request.auth.uid == userId;
-      allow create, update: if signedIn() && request.auth.uid == userId && validUpload();
-      allow delete: if signedIn() && request.auth.uid == userId;
+      allow read: if signedIn() && request.auth.uid == userId && request.auth.token.get('companyId', null) == null
+        && firestore.get(/databases/(default)/documents/users/$(userId)).data.get('rlCompanyId', null) == null;
+      allow create, update: if signedIn() && request.auth.uid == userId && request.auth.token.get('companyId', null) == null
+        && firestore.get(/databases/(default)/documents/users/$(userId)).data.get('rlCompanyId', null) == null && validUpload();
+      allow delete: if signedIn() && request.auth.uid == userId && request.auth.token.get('companyId', null) == null
+        && firestore.get(/databases/(default)/documents/users/$(userId)).data.get('rlCompanyId', null) == null;
     }
 
     match /companies/{companyId}/{allPaths=**} {
-      allow read: if activeCompany(companyId);
-      allow create, update: if activeCompany(companyId) && validUpload();
-      allow delete: if activeCompany(companyId) && isManagerRole();
+      allow read: if activeCompany(companyId) && request.auth.token.role in ['owner', 'admin'];
+      allow create, update: if activeCompany(companyId) && request.auth.token.role in ['owner', 'admin'] && validUpload();
+      allow delete: if activeCompany(companyId) && request.auth.token.role in ['owner', 'admin'];
     }
+
+    // rlJobPhotos objects have no public download tokens. All reads/uploads pass
+    // through rlJobPhoto, which rechecks live membership, job assignment and scope.
+    match /rlJobPhotos/{allPaths=**} { allow read, write: if false; }
 
     match /{allPaths=**} {
       allow read, write: if false;

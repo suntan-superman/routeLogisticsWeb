@@ -1,9 +1,12 @@
 import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { mayOpenRoute } from '../utils/routeAccess';
+import WorkspaceGate from './WorkspaceGate';
 
 const ProtectedRoute = ({ children }) => {
-  const { currentUser, loading } = useAuth();
+  const { currentUser, loading, workspace, can, sessionVersion } = useAuth();
+  const { pathname } = useLocation();
 
   if (loading) {
     return (
@@ -17,7 +20,10 @@ const ProtectedRoute = ({ children }) => {
     return <Navigate to="/login" replace />;
   }
 
-  return children;
+  if (!currentUser.emailVerified || !['company', 'solo'].includes(workspace?.status)) return <WorkspaceGate />;
+  if (!mayOpenRoute(pathname, can)) return <main className="p-8"><h1 className="text-2xl font-bold">Access unavailable</h1><p className="my-4">Your role does not allow this screen.</p><Link className="underline" to="/">Return to your workspace</Link></main>;
+
+  return <React.Fragment key={`${currentUser.uid}:${sessionVersion}`}>{children}</React.Fragment>;
 };
 
 export default ProtectedRoute;

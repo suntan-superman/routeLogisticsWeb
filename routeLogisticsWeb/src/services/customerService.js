@@ -1,3 +1,4 @@
+import { readWorkspace } from './workspaceApi';
 import { 
   collection, 
   doc, 
@@ -14,7 +15,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { auth } from './firebase';
-import { scopeWhere, tenantFields, isInScope } from './tenancy';
+import { scopeWhere, tenantFields, isInScope, getClaims, can, requireCapability } from './tenancy';
 import { csvCell } from '../utils/customerCsv';
 import { customerView, customerActive, legacyDate } from '../utils/legacyCustomer';
 
@@ -31,6 +32,7 @@ class CustomerService {
   // Create a new customer
   static async createCustomer(customerData) {
     try {
+      requireCapability('customers.manage');
       this.getCurrentUserId();
       
       const customer = {
@@ -65,6 +67,7 @@ class CustomerService {
   // Get all customers for the current user
   static async getCustomers(limitCount = 50, lastDoc = null) {
     try {
+      if (getClaims()?.companyId) { const result = await readWorkspace('customers', { limit: limitCount, after: lastDoc?.id || lastDoc }); return { success: true, ...result, customers: result.customers.map(row => customerView(row.id, row)) }; }
       this.getCurrentUserId();
       
       let q = query(
@@ -139,6 +142,7 @@ class CustomerService {
   // Get customer by ID
   static async getCustomer(customerId) {
     try {
+      if (getClaims()?.companyId) return { success: true, ...(await readWorkspace('customers', { id: customerId })) };
       this.getCurrentUserId();
       const customerDoc = await getDoc(doc(db, 'customers', customerId));
       
@@ -175,6 +179,7 @@ class CustomerService {
   // Update customer
   static async updateCustomer(customerId, updates) {
     try {
+      requireCapability('customers.manage');
       this.getCurrentUserId();
       
       // Verify user owns the customer
@@ -207,6 +212,7 @@ class CustomerService {
   // Delete customer (soft delete)
   static async deleteCustomer(customerId) {
     try {
+      requireCapability('customers.manage');
       this.getCurrentUserId();
       
       // Verify user owns the customer
@@ -237,6 +243,7 @@ class CustomerService {
   // Permanently delete customer
   static async permanentlyDeleteCustomer(customerId) {
     try {
+      requireCapability('customers.export');
       this.getCurrentUserId();
       
       // Verify user owns the customer
@@ -262,6 +269,7 @@ class CustomerService {
   // Restore soft-deleted customer
   static async restoreCustomer(customerId) {
     try {
+      requireCapability('customers.manage');
       this.getCurrentUserId();
       
       // Verify user owns the customer
@@ -291,6 +299,7 @@ class CustomerService {
   // Get customer statistics
   static async getCustomerStats() {
     try {
+      if (getClaims()?.companyId && !can('reports.financial')) return { success: true, ...(await readWorkspace('customerStats')) };
       this.getCurrentUserId();
       
       const q = query(
@@ -334,6 +343,7 @@ class CustomerService {
   // Export customers to CSV (placeholder for future implementation)
   static async exportCustomers() {
     try {
+      requireCapability('customers.export');
       const customers = [];
       let cursor = null;
       do {

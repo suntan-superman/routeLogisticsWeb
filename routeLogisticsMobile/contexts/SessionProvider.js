@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback, use
 import { AppState } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { isOffline } from '../services/offline';
+import { isOffline, purgeLegacyReadCaches, purgeOtherRoleCaches, offlineScope } from '../services/offline';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
@@ -11,10 +11,11 @@ import { AuthService } from '../services/firebase';
 import { syncTenancy, getWorkspace, restoreOfflineWorkspace } from '../services/tenancy';
 import { companyProfile, serviceNames, workspacePermissions, parseInvitationLink } from '../services/workspacePolicy';
 import { requestStaffCode, signInWithStaffCode } from '../services/staffLogin';
+import { readWorkspace } from '../services/workspaceApi';
 
 export const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
-const sessionKey = uid => `rl-session-v2:${uid}`;
+const sessionKey = uid => `rl-session-v3:${uid}`;
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null), [isLoading, setIsLoading] = useState(true), [sessionError, setSessionError] = useState('');
   const generation = useRef(0);
@@ -36,13 +37,14 @@ export function AuthProvider({ children }) {
         if (isCurrent()) { setUser(current); setSessionError(''); }
         return { success: true, user: current };
       }
+      await purgeOtherRoleCaches(account.uid, workspacePermissions(getWorkspace(), claims).canAccess ? offlineScope() : null);
       const profile = await getDoc(doc(db, 'users', account.uid));
       const data = profile.exists() ? profile.data() : {};
-      const company = claims?.companyId ? await getDoc(doc(db, 'companies', claims.companyId)) : null;
-      if (claims?.companyId && !company?.exists()) throw new Error('Your company could not be loaded. Ask the owner to check your membership.');
+      const company = claims?.companyId && account.emailVerified ? (await readWorkspace('company')).company : null;
+      if (claims?.companyId && account.emailVerified && !company) throw new Error('Your company could not be loaded. Ask the owner to check your membership.');
       const current = {
         ...data, services: serviceNames(data.services),
-        ...(company?.exists() ? companyProfile(company.data()) : { businessPhone: data.phoneNumber || '', businessAddress: data.address || '' }),
+        ...(company ? companyProfile(company) : { businessPhone: data.phoneNumber || '', businessAddress: data.address || '' }),
         id: account.uid, email: account.email, name: account.displayName || data.name || 'User', emailVerified: account.emailVerified,
         companyId: claims?.companyId || null, role: claims?.role || null, membershipId: claims?.membershipId || null, workspace: getWorkspace(), offline: false,
       };
@@ -57,6 +59,7 @@ export function AuthProvider({ children }) {
   }, []);
   const refreshUser = useCallback(() => hydrate(auth.currentUser, true), [hydrate]);
   useEffect(() => {
+    purgeLegacyReadCaches().catch(() => {});
     Promise.all(['savedCredentials', 'tempCredentials', 'userToken', 'userData'].map(key => SecureStore.deleteItemAsync(key))).catch(() => {});
     return onAuthStateChanged(auth, account => { setIsLoading(true); hydrate(account); });
   }, [hydrate]);
@@ -74,7 +77,7 @@ export function AuthProvider({ children }) {
     const result = await AuthService.signOut();
     if (result.success) {
       generation.current++; setUser(null); setSessionError(''); await syncTenancy(null);
-      if (uid) await AsyncStorage.multiRemove([sessionKey(uid), `rl-session-v1:${uid}`]);
+      if (uid) await AsyncStorage.multiRemove([sessionKey(uid), `rl-session-v2:${uid}`, `rl-session-v1:${uid}`]);
     }
     return result;
   };

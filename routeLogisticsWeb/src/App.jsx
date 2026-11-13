@@ -10,6 +10,8 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 // Pages
 const HomePage = lazy(() => import('./pages/HomePage'));
+const MyWorkPage = lazy(() => import('./pages/MyWorkPage'));
+const DispatchPage = lazy(() => import('./pages/DispatchPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const SignupPage = lazy(() => import('./pages/SignupPage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
@@ -53,7 +55,7 @@ const queryClient = new QueryClient({
 // Shows the marketing landing page to signed-out visitors, and the dashboard
 // to signed-in users, without changing either route's own loading/redirect logic.
 const HomeOrLanding = () => {
-  const { currentUser, loading } = useAuth();
+  const { currentUser, loading, role } = useAuth();
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -63,9 +65,9 @@ const HomeOrLanding = () => {
   }
   if (!currentUser) return <LandingPage />;
   return (
-    <Layout>
-      <HomePage />
-    </Layout>
+    <ProtectedRoute><Layout>
+      {role === 'technician' ? <MyWorkPage /> : <HomePage />}
+    </Layout></ProtectedRoute>
   );
 };
 
@@ -84,6 +86,8 @@ function App() {
                 
                 {/* Protected Routes */}
                 <Route path="/" element={<HomeOrLanding />} />
+                <Route path="/my-work" element={<ProtectedRoute><Layout><MyWorkPage /></Layout></ProtectedRoute>} />
+                <Route path="/dispatch" element={<ProtectedRoute><Layout><DispatchPage /></Layout></ProtectedRoute>} />
                 <Route path="/signup" element={<SignupPage />} />
                 <Route path="/accept-invite" element={<AcceptInvitePage />} />
                 <Route path="/portal" element={<CustomerPortalPage />} />

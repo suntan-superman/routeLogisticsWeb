@@ -1,6 +1,7 @@
-import { collection, getDocs, addDoc, query, where, orderBy, limit, serverTimestamp } from 'firebase/firestore';
+import { readWorkspace, callWorkspace } from './workspaceApi';
+import { collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
 import { db } from './firebase';
-import { scopeWhere, tenantFields } from './tenancy';
+import { scopeWhere, requireCapability } from './tenancy';
 
 const ok = (data = {}) => ({ success: true, ...data });
 const fail = (error) => {
@@ -19,26 +20,7 @@ export async function addServiceLog(log) {
     if (missing.length) throw new Error(`Missing required fields: ${missing.join(', ')}`);
     const amount = Number(log.amount);
     if (!(amount > 0)) throw new Error('Amount must be greater than zero');
-    const ref = await addDoc(collection(db, 'serviceLogs'), {
-      ...tenantFields(),
-      jobId: log.jobId || null,
-      customerId: log.customerId || null,
-      customerName: log.customerName || '',
-      siteAddress: log.siteAddress || '',
-      applicationDate: log.applicationDate || new Date().toISOString().slice(0, 10),
-      product: log.product.trim(),
-      epaRegNo: (log.epaRegNo || '').trim(),
-      activeIngredient: (log.activeIngredient || '').trim(),
-      amount,
-      unit: log.unit,
-      targetPest: log.targetPest.trim(),
-      areaTreated: (log.areaTreated || '').trim(),
-      method: log.method || '',
-      applicatorName: log.applicatorName.trim(),
-      applicatorLicense: (log.applicatorLicense || '').trim(),
-      notes: log.notes || '',
-      createdAt: serverTimestamp(),
-    });
+    const ref = await callWorkspace('rlRecordApplication', { jobId: log.jobId, operationId: crypto.randomUUID(), record: { ...log, amount } });
     return ok({ id: ref.id });
   } catch (error) {
     return fail(error);
@@ -46,17 +28,13 @@ export async function addServiceLog(log) {
 }
 
 export async function listServiceLogsForJob(jobId) {
-  try {
-    const snap = await getDocs(query(collection(db, 'serviceLogs'), scopeWhere(), where('jobId', '==', jobId), limit(100)));
-    const logs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    return ok({ logs: logs.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)) });
-  } catch (error) {
-    return fail(error);
-  }
+  try { return ok(await readWorkspace('serviceLogs', { jobId })); }
+  catch (error) { return fail(error); }
 }
 
 export async function listServiceLogs(startDate, endDate, max = 1000) {
   try {
+    requireCapability('reports.operations');
     const constraints = [scopeWhere()];
     if (startDate) constraints.push(where('applicationDate', '>=', startDate));
     if (endDate) constraints.push(where('applicationDate', '<=', endDate));

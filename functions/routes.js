@@ -1,5 +1,6 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { hash, documentId, requireAuth, requireStaff, rateLimit } = require('./security');
+const { hasCapability } = require('./access');
 function routeDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw new HttpsError('invalid-argument', 'Choose a valid service date.');
   return value;
@@ -49,6 +50,7 @@ function routeHandlers(db) {
     },
     save: async (request) => {
       const scope = await routingScope(db, request);
+      if (!hasCapability(scope.role, 'routes.optimize')) throw new HttpsError('permission-denied', 'Dispatch permission is required to change route order.');
       await rateLimit(db, 'route-save', request.auth.uid, 20);
       const ids = request.data?.jobIds;
       if (!Array.isArray(ids) || !ids.length || ids.length > 25 || new Set(ids).size !== ids.length) throw new HttpsError('invalid-argument', 'Select between 1 and 25 distinct jobs.');

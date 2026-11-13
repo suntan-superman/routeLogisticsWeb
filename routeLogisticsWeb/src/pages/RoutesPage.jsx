@@ -3,17 +3,19 @@ import { httpsCallable } from 'firebase/functions';
 import { functions } from '../services/firebase';
 import { loadMaps } from '../services/maps';
 import { appointmentWarnings, googleNavigation } from '../utils/routePlanning';
+import { can } from '../services/tenancy';
+import MyWorkPage from './MyWorkPage';
 const call = (name, data) => httpsCallable(functions, name)(data).then((r) => r.data);
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
-export default function RoutesPage() {
-  const [team, setTeam] = useState([]), [memberId, setMemberId] = useState(''), [date, setDate] = useState(today);
+function RoutePlanner({ initialMemberId = '', initialDate = today() }) {
+  const [team, setTeam] = useState([]), [memberId, setMemberId] = useState(initialMemberId), [date, setDate] = useState(initialDate);
   const [stops, setStops] = useState([]), [selected, setSelected] = useState([]), [revision, setRevision] = useState(0);
   const [startAddress, setStartAddress] = useState(''), [returnToStart, setReturnToStart] = useState(true), [keepAppointments, setKeepAppointments] = useState(true), [startTime, setStartTime] = useState('08:00');
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState(''), [estimate, setEstimate] = useState(null);
   const element = useRef(null), map = useRef(null), overlays = useRef([]), cache = useRef(null), generation = useRef(0);
   const clearRoute = () => { overlays.current.forEach((item) => { if (item.setMap) item.setMap(null); else item.map = null; }); overlays.current = []; setEstimate(null); };
-  useEffect(() => { const lifecycle = generation; let active = true; call('rlGetRoutingTeam').then((data) => { if (active) { setTeam(data.team); setMemberId(data.team[0]?.id || ''); setStartAddress(data.startAddress); } }).catch((e) => { if (active) setError(e.message); }); return () => { active = false; lifecycle.current++; overlays.current.forEach((item) => { if (item.setMap) item.setMap(null); else item.map = null; }); }; }, []);
+  useEffect(() => { const lifecycle = generation; let active = true; call('rlGetRoutingTeam').then((data) => { if (active) { setTeam(data.team); setMemberId(current => current || data.team[0]?.id || ''); setStartAddress(data.startAddress); } }).catch((e) => { if (active) setError(e.message); }); return () => { active = false; lifecycle.current++; overlays.current.forEach((item) => { if (item.setMap) item.setMap(null); else item.map = null; }); }; }, []);
   const reset = () => { generation.current++; setStops([]); setSelected([]); setRevision(0); setMessage(''); clearRoute(); };
   const load = async () => {
     const ticket = ++generation.current; setBusy(true); setError(''); setMessage(''); clearRoute(); setStops([]); setSelected([]);
@@ -60,4 +62,7 @@ export default function RoutesPage() {
     {estimate && <div className="rounded border bg-white p-4"><p className="font-semibold">Estimated driving: {estimate.minutes} minutes · {estimate.miles} miles</p>{estimate.warnings.map((warning) => <p className="mt-2 text-amber-800" key={warning}>{warning}</p>)}</div>}
     <div ref={element} className="h-80 rounded border bg-gray-100" aria-label="Daily route map" />{message && <p role="status">{message}</p>}{error && <p role="alert" className="text-red-700">{error}</p>}
   </div>;
+}
+export default function RoutesPage(props) {
+  return can('routes.optimize') ? <RoutePlanner {...props} /> : <MyWorkPage />;
 }

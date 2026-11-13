@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "roles": {
+    "owner": ["company.read", "company.edit", "team.manage", "ownership.transfer", "customers.read", "customers.manage", "customers.export", "jobs.read", "jobs.schedule", "jobs.assign", "jobs.work", "jobs.cancel", "jobs.pricing", "jobs.export", "estimates.manage", "plans.manage", "routes.read", "routes.optimize", "dispatch.manage", "locations.viewTeam", "locations.shareOwn", "invoices.read", "invoices.manage", "reports.operations", "reports.financial", "integrations.read", "integrations.manage"],
+    "admin": ["company.read", "customers.read", "customers.manage", "customers.export", "jobs.read", "jobs.schedule", "jobs.assign", "jobs.work", "jobs.cancel", "jobs.pricing", "jobs.export", "estimates.manage", "plans.manage", "routes.read", "routes.optimize", "dispatch.manage", "locations.viewTeam", "locations.shareOwn", "invoices.read", "invoices.manage", "reports.operations", "reports.financial", "integrations.read"],
+    "manager": ["company.read", "customers.read", "customers.manage", "jobs.read", "jobs.schedule", "jobs.assign", "jobs.work", "jobs.cancel", "jobs.pricing", "estimates.manage", "plans.manage", "routes.read", "routes.optimize", "dispatch.manage", "locations.viewTeam", "locations.shareOwn", "reports.operations"],
+    "technician": ["company.read", "customers.read", "jobs.read", "jobs.work", "routes.read", "locations.shareOwn"]
+  },
+  "scopes": { "owner": "company", "admin": "company", "manager": "company", "technician": "assigned" },
+  "reservedProfiles": { "dispatcher": { "enabled": false, "capabilities": ["jobs.read", "jobs.schedule", "jobs.assign", "routes.read", "routes.optimize", "dispatch.manage", "locations.viewTeam"] } }
+}

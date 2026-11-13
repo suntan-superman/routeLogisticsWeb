@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { uploadJobPhoto, listJobPhotos, deleteJobPhoto } from '../services/photoService';
+import { uploadJobPhoto, listJobPhotos, deleteJobPhoto, readJobPhoto } from '../services/photoService';
 import { canManage } from '../services/tenancy';
 import { useConfirm } from './ConfirmProvider';
 
@@ -74,9 +74,7 @@ const JobPhotos = ({ job }) => {
         <div className="grid grid-cols-3 gap-2">
           {photos.map((photo) => (
             <div key={photo.id} className="relative group">
-              <a href={photo.url} target="_blank" rel="noopener noreferrer">
-                <img src={photo.url} alt={photo.caption || 'Job photo'} loading="lazy" className="h-24 w-full object-cover rounded" />
-              </a>
+              <PrivatePhoto photo={photo} />
               {canManage() && (
                 <button
                   type="button"
@@ -96,3 +94,8 @@ const JobPhotos = ({ job }) => {
 };
 
 export default JobPhotos;
+
+function PrivatePhoto({ photo }) {
+  const [url, setUrl] = useState(''), [error, setError] = useState('');
+  return <div>{url ? <img src={url} alt={photo.caption || 'Job photo'} className="max-h-96 w-full object-contain rounded" /> : <button className="w-full rounded border p-5 text-sm underline" onClick={async () => { try { setUrl((await readJobPhoto(photo.id)).dataUri); } catch (e) { setError(e.message); } }}>View photo</button>}{error && <p role="alert">{error}</p>}</div>;
+}

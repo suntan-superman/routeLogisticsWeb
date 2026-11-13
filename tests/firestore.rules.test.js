@@ -36,7 +36,7 @@ beforeEach(async () => {
   });
 });
 
-const as = (uid, claims = {}) => env.authenticatedContext(uid, claims).firestore();
+const as = (uid, claims = {}) => env.authenticatedContext(uid, { email_verified: true, ...claims }).firestore();
 const owner = () => as('owner1', { companyId: 'c1', role: 'owner' });
 const tech = () => as('tech1', { companyId: 'c1', role: 'technician', membershipId: 't1' });
 const manager = () => as('mgr1', { companyId: 'c1', role: 'manager', membershipId: 'm1' });
@@ -51,6 +51,15 @@ test('invoice payment locks and accounting fields are server-owned', async () =>
   await assertFails(updateDoc(doc(owner(), 'invoices/locked'), { qbBalance: 0 }));
   await assertFails(updateDoc(doc(owner(), 'invoices/locked'), { paymentLock: null }));
   await assertSucceeds(updateDoc(doc(owner(), 'invoices/locked'), { notes: 'Call customer' }));
+});
+
+test('location and saved-route documents are accessible only through authorized callables', async () => {
+  for (const collectionName of ['rlLocations', 'rlRoutes']) {
+    await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), `${collectionName}/private`), { companyId: 'c1', userId: 'tech1', lat: 40, lng: -120 }));
+    await assertFails(getDoc(doc(owner(), `${collectionName}/private`)));
+    await assertFails(getDoc(doc(tech(), `${collectionName}/private`)));
+    await assertFails(setDoc(doc(tech(), `${collectionName}/forged`), { companyId: 'c1', userId: 'tech1', lat: 40, lng: -120 }));
+  }
 });
 
 // ---- users: privilege escalation ----
@@ -84,8 +93,8 @@ test('owner can update company, others cannot', async () => {
   await assertFails(updateDoc(doc(owner(), 'companies/c1'), { ownerId: 'solo1' }));
 });
 
-test('company members can read their company only', async () => {
-  await assertSucceeds(getDoc(doc(tech(), 'companies/c1')));
+test('technicians use the safe company projection, never the raw company record', async () => {
+  await assertFails(getDoc(doc(tech(), 'companies/c1')));
   await assertFails(getDoc(doc(tech(), 'companies/c2')));
 });
 
@@ -94,14 +103,14 @@ test('user already in a company cannot create a second one', async () => {
 });
 
 // ---- tenant isolation ----
-test('company member reads company jobs, not other tenants or solo jobs', async () => {
-  await assertSucceeds(getDoc(doc(tech(), 'jobs/j1')));
+test('technicians cannot read raw company jobs, other tenants or solo jobs', async () => {
+  await assertFails(getDoc(doc(tech(), 'jobs/j1')));
   await assertFails(getDoc(doc(tech(), 'jobs/jOther')));
   await assertFails(getDoc(doc(tech(), 'jobs/jSolo')));
 });
 
-test('company-scoped query succeeds; unscoped query fails', async () => {
-  await assertSucceeds(getDocs(query(collection(tech(), 'jobs'), where('companyId', '==', 'c1'))));
+test('technician raw job queries are denied even with company scope', async () => {
+  await assertFails(getDocs(query(collection(tech(), 'jobs'), where('companyId', '==', 'c1'))));
   await assertFails(getDocs(query(collection(tech(), 'jobs'), where('companyId', '==', 'c2'))));
 });
 
@@ -122,10 +131,10 @@ test('cannot create docs attributed to another user or tenant', async () => {
   await assertSucceeds(setDoc(doc(owner(), 'jobs/n3'), { userId: 'owner1', companyId: 'c1', status: 'scheduled' }));
 });
 
-test('technician cannot create customers or jobs but can add photos', async () => {
+test('technicians cannot create customers, jobs or raw photo metadata', async () => {
   await assertFails(setDoc(doc(tech(), 'customers/n1'), { userId: 'tech1', companyId: 'c1' }));
   await assertFails(setDoc(doc(tech(), 'jobs/n1'), { userId: 'tech1', companyId: 'c1', status: 'scheduled' }));
-  await assertSucceeds(setDoc(doc(tech(), 'photos/p1'), { userId: 'tech1', companyId: 'c1', jobId: 'j1' }));
+  await assertFails(setDoc(doc(tech(), 'photos/p1'), { userId: 'tech1', companyId: 'c1', jobId: 'j1' }));
 });
 
 test('clients cannot reassign companyId or userId on update', async () => {
@@ -134,16 +143,16 @@ test('clients cannot reassign companyId or userId on update', async () => {
 });
 
 // ---- role enforcement ----
-test('technician can update job status and notes but not price/customer', async () => {
-  await assertSucceeds(updateDoc(doc(tech(), 'jobs/j1'), { status: 'in-progress', updatedAt: 'now' }));
+test('technician work updates use the authorized callable; raw changes are denied', async () => {
+  await assertFails(updateDoc(doc(tech(), 'jobs/j1'), { status: 'in-progress', updatedAt: 'now' }));
   await assertFails(updateDoc(doc(tech(), 'jobs/j1'), { totalCost: 0 }));
   await assertFails(updateDoc(doc(tech(), 'jobs/j1'), { customerId: 'cu9' }));
 });
 
-test('technician cannot delete jobs or customers; manager can', async () => {
+test('technicians and managers cannot directly delete raw jobs', async () => {
   await assertFails(deleteDoc(doc(tech(), 'jobs/j1')));
   await assertFails(deleteDoc(doc(tech(), 'customers/cu1')));
-  await assertSucceeds(deleteDoc(doc(manager(), 'jobs/j1')));
+  await assertFails(deleteDoc(doc(manager(), 'jobs/j1')));
 });
 
 test('technician cannot edit customers', async () => {
@@ -157,9 +166,9 @@ test('invalid status values are rejected', async () => {
   await assertFails(setDoc(doc(owner(), 'jobs/n1'), { userId: 'owner1', companyId: 'c1', status: 'bogus' }));
 });
 
-test('technician cannot reopen completed jobs; manager can', async () => {
+test('job reopening requires the management callable for managers', async () => {
   await assertFails(updateDoc(doc(tech(), 'jobs/jDone'), { status: 'scheduled' }));
-  await assertSucceeds(updateDoc(doc(manager(), 'jobs/jDone'), { status: 'scheduled' }));
+  await assertFails(updateDoc(doc(manager(), 'jobs/jDone'), { status: 'scheduled' }));
 });
 
 // ---- team members ----
@@ -198,12 +207,13 @@ test('unknown collections are denied', async () => {
 
 
 // ---- P1: invoices, service plans, service logs ----
-test('invoices: managers write, technicians read only, paid is immutable', async () => {
+test('invoices: owner writes, manager and technician reads denied, paid immutable', async () => {
   await env.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), 'invoices/i1'), { userId: 'owner1', companyId: 'c1', status: 'draft', total: 100 });
     await setDoc(doc(ctx.firestore(), 'invoices/iPaid'), { userId: 'owner1', companyId: 'c1', status: 'paid', total: 100 });
   });
-  await assertSucceeds(getDoc(doc(tech(), 'invoices/i1')));
+  await assertFails(getDoc(doc(tech(), 'invoices/i1')))
+  await assertFails(getDoc(doc(manager(), 'invoices/i1'))) ;
   await assertFails(updateDoc(doc(tech(), 'invoices/i1'), { status: 'paid' }));
   await assertFails(setDoc(doc(tech(), 'invoices/iNew'), { userId: 'tech1', companyId: 'c1', status: 'draft', total: 5 }));
   await assertSucceeds(updateDoc(doc(owner(), 'invoices/i1'), { status: 'sent' }));
@@ -218,8 +228,9 @@ test('invoices: other tenants cannot read', async () => {
   await assertFails(getDoc(doc(as('x', { companyId: 'c2', role: 'owner' }), 'invoices/i1')));
 });
 
-test('serviceLogs: technicians can add, nobody can delete', async () => {
-  await assertSucceeds(setDoc(doc(tech(), 'serviceLogs/l1'), { userId: 'tech1', companyId: 'c1', product: 'Termidor', epaRegNo: '7969-210' }));
+test('serviceLogs: technicians use the assigned-work callable; no client deletion', async () => {
+  await assertFails(setDoc(doc(tech(), 'serviceLogs/l1'), { userId: 'tech1', companyId: 'c1', jobId: 'j1', product: 'Termidor', epaRegNo: '7969-210' }));
+  await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), 'serviceLogs/l1'), { userId: 'tech1', companyId: 'c1', jobId: 'j1', product: 'Termidor' }));
   await assertFails(deleteDoc(doc(owner(), 'serviceLogs/l1')));
   await assertFails(updateDoc(doc(tech(), 'serviceLogs/l1'), { product: 'x' }));
   await assertSucceeds(updateDoc(doc(owner(), 'serviceLogs/l1'), { notes: 'ok' }));

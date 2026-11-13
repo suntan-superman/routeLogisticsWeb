@@ -6,6 +6,8 @@ const { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } = require('fir
 const { getMessaging } = require('firebase-admin/messaging');
 const { resolveClaims } = require('./claims');
 const { workspaceStatus } = require('./workspace');
+const { workDataHandlers } = require('./workData');
+const { jobPhotoHandler } = require('./jobPhotos');
 const { assignmentTarget, buildAssignmentMessage, DEAD_TOKEN_CODES } = require('./notify');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineString } = require('firebase-functions/params');
@@ -18,7 +20,7 @@ const { staffLoginHandlers } = require('./staffLogin');
 const { drainMail } = require('./mail');
 const { invoiceEmailHandlers } = require('./invoiceEmail');
 const { ownershipHandler } = require('./ownership');
-const { paymentHandlers } = require('./payments');
+const { paymentHandlers, stripeKeyForMode } = require('./payments');
 const { routeHandlers } = require('./routes');
 const { locationHandlers } = require('./locations');
 const { offlineHandler } = require('./offline');
@@ -110,6 +112,13 @@ exports.syncClaims = onCall(async (request) => {
   return { claims, workspace };
 });
 
+const workData = workDataHandlers(db);
+exports.rlReadWorkspace = onCall(workData.read);
+exports.rlManageJob = onCall(workData.manageJob);
+exports.rlRecordApplication = onCall(workData.application);
+exports.rlCreateCompany = onCall(workData.createCompany);
+exports.rlJobPhoto = onCall({ memory: '512MiB', timeoutSeconds: 60 }, jobPhotoHandler(db));
+
 const invites = invitationHandlers(db, applyClaims, () => appUrl.value(), emailEnabled);
 exports.sendTeamInviteEmail = onCall(invites.sendTeamInviteEmail);
 exports.acceptTeamInvite = onCall(invites.acceptTeamInvite);
@@ -135,8 +144,7 @@ const stripeEnabled = () => process.env.RL_STRIPE_ENABLED === 'true';
 const stripeMode = () => process.env.RL_STRIPE_MODE || 'test';
 const stripeSecrets = stripeEnabled() ? ['RL_STRIPE_SECRET_KEY'] : [];
 const payments = paymentHandlers(db, () => {
-  const key = process.env.RL_STRIPE_SECRET_KEY || '';
-  if (!key.startsWith(stripeMode() === 'test' ? 'sk_test_' : 'sk_live_')) throw new HttpsError('failed-precondition', 'Stripe credentials do not match the configured mode.');
+  const key = stripeKeyForMode(process.env.RL_STRIPE_SECRET_KEY, stripeMode());
   return new (require('stripe'))(key, { timeout: 20_000, maxNetworkRetries: 1 });
 }, { enabled: stripeEnabled, mode: stripeMode, liveApproved: () => process.env.RL_STRIPE_LIVE_APPROVED === 'true' });
 exports.rlCreateInvoicePayment = onCall({ secrets: stripeSecrets }, payments.create);
@@ -199,8 +207,9 @@ for (const name of TENANT_COLLECTIONS) {
     if (companyId) {
       // Old claimless tokens must not turn technician-created solo docs into company jobs.
       const account = await getAuth().getUser(data.userId);
+      if (account.disabled || !account.emailVerified) return;
       try {
-        await requireManager(db, { auth: { uid: data.userId, token: account.customClaims || {} } }, { userId: data.userId, companyId });
+        await requireManager(db, { auth: { uid: data.userId, token: { ...account.customClaims, email_verified: account.emailVerified, email: account.email } } }, { userId: data.userId, companyId });
       } catch (error) {
         if (error.code === 'permission-denied' || error.code === 'unauthenticated') return;
         throw error;

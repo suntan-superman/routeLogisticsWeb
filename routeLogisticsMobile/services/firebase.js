@@ -1,3 +1,4 @@
+import { readWorkspace, callWorkspace } from './workspaceApi';
 // Firebase Authentication Service for Route Logisitcs
 import { 
   signInWithEmailAndPassword, 
@@ -292,6 +293,15 @@ export class CustomerService {
   // Get all customers for the current user
   static async getCustomers() {
     try {
+      requireWorkspace(true);
+      if (getClaims()?.companyId) {
+        const customers = await cachedRead('customers', async () => {
+          let after = null, rows = [];
+          do { const page = await readWorkspace('customers', { limit: 500, after }); rows.push(...page.customers); after = page.hasMore ? page.lastDoc : null; } while (after && rows.length < 5000);
+          return rows.map(row => ({ ...row, name: row.name || [row.firstName, row.lastName].filter(Boolean).join(' '), phone: row.phone || row.phoneNumber || '' }));
+        });
+        return { success: true, customers };
+      }
       const userId = this.getCurrentUserId();
       if (!userId) {
         return {
@@ -367,7 +377,7 @@ export class CustomerService {
         };
       }
 
-      await deleteDoc(doc(db, 'customers', customerId));
+      await updateDoc(doc(db, 'customers', customerId), { isActive: false, updatedAt: new Date().toISOString() });
 
       return { success: true };
     } catch (error) {
@@ -609,7 +619,7 @@ export class JobService {
         updatedAt: new Date().toISOString(),
       };
 
-      const docRef = await addDoc(collection(db, 'jobs'), jobDoc);
+      const docRef = getClaims()?.companyId ? await callWorkspace('rlManageJob', { action: 'create', job: jobDoc }) : await addDoc(collection(db, 'jobs'), jobDoc);
 
       return {
         success: true,
@@ -651,8 +661,13 @@ export class JobService {
       );
 
       const loaded = await cachedRead(`jobs:${startDate}:${endDate}`, async (scope) => {
-        const snapshot = await getDocs(q);
-        const data = snapshot.docs.map((row) => ({ id: row.id, ...row.data() }));
+        let data;
+        if (getClaims()?.companyId) {
+          data = []; let after = null, page;
+          do { page = await readWorkspace('jobs', { startDate, endDate, after, limit: 500 }); data.push(...page.jobs); after = page.lastDoc; } while (page.hasMore && data.length < 10000);
+          if (page.hasMore) throw new Error('Too many jobs for this date range. Select a shorter period.');
+        }
+        else { const snapshot = await getDocs(q); data = snapshot.docs.map((row) => ({ id: row.id, ...row.data() })); }
         const bases = await readCache('job-bases', scope) || {};
         data.forEach((job) => { bases[job.id] = job; });
         await writeCache('job-bases', bases, scope);
@@ -700,7 +715,7 @@ export class JobService {
   static async updateJob(jobId, jobData) {
     try {
       const supported = ['status', 'notes', 'actualWorkDone', 'actualHours', 'completionNotes', 'completedAt'];
-      if (Object.keys(jobData).every((key) => supported.includes(key))) return await saveJobOffline(jobId, jobData);
+      if (Object.keys(jobData).every((key) => supported.includes(key)) && (!jobData.status || ['en-route', 'in-progress', 'completed'].includes(jobData.status))) return await saveJobOffline(jobId, jobData);
       requireWorkspace(true);
       if (await isOffline()) throw new Error('Scheduling and pricing changes require an internet connection. Work notes and completion details can be saved offline.');
       const userId = this.getCurrentUserId();
@@ -711,6 +726,7 @@ export class JobService {
         };
       }
 
+      if (getClaims()?.companyId) { await callWorkspace('rlManageJob', { action: 'update', id: jobId, job: jobData }); return { success: true }; }
       await updateDoc(doc(db, 'jobs', jobId), {
         ...jobData,
         updatedAt: new Date().toISOString(),
@@ -740,7 +756,8 @@ export class JobService {
         };
       }
 
-      await deleteDoc(doc(db, 'jobs', jobId));
+      if (getClaims()?.companyId) await callWorkspace('rlManageJob', { action: 'delete', id: jobId });
+      else await deleteDoc(doc(db, 'jobs', jobId));
       return { success: true };
     } catch (error) {
       return {

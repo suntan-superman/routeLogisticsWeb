@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import CustomerService from '../services/customerService';
 import JobManagementService from '../services/jobManagementService';
 import EstimateTemplateService from '../services/estimateTemplateService';
+import { can } from '../services/tenancy';
 import { motion as Motion } from 'framer-motion';
 import { 
   BuildingOfficeIcon, 
@@ -72,7 +73,7 @@ const HomePage = () => {
   const stats = [
     { name: 'Total Customers', value: String(counts.customers), icon: UsersIcon },
     { name: 'Active Jobs', value: String(counts.activeJobs), icon: ClockIcon },
-    { name: 'Monthly Revenue', value: formatMoney(counts.monthRevenue), icon: CurrencyDollarIcon },
+    ...(can('reports.financial') ? [{ name: 'Monthly Revenue', value: formatMoney(counts.monthRevenue), icon: CurrencyDollarIcon }] : []),
     { name: 'Estimate Templates', value: String(counts.templates), icon: DocumentTextIcon },
   ];
 

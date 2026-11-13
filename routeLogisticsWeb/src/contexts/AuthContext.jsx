@@ -9,8 +9,9 @@ import {
   updateProfile,
   sendEmailVerification
 } from 'firebase/auth';
-import { syncTenancy, loadClaims, getClaims } from '../services/tenancy';
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { syncTenancy, loadClaims, getClaims, getWorkspace, can } from '../services/tenancy';
+import { readWorkspace } from '../services/workspaceApi';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import toast from 'react-hot-toast';
 
 const AuthContext = createContext();
@@ -34,17 +35,30 @@ export const AuthProvider = ({ children }) => {
   const queryClient = useQueryClient();
   const authorizedCompany = async () => {
     const id = getClaims()?.companyId;
-    if (!id) return null;
-    const snap = await getDoc(doc(db, 'companies', id));
-    return snap.exists() ? { ...snap.data(), id: snap.id } : null;
+    if (!id || getWorkspace()?.status !== 'company' || !auth.currentUser?.emailVerified) return null;
+    return (await readWorkspace('company')).company;
   };
   useEffect(() => {
-    if (!company?.id || !currentUser) return;
-    const accountId = currentUser.uid;
-    return onSnapshot(doc(db, 'companies', company.id), (snap) => {
-      if (auth.currentUser?.uid === accountId) setCompany(snap.exists() ? { ...snap.data(), id: snap.id } : null);
-    }, () => setCompany(null));
-  }, [company?.id, currentUser]);
+    if (!currentUser) return;
+    let active = true, pending = false;
+    const refreshAccess = async () => {
+      if (pending || document.visibilityState === 'hidden') return;
+      pending = true;
+      const previous = JSON.stringify([getClaims(), getWorkspace()]);
+      try { await syncTenancy(); }
+      catch { /* syncTenancy closes access on failure. */ }
+      finally {
+        if (active && previous !== JSON.stringify([getClaims(), getWorkspace()])) {
+          queryClient.clear(); setCompany(null); setSessionVersion(v => v + 1);
+          authorizedCompany().then(value => { if (active) setCompany(value); }).catch(() => {});
+        }
+        pending = false;
+      }
+    };
+    const timer = setInterval(refreshAccess, 60000);
+    window.addEventListener('focus', refreshAccess);
+    return () => { active = false; clearInterval(timer); window.removeEventListener('focus', refreshAccess); };
+  }, [currentUser, queryClient]);
   const refreshSession = async () => {
     const user = auth.currentUser;
     if (!user) return;
@@ -244,6 +258,7 @@ export const AuthProvider = ({ children }) => {
 
   const value = {
     currentUser, company,
+    workspace: getWorkspace(), can, role: getClaims()?.role || null,
     userProfile,
     loading,
     signup,

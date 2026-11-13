@@ -27,13 +27,14 @@ import { useNavigate } from 'react-router-dom';
 import JobPhotos from '../components/JobPhotos';
 import JobApplicationLog from '../components/JobApplicationLog';
 import { createInvoiceFromJob } from '../services/invoiceService';
-import { canManage } from '../services/tenancy';
+import { canManage, can } from '../services/tenancy';
 
 const JobManagementPage = () => {
   const navigate = useNavigate();
   const confirm = useConfirm();
 
   const handleCreateInvoice = async (job) => {
+    if (!can('invoices.manage')) return toast.error('Invoice access is required.');
     const res = await createInvoiceFromJob(job);
     if (!res.success) return toast.error(res.error || 'Could not create invoice');
     toast.success(res.existing ? 'Opening existing invoice' : 'Invoice created');
@@ -391,13 +392,13 @@ const JobManagementPage = () => {
             </div>
           </div>
           <div className="flex space-x-3">
-            <button
+            {can('jobs.export') && <button
               onClick={exportJobs}
               className="flex items-center px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
             >
               <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
               Export
-            </button>
+            </button>}
             {canManage() && (
               <button
                 onClick={() => setShowNewJob(true)}
@@ -461,7 +462,7 @@ const JobManagementPage = () => {
           </div>
         </div>
 
-        <div className="bg-white overflow-hidden shadow-sm rounded-lg border border-gray-200">
+        {can('reports.financial') && <div className="bg-white overflow-hidden shadow-sm rounded-lg border border-gray-200">
           <div className="p-5">
             <div className="flex items-center">
               <div className="flex-shrink-0">
@@ -475,7 +476,7 @@ const JobManagementPage = () => {
               </div>
             </div>
           </div>
-        </div>
+        </div>}
       </div>
 
       {/* Additional Stats */}
@@ -795,7 +796,7 @@ const JobManagementPage = () => {
               </div>
               
               <div className="flex justify-end space-x-3 mt-6">
-                {canManage() && selectedJob.status === 'completed' && (
+                {can('invoices.manage') && selectedJob.status === 'completed' && (
                   <button
                     onClick={() => handleCreateInvoice(selectedJob)}
                     className="px-4 py-2 border border-primary-600 text-primary-700 rounded-md hover:bg-primary-50"

@@ -1,5 +1,6 @@
+const { requireCapability } = require('./access');
 const { HttpsError } = require('firebase-functions/v2/https');
-const { requireAuth, requireManager, rateLimit, hash, normalizeEmail, validEmail } = require('./security');
+const { requireAuth, rateLimit, hash, normalizeEmail, validEmail } = require('./security');
 const FIELDS = ['name', 'email', 'phone', 'address', 'city', 'state', 'zipCode', 'notes'];
 function cleanCustomer(row) {
   if (!row || typeof row !== 'object') throw new HttpsError('invalid-argument', 'Invalid customer row.');
@@ -13,7 +14,7 @@ function customerHandlers(db) {
     bulkImportCustomers: async (request) => {
       const { uid, token } = requireAuth(request);
       const scope = token.companyId ? { companyId: token.companyId } : { userId: uid };
-      await requireManager(db, request, { userId: uid, ...scope });
+      await requireCapability(db, request, 'customers.export', { userId: uid, ...scope });
       await rateLimit(db, 'customer-import', uid, 60);
       if (!Array.isArray(request.data?.customers) || !request.data.customers.length || request.data.customers.length > 100) throw new HttpsError('invalid-argument', 'Import between 1 and 100 customers per batch.');
       const rows = request.data.customers.map(cleanCustomer);

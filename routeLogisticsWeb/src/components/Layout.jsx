@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { mayOpenRoute } from '../utils/routeAccess';
 import NotificationToggle from './NotificationToggle';
 import { disablePush } from '../services/push';
 import EmailVerificationBanner from './EmailVerificationBanner';
@@ -21,7 +22,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 const Layout = ({ children }) => {
-  const { userProfile, company, logout: signOut } = useAuth();
+  const { userProfile, company, can, role, logout: signOut } = useAuth();
   // Unregister this device's push token while still signed in so the next user on it isn't notified.
   const logout = async () => {
     await disablePush().catch(() => {});
@@ -31,8 +32,9 @@ const Layout = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const navigation = [
-    { name: 'Dashboard', href: '/', icon: HomeIcon },
-    { name: 'Company Setup', href: '/company-setup', icon: BuildingOfficeIcon },
+    { name: role === 'technician' ? 'My Work' : 'Dashboard', href: '/', icon: HomeIcon },
+    { name: 'Dispatch Board', href: '/dispatch', icon: CalendarIcon },
+    { name: can('company.edit') ? 'Company Setup' : 'Company', href: '/company-setup', icon: BuildingOfficeIcon },
     { name: 'Customers', href: '/customers', icon: UsersIcon },
     { name: 'Estimate Templates', href: '/estimate-templates', icon: DocumentTextIcon },
     { name: 'Jobs', href: '/jobs', icon: ClipboardDocumentListIcon },
@@ -44,7 +46,7 @@ const Layout = ({ children }) => {
     { name: 'Reports', href: '/reports', icon: ChartBarIcon },
     { name: 'Integrations', href: '/integrations', icon: ArrowPathIcon },
     { name: 'Notifications', href: '/notifications', icon: ClipboardDocumentListIcon },
-  ];
+  ].filter(item => mayOpenRoute(item.href, can));
 
   const isCurrentPath = (path) => {
     return location.pathname === path;

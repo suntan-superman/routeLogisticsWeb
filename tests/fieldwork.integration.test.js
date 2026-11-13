@@ -19,15 +19,60 @@ before(async () => {
   routes = routeHandlers(db); locations = locationHandlers(db); apply = offlineHandler(db);
 });
 after(() => deleteApp(app));
+
+async function locationFixture(suffix) {
+  const companyId = `location-co-${suffix}`, memberId = `location-member-${suffix}`, jobId = `location-job-${suffix}`;
+  const owner = { uid: `location-owner-${suffix}`, token: { companyId, role: 'owner', email_verified: true } };
+  const tech = { uid: `location-tech-${suffix}`, token: { companyId, membershipId: memberId, role: 'technician', email_verified: true } };
+  await db.doc(`companies/${companyId}`).set({ ownerId: owner.uid });
+  await db.doc(`teamMembers/${memberId}`).set({ companyId, uid: tech.uid, role: 'technician', status: 'active' });
+  await db.doc(`jobs/${jobId}`).set({ companyId, userId: owner.uid, assignedTo: memberId, date: '2026-11-13', status: 'in-progress', latitude: 40, longitude: -120 });
+  return { companyId, memberId, jobId, owner, tech };
+}
+
+test('route and location access cannot cross tenants even with forged role claims', async () => {
+  const a = await locationFixture('tenant-a'), b = await locationFixture('tenant-b');
+  const session = await locations.update(request({ action: 'start', jobId: a.jobId }, a.tech));
+  await locations.update(request({ action: 'position', sessionId: session.sessionId, latitude: 40, longitude: -120, accuracy: 10 }, a.tech));
+  assert.equal((await locations.list(request({}, a.owner))).locations.length, 1);
+  assert.equal((await locations.list(request({}, b.owner))).locations.length, 0);
+  await assert.rejects(locations.list(request({}, a.tech)), { code: 'permission-denied' });
+  await assert.rejects(routes.get(request({ memberId: a.memberId, date: '2026-11-13' }, b.owner)), { code: 'failed-precondition' });
+  await assert.rejects(routes.save(request({ memberId: b.memberId, date: '2026-11-13', jobIds: [a.jobId] }, b.owner)), { code: 'permission-denied' });
+  const forged = { ...a.tech, token: { ...a.tech.token, companyId: b.companyId, role: 'owner' } };
+  await assert.rejects(locations.list(request({}, forged)), { code: 'permission-denied' });
+  await assert.rejects(locations.update(request({ action: 'start', jobId: b.jobId }, a.tech)), { code: 'failed-precondition' });
+  await db.doc(`teamMembers/${a.memberId}`).update({ status: 'removed' });
+  assert.equal((await locations.list(request({}, a.owner))).locations.length, 0);
+  await assert.rejects(locations.update(request({ action: 'position', sessionId: session.sessionId, latitude: 40, longitude: -120, accuracy: 10 }, a.tech)), { code: 'permission-denied' });
+});
+
+test('location updates require an explicit current session and stop when the job or session ends', async () => {
+  const f = await locationFixture('consent');
+  const position = { action: 'position', latitude: 40, longitude: -120, accuracy: 10 };
+  await assert.rejects(locations.update(request(position, f.tech)), { code: 'failed-precondition' });
+  const unverified = { ...f.tech, token: { ...f.tech.token, email_verified: false } };
+  await assert.rejects(locations.update(request({ action: 'start', jobId: f.jobId }, unverified)), { code: 'failed-precondition' });
+  const session = await locations.update(request({ action: 'start', jobId: f.jobId }, f.tech));
+  await assert.rejects(locations.update(request({ ...position, sessionId: 'not-the-sharing-session' }, f.tech)), { code: 'failed-precondition' });
+  await locations.update(request({ ...position, sessionId: session.sessionId }, f.tech));
+  await db.doc(`jobs/${f.jobId}`).update({ status: 'completed' });
+  await assert.rejects(locations.update(request({ ...position, sessionId: session.sessionId }, f.tech)), { code: 'failed-precondition' });
+  await db.doc(`jobs/${f.jobId}`).update({ status: 'in-progress' });
+  const rows = await db.collection('rlLocations').where('companyId', '==', f.companyId).get();
+  await rows.docs[0].ref.update({ sessionExpiresAt: new Date(0) });
+  await assert.rejects(locations.update(request({ ...position, sessionId: session.sessionId }, f.tech)), { code: 'failed-precondition' });
+});
+
 test('daily routes enforce assignment and optimistic revision without provider calls', async () => {
   const data = { memberId: 'field-member', date: '2026-11-13' };
   await db.doc('jobs/field-job').update({ estimatedDuration: 1.5 });
   const result = await routes.get(request(data));
   assert.equal(result.stops.length, 1); assert.equal(result.stops[0].durationMinutes, 90);
   await assert.rejects(routes.get(request({ ...data, memberId: owner.uid })), { code: 'permission-denied' });
-  assert.equal((await routes.save(request({ ...data, jobIds: ['field-job'], revision: 0 }))).revision, 1);
-  await assert.rejects(routes.save(request({ ...data, jobIds: ['field-job'], revision: 0 })), { code: 'aborted' });
-  await assert.rejects(routes.save(request({ ...data, jobIds: ['field-job', 'field-job'], revision: 1 })), { code: 'invalid-argument' });
+  assert.equal((await routes.save(request({ ...data, jobIds: ['field-job'], revision: 0 }, owner))).revision, 1);
+  await assert.rejects(routes.save(request({ ...data, jobIds: ['field-job'], revision: 0 }, owner)), { code: 'aborted' });
+  await assert.rejects(routes.save(request({ ...data, jobIds: ['field-job', 'field-job'], revision: 1 }, owner)), { code: 'invalid-argument' });
 });
 test('location sharing is explicit, manager-only, stoppable and expires', async () => {
   const session = await locations.update(request({ action: 'start', jobId: 'field-job' }));

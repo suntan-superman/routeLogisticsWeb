@@ -19,7 +19,7 @@ export default function AcceptInvitePage() {
     try {
       await httpsCallable(functions, 'acceptTeamInvite')({ inviteId, code });
       await refreshSession();
-      navigate('/jobs', { replace: true });
+      navigate('/', { replace: true });
     } catch (e) { setError(e.message); }
     finally { setBusy(false); }
   };

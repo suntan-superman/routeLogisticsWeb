@@ -1,10 +1,8 @@
+import { readWorkspace, callWorkspace } from '../services/workspaceApi';
 import React, { useEffect, useState } from 'react';
 import { View, Text, Button, Image, ScrollView, Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
-import { collection, getDocs, query, where, limit } from 'firebase/firestore';
-import { db } from '../constants/firebase';
-import { scopeWhere } from '../services/tenancy';
 import { cachedRead, savePhotoOffline, queuedWork, subscribeOffline } from '../services/offline';
 import { useTheme } from '../theme/ThemeProvider';
 
@@ -13,7 +11,7 @@ export default function JobPhotos({ job }) {
   const [photos, setPhotos] = useState([]), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const load = async () => {
     try {
-      const saved = await cachedRead(`photos:${job.id}`, async () => { const snap = await getDocs(query(collection(db, 'photos'), scopeWhere(), where('jobId', '==', job.id), limit(100))); return snap.docs.map((d) => ({ id: d.id, ...d.data() })); }).catch(() => []);
+      const saved = await cachedRead(`photos:${job.id}`, async () => { const data = await readWorkspace('photos', { jobId: job.id }); return data.photos; }).catch(() => []);
       const local = (await queuedWork()).filter((row) => row.kind === 'photo' && row.jobId === job.id && !['synced', 'discarded'].includes(row.state)).map((row) => ({ id: row.id, url: row.localUri, caption: `Photo ${row.state}` }));
       setPhotos([...saved, ...local.filter((row) => !saved.some((photo) => photo.id === row.id))]);
     } catch (e) { setError(e.message); }
@@ -39,6 +37,11 @@ export default function JobPhotos({ job }) {
     <View style={{ flexDirection: 'row', gap: 12 }}><Button title={busy ? 'Saving…' : 'Take photo'} disabled={busy} onPress={() => capture(true)} /><Button title="Choose photo" disabled={busy} onPress={() => capture(false)} /></View>
     <Text style={{ color: palette.secondary, marginVertical: 6 }}>Photos stay on this device until uploaded. Sync resumes while the app is open and connected.</Text>
     {!!error && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{error}</Text>}
-    <ScrollView horizontal>{photos.map((photo) => <Image key={photo.id} accessibilityLabel={photo.caption || 'Job photo'} source={{ uri: photo.url }} style={{ width: 140, height: 140, margin: 5, borderRadius: 8 }} />)}</ScrollView>
+    <ScrollView horizontal>{photos.map((photo) => <PrivatePhoto key={photo.id} photo={photo} style={{ width: 140, height: 140, margin: 5, borderRadius: 8 }} />)}</ScrollView>
   </View>;
+}
+
+function PrivatePhoto({ photo, style }) {
+  const [uri, setUri] = useState(photo.url || ''), [error, setError] = useState('');
+  return <View>{uri ? <Image source={{ uri }} style={style} /> : <Button title="View photo" onPress={async () => { try { setUri((await callWorkspace('rlJobPhoto', { action: 'read', photoId: photo.id })).dataUri); } catch (e) { setError(e.message); } }} />}{!!error && <Text>{error}</Text>}</View>;
 }

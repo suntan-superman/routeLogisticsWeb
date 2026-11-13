@@ -90,7 +90,7 @@ const CompanySetupPage = () => {
         setServiceCategories(result.company.serviceCategories || []);
         
         // Load team members
-        const teamResult = await CompanyService.getTeamMembers(companyId);
+        const teamResult = result.company.ownerId === currentUser?.uid ? await CompanyService.getTeamMembers(companyId) : { success: false };
         if (teamResult.success) {
           setTeamMembers(teamResult.teamMembers);
         }

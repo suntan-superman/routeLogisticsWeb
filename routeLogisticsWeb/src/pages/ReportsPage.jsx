@@ -14,6 +14,8 @@ import {
   PrinterIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import { can } from '../services/tenancy';
+import OperationsReportsPage from './OperationsReportsPage';
 
 const ReportsPage = () => {
   const [analytics, setAnalytics] = useState(null);
@@ -499,4 +501,6 @@ const ReportsPage = () => {
   );
 };
 
-export default ReportsPage;
+export default function AuthorizedReportsPage() {
+  return can('reports.financial') ? <ReportsPage /> : <OperationsReportsPage />;
+}

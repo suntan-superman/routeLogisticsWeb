@@ -1,12 +1,11 @@
+import { readWorkspace, callWorkspace } from './workspaceApi';
 import { 
   collection, 
   doc, 
-  getDoc, 
   updateDoc, 
   getDocs, 
   query, 
-  where,
-  addDoc
+  where
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { auth } from './firebase';
@@ -27,65 +26,20 @@ class CompanyService {
   // Create a new company
   static async createCompany(companyData) {
     try {
-      const userId = this.getCurrentUserId();
-      
-      const company = {
-        ...companyData,
-        ownerId: userId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        isActive: true
-      };
-
-      // Add company to companies collection
-      const docRef = await addDoc(collection(db, 'companies'), company);
-      
-      // Update user profile with company ID
-      await updateDoc(doc(db, 'users', userId), {
-        companyId: docRef.id,
-        updatedAt: new Date().toISOString()
-      });
-
-      // Server mints owner claims and backfills existing data with the new companyId.
+      const result = await callWorkspace('rlCreateCompany', { name: companyData.name });
       await syncTenancy();
-
-      return {
-        success: true,
-        companyId: docRef.id,
-        company: { id: docRef.id, ...company }
-      };
-    } catch (error) {
-      console.error('Error creating company:', error);
-      return {
-        success: false,
-        error: error.message
-      };
-    }
+      await updateDoc(doc(db, 'companies', result.companyId), { ...companyData, updatedAt: new Date().toISOString() });
+      return { success: true, companyId: result.companyId, ...(await readWorkspace('company')) };
+    } catch (error) { return { success: false, error: error.message }; }
   }
 
   // Get company by ID
   static async getCompany(companyId) {
     try {
-      const companyDoc = await getDoc(doc(db, 'companies', companyId));
-      
-      if (!companyDoc.exists()) {
-        return {
-          success: false,
-          error: 'Company not found'
-        };
-      }
-
-      return {
-        success: true,
-        company: { id: companyDoc.id, ...companyDoc.data() }
-      };
-    } catch (error) {
-      console.error('Error getting company:', error);
-      return {
-        success: false,
-        error: error.message
-      };
-    }
+      const { company } = await readWorkspace('company');
+      if (company?.id !== companyId) throw new Error('Company unavailable.');
+      return { success: true, company };
+    } catch (error) { return { success: false, error: error.message }; }
   }
 
   // Get company by user ID

@@ -14,6 +14,8 @@ import {
   Image,
 } from 'react-native';
 import JobPhotos from '../components/JobPhotos';
+import FieldWorkTools from '../components/FieldWorkTools';
+import MyRoute from '../components/MyRoute';
 import WorkLocation from '../components/WorkLocation';
 import OfflineStatus from '../components/OfflineStatus';
 import { canManage, localDate } from '../services/tenancy';
@@ -751,7 +753,7 @@ const HomeScreen = ({ navigation }) => {
         <View style={{ gap: 6 }}><Text style={{ color: palette.text, fontSize: 28, fontWeight: '700', letterSpacing: -0.6 }}>{t('welcome')}, {user.name?.split(' ')[0]}.</Text><Text style={{ color: palette.secondary, fontSize: 14, textTransform: 'capitalize' }}>{user.role || 'Independent business'} · {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</Text></View>
         <GlassCard>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-            <View style={{ flex: 1, gap: 5 }}><Text style={{ color: palette.secondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 }}>Your schedule</Text><Text style={{ color: palette.text, fontSize: 23, fontWeight: '700' }}>{isLoadingJobs ? 'Loading…' : jobs.length + (jobs.length === 1 ? ' job' : ' jobs')}</Text></View>
+            <View style={{ flex: 1, gap: 5 }}><Text style={{ color: palette.secondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 }}>{permissions.isTechnician ? 'My Work' : 'Your schedule'}</Text><Text style={{ color: palette.text, fontSize: 23, fontWeight: '700' }}>{isLoadingJobs ? 'Loading…' : jobs.length + (jobs.length === 1 ? ' job' : ' jobs')}</Text></View>
             <GlassButton secondary title="View schedule" icon="calendar-outline" onPress={handleSchedulePress} />
           </View>
           {!!jobsError && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{jobsError}</Text>}
@@ -765,6 +767,7 @@ const HomeScreen = ({ navigation }) => {
         {managing && <View style={{ gap: 10 }}><Text style={{ color: palette.text, fontSize: 18, fontWeight: '700' }}>Manage work</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}><GlassButton title="Schedule service" icon="add-outline" onPress={handleScheduleServicePress} style={{ flexGrow: 1 }} /><GlassButton secondary title="Customers" icon="people-outline" onPress={() => setShowCustomerModal(true)} style={{ flexGrow: 1 }} /><GlassButton secondary title="Estimates" icon="document-text-outline" onPress={handleEstimatesPress} style={{ flexGrow: 1 }} /></View></View>}
         <WorkLocation jobs={jobs} />
         <OfflineStatus onSynced={() => loadJobs()} />
+        {permissions.isTechnician && <MyRoute />}
         <GlassCard><View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}><Ionicons name="construct-outline" size={22} color={palette.accent} /><Text style={{ color: palette.text, fontSize: 18, fontWeight: '700', flex: 1 }}>{user.companyId ? 'Company services' : 'Your services'}</Text><Text style={{ color: palette.accent, fontWeight: '700' }}>{user.services?.length || 0}</Text></View>
           {user.services?.length ? user.services.slice(0, 6).map(service => <Text key={service} style={{ color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{service}</Text>) : <Text style={{ color: palette.secondary }}>{user.companyId ? 'Your company owner manages the service catalog.' : 'Add your business services in Settings.'}</Text>}
           <GlassButton secondary title="Business details & all services" icon="arrow-forward-outline" onPress={() => navigation.navigate('settings')} />
@@ -1318,7 +1321,7 @@ const HomeScreen = ({ navigation }) => {
 
             {selectedJob && (
               <ScrollView style={styles.jobDetailsContent}>
-                <JobPhotos job={selectedJob} />
+                <FieldWorkTools job={selectedJob} onChanged={loadJobs} /><JobPhotos job={selectedJob} />
                 <View style={styles.jobDetailRow}>
                   <Text style={styles.jobDetailLabel}>Customer:</Text>
                   <Text style={styles.jobDetailValue}>{selectedJob.customerName}</Text>
@@ -1339,7 +1342,7 @@ const HomeScreen = ({ navigation }) => {
                   <Text style={styles.jobDetailLabel}>Duration:</Text>
                   <Text style={styles.jobDetailValue}>{selectedJob.duration} hours</Text>
                 </View>
-                {selectedJob.estimatedCost && (
+                {managing && selectedJob.estimatedCost && (
                   <View style={styles.jobDetailRow}>
                     <Text style={styles.jobDetailLabel}>Estimated Cost:</Text>
                     <Text style={styles.jobDetailValue}>${selectedJob.estimatedCost}</Text>
@@ -1406,7 +1409,7 @@ const HomeScreen = ({ navigation }) => {
               </TouchableOpacity>
 
               {selectedJob?.status === 'scheduled' && <TouchableOpacity style={[styles.modalButton, styles.confirmButton]} onPress={async () => { const result = await JobService.updateJob(selectedJob.id, { status: 'in-progress' }); if (result.success) { setSelectedJob({ ...selectedJob, status: 'in-progress' }); loadJobs(); } else Alert.alert('Could not start job', result.error?.message || 'Try again.'); }}><Text style={styles.confirmButtonText}>Start</Text></TouchableOpacity>}
-              {['scheduled', 'in-progress'].includes(selectedJob?.status) && (
+              {['scheduled', 'en-route', 'in-progress'].includes(selectedJob?.status) && (
                 <>
                   {managing && <TouchableOpacity
                     style={[styles.modalButton, styles.editButton]}

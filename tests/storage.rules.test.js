@@ -9,13 +9,14 @@ before(async () => {
   await env.withSecurityRulesDisabled(async (ctx) => { await setDoc(doc(ctx.firestore(), 'companies/storage-co'), { ownerId: 'storage-owner' }); await setDoc(doc(ctx.firestore(), 'teamMembers/storage-member'), { companyId: 'storage-co', uid: 'storage-tech', status: 'active', role: 'technician' }); });
 });
 after(() => env.cleanup());
-test('storage enforces live membership after removal even with stale claims', async () => {
-  const storage = env.authenticatedContext('storage-tech', { companyId: 'storage-co', membershipId: 'storage-member', role: 'technician' }).storage();
+test('technicians cannot bypass authenticated photo delivery via Storage, including after removal', async () => {
+  const storage = env.authenticatedContext('storage-tech', { companyId: 'storage-co', membershipId: 'storage-member', role: 'technician', email_verified: true }).storage();
   const file = ref(storage, 'companies/storage-co/jobs/test/photo.jpg');
-  await assertSucceeds(uploadBytes(file, new Uint8Array([1, 2]), { contentType: 'image/jpeg' }));
-  await assertSucceeds(getMetadata(file));
+  await env.withSecurityRulesDisabled(ctx => uploadBytes(ref(ctx.storage(), file.fullPath), new Uint8Array([1, 2]), { contentType: 'image/jpeg' }));
+  await assertFails(uploadBytes(file, new Uint8Array([1, 2]), { contentType: 'image/jpeg' }));
+  await assertFails(getMetadata(file));
   await env.withSecurityRulesDisabled((ctx) => updateDoc(doc(ctx.firestore(), 'teamMembers/storage-member'), { status: 'removed' }));
   await assertFails(getMetadata(file)); await assertFails(uploadBytes(file, new Uint8Array([3]), { contentType: 'image/jpeg' }));
-  const owner = env.authenticatedContext('storage-owner', { companyId: 'storage-co', role: 'owner' }).storage(); await assertSucceeds(getMetadata(ref(owner, file.fullPath)));
+  const owner = env.authenticatedContext('storage-owner', { companyId: 'storage-co', role: 'owner', email_verified: true }).storage(); await assertSucceeds(getMetadata(ref(owner, file.fullPath)));
   const other = env.authenticatedContext('other', { companyId: 'other', role: 'owner' }).storage(); await assertFails(getMetadata(ref(other, file.fullPath)));
 });

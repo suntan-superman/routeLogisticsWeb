@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { returnPath } from '../utils/returnPath';
-import toast from 'react-hot-toast';
 import { motion as Motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
-import CompanyService from '../services/companyService';
 
 const SignupPage = () => {
   const { signup, refreshSession } = useAuth();
@@ -29,8 +27,6 @@ const SignupPage = () => {
       if (next) {
         navigate(next);
       } else {
-        const company = await CompanyService.createCompany({ name: form.businessName || `${form.name}'s Company` });
-        if (!company.success) toast.error(company.error);
         await refreshSession();
         navigate('/company-setup');
       }

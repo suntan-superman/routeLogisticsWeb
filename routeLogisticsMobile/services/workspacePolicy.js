@@ -1,12 +1,14 @@
-const STAFF_ROLES = ['owner', 'admin', 'manager', 'technician'];
+const policy = require('../../functions/shared/capabilities.json');
+const STAFF_ROLES = Object.keys(policy.roles);
 
 function workspacePermissions(workspace, claims) {
   const company = workspace?.status === 'company' && !!claims?.companyId && STAFF_ROLES.includes(claims.role)
     && (claims.role === 'owner' || !!claims.membershipId);
   const solo = workspace?.status === 'solo' && !claims?.companyId;
+  const can = capability => (company || solo) && (policy.roles[company ? claims.role : 'owner'] || []).includes(capability);
   return {
     canAccess: company || solo,
-    canManage: solo || (company && ['owner', 'admin', 'manager'].includes(claims.role)),
+    can, canManage: can('jobs.schedule'), canViewFinancial: can('reports.financial'),
     canEditCompany: company && claims.role === 'owner',
     isTechnician: company && claims.role === 'technician',
   };

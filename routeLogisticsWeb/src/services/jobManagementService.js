@@ -1,3 +1,4 @@
+import { readWorkspace, callWorkspace } from './workspaceApi';
 import { 
   collection, 
   doc, 
@@ -15,7 +16,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { auth } from './firebase';
-import { scopeWhere, isInScope, tenantFields } from './tenancy';
+import { scopeWhere, isInScope, tenantFields, getClaims, can, requireCapability } from './tenancy';
 
 class JobManagementService {
   // Get current user ID
@@ -29,6 +30,8 @@ class JobManagementService {
 
   static async createJob(jobData) {
     try {
+      requireCapability('jobs.schedule');
+      if (getClaims()?.companyId) { const result = await callWorkspace('rlManageJob', { action: 'create', job: jobData }); return { success: true, jobId: result.id, ...(await readWorkspace('jobs', { id: result.id })) }; }
       const now = new Date().toISOString();
       const job = {
         ...jobData,
@@ -48,6 +51,7 @@ class JobManagementService {
   // Get all jobs for the current user's company
   static async getJobs(limitCount = 50, lastDoc = null, filters = {}) {
     try {
+      if (getClaims()?.companyId) { const result = await readWorkspace('jobs', { limit: limitCount, after: lastDoc?.id || lastDoc, status: filters.status || null, customerId: filters.customerId || null }); return { success: true, ...result, jobs: result.jobs.filter(job => !filters.dateRange || (new Date(job.date) >= filters.dateRange.startDate && new Date(job.date) <= filters.dateRange.endDate)).sort((a,b) => String(b.date).localeCompare(String(a.date)) || String(b.time).localeCompare(String(a.time))) }; }
       this.getCurrentUserId();
 
       // Scoped to the company (members) or the user (solo accounts). Status/customer filters run
@@ -102,6 +106,7 @@ class JobManagementService {
   // Get job by ID
   static async getJob(jobId) {
     try {
+      if (getClaims()?.companyId) return { success: true, ...(await readWorkspace('jobs', { id: jobId })) };
       this.getCurrentUserId();
       const jobDoc = await getDoc(doc(db, 'jobs', jobId));
       
@@ -138,6 +143,8 @@ class JobManagementService {
   // Update job
   static async updateJob(jobId, updates, expectedUpdatedAt = undefined) {
     try {
+      requireCapability('jobs.schedule');
+      if (getClaims()?.companyId) { await callWorkspace('rlManageJob', { action: 'update', id: jobId, job: updates, ...(expectedUpdatedAt !== undefined ? { expectedVersion: expectedUpdatedAt } : {}) }); return this.getJob(jobId); }
       this.getCurrentUserId();
       
       // Verify user owns the job
@@ -178,6 +185,8 @@ class JobManagementService {
   // Delete job
   static async deleteJob(jobId) {
     try {
+      requireCapability('jobs.schedule');
+      if (getClaims()?.companyId) { await callWorkspace('rlManageJob', { action: 'delete', id: jobId }); return { success: true }; }
       this.getCurrentUserId();
       
       // Verify user owns the job
@@ -203,6 +212,7 @@ class JobManagementService {
   // Get jobs by status
   static async getJobsByStatus(status) {
     try {
+      if (getClaims()?.companyId) return this.getJobs(500, null, { status });
       this.getCurrentUserId();
       
       const q = query(
@@ -236,6 +246,12 @@ class JobManagementService {
   // Get jobs by date range
   static async getJobsByDateRange(startDate, endDate) {
     try {
+      if (getClaims()?.companyId) {
+        const day = value => { const date = new Date(value); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; };
+        const jobs = []; let after = null, page;
+        do { page = await readWorkspace('jobs', { startDate: day(startDate), endDate: day(endDate), after, limit: 500 }); jobs.push(...page.jobs); after = page.lastDoc; } while (page.hasMore && jobs.length < 10000);
+        return { success: true, jobs, hasMore: page.hasMore };
+      }
       this.getCurrentUserId();
       
       // Get all jobs and filter by date range
@@ -349,7 +365,8 @@ class JobManagementService {
         scopeWhere()
       );
       
-      const querySnapshot = await getDocs(q);
+      const querySnapshot = getClaims()?.companyId ? { forEach: () => {} } : await getDocs(q);
+      if (getClaims()?.companyId) { const result = await this.getJobs(500); if (!result.success) return result; querySnapshot.forEach = callback => result.jobs.forEach(data => callback({ data: () => data })); }
       
       let totalJobs = 0;
       let scheduledJobs = 0;
@@ -388,7 +405,7 @@ class JobManagementService {
         }
         
         // Calculate revenue for completed jobs
-        if (data.status === 'completed' && data.totalCost) {
+        if (can('reports.financial') && data.status === 'completed' && data.totalCost) {
           totalRevenue += parseFloat(data.totalCost) || 0;
         }
         
@@ -480,6 +497,7 @@ class JobManagementService {
   // Get jobs by customer
   static async getJobsByCustomer(customerId) {
     try {
+      if (getClaims()?.companyId) return this.getJobs(500, null, { customerId });
       this.getCurrentUserId();
       
       const q = query(
@@ -512,6 +530,7 @@ class JobManagementService {
   // Export jobs to CSV
   static async exportJobs(filters = {}) {
     try {
+      requireCapability('jobs.export');
       const result = await this.getJobs(1000, null, filters);
       if (!result.success) {
         return result;

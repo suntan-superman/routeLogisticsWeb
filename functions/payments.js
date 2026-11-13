@@ -1,5 +1,19 @@
+const { requireCapability } = require('./access');
+const requireFinance = (db, request, data) => requireCapability(db, request, 'invoices.manage', data);
 const { HttpsError } = require('firebase-functions/v2/https');
-const { hash, normalizeEmail, validEmail, documentId, requireManager, rateLimit } = require('./security');
+const { hash, normalizeEmail, validEmail, documentId, rateLimit } = require('./security');
+
+function stripeKeyMatchesMode(key, mode) {
+  return typeof key === 'string' && key === key.trim() && ['test', 'live'].includes(mode)
+    && new RegExp(`^(sk|rk)_${mode}_[A-Za-z0-9]+$`).test(key);
+}
+
+function stripeKeyForMode(value, mode) {
+  // Secret Manager values entered through shell tools can end with a newline.
+  const key = typeof value === 'string' ? value.trim() : '';
+  if (!stripeKeyMatchesMode(key, mode)) throw new HttpsError('failed-precondition', 'Stripe credentials do not match the configured mode.');
+  return key;
+}
 
 function amountInCents(invoice) {
   const value = Number(invoice.total);
@@ -14,7 +28,7 @@ async function authorizeInvoice(db, request, invoice) {
     const customer = await db.collection('customers').doc(documentId(invoice.customerId)).get();
     const scopeMatches = invoice.companyId ? customer.get('companyId') === invoice.companyId : customer.get('userId') === invoice.userId && !customer.get('companyId');
     if (!customer.exists || !scopeMatches || customer.get('isActive') === false || customer.get('deletedAt') || normalizeEmail(customer.get('email')) !== normalizeEmail(request.auth.token.portalEmail)) throw new HttpsError('permission-denied', 'Customer invoice access required.');
-  } else await requireManager(db, request, invoice);
+  } else await requireFinance(db, request, invoice);
 }
 function paymentHandlers(db, getStripe, { enabled = () => false, mode = () => 'test', liveApproved = () => false } = {}) {
   function provider() {
@@ -41,18 +55,23 @@ function paymentHandlers(db, getStripe, { enabled = () => false, mode = () => 't
         if (invoice.get('status') !== 'sent') throw new HttpsError('failed-precondition', 'Only sent, unpaid invoices can be paid.');
         const amount = amountInCents(invoice.data());
         if (payment.exists && payment.get('status') !== 'canceled') {
+          if (payment.get('invoiceId') !== invoiceId || payment.get('mode') !== mode()
+            || payment.get('companyId') !== (invoice.get('companyId') || null) || payment.get('userId') !== invoice.get('userId')
+            || (payment.get('customerId') !== undefined && payment.get('customerId') !== (invoice.get('customerId') || null))) throw new HttpsError('failed-precondition', 'Payment ownership no longer matches the invoice.');
           if (payment.get('reviewRequired')) throw new HttpsError('failed-precondition', 'The previous payment needs administrator review.');
           if (payment.get('amount') !== amount || payment.get('currency') !== 'usd') throw new HttpsError('failed-precondition', 'Cancel the previous payment attempt before changing its amount.');
           if (!payment.get('intentId') && Date.now() - payment.get('createdAt').toMillis() > 23 * 3600_000) throw new HttpsError('failed-precondition', 'The incomplete payment attempt needs administrator review before retrying.');
           return payment.data();
         }
-        const data = { invoiceId, companyId: invoice.get('companyId') || null, userId: invoice.get('userId'), amount, currency: 'usd', mode: mode(), generation: (payment.get('generation') || 0) + 1, status: 'creating', createdAt: new Date(), updatedAt: new Date() };
+        const data = { invoiceId, companyId: invoice.get('companyId') || null, userId: invoice.get('userId'), customerId: invoice.get('customerId') || null, amount, currency: 'usd', mode: mode(), generation: (payment.get('generation') || 0) + 1, status: 'creating', createdAt: new Date(), updatedAt: new Date() };
         tx.set(ref, data);
         tx.update(invoice.ref, { paymentLock: { paymentId: ref.id, mode: mode(), amount, currency: 'usd' } });
         return data;
       });
       const intent = pending.intentId ? await stripe.paymentIntents.retrieve(pending.intentId) : await stripe.paymentIntents.create({ amount: pending.amount, currency: 'usd', automatic_payment_methods: { enabled: true }, metadata: { rlPaymentId: ref.id, rlInvoiceId: invoiceId, rlCompanyId: pending.companyId || '', rlMode: mode() } }, { idempotencyKey: `rl-${ref.id}-${pending.generation}` });
-      if (intent.livemode !== (mode() === 'live') || intent.amount !== pending.amount || intent.currency !== pending.currency) throw new HttpsError('failed-precondition', 'Payment configuration does not match the invoice.');
+      if (intent.livemode !== (mode() === 'live') || intent.amount !== pending.amount || intent.currency !== pending.currency
+        || intent.metadata?.rlPaymentId !== ref.id || intent.metadata?.rlInvoiceId !== invoiceId
+        || (intent.metadata?.rlCompanyId || null) !== pending.companyId || intent.metadata?.rlMode !== mode()) throw new HttpsError('failed-precondition', 'Payment configuration does not match the invoice.');
       await db.runTransaction(async (tx) => {
         const current = await tx.get(ref);
         if (current.get('generation') !== pending.generation) throw new HttpsError('aborted', 'Payment changed. Refresh the invoice.');
@@ -70,7 +89,7 @@ function paymentHandlers(db, getStripe, { enabled = () => false, mode = () => 't
     cancel: async (request) => {
       const stripe = provider();
       const { invoice, ref } = await paymentFor(request);
-      await requireManager(db, request, invoice.data());
+      await requireFinance(db, request, invoice.data());
       await rateLimit(db, 'payment-cancel', request.auth.uid, 10);
       const payment = await ref.get();
       if (!payment.get('intentId')) throw new HttpsError('failed-precondition', 'No cancellable payment was found.');
@@ -109,7 +128,15 @@ async function reconcilePayment(db, stripe, event, mode) {
     if (!payment.exists) throw new Error('RL payment mapping is missing');
     const invoice = await tx.get(db.doc(`invoices/${payment.get('invoiceId')}`));
     const amount = payment.get('amount'), refundedAmount = charge?.amount_refunded || 0;
-    const mismatch = !invoice.exists || payment.get('mode') !== mode || intent.amount !== amount || intent.currency !== payment.get('currency') || (payment.get('intentId') && payment.get('intentId') !== intent.id) || intent.metadata.rlInvoiceId !== payment.get('invoiceId') || (intent.metadata.rlCompanyId || null) !== payment.get('companyId') || (invoice.exists && (Math.round(Number(invoice.get('total')) * 100) !== amount || (invoice.get('companyId') || null) !== payment.get('companyId')));
+    let invoiceAmount = null;
+    try { if (invoice.exists) invoiceAmount = amountInCents(invoice.data()); } catch { /* Flag invalid invoice amounts for review without settling. */ }
+    const mismatch = !invoice.exists || paymentId !== hash(`${mode}:${payment.get('invoiceId')}`)
+      || payment.get('mode') !== mode || intent.metadata.rlMode !== mode || intent.amount !== amount || intent.currency !== payment.get('currency')
+      || (payment.get('intentId') && payment.get('intentId') !== intent.id) || intent.metadata.rlInvoiceId !== payment.get('invoiceId')
+      || (intent.metadata.rlCompanyId || null) !== payment.get('companyId')
+      || (invoice.exists && (invoiceAmount !== amount || (invoice.get('companyId') || null) !== payment.get('companyId')
+        || invoice.get('userId') !== payment.get('userId')
+        || (payment.get('customerId') !== undefined && (invoice.get('customerId') || null) !== payment.get('customerId'))));
     const disputeStatus = dispute?.status || payment.get('disputeStatus') || null;
     const disputed = disputeStatus ? !['won', 'warning_closed'].includes(disputeStatus) : charge?.disputed;
     const status = disputed ? 'disputed' : refundedAmount >= amount ? 'refunded' : refundedAmount > 0 ? 'partially_refunded' : intent.status;
@@ -127,4 +154,4 @@ async function reconcilePayment(db, stripe, event, mode) {
     return { reconciled: !reviewRequired, reviewRequired };
   });
 }
-module.exports = { paymentHandlers, reconcilePayment, amountInCents, authorizeInvoice };
+module.exports = { paymentHandlers, reconcilePayment, amountInCents, authorizeInvoice, stripeKeyMatchesMode, stripeKeyForMode };

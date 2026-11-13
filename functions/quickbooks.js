@@ -1,3 +1,4 @@
+const { hasCapability } = require('./access');
 const { randomBytes, createHmac, timingSafeEqual } = require('node:crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { hash, documentId, requireAuth, requireStaff, requireCompanyOwner, rateLimit } = require('./security');
@@ -50,7 +51,7 @@ function quickBooksHandlers(db, config, transport = fetch) {
   async function scope(request, owner = false) {
     const { uid, token } = requireAuth(request, true), companyId = documentId(token.companyId, 'company');
     if (owner) await requireCompanyOwner(db, request, companyId);
-    else if ((await requireStaff(db, request, companyId)).role === 'technician') throw new HttpsError('permission-denied', 'Manager access required.');
+    else if (!hasCapability((await requireStaff(db, request, companyId)).role, 'integrations.read')) throw new HttpsError('permission-denied', 'Manager access required.');
     await rateLimit(db, 'quickbooks', uid, 40); return companyId;
   }
   async function source(companyId, type, id) {

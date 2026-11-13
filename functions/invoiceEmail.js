@@ -1,5 +1,7 @@
+const { requireCapability } = require('./access');
+const requireFinance = (db, request, data) => requireCapability(db, request, 'invoices.manage', data);
 const { HttpsError } = require('firebase-functions/v2/https');
-const { requireAuth, requireManager, rateLimit, documentId, normalizeEmail, validEmail } = require('./security');
+const { requireAuth, rateLimit, documentId, normalizeEmail, validEmail } = require('./security');
 function invoiceMessage(invoice, companyName, reminder, appUrl) {
   const amount = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(invoice.total);
   return { subject: `${reminder ? 'Payment reminder: ' : ''}Invoice ${invoice.invoiceNumber || ''} from ${companyName}`, text: `${companyName}\nInvoice ${invoice.invoiceNumber || ''}\nTotal: ${amount}\nDue: ${invoice.dueDate || ''}\n\n${(invoice.lineItems || []).map((i) => `${i.description}: ${i.quantity} x ${i.unitPrice}`).join('\n')}\n\nView your visits and invoices: ${appUrl.replace(/\/$/, '')}/portal\nContact your service provider for payment arrangements.${reminder ? '\nIf you have already paid, please contact your provider so they can update the invoice.' : ''}` };
@@ -38,7 +40,7 @@ function invoiceEmailHandlers(db, appUrl, emailEnabled = () => true) {
       requireAuth(request, true);
       if (!emailEnabled()) throw new HttpsError('failed-precondition', 'Email delivery is disabled. Download the invoice to share it directly.');
       await rateLimit(db, 'email-invoice', request.auth.uid, 20, 60 * 60_000);
-      return queueInvoiceEmail(db, request.data?.invoiceId, { appUrl: appUrl(), authorize: (invoice) => requireManager(db, request, invoice) });
+      return queueInvoiceEmail(db, request.data?.invoiceId, { appUrl: appUrl(), authorize: (invoice) => requireFinance(db, request, invoice) });
     },
     reminders: async () => {
       if (!emailEnabled()) return { skipped: true };

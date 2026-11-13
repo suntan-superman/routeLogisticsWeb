@@ -7,7 +7,7 @@ export default ({ config }) => ({
   slug: "route-logistics",
   version: "1.0.0",
   orientation: "portrait",
-  icon: "./assets/icon.png",
+  icon: "./assets/brand/app-icon-ios.png",
   userInterfaceStyle: "automatic",
   newArchEnabled: true,
   plugins: ["expo-font", "@react-native-community/datetimepicker", ["expo-location", { locationWhenInUsePermission: "Share your location with your company only while you choose to work with this app open.", isIosBackgroundLocationEnabled: false, isAndroidBackgroundLocationEnabled: false, isAndroidForegroundServiceEnabled: false }], ["expo-image-picker", {
@@ -21,6 +21,7 @@ export default ({ config }) => ({
     backgroundColor: "#ffffff"
   },
   ios: {
+    icon: "./assets/brand/app-icon-ios.png",
     buildNumber: "1",
     supportsTablet: true,
     bundleIdentifier: "com.workside.routelogistics",
@@ -29,9 +30,11 @@ export default ({ config }) => ({
     }
   },
   android: {
+    icon: "./assets/brand/app-icon-ios.png",
     adaptiveIcon: {
-      foregroundImage: "./assets/adaptive-icon.png",
-      backgroundColor: "#ffffff"
+      foregroundImage: "./assets/brand/android-adaptive-foreground.png",
+      monochromeImage: "./assets/brand/android-monochrome.png",
+      backgroundColor: "#046A36"
     },
     edgeToEdgeEnabled: true,
     package: "com.workside.routelogistics"

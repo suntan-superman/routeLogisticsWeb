@@ -4,15 +4,16 @@
     "slug": "route-logistics",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/routeLogistics_logo.png",
+    "icon": "./assets/brand/app-icon-ios.png",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/routeLogistics_logo.png",
+      "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
+      "icon": "./assets/brand/app-icon-ios.png",
       "supportsTablet": true,
       "bundleIdentifier": "com.workside.routelogistics",
       "infoPlist": {
@@ -21,9 +22,11 @@
       "buildNumber": "1"
     },
     "android": {
+      "icon": "./assets/brand/app-icon-ios.png",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/brand/android-adaptive-foreground.png",
+        "monochromeImage": "./assets/brand/android-monochrome.png",
+        "backgroundColor": "#046A36"
       },
       "edgeToEdgeEnabled": true,
       "package": "com.workside.routelogistics"

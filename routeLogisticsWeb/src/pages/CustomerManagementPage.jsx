@@ -157,6 +157,7 @@ const CustomerManagementPage = () => {
   };
 
   const handleAddCustomer = async () => {
+    if (!canManage()) return toast.error('Your role does not allow customer changes.');
     if (!customerData.name.trim()) {
       toast.error('Customer name is required');
       return;
@@ -182,6 +183,7 @@ const CustomerManagementPage = () => {
   };
 
   const handleEditCustomer = async () => {
+    if (!canManage()) return toast.error('Your role does not allow customer changes.');
     if (!customerData.name.trim()) {
       toast.error('Customer name is required');
       return;
@@ -209,6 +211,7 @@ const CustomerManagementPage = () => {
   };
 
   const handleDeleteCustomer = async (customerId) => {
+    if (!canManage()) return toast.error('Your role does not allow customer changes.');
     const ok = await confirm({ title: 'Delete customer?', message: "This customer will be permanently removed. Their existing jobs and invoices are not deleted. This can't be undone.", confirmText: 'Delete customer' });
     if (!ok) {
       return;
@@ -234,6 +237,7 @@ const CustomerManagementPage = () => {
   };
 
   const handleRestoreCustomer = async (customerId) => {
+    if (!canManage()) return toast.error('Your role does not allow customer changes.');
     setIsLoading(true);
     try {
       const result = await CustomerService.restoreCustomer(customerId);
@@ -254,6 +258,7 @@ const CustomerManagementPage = () => {
   };
 
   const openEditModal = (customer) => {
+    if (!canManage()) return toast.error('Your role does not allow customer changes.');
     setSelectedCustomer(customer);
     setCustomerData({
       name: customer.name || '',
@@ -334,13 +339,13 @@ const CustomerManagementPage = () => {
               <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
               Export
             </button>
-            <button
+            {canManage() && <button
               onClick={() => setShowAddModal(true)}
               className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
             >
               <PlusIcon className="h-4 w-4 mr-2" />
               Add Customer
-            </button>
+            </button>}
           </div>
         </div>
       </div>
@@ -469,9 +474,9 @@ const CustomerManagementPage = () => {
             <UsersIcon className="mx-auto h-12 w-12 text-gray-400" />
             <h3 className="mt-2 text-sm font-medium text-gray-900">No customers found</h3>
             <p className="mt-1 text-sm text-gray-500">
-              {searchTerm ? 'Try adjusting your search terms.' : 'Get started by adding your first customer.'}
+              {searchTerm ? 'Try adjusting your search terms.' : canManage() ? 'Get started by adding your first customer.' : 'No customers are available.'}
             </p>
-            {!searchTerm && (
+            {!searchTerm && canManage() && (
               <div className="mt-6">
                 <button
                   onClick={() => setShowAddModal(true)}
@@ -543,13 +548,13 @@ const CustomerManagementPage = () => {
                         >
                           <EyeIcon className="h-4 w-4" />
                         </button>
-                        <button
+                        {canManage() && <button
                           onClick={() => openEditModal(customer)}
                           className="text-gray-600 hover:text-gray-900"
                         >
                           <PencilIcon className="h-4 w-4" />
-                        </button>
-                        {customer.isActive ? (
+                        </button>}
+                        {canManage() && (customer.isActive ? (
                           <button
                             onClick={() => handleDeleteCustomer(customer.id)}
                             className="text-red-600 hover:text-red-900"
@@ -563,7 +568,7 @@ const CustomerManagementPage = () => {
                           >
                             Restore
                           </button>
-                        )}
+                        ))}
                       </div>
                     </td>
                   </tr>
@@ -575,7 +580,7 @@ const CustomerManagementPage = () => {
       </div>
 
       {/* Add Customer Modal */}
-      {showAddModal && (
+      {canManage() && showAddModal && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
           <div className="relative top-12 mx-auto p-6 border w-full max-w-xl shadow-xl rounded-xl bg-white">
             <div>
@@ -711,7 +716,7 @@ const CustomerManagementPage = () => {
       )}
 
       {/* Edit Customer Modal */}
-      {showEditModal && (
+      {canManage() && showEditModal && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
           <div className="relative top-12 mx-auto p-6 border w-full max-w-xl shadow-xl rounded-xl bg-white">
             <div>
@@ -956,7 +961,7 @@ const CustomerManagementPage = () => {
                 >
                   Close
                 </button>
-                <button
+                {canManage() && <button
                   onClick={() => {
                     setShowViewModal(false);
                     openEditModal(selectedCustomer);
@@ -964,7 +969,7 @@ const CustomerManagementPage = () => {
                   className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
                   Edit Customer
-                </button>
+                </button>}
               </div>
             </div>
           </div>

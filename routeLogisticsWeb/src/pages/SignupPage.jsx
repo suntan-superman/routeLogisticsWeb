@@ -51,7 +51,7 @@ const SignupPage = () => {
             <span className="text-white font-bold text-xl">RL</span>
           </Link>
           <h2 className="mt-6 text-center text-3xl font-bold text-gray-900">Create your account</h2>
-          <p className="mt-2 text-center text-sm text-gray-600">{next ? 'Create your account to join the team' : 'Set up your company in Route Logistics'}</p>
+          <p className="mt-2 text-center text-sm text-gray-600">{next ? 'Create your personal login to accept your company invitation. Your company and role are already selected.' : 'Set up your company in Route Logistics'}</p>
         </div>
 
         <form className="mt-8 space-y-4" onSubmit={handleSubmit}>
@@ -66,7 +66,7 @@ const SignupPage = () => {
               placeholder="Jane Smith"
             />
           </div>
-          <div>
+          {!next && <div>
             <label htmlFor="businessName" className="block text-sm font-medium text-gray-700">Company name</label>
             <input
               id="businessName"
@@ -77,7 +77,7 @@ const SignupPage = () => {
               className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
               placeholder="Acme Pest Control"
             />
-          </div>
+          </div>}
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-gray-700">Email address</label>
             <input

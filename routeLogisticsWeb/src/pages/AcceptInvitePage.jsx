@@ -25,12 +25,15 @@ export default function AcceptInvitePage() {
   };
   return <main className="mx-auto max-w-lg p-6 pt-20">
     <Link to="/" className="text-primary-700">Route Logistics</Link>
-    <h1 className="my-6 text-3xl font-bold">Join your team</h1>
-    <p className="mb-6">Use the email address your company owner invited. The owner has selected your team role.</p>
-    {!currentUser && <p className="mb-6 text-sm text-gray-600">Already have a mi Factotum or Route Logistics account? Sign in with that account's existing password. Use “Forgot password?” on the sign-in page if needed. New users choose a password when creating their account.</p>}
+    <h1 className="my-6 text-3xl font-bold">Join your company</h1>
+    <p className="mb-6">Use the email address your company owner invited. Your owner has already selected your role and permissions.</p>
+    {!currentUser && <>
+      <p className="mb-4 text-sm text-gray-600">Already have an account? Sign in with your existing password, or use “Forgot password?” on the sign-in page.</p>
+      <p className="mb-6 text-sm text-gray-600">New to Route Logistics? Create your personal login, verify your email, then accept this invitation. This joins the existing company; it does not create a company or let you choose a role.</p>
+    </>}
     {!inviteId || !code ? <p role="alert">This invitation link is incomplete. Ask the owner to send a new invitation.</p> : !currentUser ? <div className="flex gap-5">
       <Link className="text-primary-700 underline" to={`/login?next=${returnTo}`}>Sign in</Link>
-      <Link className="text-primary-700 underline" to={`/signup?next=${returnTo}`}>Create a team account</Link>
+      <Link className="text-primary-700 underline" to={`/signup?next=${returnTo}`}>Create your login</Link>
     </div> : <>
       <EmailVerificationBanner />
       <p className="mb-4">Signed in as {currentUser.email}</p>

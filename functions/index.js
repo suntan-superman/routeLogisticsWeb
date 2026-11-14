@@ -1,4 +1,4 @@
-const { initializeApp } = require('firebase-admin/app');
+const { initializeApp, applicationDefault } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
@@ -31,12 +31,19 @@ const { createTwilioTransport } = require('./smsProvider');
 const { createSmsProviderEventsHandler } = require('./smsProviderEvents');
 const { platformCmsHandlers } = require('./platformCms');
 const { publicContentHandler } = require('./publicContent');
+const { serviceAreaHandlers, createGoogleGeocoder } = require('./serviceAreas');
 const { serviceFormsHandler } = require('./serviceForms');
 const { paymentLifecycleHandlers } = require('./paymentLifecycle');
 const { estimateHandlers } = require('./estimates');
 
 initializeApp();
 const db = getFirestore();
+const mapsCredential = applicationDefault();
+const serviceAreas = serviceAreaHandlers(db, { geocode: createGoogleGeocoder({
+  projectId: process.env.GCLOUD_PROJECT || 'mi-factotum-field-service',
+  getAccessToken: async () => (await mapsCredential.getAccessToken()).access_token,
+}) });
+exports.rlServiceAreas = onCall({ timeoutSeconds: 60 }, serviceAreas.handle);
 
 const TENANT_COLLECTIONS = ['customers', 'jobs', 'appointments', 'photos', 'estimates', 'estimateTemplates', 'invoices', 'servicePlans', 'serviceLogs'];
 const appUrl = defineString('RL_APP_URL', { default: 'https://route-logistics.com' });
@@ -121,7 +128,7 @@ exports.syncClaims = onCall(async (request) => {
   return { claims, workspace };
 });
 
-const workData = workDataHandlers(db);
+const workData = workDataHandlers(db, { serviceAreas });
 exports.rlReadWorkspace = onCall(workData.read);
 exports.rlManageJob = onCall(workData.manageJob);
 exports.rlRecordApplication = onCall(workData.application);
@@ -152,7 +159,8 @@ exports.rlDeliverEmail = onSchedule({ schedule: 'every 1 minutes', secrets: emai
 const invoiceEmails = invoiceEmailHandlers(db, () => appUrl.value(), emailEnabled);
 exports.emailInvoice = onCall(invoiceEmails.emailInvoice);
 exports.rlQueueInvoiceReminders = onSchedule({ schedule: 'every day 09:00', timeZone: 'Etc/UTC', timeoutSeconds: 540 }, invoiceEmails.reminders);
-const recurring = recurringHandlers(db);
+const recurring = recurringHandlers(db, { serviceAreas });
+exports.rlManageServicePlan = onCall({ timeoutSeconds: 60 }, recurring.manageServicePlan);
 exports.generateServicePlanJob = onCall(recurring.generateServicePlanJob);
 exports.rlGenerateRecurringJobs = onSchedule({ schedule: 'every day 04:00', timeZone: 'Etc/UTC', timeoutSeconds: 540 }, recurring.generateRecurringJobs);
 
@@ -172,7 +180,7 @@ exports.rlGetPaymentReadiness = onCall(paymentLifecycle.readiness);
 exports.rlGetInvoicePaymentHistory = onCall(paymentLifecycle.history);
 exports.rlSendPaymentConfirmation = onDocumentCreated('rlPaymentEvents/{id}', paymentLifecycle.receipt);
 exports.rlServiceForms = onCall(serviceFormsHandler(db, { enabled: () => process.env.RL_SERVICE_FORMS_ENABLED === 'true' }));
-const estimates = estimateHandlers(db, { enabled: () => process.env.RL_ESTIMATES_ENABLED === 'true', emailEnabled: () => emailEnabled() && process.env.RL_ESTIMATE_EMAIL_ENABLED === 'true', appUrl: () => appUrl.value() });
+const estimates = estimateHandlers(db, { serviceAreas, enabled: () => process.env.RL_ESTIMATES_ENABLED === 'true', emailEnabled: () => emailEnabled() && process.env.RL_ESTIMATE_EMAIL_ENABLED === 'true', appUrl: () => appUrl.value() });
 exports.rlEstimate = onCall({ memory: '512MiB', timeoutSeconds: 120 }, estimates.handle);
 exports.rlEstimateApproval = onCall({ memory: '512MiB', timeoutSeconds: 120 }, estimates.approval);
 

@@ -12,6 +12,7 @@ function load(relative){const file=path.resolve(__dirname,'../routeLogisticsWeb/
   if(name==='react-hot-toast')return {__esModule:true,default:{success:message=>toasts.push({type:'success',message}),error:message=>toasts.push({type:'error',message})}};
   if(name.endsWith('/AuthContext'))return {useAuth:()=>({company:{id:companyId,ownerId:'owner'},currentUser:{uid:owner?'owner':'manager'},role:owner?'owner':'manager',updateUserProfile:async()=>{},refreshSession:async()=>{}})};
   if(name.endsWith('/useUnsavedChanges'))return {useUnsavedChanges:value=>{dirty=value;return {confirmDiscard:async()=>true};}};
+  if(name.endsWith('/ServiceAreasSettings'))return {__esModule:true,default:()=>null};
   if(name.endsWith('/workspaceApi'))return {callWorkspace:async(name,params)=>{calls.push({name,params});if(name==='rlSmsConfig'&&params.action==='save'){if(pendingSave)await pendingSave.promise;if(saveFailure)throw saveFailure;return {...data,settings:params.settings};}return data;}};
   if(name.endsWith('/tenancy'))return {getClaims:()=>({companyId})};
   if(name.endsWith('/companyService'))return {__esModule:true,default:{getCompany:async()=>({success:true,company:companyProfile}),getTeamMembers:async()=>({success:true,teamMembers:[]}),updateCompany:async(id,values)=>{companyUpdates.push({id,values});if(saveFailure)throw saveFailure;companyProfile={...companyProfile,...values};return {success:true,company:companyProfile};}}};

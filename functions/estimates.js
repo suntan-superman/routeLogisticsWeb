@@ -23,6 +23,7 @@ const {
   validEmail,
   rateLimit
 } = require('./security');
+const { serviceAreaWorkflow, storedGeometry, propertyAddress } = require('./serviceAreaWorkflows');
 const PHOTO_LIMIT = 1572864,
   PDF_LIMIT = 10 * 1024 * 1024;
 const timestamp = value => value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : Date.parse(value || '');
@@ -162,6 +163,7 @@ async function createEstimatePdf(estimate, company, photos = []) {
   });
   line(`Prepared for: ${estimate.recipient.name}`);
   if (estimate.recipient.address) line(estimate.recipient.address);
+  if (estimate.serviceProperty?.address) line(`Service property: ${estimate.serviceProperty.address}`);
   line(`Valid until: ${estimate.validUntil.slice(0, 10)}`);
   line('Scope of work', {
     strong: true
@@ -208,6 +210,7 @@ async function createEstimatePdf(estimate, company, photos = []) {
   return bytes;
 }
 function estimateHandlers(db, config = {}) {
+  const serviceAreas = serviceAreaWorkflow(db, config);
   const enabled = config.enabled || (() => false),
     emailEnabled = config.emailEnabled || (() => false),
     now = config.now || (() => Date.now()),
@@ -316,8 +319,23 @@ function estimateHandlers(db, config = {}) {
           expectedVersion: data.expectedVersion ?? null,
           draft,
           customerId: data.data.customerId || null,
-          prospect: data.data.prospect || null
+          prospect: data.data.prospect || null,
+          serviceProperty: data.data.serviceProperty || null,
+          serviceCategory: data.data.serviceCategory || null,
+          serviceAreaExceptionId: data.data.serviceAreaExceptionId || null
         }));
+        const [initial, initialOperation] = await Promise.all([target.get(), operationRef.get()]);
+        if (initial.exists) managed(scope, initial);
+        if (initial.exists && !initialOperation.exists) {
+          if (initial.get('rlManaged') !== true) fail('failed-precondition', 'Legacy estimates are preserved. Copy their content into a new photo estimate.');
+          if (['approved', 'converted'].includes(initial.get('status'))) fail('failed-precondition', 'An approved estimate is immutable. Create a new draft for a revised quote.');
+          if (data.expectedVersion !== initial.get('version')) fail('aborted', 'This estimate changed. Reload before saving your draft.');
+        }
+        if (!initialOperation.exists && data.data.customerId) {
+          const customer = await ref('customers', documentId(data.data.customerId, 'customer')).get();
+          if (!customer.exists || !scoped(scope, customer.data()) || customer.get('isActive') === false) fail('permission-denied', 'Choose an active customer from your company.');
+        }
+        const area = initialOperation.exists ? null : await serviceAreas.prepare(scope, data.data, initial.data() || {}, 'estimate', !initial.exists);
         return db.runTransaction(async tx => {
           const [old, previousOperation, secret] = await Promise.all([tx.get(target), tx.get(operationRef), tx.get(secretRef(id))]);
           if (previousOperation.exists) {
@@ -334,13 +352,17 @@ function estimateHandlers(db, config = {}) {
             if (['approved', 'converted'].includes(old.get('status'))) fail('failed-precondition', 'An approved estimate is immutable. Create a new draft for a revised quote.');
             if (data.expectedVersion !== old.get('version')) fail('aborted', 'This estimate changed. Reload before saving your draft.');
           } else if (!isNew) fail('not-found', 'Estimate not found.');
+          if (area && initial.exists && !old.updateTime.isEqual(initial.updateTime)) fail('aborted', 'This estimate changed while its service property was checked. Reload before saving.');
           const contact = await recipient(scope, data.data, tx);
           await photosFor(scope, id, draft.photoIds, tx);
+          await serviceAreas.assertCurrent(tx, area);
           const version = (old.get('version') || 0) + 1,
             created = old.get('createdAt') || new Date(now()).toISOString();
           const current = {
             ...draft,
             ...contact,
+            ...storedGeometry(old.data()),
+            ...storedGeometry(area?.patch),
             userId: old.get('userId') || scope.uid,
             ...(scope.companyId ? {
               companyId: scope.companyId
@@ -563,6 +585,19 @@ function estimateHandlers(db, config = {}) {
         if (data.createCustomer === true && data.customerId) fail('invalid-argument', 'Choose an existing customer or explicitly create one, not both.');
         const jobId = `rl_estimate_${id}`,
           jobRef = ref('jobs', jobId);
+        const [initialJob, initialVersion, initialApproval] = await Promise.all([jobRef.get(), versionRef(id, estimate.version).get(), secretRef(id).get()]);
+        let area = null;
+        if (!initialJob.exists) {
+          if (estimate.status !== 'approved' || !initialVersion.exists || initialApproval.get('status') !== 'approved' || initialApproval.get('version') !== estimate.version) fail('failed-precondition', 'This exact estimate version must be approved by its recipient before conversion.');
+          const approvedSource = initialVersion.data(), requestedAddress = propertyAddress(schedule), approvedAddress = propertyAddress(approvedSource);
+          if (approvedAddress && requestedAddress && requestedAddress.trim().toLowerCase() !== approvedAddress.trim().toLowerCase()) fail('failed-precondition', 'The approved service property cannot be changed during conversion. Save and approve a revised estimate.');
+          if (approvedSource.serviceCategory && schedule.serviceCategory && approvedSource.serviceCategory !== schedule.serviceCategory) fail('failed-precondition', 'The approved service category cannot be changed during conversion. Save and approve a revised estimate.');
+          area = await serviceAreas.prepare(scope, {
+            serviceProperty: approvedSource.serviceProperty || schedule.serviceProperty,
+            serviceCategory: approvedSource.serviceCategory || schedule.serviceCategory || '',
+            serviceAreaExceptionId: data.serviceAreaExceptionId || schedule.serviceAreaExceptionId
+          }, {}, 'scheduling', true);
+        }
         return db.runTransaction(async tx => {
           const [current, approval, snapshot, existing] = await Promise.all([tx.get(target), tx.get(secretRef(id)), tx.get(versionRef(id, estimate.version)), tx.get(jobRef)]);
           managed(scope, current);
@@ -596,6 +631,7 @@ function estimateHandlers(db, config = {}) {
               if (member.get('companyId') !== scope.companyId || member.get('status') !== 'active' || !member.get('uid')) fail('permission-denied', 'Choose an active technician from this company.');
             }
           } else if (assignedTo && assignedTo !== scope.uid) fail('permission-denied', 'Solo jobs cannot be assigned to another workspace.');
+          await serviceAreas.assertCurrent(tx, area);
           const job = {
             userId: current.get('userId'),
             ...(scope.companyId ? {
@@ -604,7 +640,9 @@ function estimateHandlers(db, config = {}) {
             customerId: customer.id,
             customerName: customer.get('name') || source.recipient.name,
             customerPhone: customer.get('phone') || '',
-            address: source.recipient.address,
+            address: source.serviceProperty?.address || source.recipient.address,
+            ...storedGeometry(source),
+            ...(area?.patch || {}),
             serviceType: source.serviceType,
             title: source.title,
             scopeOfWork: source.scopeOfWork,
@@ -693,6 +731,8 @@ function estimateHandlers(db, config = {}) {
             status: row.get('status'),
             customerName: value.recipient.name,
             serviceType: value.serviceType,
+            serviceProperty: value.serviceProperty?.address ? { address: value.serviceProperty.address } : null,
+            serviceCategory: value.serviceCategory || '',
             scopeOfWork: value.scopeOfWork,
             notes: value.notes,
             lineItems: value.lineItems,

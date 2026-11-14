@@ -1,6 +1,6 @@
-import { collection, doc, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, limit, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, getDocs, deleteDoc, query, orderBy, limit } from 'firebase/firestore';
 import { db } from './firebase';
-import { scopeWhere, tenantFields } from './tenancy';
+import { scopeWhere } from './tenancy';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from './firebase';
 
@@ -35,23 +35,8 @@ export async function createServicePlan(plan) {
     if (!plan.nextServiceDate) throw new Error('Choose the first service date');
     const frequencyDays = Number(plan.frequencyDays);
     if (!(frequencyDays > 0)) throw new Error('Choose a service frequency');
-    const ref = await addDoc(collection(db, 'servicePlans'), {
-      ...tenantFields(),
-      customerId: plan.customerId,
-      customerName: plan.customerName || '',
-      customerPhone: plan.customerPhone || '',
-      address: plan.address || '',
-      serviceType: plan.serviceType || 'General Pest Control',
-      frequencyDays,
-      nextServiceDate: plan.nextServiceDate,
-      time: plan.time || '09:00',
-      price: Number(plan.price) || 0,
-      notes: plan.notes || '',
-      active: true,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    return ok({ id: ref.id });
+    const result = await httpsCallable(functions, 'rlManageServicePlan')({ action: 'create', plan: { ...plan, frequencyDays, price: Number(plan.price) || 0 } });
+    return ok(result.data);
   } catch (error) {
     return fail(error);
   }
@@ -59,8 +44,8 @@ export async function createServicePlan(plan) {
 
 export async function updateServicePlan(id, patch) {
   try {
-    await updateDoc(doc(db, 'servicePlans', id), { ...patch, updatedAt: serverTimestamp() });
-    return ok();
+    const result = await httpsCallable(functions, 'rlManageServicePlan')({ action: 'update', id, plan: patch });
+    return ok(result.data);
   } catch (error) {
     return fail(error);
   }

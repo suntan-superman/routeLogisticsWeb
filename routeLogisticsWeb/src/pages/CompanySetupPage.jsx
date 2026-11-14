@@ -16,6 +16,7 @@ import { httpsCallable } from 'firebase/functions';
 import { functions } from '../services/firebase';
 import { useConfirm } from '../components/ConfirmProvider';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import ServiceAreasSettings from '../components/ServiceAreasSettings';
 
 const companyForm = (company = {}) => ({
   name: company.name || '', description: company.description || '', address: company.address || '', city: company.city || '', state: company.state || '', zipCode: company.zipCode || '',
@@ -28,7 +29,7 @@ const CompanySetupPage = () => {
   return <CompanySetupForm key={`${currentUser?.uid}:${getClaims()?.companyId}:${role}`} />;
 };
 const CompanySetupForm = () => {
-  const { currentUser, updateUserProfile, refreshSession } = useAuth();
+  const { currentUser, updateUserProfile, refreshSession, role } = useAuth();
   const confirm = useConfirm();
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
@@ -603,7 +604,7 @@ const CompanySetupForm = () => {
 
   if (companyId && !company && loadError) return <section className="rounded border bg-white p-6"><p role="alert">{loadError}</p><button type="button" className="btn-secondary mt-3" onClick={loadCompanyData}>Retry company settings</button></section>;
 
-  if (company && !isOwner) return <div className="rounded-lg border bg-white p-6"><h1 className="text-2xl font-bold">{company.name}</h1><p className="mt-3">Company settings and invitations are managed by the owner.</p></div>;
+  if (company && !isOwner) return <div className="space-y-6"><div className="rounded-lg border bg-white p-6"><h1 className="text-2xl font-bold">{company.name}</h1><p className="mt-3">Company settings and invitations are managed by the owner.</p></div>{role === 'manager' && <ServiceAreasSettings company={company} />}</div>;
 
   return (
     <Motion.div
@@ -707,6 +708,7 @@ const CompanySetupForm = () => {
           </div>
         </div>
       </div>
+      {company && isOwner && <ServiceAreasSettings company={company} />}
     </Motion.div>
   );
 };

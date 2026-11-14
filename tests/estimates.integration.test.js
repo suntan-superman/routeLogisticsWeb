@@ -32,6 +32,13 @@ test('disabled estimate email queues nothing, existing legacy estimates and cust
   const legacy=await f.handlers.handle(f.request({action:'get',estimateId:`${f.id}-legacy`}));assert.equal(legacy.estimate.legacy,true);
   await assert.rejects(f.save(f.draft,{estimateId:`${f.id}-legacy`,expectedVersion:0}),{code:'failed-precondition'});
 });
+test('signed estimate review shows the approved service property without private coverage or exception records',async()=>{
+  const f=await fixture(),address='101 Synthetic Service Street, Bakersfield, CA 93312';
+  const {estimate}=await f.save({...f.draft,serviceProperty:{address},serviceCategory:'Inspection'}),{token}=await f.send(estimate);
+  const result=await f.handlers.approval({data:{action:'get',estimateId:estimate.id,token},rawRequest:{ip:f.id}});
+  assert.deepEqual(result.estimate.serviceProperty,{address});assert.equal(result.estimate.serviceCategory,'Inspection');
+  assert.equal(result.estimate.serviceAreaEligibility,undefined);assert.equal(result.estimate.serviceAreaExceptionId,undefined);assert.equal(result.estimate.serviceProperty.latitude,undefined);
+});
 test('private photo uploads are idempotent, version-neutral, scoped and have no public download tokens',async()=>{
   const f=await fixture(),other=await fixture(),{estimate}=await f.save();const base64=Buffer.from([255,216,255,217]).toString('base64');
   const data={action:'photo-upload',estimateId:estimate.id,operationId:'photo-operation-controlled-0001',base64,caption:'Controlled photo'};

@@ -34,6 +34,7 @@ async function estimates(name,data) {
   if(name==='list'){if(env.saved&&env.failListAfterSave)throw Error('List refresh failed.');return{estimates:[env.estimate],enabled:true,emailEnabled:false};}
   if(name==='get')return{estimate:env.estimate,photos:[],versions:[]};
   if(name==='save'){if(env.failSave)throw Error('Estimate save failed.');env.saved=true;env.estimate={...env.estimate,...data.data,version:env.estimate.version+1};return{estimate:env.estimate};}
+  if(name==='convert'){env.estimate={...env.estimate,convertedJobId:'controlled-converted-job'};return{jobId:'controlled-converted-job'};}
   throw Error('Unexpected estimate operation');
 }
 const mock = name => {
@@ -46,11 +47,18 @@ const mock = name => {
   if(name.endsWith('/services/maps'))return{loadMaps:()=>{throw Error('Maps must not be called during save tests');}};
   if(name.endsWith('/utils/routePlanning'))return{googleNavigation:()=>'',appointmentWarnings:()=>[]};
   if(name==='./MyWorkPage'||name==='./ServiceTemplateEditor')return{__esModule:true,default:()=>null};
-  if(name.endsWith('/contexts/AuthContext'))return{useAuth:()=>({currentUser:{uid:'user-1'},company:{id:'company-1'},role:'technician',can:capability=>env.kind==='estimates'&&capability==='estimates.manage'})};
-  if(name.endsWith('/services/workspaceApi'))return{callWorkspace:service};
+  if(name.endsWith('/contexts/AuthContext'))return{useAuth:()=>({currentUser:{uid:'user-1'},company:{id:'company-1',ownerId:'user-1',serviceCategories:['Pest Control','Pool Cleaning']},role:env.kind==='estimates-geography'?'owner':'technician',can:capability=>env.kind.startsWith('estimates')&&(capability==='estimates.manage'||env.kind==='estimates-geography'&&['customers.manage','jobs.schedule'].includes(capability))})};
+  if(name.endsWith('/services/workspaceApi'))return{callWorkspace:async(name,data)=>{
+    if(name!=='rlServiceAreas')return service(name,data);
+    env.calls.push({name,data});
+    if(data.action==='status')return{settings:{configured:true,revision:1,allowOutOfAreaRequests:true},canApproveExceptions:true,availableCategories:['Pest Control','Pool Cleaning']};
+    if(data.action==='check'){if(env.pendingPropertyCheck)return env.pendingPropertyCheck;return{eligible:true,status:'inside',message:'The actual property is covered.',property:{formattedAddress:data.propertyAddress}};}
+    throw Error('Unexpected service-area test operation');
+  }};
   if(name.endsWith('/utils/serviceForms'))return utilities('serviceForms');
   if(name.endsWith('/utils/estimateDraft'))return utilities('estimateDraft');
-  if(name.endsWith('/services/customerService'))return{__esModule:true,default:{getCustomers:async()=>({success:true,customers:[{id:'customer-1',name:'Customer'}],hasMore:false})}};
+  if(name.endsWith('/components/ServicePropertyEligibility'))return env.kind==='estimates-geography'?compile('components/ServicePropertyEligibility.jsx',mock):{__esModule:true,default:()=>null};
+  if(name.endsWith('/services/customerService'))return{__esModule:true,default:{getCustomers:async()=>({success:true,customers:[{id:'customer-1',name:'Customer',address:'Customer billing address must not become the service property'}],hasMore:false})}};
   if(name.endsWith('/services/estimateService'))return{callEstimate:estimates,prepareEstimatePhoto:()=>{},downloadEstimatePdf:()=>{}};
   throw Error('Unexpected dependency: '+name);
 };
@@ -123,4 +131,29 @@ test('estimate transport failures preserve the exact uncertain operation for saf
   reset('estimates');await render('pages/EstimatesPage.jsx');await click('Open estimate');await act(async()=>inputFor('Estimate title').props.onChange({target:{value:'Changed title'}}));env.failSave=true;await click('Save estimate version');
   const first=env.calls.find(row=>row.name==='save').data;assert.equal(env.dirty,true);assert.equal(env.toasts.at(-1).kind,'error');
   env.failSave=false;await click('Retry saved request');assert.deepEqual(env.calls.filter(row=>row.name==='save')[1].data,first);assert.equal(env.dirty,false);assert.equal(env.toasts.at(-1).kind,'success');assert.doesNotMatch(text(),/Estimate save failed/);
+});
+
+test('estimate property selection is explicit and saves only server-checkable property fields',async()=>{
+  reset('estimates-geography');await render('pages/EstimatesPage.jsx');await click('Open estimate');
+  const property=()=>tree.root.findByProps({'aria-label':'Service property address'});
+  assert.equal(property().props.value,'');assert.equal(env.calls.some(row=>row.name==='rlServiceAreas'&&row.data.action==='check'),false);
+  await act(async()=>property().props.onChange({target:{value:'100 Actual Service Street, Bakersfield, CA 93312'}}));
+  await act(async()=>tree.root.findByProps({'aria-label':'Service property category'}).props.onChange({target:{value:'Pest Control'}}));
+  await click('Check service property');assert.match(text(),/actual property is covered/);await click('Save estimate version');
+  const request=env.calls.find(row=>row.name==='save').data.data;assert.deepEqual(request.serviceProperty,{address:'100 Actual Service Street, Bakersfield, CA 93312'});assert.equal(request.serviceCategory,'Pest Control');assert.equal(request.eligible,undefined);assert.equal(request.confirmed,undefined);assert.equal(env.dirty,false);assert.equal(button('Save estimate version').props.disabled,true);
+});
+
+test('approved estimate conversion fixes its recorded property but can select a missing category',async()=>{
+  reset('estimates-geography');env.estimate={...env.estimate,status:'approved',serviceProperty:{address:'Approved property, Bakersfield, CA 93312',latitude:35,longitude:-119,validated:true}};await render('pages/EstimatesPage.jsx');await click('Open estimate');
+  const property=tree.root.findByProps({'aria-label':'Service property address'}),category=tree.root.findByProps({'aria-label':'Service property category'});
+  assert.equal(property.props.value,env.estimate.serviceProperty.address);assert.equal(property.props.disabled,true);assert.equal(category.props.disabled,false);assert.equal(button('Use this as the service property'),undefined);
+  await act(async()=>category.props.onChange({target:{value:'Pest Control'}}));await click('Check service property');const checked=env.calls.find(row=>row.name==='rlServiceAreas'&&row.data.action==='check').data;assert.equal(checked.purpose,'scheduling');assert.equal(checked.propertyAddress,env.estimate.serviceProperty.address);assert.equal(checked.serviceCategory,'Pest Control');
+  await act(async()=>inputFor('Service date').props.onChange({target:{value:'2030-01-02'}}));await click('Convert approved estimate to job');await click('Confirm job conversion');
+  const request=env.calls.find(row=>row.name==='convert').data;assert.deepEqual(request.schedule.serviceProperty,{address:'Approved property, Bakersfield, CA 93312'});assert.equal(request.schedule.serviceCategory,'Pest Control');assert.equal(request.schedule.eligible,undefined);assert.match(text(),/controlled-converted-job/);
+});
+
+test('a late estimate property response cannot mark an edited property as eligible',async()=>{
+  reset('estimates-geography');await render('pages/EstimatesPage.jsx');await click('Open estimate');const property=()=>tree.root.findByProps({'aria-label':'Service property address'});
+  await act(async()=>property().props.onChange({target:{value:'First actual property'}}));let release;env.pendingPropertyCheck=new Promise(resolve=>{release=resolve;});await act(async()=>{button('Check service property').props.onClick();});
+  await act(async()=>property().props.onChange({target:{value:'Second actual property'}}));await act(async()=>{release({eligible:true,status:'inside',message:'STALE first-property approval'});await env.pendingPropertyCheck;});assert.doesNotMatch(text(),/STALE first-property approval/);await click('Save estimate version');assert.equal(env.calls.find(row=>row.name==='save').data.data.serviceProperty.address,'Second actual property');
 });

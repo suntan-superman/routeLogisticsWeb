@@ -4,8 +4,9 @@ const { FieldPath } = require('firebase-admin/firestore');
 const { documentId, rateLimit } = require('./security');
 const { accessScope, requireCapability, hasCapability, checkJob } = require('./access');
 const { version } = require('./offline');
+const { serviceAreaWorkflow, servicePropertySite } = require('./serviceAreaWorkflows');
 
-const JOB_FIELDS = ['userId', 'companyId', 'customerId', 'customerName', 'customerPhone', 'serviceType', 'title', 'address', 'city', 'state', 'zipCode', 'serviceArea', 'date', 'time', 'windowStart', 'windowEnd', 'estimatedDuration', 'duration', 'priority', 'status', 'assignedTo', 'workNotes', 'actualWorkDone', 'actualHours', 'completionNotes', 'completedAt', 'createdAt', 'updatedAt'];
+const JOB_FIELDS = ['userId', 'companyId', 'customerId', 'customerName', 'customerPhone', 'serviceType', 'serviceCategory', 'title', 'address', 'city', 'state', 'zipCode', 'serviceArea', 'date', 'time', 'windowStart', 'windowEnd', 'estimatedDuration', 'duration', 'priority', 'status', 'assignedTo', 'workNotes', 'actualWorkDone', 'actualHours', 'completionNotes', 'completedAt', 'createdAt', 'updatedAt'];
 const PRICING_FIELDS = ['totalCost', 'estimatedCost', 'laborRate', 'laborHours', 'materialCost', 'materials', 'scopeOfWork', 'notes', 'description', 'servicePlanId'];
 const CUSTOMER_FIELDS = ['userId', 'companyId', 'name', 'firstName', 'lastName', 'email', 'emailNormalized', 'phone', 'phoneNumber', 'address', 'city', 'state', 'zipCode', 'isActive', 'status', 'createdAt', 'updatedAt', 'lastServiceDate', 'totalJobs', 'emailConsent', 'notes', 'serviceInstructions'];
 const APPLICATION_FIELDS = ['product', 'epaRegNo', 'activeIngredient', 'amount', 'unit', 'targetPest', 'areaTreated', 'method', 'applicatorLicense', 'notes'];
@@ -19,8 +20,11 @@ function coordinates(data) {
   return typeof lat === 'number' && typeof lng === 'number' && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { latitude: lat, longitude: lng } : {};
 }
 function projectJob(id, data, role) {
+  data = { ...data, ...(servicePropertySite(data) || {}) };
   if (hasCapability(role, 'reports.financial')) return { ...data, id, updatedAt: version(data.updatedAt) };
-  return { id, ...pick(data, JOB_FIELDS), ...coordinates(data), ...(hasCapability(role, 'jobs.pricing') ? pick(data, PRICING_FIELDS) : { notes: typeof data.workNotes === 'string' ? data.workNotes : '' }) };
+  const property = data.serviceProperty && typeof data.serviceProperty === 'object' ? { serviceProperty: pick(data.serviceProperty, ['address', 'formattedAddress', 'postalCode', 'latitude', 'longitude', 'validated', 'source']) } : {};
+  const area = hasCapability(role, 'jobs.schedule') && data.serviceAreaEligibility ? { serviceAreaEligibility: pick(data.serviceAreaEligibility, ['status', 'settingsRevision', 'serviceCategory', 'purpose', 'checkedAt', 'exceptionId', 'continuedFromServicePlan']) } : {};
+  return { id, ...pick(data, JOB_FIELDS), ...coordinates(data), ...property, ...area, ...(hasCapability(role, 'jobs.pricing') ? pick(data, PRICING_FIELDS) : { notes: typeof data.workNotes === 'string' ? data.workNotes : '' }) };
 }
 function projectCustomer(id, data, role) {
   if (hasCapability(role, 'reports.financial')) return { ...data, id };
@@ -41,12 +45,15 @@ async function jobFor(db, scope, id) {
   return snap;
 }
 function withCustomerLocation(data, customer) {
+  const property = servicePropertySite(data);
+  if (property) data = { ...data, ...property };
   if (!customer) return data;
   const address = typeof customer.address === 'string' ? customer.address : customer.address?.street || customer.address?.line1;
   return { ...data, customerName: data.customerName || customer.name || [customer.firstName, customer.lastName].filter(Boolean).join(' '), customerPhone: data.customerPhone || customer.phone || customer.phoneNumber || '',
-    ...(!data.address ? { address: address || '', city: customer.city || customer.address?.city || '', state: customer.state || customer.address?.state || '', zipCode: customer.zipCode || customer.address?.zipCode || '', ...coordinates(customer) } : {}) };
+    ...(!property && !data.address ? { address: address || '', city: customer.city || customer.address?.city || '', state: customer.state || customer.address?.state || '', zipCode: customer.zipCode || customer.address?.zipCode || '', ...coordinates(customer) } : {}) };
 }
-function workDataHandlers(db) {
+function workDataHandlers(db, config = {}) {
+  const serviceAreas = serviceAreaWorkflow(db, config);
   return {
     read: async request => {
       const scope = await accessScope(db, request), data = request.data || {}, resource = data.resource;
@@ -124,11 +131,22 @@ function workDataHandlers(db) {
       const permitted = [...JOB_FIELDS, ...PRICING_FIELDS, 'latitude', 'longitude', 'workNotes', 'cancelledAt', 'cancellationReason'];
       const patch = action === 'assign' ? { assignedTo: data.memberId || null } : pick(input, permitted.filter(key => !['userId', 'companyId', 'createdAt', 'updatedAt'].includes(key)));
       if (patch.status && !['scheduled', 'en-route', 'in-progress', 'completed', 'cancelled'].includes(patch.status)) throw new HttpsError('invalid-argument', 'Invalid job status.');
+      const initial = action === 'create' ? null : await ref.get();
+      if (initial) checkJob(scope, initial.data());
+      if (patch.customerId) {
+        const customer = await db.doc(`customers/${documentId(patch.customerId)}`).get();
+        if (!customer.exists || (scope.companyId ? customer.get('companyId') !== scope.companyId : customer.get('companyId') || customer.get('userId') !== scope.uid)) throw new HttpsError('permission-denied', 'Choose a customer in this workspace.');
+      }
+      // Resolve Google once before entering a retried Firestore transaction.
+      // Existing status/date/notes edits do not revisit changed boundaries.
+      const area = ['create', 'update'].includes(action) ? await serviceAreas.prepare(scope, input, initial?.data() || {}, 'scheduling', action === 'create') : null;
+      if (area) Object.assign(patch, area.patch);
       return db.runTransaction(async tx => {
         const existing = await tx.get(ref);
         if (action !== 'create') {
           checkJob(scope, existing.data());
           if (data.expectedVersion !== undefined && version(existing.get('updatedAt')) !== version(data.expectedVersion)) throw new HttpsError('aborted', 'This job changed. Refresh it before saving.');
+          if (area && !existing.updateTime.isEqual(initial.updateTime)) throw new HttpsError('aborted', 'This job changed while its service property was being checked. Refresh before saving.');
         }
         if (patch.customerId) {
           const customer = await tx.get(db.doc(`customers/${documentId(patch.customerId)}`));
@@ -138,6 +156,7 @@ function workDataHandlers(db) {
           const member = await tx.get(db.doc(`teamMembers/${documentId(patch.assignedTo)}`));
           if (member.get('companyId') !== scope.companyId || member.get('status') !== 'active' || !member.get('uid')) throw new HttpsError('permission-denied', 'Choose an active company member.');
         }
+        await serviceAreas.assertCurrent(tx, area);
         const updatedAt = new Date(Math.max(Date.now(), Date.parse(version(existing.get('updatedAt'))) + 1 || 0)).toISOString();
         const before = existing.data() || {};
         if (action === 'delete') tx.delete(ref);
@@ -149,7 +168,7 @@ function workDataHandlers(db) {
         }
         const audit = db.collection('rlAudit').doc();
         tx.create(audit, { action: `job.${action}`, companyId: scope.companyId, actorId: scope.uid, jobId: ref.id, fromMemberId: before.assignedTo || null, toMemberId: patch.assignedTo ?? before.assignedTo ?? null, createdAt: updatedAt });
-        return { id: ref.id, updatedAt };
+        return { id: ref.id, updatedAt, ...(area ? { serviceArea: area.result } : {}) };
       });
     },
     application: async request => {

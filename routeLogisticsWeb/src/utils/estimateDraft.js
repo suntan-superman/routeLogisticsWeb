@@ -1,6 +1,11 @@
 // Client draft validation only. The backend owns all prices, totals and versions.
 const blankLine = kind => ({ kind, description: '', quantity: '1', unitPrice: '', unit: kind === 'labor' ? 'hour' : 'item' });
 const blankEstimate = () => ({ customerId: '', prospect: { name: '', email: '', phone: '', address: '' }, title: '', serviceType: '', scopeOfWork: '', notes: '', validDays: '30', taxRate: '0', lineItems: [blankLine('labor'), blankLine('material')], photoIds: [] });
+function propertyInput(value = {}) {
+  const address = String(value.serviceProperty?.address || '').trim(), serviceCategory = String(value.serviceCategory || '').trim();
+  if (address.length > 278) throw new Error('Use a service property address of up to 278 characters.');
+  return { ...(Object.hasOwn(value, 'serviceProperty') ? { serviceProperty: { address } } : {}), ...(Object.hasOwn(value, 'serviceCategory') ? { serviceCategory } : {}), ...(Object.hasOwn(value, 'serviceAreaExceptionId') ? { serviceAreaExceptionId: address && value.serviceAreaExceptionId || null } : {}) };
+}
 function draftFromEstimate(estimate) {
   return { ...blankEstimate(), ...estimate, prospect: { ...blankEstimate().prospect, ...(!estimate.customerId ? estimate.recipient || { name: estimate.customerName || '', email: estimate.customerEmail || '', address: estimate.address || '' } : {}), ...(estimate.prospect || {}) }, lineItems: (estimate.lineItems || []).map(line => ({ ...line, quantity: String(line.quantity), unitPrice: String(line.unitPrice ?? (Number(line.unitPriceCents || 0) / 100)) })), taxRate: String(estimate.taxRate ?? Number(estimate.taxBasisPoints || 0) / 100), validDays: String(estimate.validDays || 30), photoIds: estimate.photoIds || [] };
 }
@@ -16,13 +21,13 @@ function estimateInput(draft) {
   });
   const taxRate = Number(draft.taxRate || 0), validDays = Number(draft.validDays || 30);
   if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100 || !/^\d+(\.\d{1,2})?$/.test(String(draft.taxRate || 0)) || !Number.isInteger(validDays) || validDays < 1 || validDays > 90) throw new Error('Tax must be 0–100% (up to two decimals); validity must be 1–90 days.');
-  return { customerId: draft.customerId || null, prospect: draft.customerId ? null : Object.fromEntries(['name', 'email', 'phone', 'address'].map(key => [key, String(draft.prospect?.[key] || '').trim()])), title: draft.title.trim(), serviceType: draft.serviceType.trim(), scopeOfWork: draft.scopeOfWork.trim(), notes: draft.notes?.trim() || '', validDays, taxRate, lineItems: cleaned, photoIds: draft.photoIds || [] };
+  return { customerId: draft.customerId || null, prospect: draft.customerId ? null : Object.fromEntries(['name', 'email', 'phone', 'address'].map(key => [key, String(draft.prospect?.[key] || '').trim()])), title: draft.title.trim(), serviceType: draft.serviceType.trim(), scopeOfWork: draft.scopeOfWork.trim(), notes: draft.notes?.trim() || '', validDays, taxRate, lineItems: cleaned, photoIds: draft.photoIds || [], ...propertyInput(draft) };
 }
 const money = cents => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(cents || 0) / 100);
 function conversionInput(schedule, { customerId, createCustomer = false } = {}) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(schedule.date || '') || !Number.isFinite(Date.parse(`${schedule.date}T12:00:00Z`)) || new Date(`${schedule.date}T12:00:00Z`).toISOString().slice(0, 10) !== schedule.date || !/^([01]\d|2[0-3]):[0-5]\d$/.test(schedule.time || '')) throw new Error('Choose a valid service date and time before converting.');
   if (customerId && createCustomer) throw new Error('Select an existing customer or create one from the approved prospect.');
-  return { schedule: { date: schedule.date, time: schedule.time }, ...(customerId ? { customerId } : createCustomer ? { createCustomer: true } : {}) };
+  return { schedule: { date: schedule.date, time: schedule.time, ...propertyInput(schedule) }, ...(customerId ? { customerId } : createCustomer ? { createCustomer: true } : {}) };
 }
 export { blankLine, blankEstimate, draftFromEstimate, estimateInput, money, conversionInput };
 export function approvalCredentials(fragment) {

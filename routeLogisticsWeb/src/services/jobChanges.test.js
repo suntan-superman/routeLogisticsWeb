@@ -22,3 +22,18 @@ test('keeps first original snapshot and appends revisions', () => {
   assert.equal(second.revisions.length, 2);
   assert.equal(second.revisions[0].reason, 'more rooms');
 });
+
+test('ordinary job edits preserve omitted geography and do not create a false location change',()=>{
+  const stored={...job,serviceProperty:{address:'Recorded service property',latitude:35,longitude:-119,validated:true},serviceCategory:'Pest Control',serviceAreaExceptionId:'historic-approval'};
+  const edit=buildJobEdit(stored,{...job,notes:'A normal work note'},{by:'owner'});
+  assert.deepEqual(edit.revisions.at(-1).changes.map(row=>row.field),['notes']);
+  assert.deepEqual(edit.originalDetails.serviceProperty,stored.serviceProperty);
+  assert.equal(Object.hasOwn(edit,'serviceProperty'),false);
+});
+
+test('property, category and explicit exception changes are recorded independently',()=>{
+  const stored={...job,serviceProperty:{address:'First property',latitude:35,validated:true},serviceCategory:'Pest Control',serviceAreaExceptionId:'first-approval'};
+  const next={...job,serviceProperty:{address:'Second property'},serviceCategory:'Pool Cleaning',serviceAreaExceptionId:null};
+  assert.deepEqual(diffJob(stored,next).map(row=>row.field),['serviceProperty','serviceCategory','serviceAreaExceptionId']);
+  assert.equal(diffJob(stored,{...job,serviceProperty:{address:'First property'}}).length,0);
+});

@@ -77,6 +77,28 @@ service cloud.firestore {
                 && (isManager() || (allowTechnician && isStaff()))));
     }
 
+    // Geographic decisions and their proof are server-owned. Historical records
+    // remain writable for ordinary non-geographic edits after coverage changes.
+    function configuredServiceArea(d) {
+      return d.get('companyId', null) != null
+        && exists(/databases/$(database)/documents/rlServiceAreas/$(d.companyId))
+        && get(/databases/$(database)/documents/rlServiceAreas/$(d.companyId)).data.get('configured', false) == true;
+    }
+    function geographicFields() {
+      return ['customerId', 'serviceProperty', 'propertyAddress', 'serviceCategory', 'serviceType',
+        'address', 'city', 'state', 'zipCode', 'latitude', 'longitude', 'location',
+        'serviceAreaExceptionId', 'serviceAreaEligibility', 'serviceAreaManaged'];
+    }
+    function geographicCreate() {
+      return !configuredServiceArea(request.resource.data)
+        && !request.resource.data.keys().hasAny(['serviceAreaEligibility', 'serviceAreaManaged']);
+    }
+    function geographicUpdate() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['serviceAreaEligibility', 'serviceAreaManaged'])
+        && (!configuredServiceArea(resource.data)
+          || !request.resource.data.diff(resource.data).affectedKeys().hasAny(geographicFields()));
+    }
+
     // ---------- users ----------
     match /users/{userId} {
       allow read: if signedIn() && uid() == userId;
@@ -151,8 +173,10 @@ service cloud.firestore {
 
       allow read: if financeAccess(resource.data);
       allow create: if validCreate(false) && (claimCompany() == null || isFinance())
+        && geographicCreate()
         && validStatus(request.resource.data.get('status', 'scheduled'));
       allow update: if tenancyUnchanged() && statusOk()
+        && geographicUpdate()
         && financeAccess(resource.data);
       allow delete: if financeAccess(resource.data); // Managers use rlManageJob; technicians use rlApplyJobOperation.
     }
@@ -160,8 +184,8 @@ service cloud.firestore {
     // ---------- appointments ----------
     match /appointments/{id} {
       allow read: if financeAccess(resource.data);
-      allow create: if validCreate(false);
-      allow update: if manageable(resource.data) && tenancyUnchanged();
+      allow create: if validCreate(false) && geographicCreate();
+      allow update: if manageable(resource.data) && tenancyUnchanged() && geographicUpdate();
       allow delete: if manageable(resource.data);
     }
 
@@ -178,8 +202,9 @@ service cloud.firestore {
         && (resource.data.get('rlManaged', false) != true || manageable(resource.data));
       // Versioned Route Logistics estimates are written only through the callable.
       // Legacy estimate documents retain their existing permissions.
-      allow create: if validCreate(false) && request.resource.data.get('rlManaged', false) != true;
+      allow create: if validCreate(false) && geographicCreate() && request.resource.data.get('rlManaged', false) != true;
       allow update: if manageable(resource.data) && tenancyUnchanged()
+        && geographicUpdate()
         && resource.data.get('rlManaged', false) != true
         && request.resource.data.get('rlManaged', false) != true;
       allow delete: if manageable(resource.data) && resource.data.get('rlManaged', false) != true;
@@ -222,9 +247,10 @@ service cloud.firestore {
     match /servicePlans/{id} {
       allow read: if readable(resource.data);
       allow create: if validCreate(false)
+        && geographicCreate()
         && request.resource.data.get('frequencyDays', 0) is number
         && request.resource.data.get('frequencyDays', 0) > 0;
-      allow update: if manageable(resource.data) && tenancyUnchanged();
+      allow update: if manageable(resource.data) && tenancyUnchanged() && geographicUpdate();
       allow delete: if manageable(resource.data);
     }
 

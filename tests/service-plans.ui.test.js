@@ -19,6 +19,7 @@ const dependencies=name=>{
   if(name.endsWith('/components/ConfirmProvider'))return{useConfirm:()=>async()=>true};
   if(name.endsWith('/hooks/useUnsavedChanges'))return{useUnsavedChanges:dirty=>{env.dirty=dirty;return{confirmDiscard:async()=>{env.confirmCalls++;return env.confirm;}};}};
   if(name.endsWith('/contexts/AuthContext'))return{useAuth:()=>({currentUser:{uid:'owner-1'},company:{id:'company-1'}})};
+  if(name.endsWith('/components/ServicePropertyEligibility'))return{__esModule:true,default:props=>{React.useEffect(()=>{props.onPolicyLoaded?.({settings:{configured:false}});},[props.onPolicyLoaded]);return null;}};
   throw Error('Unexpected dependency: '+name);
 };
 const moduleValue={exports:{}};

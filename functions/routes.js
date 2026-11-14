@@ -1,6 +1,7 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { hash, documentId, requireAuth, requireStaff, rateLimit } = require('./security');
 const { hasCapability } = require('./access');
+const { servicePropertySite } = require('./serviceAreaWorkflows');
 function routeDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw new HttpsError('invalid-argument', 'Choose a valid service date.');
   return value;
@@ -40,9 +41,10 @@ function routeHandlers(db) {
         const data = job.data(); if (['completed', 'cancelled'].includes(data.status)) continue;
         const customer = data.customerId ? await db.doc(`customers/${documentId(data.customerId)}`).get() : null;
         const customerData = customer?.get('companyId') === scope.companyId ? customer.data() : {};
-        const address = typeof data.address === 'string' && data.address.trim() ? data.address : [customerData.address, customerData.city, customerData.state, customerData.zipCode].filter((v) => typeof v === 'string' && v.trim()).join(', ');
+        const property = servicePropertySite(data);
+        const address = property ? property.address : typeof data.address === 'string' && data.address.trim() ? data.address : [customerData.address, customerData.city, customerData.state, customerData.zipCode].filter((v) => typeof v === 'string' && v.trim()).join(', ');
         const hours = Number(data.estimatedDuration ?? data.duration ?? 0);
-        stops.push({ id: job.id, customerName: data.customerName || customerData.name || [customerData.firstName, customerData.lastName].filter(Boolean).join(' ') || 'Customer', serviceType: data.serviceType || 'Service', time: data.time || '', windowStart: data.windowStart || data.time || '', windowEnd: data.windowEnd || '', durationMinutes: Number.isFinite(hours) ? Math.max(0, hours * 60) : 0, location: coordinates(data) || coordinates(customerData), address });
+        stops.push({ id: job.id, customerName: data.customerName || customerData.name || [customerData.firstName, customerData.lastName].filter(Boolean).join(' ') || 'Customer', serviceType: data.serviceType || 'Service', time: data.time || '', windowStart: data.windowStart || data.time || '', windowEnd: data.windowEnd || '', durationMinutes: Number.isFinite(hours) ? Math.max(0, hours * 60) : 0, location: property ? coordinates(property) : coordinates(data) || coordinates(customerData), address });
       }
       stops.sort((a, b) => a.time.localeCompare(b.time) || a.id.localeCompare(b.id));
       const saved = await db.doc(`rlRoutes/${hash(`${scope.companyId}:${scope.memberId}:${scope.date}`)}`).get();

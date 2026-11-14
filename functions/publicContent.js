@@ -1,0 +1,60 @@
+const { contentPath } = require('./platformCms');
+const ORIGIN = 'https://route-logistics.com';
+const CATALOG = {
+  faqs: { type: 'faq', title: 'Frequently asked questions', description: 'Answers about Route Logistics, field service scheduling and the customer portal.', empty: 'Published answers will appear here as our help library grows.' },
+  testimonials: { type: 'testimonial', title: 'Customer testimonials', description: 'Customer feedback shared with permission by Route Logistics users.', empty: 'Testimonials will appear here when customers have approved their feedback for publication.' },
+  'success-stories': { type: 'story', title: 'Customer success stories', description: 'Verified customer stories about managing field service work with Route Logistics.', empty: 'Customer stories will appear here after their results and permission to publish have been verified.' },
+};
+const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+const json = value => JSON.stringify(value).replace(/</g, '\\u003c').replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029');
+const iso = value => value?.toDate ? value.toDate().toISOString() : value instanceof Date ? value.toISOString() : typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
+const paragraphs = text => String(text || '').split(/\n\s*\n/).filter(Boolean).map(p => `<p>${escape(p).replace(/\n/g,'<br>')}</p>`).join('');
+function publicItem(data) {
+  return data?.status === 'published' && Object.values(CATALOG).some(c => c.type === data.type) && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.slug || '');
+}
+function image(item) {
+  const url = item.imageUrl;
+  if (!item.imageId || typeof url !== 'string' || !url.startsWith('https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlPublicContentImage?id=')) return '';
+  return `<img src="${escape(url)}" alt="${escape(item.imageAlt)}" loading="lazy" width="1000" height="560">`;
+}
+function renderPage({ title, description, canonical, body, item, structured, noindex = false }) {
+  const safeCanonical = typeof canonical === 'string' && canonical.startsWith(ORIGIN + '/') ? canonical : ORIGIN;
+  const graph = [ { '@context':'https://schema.org', '@type':'Organization', name:'Route Logistics', url:ORIGIN }, ...structured || [] ];
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(title)} | Route Logistics</title><meta name="description" content="${escape(description)}"><meta name="robots" content="${noindex ? 'noindex, nofollow' : 'index, follow'}"><link rel="canonical" href="${escape(safeCanonical)}"><meta property="og:type" content="${item?.type === 'story' ? 'article' : 'website'}"><meta property="og:site_name" content="Route Logistics"><meta property="og:title" content="${escape(item?.seo?.ogTitle || title)}"><meta property="og:description" content="${escape(item?.seo?.ogDescription || description)}"><meta property="og:url" content="${escape(safeCanonical)}">${item?.imageUrl ? `<meta property="og:image" content="${escape(item.imageUrl)}"><meta property="og:image:alt" content="${escape(item.imageAlt)}">` : ''}<script type="application/ld+json">${json(graph)}</script><style>
+*{box-sizing:border-box}body{margin:0;color:#152536;background:#f7faf9;font:17px/1.65 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:#006b50;text-underline-offset:3px;overflow-wrap:anywhere}a:hover{color:#004b38}a:focus-visible,summary:focus-visible{outline:3px solid #007a5a;outline-offset:5px}header,footer{background:white;border-bottom:1px solid #dce6e1}nav,.wrap{max-width:1080px;margin:auto;padding:24px}nav{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}nav .links{display:flex;flex-wrap:wrap;gap:20px}.brand{font-weight:800;text-decoration:none;color:#12382b}main{min-height:60vh}h1{font-size:clamp(2rem,6vw,3.5rem);line-height:1.15;letter-spacing:-.035em;margin:24px 0}h2{font-size:1.3rem;line-height:1.35}p{overflow-wrap:anywhere}.intro{max-width:760px;color:#435667}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:24px;margin:32px 0}.card,.article{background:white;border:1px solid #dce6e1;border-radius:18px;padding:28px}.article{max-width:820px;margin:32px auto}.article h1{font-size:clamp(1.9rem,5vw,2.8rem)}.meta{color:#506274;font-size:.9rem}img{width:100%;height:auto;max-height:560px;object-fit:cover;border-radius:12px}details{background:white;border:1px solid #dce6e1;border-radius:12px;padding:20px;margin:18px 0}summary{font-weight:650;cursor:pointer}.empty{padding:32px;border:1px dashed #aebfb5;border-radius:16px;background:white}.skip{position:absolute;left:16px;top:-100px;background:white;padding:12px}.skip:focus{top:12px}footer .wrap{display:flex;gap:20px;flex-wrap:wrap;justify-content:space-between}.crumb{font-size:.9rem}@media(max-width:480px){nav,.wrap{padding:20px}.article,.card{padding:20px}.links{font-size:.94rem}}
+</style></head><body><a class="skip" href="#main">Skip to content</a><header><nav aria-label="Main navigation"><a class="brand" href="/">Route Logistics</a><div class="links"><a href="/faqs">FAQs</a><a href="/testimonials">Testimonials</a><a href="/success-stories">Success stories</a><a href="/portal">Customer portal</a><a href="/login">Sign in</a></div></nav></header><main id="main" class="wrap">${body}</main><footer><div class="wrap"><span>Route Logistics · Workside Software LLC</span><div><a href="/faqs">Help</a> · <a href="/privacy">Privacy</a> · <a href="/sitemap.xml">Sitemap</a></div></div></footer></body></html>`;
+}
+function renderCatalog(key, rows) {
+  const config = CATALOG[key], items = rows.filter(item => publicItem(item) && item.type === config.type);
+  const cards = key === 'faqs' ? items.map(item => `<details><summary>${escape(item.title)}</summary>${paragraphs(item.body)}<a href="${escape(contentPath(item))}">Read answer</a></details>`).join('') : `<div class="grid">${items.map(item => `<article class="card">${image(item)}<h2><a href="${escape(contentPath(item))}">${escape(item.title)}</a></h2><p>${escape(item.summary)}</p>${item.type === 'testimonial' ? `<p class="meta">${escape(item.attributionName)}${item.companyName ? ` · ${escape(item.companyName)}` : ''}</p>` : ''}</article>`).join('')}</div>`;
+  const structured = key === 'faqs' && items.length ? [{ '@context':'https://schema.org','@type':'FAQPage',mainEntity:items.map(item => ({'@type':'Question',name:item.title,acceptedAnswer:{'@type':'Answer',text:item.body}})) }] : [{ '@context':'https://schema.org','@type':'CollectionPage',name:config.title,url:ORIGIN+'/'+key }];
+  return renderPage({title:config.title,description:config.description,canonical:ORIGIN+'/'+key,body:`<h1>${escape(config.title)}</h1><p class="intro">${escape(config.description)}</p>${items.length ? cards : `<p class="empty">${escape(config.empty)}</p>`}`,structured});
+}
+function renderDetail(key, item) {
+  const config=CATALOG[key], path=contentPath(item), structured=[{'@context':'https://schema.org','@type':'BreadcrumbList',itemListElement:[{'@type':'ListItem',position:1,name:config.title,item:ORIGIN+'/'+key},{'@type':'ListItem',position:2,name:item.title,item:ORIGIN+path}]}];
+  if(item.type==='story')structured.push({'@context':'https://schema.org','@type':'Article',headline:item.title,description:item.summary,datePublished:iso(item.publishedAt),dateModified:iso(item.updatedAt),author:{'@type':'Organization',name:'Route Logistics'},mainEntityOfPage:ORIGIN+path,...(item.imageUrl?{image:item.imageUrl}:{})});
+  if(item.type==='faq')structured.push({'@context':'https://schema.org','@type':'FAQPage',mainEntity:[{'@type':'Question',name:item.title,acceptedAnswer:{'@type':'Answer',text:item.body}}]});
+  return renderPage({title:item.seo?.title||item.title,description:item.seo?.description||item.summary||item.body.slice(0,160),canonical:item.seo?.canonicalUrl||ORIGIN+path,item,structured,body:`<nav class="crumb" aria-label="Breadcrumb"><a href="/${key}">${escape(config.title)}</a><span aria-hidden="true">/</span><span>${escape(item.title)}</span></nav><article class="article"><h1>${escape(item.title)}</h1>${item.summary?`<p class="intro">${escape(item.summary)}</p>`:''}${image(item)}${paragraphs(item.body)}${item.type==='testimonial'?`<p class="meta">${escape(item.attributionName)}${item.attributionRole?`, ${escape(item.attributionRole)}`:''}${item.companyName?` · ${escape(item.companyName)}`:''}</p>`:''}${iso(item.publishedAt)?`<p class="meta">Published <time datetime="${escape(iso(item.publishedAt))}">${escape(iso(item.publishedAt).slice(0,10))}</time></p>`:''}<p><a href="/${key}">More ${escape(config.title.toLowerCase())}</a> · <a href="/faqs">Explore our FAQs</a></p></article>`});
+}
+function publicContentHandler(db) {
+  return async(req,res)=>{
+    res.set('Cache-Control','private, no-store');res.set('X-Content-Type-Options','nosniff');res.set('Content-Security-Policy',"default-src 'none'; style-src 'unsafe-inline'; img-src https://us-central1-mi-factotum-field-service.cloudfunctions.net data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
+    if(!['GET','HEAD'].includes(req.method))return res.status(405).set('Allow','GET, HEAD').send('Method not allowed');
+    const path=typeof req.query?.path==='string'?req.query.path:(req.path||'/');
+    const notFound=()=>{res.set('X-Robots-Tag','noindex, nofollow');return res.status(404).type('html').send(req.method==='HEAD'?'':renderPage({title:'Page unavailable',description:'This page is unavailable.',canonical:ORIGIN,body:'<h1>Page unavailable</h1><p>This content is not published. <a href="/faqs">Explore the FAQ library</a>.</p>',noindex:true}));};
+    if(path==='/robots.txt')return res.type('text/plain').send('User-agent: *\nAllow: /\nDisallow: /platform-admin\nDisallow: /portal\nDisallow: /login\nDisallow: /signup\nDisallow: /accept-invite\nSitemap: '+ORIGIN+'/sitemap.xml\n');
+    try{
+      if(path==='/sitemap.xml'){
+        const items=[],query=db.collection('rlPublicContent').orderBy('__name__');let cursor;
+        for(let page=0;page<50;page++){const rows=await(cursor?query.startAfter(cursor):query).limit(500).get();items.push(...rows.docs.map(d=>d.data()).filter(publicItem));if(rows.size<500)break;cursor=rows.docs.at(-1);}
+        const urls=[{path:'/'},{path:'/privacy'},...Object.keys(CATALOG).map(key=>({path:'/'+key})),...items.map(item=>({path:contentPath(item),updated:iso(item.updatedAt)}))];
+        return res.type('application/xml').send(req.method==='HEAD'?'':'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'+urls.map(item=>`<url><loc>${escape(ORIGIN+item.path)}</loc>${item.updated?`<lastmod>${escape(item.updated)}</lastmod>`:''}</url>`).join('')+'</urlset>');
+      }
+      const match=path.match(/^\/(faqs|testimonials|success-stories)(?:\/([a-z0-9]+(?:-[a-z0-9]+)*))?\/?$/);
+      if(!match)return notFound();const [,key,slug]=match,config=CATALOG[key];
+      if(slug){const rows=await db.collection('rlPublicContent').where('type','==',config.type).where('slug','==',slug).limit(2).get();const found=rows.docs.map(d=>d.data()).filter(publicItem);if(found.length!==1)return notFound();return res.type('html').send(req.method==='HEAD'?'':renderDetail(key,found[0]));}
+      const rows=await db.collection('rlPublicContent').where('type','==',config.type).orderBy('publishedAt','desc').limit(200).get();return res.type('html').send(req.method==='HEAD'?'':renderCatalog(key,rows.docs.map(d=>d.data())));
+    }catch{res.set('X-Robots-Tag','noindex, nofollow');return res.status(503).type('html').send(req.method==='HEAD'?'':renderPage({title:'Temporarily unavailable',description:'Please try again shortly.',canonical:ORIGIN,body:'<h1>Content is temporarily unavailable</h1><p>Please try again shortly.</p>',noindex:true}));}
+  };
+}
+module.exports={publicContentHandler,renderCatalog,renderDetail,renderPage,publicItem,escape};

@@ -146,9 +146,9 @@ const LandingPage = () => {
       </section>
 
       <footer className="border-t border-gray-100 py-8">
-        <div className="max-w-6xl mx-auto px-6 text-sm text-gray-500 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-6 text-sm text-gray-600 flex flex-wrap gap-5 items-center justify-between">
           <span>&copy; {new Date().getFullYear()} Route Logistics</span>
-          <span>route-logistics.com</span>
+          <nav aria-label="Resources" className="flex flex-wrap gap-4"><a className="underline" href="/faqs">FAQs</a><a className="underline" href="/testimonials">Testimonials</a><a className="underline" href="/success-stories">Success stories</a><Link className="underline" to="/portal">Customer portal</Link><Link className="underline" to="/privacy">Privacy</Link></nav>
         </div>
       </footer>
     </div>

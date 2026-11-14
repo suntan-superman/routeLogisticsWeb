@@ -1,0 +1,35 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { customerUid, otpHash, publicJob, publicInvoice, portalHandlers } = require('./portal');
+
+test('portal identities are normalized, deterministic and isolated from team account UIDs', () => {
+  assert.equal(customerUid(' Customer@Example.test '), customerUid('customer@example.test'));
+  assert.match(customerUid('customer@example.test'), /^rl_customer_[a-f0-9]{64}$/);
+  assert.notEqual(customerUid('customer@example.test'), customerUid('another@example.test'));
+});
+
+test('OTP hashes bind a six-digit code to a single challenge', () => {
+  assert.match(otpHash('a'.repeat(48), '123456'), /^[a-f0-9]{64}$/);
+  assert.notEqual(otpHash('a'.repeat(48), '123456'), otpHash('b'.repeat(48), '123456'));
+});
+
+test('portal jobs and invoices expose an explicit public field whitelist', () => {
+  const job = publicJob('job', { serviceType:'Pest control', date:'2026-11-14', time:'10:00', status:'completed', notes:'Private technician note', assignedTo:'staff', customerId:'customer', companyId:'private-company', storagePath:'private' });
+  assert.deepEqual(Object.keys(job).sort(), ['date','id','serviceType','status','time']);
+  const invoice = publicInvoice('invoice', { invoiceNumber:'TEST-1', total:20, status:'sent', companyId:'private', stripePaymentId:'secret-reference', bankAccount:'private', notes:'Private', lineItems:[{description:'Service',quantity:1,unitPrice:20,amount:20,internalCost:2}] });
+  assert.equal(invoice.stripePaymentId, undefined);assert.equal(invoice.companyId, undefined);assert.equal(invoice.notes, undefined);assert.equal(invoice.lineItems[0].internalCost, undefined);
+});
+
+test('portal-only operations reject team users, missing sessions and mismatched UID/email claims before database reads', async () => {
+  const handlers = portalHandlers({}, {});
+  for (const auth of [undefined, {uid:'staff',token:{email:'customer@example.test'}}, {uid:'staff',token:{portal:true,portalEmail:'customer@example.test'}}, {uid:customerUid('one@example.test'),token:{portal:true,portalEmail:'two@example.test'}}]) {
+    await assert.rejects(handlers.getCustomerPortal({auth}), {code:'unauthenticated'});
+    await assert.rejects(handlers.getCustomerPortalFile({auth}), {code:'unauthenticated'});
+  }
+});
+
+test('email-disabled portal cannot issue or verify OTPs', async () => {
+  const handlers = portalHandlers({}, {}, () => false);
+  await assert.rejects(handlers.requestCustomerOTP({data:{email:'customer@example.test'}}), {code:'failed-precondition'});
+  await assert.rejects(handlers.verifyCustomerOTP({data:{}}), {code:'failed-precondition'});
+});

@@ -8,6 +8,64 @@
   NPM_FLAGS = "--legacy-peer-deps"
 
 [[redirects]]
+  from = "/faqs"
+  to = "https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlPublicContent?path=/faqs"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/faqs/*"
+  to = "https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlPublicContent?path=/faqs/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/testimonials"
+  to = "https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlPublicContent?path=/testimonials"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/testimonials/*"
+  to = "https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlPublicContent?path=/testimonials/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/success-stories"
+  to = "https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlPublicContent?path=/success-stories"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/success-stories/*"
+  to = "https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlPublicContent?path=/success-stories/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/sitemap.xml"
+  to = "https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlPublicContent?path=/sitemap.xml"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/robots.txt"
+  to = "https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlPublicContent?path=/robots.txt"
+  status = 200
+  force = true
+
+[[headers]]
+  for = "/platform-admin*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/portal"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

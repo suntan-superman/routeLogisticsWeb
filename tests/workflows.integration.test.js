@@ -8,7 +8,7 @@ const { getFirestore, Timestamp } = req('firebase-admin/firestore');
 const { invitationHandlers, memberIdFor } = require('../functions/invitations');
 const { recurringHandlers } = require('../functions/recurring');
 const { customerHandlers } = require('../functions/customers');
-const { portalHandlers, otpHash } = require('../functions/portal');
+const { portalHandlers, otpHash, customerUid } = require('../functions/portal');
 const { deliverMail } = require('../functions/mail');
 const { rateLimit } = require('../functions/security');
 const { queueInvoiceEmail, invoiceEmailHandlers } = require('../functions/invoiceEmail');
@@ -133,7 +133,7 @@ test('portal shows only the matching customer and public fields, never internal 
   await db.doc('jobs/other-customer-job').set({ companyId: 'workflow-co', customerId: 'someone-else', date: '2026-11-12' });
   await db.doc('invoices/portal-draft').set({ companyId: 'workflow-co', customerId: 'portal-customer', status: 'draft', total: 100, createdAt: new Date() });
   const handler = portalHandlers(db, {}).getCustomerPortal;
-  const out = await handler({ auth: { uid: 'portal-uid', token: { portal: true, portalEmail: 'portal@workflows.test' } } });
+  const out = await handler({ auth: { uid: customerUid('portal@workflows.test'), token: { portal: true, portalEmail: 'portal@workflows.test' } } });
   assert.equal(out.accounts.length, 1); assert.equal(out.accounts[0].jobs.length, 1); assert.equal(out.accounts[0].jobs[0].notes, undefined); assert.equal(out.accounts[0].invoices.length, 0);
   await assert.rejects(handler({ auth: owner }));
 });

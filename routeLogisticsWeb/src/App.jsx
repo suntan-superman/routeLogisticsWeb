@@ -1,8 +1,8 @@
 import React, { Suspense, lazy } from 'react';
-import { createBrowserRouter, RouterProvider, Routes, Route, Navigate } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
-import { HelmetProvider } from 'react-helmet-async';
+import { Helmet, HelmetProvider } from 'react-helmet-async';
 import { registerLicense } from '@syncfusion/ej2-base';
 
 // Contexts
@@ -27,6 +27,8 @@ const InvoicesPage = lazy(() => import('./pages/InvoicesPage'));
 const ServicePlansPage = lazy(() => import('./pages/ServicePlansPage'));
 const AcceptInvitePage = lazy(() => import('./pages/AcceptInvitePage'));
 const CustomerPortalPage = lazy(() => import('./pages/CustomerPortalPage'));
+const PlatformAdminPage = lazy(() => import('./pages/PlatformAdminPage'));
+const PublicContentPage = lazy(() => import('./pages/PublicContentPage'));
 
 const NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
@@ -74,10 +76,16 @@ const HomeOrLanding = () => {
   );
 };
 
+function PrivateRouteMetadata() {
+  const { pathname } = useLocation();
+  const publicPage = pathname === '/' || pathname === '/privacy' || /^\/(faqs|testimonials|success-stories)(\/|$)/.test(pathname);
+  return publicPage ? null : <Helmet><meta name="robots" content="noindex, nofollow" /></Helmet>;
+}
 function AppContent() {
   return (
           <UnsavedChangesProvider>
             <div className="min-h-screen bg-gray-50">
+              <PrivateRouteMetadata />
               <Suspense fallback={<div className="p-8" role="status">Loading…</div>}>
               <Routes>
                 {/* Public Routes */}
@@ -90,6 +98,13 @@ function AppContent() {
                 <Route path="/signup" element={<SignupPage />} />
                 <Route path="/accept-invite" element={<AcceptInvitePage />} />
                 <Route path="/portal" element={<CustomerPortalPage />} />
+                <Route path="/platform-admin" element={<PlatformAdminPage />} />
+                <Route path="/faqs" element={<PublicContentPage type="faq" />} />
+                <Route path="/faqs/:slug" element={<PublicContentPage type="faq" />} />
+                <Route path="/testimonials" element={<PublicContentPage type="testimonial" />} />
+                <Route path="/testimonials/:slug" element={<PublicContentPage type="testimonial" />} />
+                <Route path="/success-stories" element={<PublicContentPage type="story" />} />
+                <Route path="/success-stories/:slug" element={<PublicContentPage type="story" />} />
                 <Route path="/estimate-approval" element={<EstimateApprovalPage />} />
                 <Route path="/estimates" element={<ProtectedRoute><Layout><EstimatesPage /></Layout></ProtectedRoute>} />
                 <Route path="/privacy" element={<PrivacyPage />} />

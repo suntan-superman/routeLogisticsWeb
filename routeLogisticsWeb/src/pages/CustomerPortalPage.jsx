@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 import { onAuthStateChanged, signInWithCustomToken, signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { portalAuth, portalFunctions, portalReady } from '../services/portal';
 import InvoicePayment from '../components/InvoicePayment';
+import PaymentHistory from '../components/PaymentHistory';
 import { paymentsConfigured, paymentMode } from '../services/paymentConfig';
 const call = (name, data) => httpsCallable(portalFunctions, name)(data).then((result) => result.data);
 const money = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
@@ -14,56 +16,113 @@ export default function CustomerPortalPage() {
   const [busy, setBusy] = useState(true), [message, setMessage] = useState(''), [error, setError] = useState('');
   const [hasMore, setHasMore] = useState(false);
   const [paymentInvoice, setPaymentInvoice] = useState(null);
-  const load = async () => {
-    setBusy(true); setError('');
-    try { const data = await call('getCustomerPortal'); setAccounts(data.accounts); setHasMore(data.hasMoreAccounts); }
-    catch (e) { setError(e.message); }
-    finally { setBusy(false); }
+  const [selectedId, setSelectedId] = useState(''), [openInvoice, setOpenInvoice] = useState(null), [fileView, setFileView] = useState(null), [logoutFailed, setLogoutFailed] = useState(false);
+  const alive = useRef(false), identity = useRef(null), selection = useRef(''), requestVersion = useRef(0), fileVersion = useRef(0), authVersion = useRef(0), submitting = useRef(false);
+  const clearDetails = () => { fileVersion.current++; setPaymentInvoice(null); setOpenInvoice(null); setFileView(null); };
+  const load = async (current = identity.current) => {
+    if (!current) return;
+    const version = ++requestVersion.current, uid = current.uid, previous = selection.current;
+    clearDetails(); setBusy(true); setError(''); setAccounts([]);
+    try {
+      await portalReady;
+      const data = await call('getCustomerPortal');
+      if (!alive.current || version !== requestVersion.current || identity.current?.uid !== uid || portalAuth.currentUser?.uid !== uid) return;
+      const available = Array.isArray(data.accounts) ? data.accounts : [];
+      const next = available.some(account => account.id === previous) ? previous : available[0]?.id || '';
+      selection.current = next; setSelectedId(next); setAccounts(available); setHasMore(data.hasMoreAccounts === true);
+    } catch (failure) {
+      if (alive.current && version === requestVersion.current && identity.current?.uid === uid) { selection.current = ''; setSelectedId(''); setError(failure.message || 'Your records could not be loaded. Refresh the portal to try again.'); }
+    } finally { if (alive.current && version === requestVersion.current && identity.current?.uid === uid) setBusy(false); }
   };
-  useEffect(() => onAuthStateChanged(portalAuth, (current) => {
-    setUser(current); setAccounts([]); setPaymentInvoice(null);
-    if (current) load(); else setBusy(false);
-  }), []);
+  const loadRef = useRef(load); loadRef.current = load;
+  useEffect(() => {
+    alive.current = true;
+    const unsubscribe = onAuthStateChanged(portalAuth, current => {
+      identity.current = current; selection.current = ''; requestVersion.current++; fileVersion.current++; authVersion.current++;
+      setUser(current); setAccounts([]); setSelectedId(''); setPaymentInvoice(null); setOpenInvoice(null); setFileView(null); setHasMore(false);
+      setCode(''); setChallenge(null); setMessage(''); setError(''); setLogoutFailed(false);
+      if (current) loadRef.current(current); else setBusy(false);
+    });
+    return () => { alive.current = false; unsubscribe(); };
+  }, []);
+  const selectedAccount = user ? accounts.find(account => account.id === selectedId) : null;
+  const selectedAccounts = selectedAccount ? [selectedAccount] : [];
+  const chooseProvider = event => {
+    if (!accounts.some(account => account.id === event.target.value)) return;
+    selection.current = event.target.value; setSelectedId(event.target.value); clearDetails(); setError(''); setMessage('');
+  };
+  const logout = async () => {
+    if (submitting.current) return;
+    submitting.current = true; requestVersion.current++; authVersion.current++; identity.current = null; selection.current = '';
+    clearDetails(); setUser(null); setAccounts([]); setSelectedId(''); setCode(''); setChallenge(null); setError(''); setMessage(''); setBusy(true);
+    try { await signOut(portalAuth); }
+    catch { if (alive.current) { setLogoutFailed(true); setError('Sign-out could not finish. Your records have been hidden; retry signing out.'); } }
+    finally { submitting.current = false; if (alive.current) setBusy(false); }
+  };
   const submit = async (event) => {
-    event.preventDefault(); setBusy(true); setError('');
+    event.preventDefault();
+    if (submitting.current || identity.current) return;
+    submitting.current = true; const version = ++authVersion.current; setBusy(true); setError('');
     try {
       await portalReady;
       if (!challenge) {
-        const data = await call('rlRequestCustomerOTP', { email });
-        setChallenge(data.challengeId); setMessage(data.message);
+        const data = await call('rlRequestCustomerOTP', { email: email.trim() });
+        if (alive.current && version === authVersion.current && !identity.current) { setChallenge(data.challengeId); setMessage(data.message); setCode(''); }
       } else {
         const { token } = await call('rlVerifyCustomerOTP', { challengeId: challenge, code });
+        if (!alive.current || version !== authVersion.current || identity.current) return;
         await signInWithCustomToken(portalAuth, token);
-        setMessage(''); setCode(''); setChallenge(null);
+        if (alive.current) { setMessage(''); setCode(''); setChallenge(null); }
       }
-    } catch (e) { setError(e.message); }
-    finally { setBusy(false); }
+    } catch (e) { if (alive.current && version === authVersion.current && !identity.current) { setError(e.message || 'Sign-in could not finish. Please try again.'); setCode(''); } }
+    finally { submitting.current = false; if (alive.current && !identity.current) setBusy(false); }
   };
-  return <main className="mx-auto max-w-5xl p-6">
-    <div className="mb-8 flex flex-wrap items-center justify-between gap-3"><Link className="font-bold text-primary-700" to="/">Route Logistics</Link>{user && <button className="underline" onClick={() => signOut(portalAuth)}>Sign out</button>}</div>
+  const readFile = async item => {
+    if (!selectedAccount || !identity.current) return;
+    const accountId = selectedAccount.id, uid = identity.current.uid, version = ++fileVersion.current;
+    setFileView({ accountId, item, loading: true, error: '', data: null });
+    try {
+      const data = await call('rlGetCustomerPortalFile', { accountId, kind: item.kind, fileId: item.id });
+      if (!alive.current || version !== fileVersion.current || selection.current !== accountId || identity.current?.uid !== uid || portalAuth.currentUser?.uid !== uid) return;
+      const types = item.kind === 'photo' ? ['image/jpeg', 'image/png', 'image/webp'] : ['application/pdf'];
+      if (!types.includes(data.contentType) || typeof data.dataUri !== 'string' || !data.dataUri.startsWith(`data:${data.contentType};base64,`) || data.dataUri.length > 3 * 1024 * 1024) throw new Error('This file has an unsupported format or exceeds the portal download limit. Contact your provider.');
+      setFileView({ accountId, item, loading: false, error: '', data });
+    } catch (failure) { if (alive.current && version === fileVersion.current && selection.current === accountId && identity.current?.uid === uid) setFileView({ accountId, item, loading: false, data: null, error: failure.message || 'This file could not be loaded. Please try again.' }); }
+  };
+  const currentFile = fileView?.accountId === selectedAccount?.id ? fileView : null;
+  const activePayment = paymentInvoice?.accountId === selectedAccount?.id && selectedAccount?.invoices?.some(invoice => invoice.id === paymentInvoice.invoiceId) ? paymentInvoice.invoiceId : null;
+  return <main className="mx-auto max-w-5xl p-5 sm:p-8">
+    <Helmet><title>Customer portal | Route Logistics</title><meta name="robots" content="noindex,nofollow" /></Helmet>
+    <div className="mb-8 flex flex-wrap items-center justify-between gap-3"><Link className="font-bold text-primary-700" to="/">Route Logistics</Link>{(user || logoutFailed) && <button type="button" disabled={busy && !user} className="text-primary-700 underline" onClick={logout}>{logoutFailed ? 'Retry sign out' : 'Sign out'}</button>}</div>
     <h1 className="mb-6 text-3xl font-bold">Customer portal</h1>
-    {!user ? <form onSubmit={submit} className="max-w-md space-y-4 rounded-lg border bg-white p-6">
+    {!user ? <form onSubmit={submit} aria-label="Customer email sign-in" className="max-w-md space-y-4 rounded-xl border bg-white p-6">
       <p>View your service visits and invoices using the email you gave your service provider.</p>
-      <label className="block">Email address<input className="mt-1 block w-full rounded border-gray-300" type="email" autoComplete="email" required disabled={!!challenge || busy} value={email} onChange={(e) => setEmail(e.target.value)} /></label>
-      {challenge && <label className="block">Six-digit code<input className="mt-1 block w-full rounded border-gray-300" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={(e) => setCode(e.target.value)} /></label>}
-      <button disabled={busy} className="rounded bg-primary-600 px-4 py-2 text-white disabled:opacity-50">{busy ? 'Please wait…' : challenge ? 'Sign in' : 'Email a sign-in code'}</button>
-      {challenge && <button type="button" disabled={busy} className="block underline" onClick={() => { setChallenge(null); setCode(''); setMessage(''); }}>Request a new code or change email</button>}
+      <label className="block">Email address<input className="mt-1 block w-full rounded border-gray-300" type="email" autoComplete="email" required disabled={!!challenge || busy || logoutFailed} value={email} onChange={(e) => setEmail(e.target.value)} /></label>
+      {challenge && <><label className="block">Six-digit code<input className="mt-1 block w-full rounded border-gray-300" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required disabled={busy || logoutFailed} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} /></label><p className="text-sm text-gray-500">Codes expire after 10 minutes and can be used once.</p></>}
+      <button disabled={busy || logoutFailed} className="rounded bg-primary-700 px-4 py-2 text-white hover:bg-primary-800 disabled:opacity-50">{busy ? 'Please wait…' : challenge ? 'Sign in' : 'Email a sign-in code'}</button>
+      {challenge && <button type="button" disabled={busy || logoutFailed} className="block underline" onClick={() => { authVersion.current++; setChallenge(null); setCode(''); setMessage(''); setError(''); }}>Request a new code or change email</button>}
     </form> : <>
-      <button className="mb-4 underline" disabled={busy} onClick={load}>{busy ? 'Refreshing…' : 'Refresh visits and invoices'}</button>
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-4 rounded-xl border bg-white p-5"><label className="min-w-0 flex-1 font-semibold sm:max-w-lg">Service provider<select className="mt-2 block w-full rounded border-gray-300 font-normal" value={selectedId} disabled={busy || !accounts.length} onChange={chooseProvider} aria-describedby="portal-provider-help">{!accounts.length && <option value="">{busy ? 'Loading providers…' : 'No available providers'}</option>}{accounts.map(account => <option key={account.id} value={account.id}>{account.companyName}{account.contactEmail ? ` · ${account.contactEmail}` : ''}</option>)}</select></label><button type="button" className="text-primary-700 underline" disabled={busy} onClick={() => load()}>{busy ? 'Refreshing…' : 'Refresh visits and invoices'}</button><p id="portal-provider-help" className="w-full text-sm text-gray-500">Only the selected provider's records are shown. Switching providers closes open files and payment details.</p></div>
+      {busy && <p role="status" className="py-4 text-gray-600">Loading your authorized providers and service records…</p>}
       {!busy && !accounts.length && !error && <p>No service records are available. Contact your provider to check your email address.</p>}
-      {accounts.map((account) => <section key={account.id} className="mb-6 rounded-lg border bg-white p-6">
+      {selectedAccounts.map((account) => <section key={`${user.uid}:${account.id}`} aria-label="Selected provider records" className="mb-6 rounded-xl border bg-white p-5 sm:p-7">
         <h2 className="text-xl font-bold">{account.companyName}</h2>
+        {account.contactEmail && <p className="mt-2 break-all text-sm text-gray-600">Provider contact: {account.contactEmail}</p>}
+        {account.duplicateCustomerCount > 0 && <p className="mt-2 text-sm text-gray-500">Matching customer records have been combined for this provider.</p>}
         <h3 className="mb-3 mt-5 font-semibold">Service visits</h3>
         {account.jobs.length ? <ul className="divide-y">{account.jobs.map((job) => <li key={job.id} className="flex flex-wrap justify-between gap-2 py-3"><span>{job.serviceType} · {job.date} {job.time}</span><span className="capitalize">{job.status.replace('-', ' ')}</span></li>)}</ul> : <p>No visits yet.</p>}
+        <h3 className="mb-3 mt-6 font-semibold">Photos and documents</h3>
+        {account.photos?.length || account.documents?.length ? <ul className="grid gap-3 sm:grid-cols-2">{[...(account.photos || []), ...(account.documents || [])].map(item => <li key={`${item.kind}:${item.id}`} className="min-w-0 rounded-lg border p-4"><p className="break-words text-sm">{item.caption || item.name || (item.kind === 'photo' ? 'Service photo' : 'Service document')}</p><button type="button" className="mt-3 text-sm font-semibold text-primary-700 underline" disabled={currentFile?.loading && currentFile.item.id === item.id} onClick={() => readFile(item)}>{item.kind === 'photo' ? 'View photo' : 'Open document'}</button></li>)}</ul> : <p className="text-gray-600">No photos or documents have been shared by this provider yet.</p>}
+        {currentFile && <section aria-label="Shared file preview" className="mt-5 space-y-4 rounded-xl border border-primary-200 bg-primary-50 p-5"><div className="flex items-start justify-between gap-4"><h4 className="break-words font-semibold">{currentFile.item.caption || currentFile.item.name || 'Shared service file'}</h4><button type="button" className="text-sm text-primary-700 underline" onClick={() => { fileVersion.current++; setFileView(null); }}>Close file</button></div>{currentFile.loading ? <p role="status">Loading shared file…</p> : currentFile.error ? <><p role="alert" className="text-red-700">{currentFile.error}</p><button type="button" className="underline" onClick={() => readFile(currentFile.item)}>Retry file</button></> : currentFile.data?.contentType === 'application/pdf' ? <a className="font-semibold text-primary-700 underline" href={currentFile.data.dataUri} download={String(currentFile.data.name || 'Service document').replace(/[^a-zA-Z0-9 ._-]/g, '').slice(0, 160).replace(/\.pdf$/i, '') + '.pdf'}>Download PDF document</a> : currentFile.data ? <img className="max-h-[32rem] max-w-full rounded-lg object-contain" src={currentFile.data.dataUri} alt={currentFile.item.caption || currentFile.data.name || 'Shared service visit photo'} /> : null}</section>}
         <h3 className="mb-3 mt-6 font-semibold">Invoices</h3>
-        {account.invoices.length ? account.invoices.map((invoice) => <details key={invoice.id} className="border-t py-3"><summary className="cursor-pointer">{invoice.invoiceNumber} · {money(invoice.total)} · {invoice.status} · Due {invoice.dueDate}</summary><ul className="mt-3 text-sm">{invoice.lineItems.map((item, i) => <li key={i}>{item.description} — {item.quantity} × {money(item.unitPrice)} = {money(item.amount)}</li>)}</ul><p className="mt-3 text-sm">Contact your provider for payment arrangements.</p></details>) : <p>No invoices yet.</p>}
+        {account.invoices.length ? account.invoices.map((invoice) => <details key={`${account.id}:${invoice.id}`} className="border-t py-3" onToggle={event => setOpenInvoice(event.currentTarget.open ? invoice.id : previous => previous === invoice.id ? null : previous)}><summary className="cursor-pointer">{invoice.invoiceNumber} · {money(invoice.total)} · {invoice.status} · Due {invoice.dueDate}</summary><ul className="mt-3 text-sm">{invoice.lineItems.map((item, i) => <li key={i}>{item.description} — {item.quantity} × {money(item.unitPrice)} = {money(item.amount)}</li>)}</ul><p className="mt-3 text-sm">Contact your provider for payment arrangements.</p>{openInvoice === invoice.id && activePayment !== invoice.id && <PaymentHistory key={`${user.uid}:${account.id}:${invoice.id}`} invoiceId={invoice.id} functionClient={portalFunctions} />}</details>) : <p>No invoices yet.</p>}
         {account.hasMore && <p className="mt-3 text-sm">Showing the latest 50 visits and invoices. Contact your provider for older records.</p>}
       </section>)}
       {hasMore && <p>Showing up to 25 service accounts. Contact your provider for additional records.</p>}
     </>}
     {message && <p role="status" className="mt-4">{message}</p>}
     {error && <p role="alert" className="mt-4 text-red-700">{error}</p>}
-    {user && paymentsConfigured && accounts.some((a) => a.invoices.some((i) => i.status === 'sent')) && <section className="mt-6 rounded border p-4"><h2 className="font-semibold">{paymentMode === 'test' ? 'Test card payments' : 'Secure card payments'}</h2><p className="mb-3 text-sm">{paymentMode === 'test' ? 'No real money is collected. Invoice balances remain unchanged.' : 'Choose an invoice to pay securely through Stripe.'}</p>{accounts.flatMap((a) => a.invoices.filter((i) => i.status === 'sent' && i.total >= 0.5).map((invoice) => <button className="mr-3 underline" key={invoice.id} onClick={() => setPaymentInvoice(invoice.id)}>{paymentMode === 'test' ? 'Test payment for' : 'Pay'} {invoice.invoiceNumber}</button>))}</section>}
-    {paymentInvoice && <InvoicePayment invoiceId={paymentInvoice} functionClient={portalFunctions} onClose={() => setPaymentInvoice(null)} onRefresh={load} />}
+    {user && paymentsConfigured && selectedAccounts.some((a) => a.invoices.some((i) => i.status === 'sent' && i.total >= 0.5)) && <section className="mt-6 rounded-xl border bg-white p-5"><h2 className="font-semibold">{paymentMode === 'test' ? 'Test card payments' : 'Secure card payments'}</h2><p className="mb-3 text-sm">{paymentMode === 'test' ? 'No real money is collected. Invoice balances remain unchanged.' : 'Choose an invoice to pay securely through Stripe.'}</p>{selectedAccounts.flatMap((a) => a.invoices.filter((i) => i.status === 'sent' && i.total >= 0.5).map((invoice) => <button type="button" className="mr-3 text-primary-700 underline" key={invoice.id} onClick={() => setPaymentInvoice({ accountId: a.id, invoiceId: invoice.id })}>{paymentMode === 'test' ? 'Test payment for' : 'Pay'} {invoice.invoiceNumber}</button>))}</section>}
+    {activePayment && <InvoicePayment key={`${user.uid}:${selectedAccount.id}:${activePayment}`} invoiceId={activePayment} functionClient={portalFunctions} onClose={() => setPaymentInvoice(null)} onRefresh={() => { if (identity.current?.uid === user.uid && selection.current === paymentInvoice.accountId) load(); }} />}
   </main>;
 }

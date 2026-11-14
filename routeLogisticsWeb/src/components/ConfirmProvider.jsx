@@ -10,15 +10,35 @@ export const ConfirmProvider = ({ children }) => {
   const [dialog, setDialog] = useState(null);
   const resolver = useRef(null);
 
-  const confirm = useCallback((options) => new Promise((resolve) => {
-    resolver.current = resolve;
-    setDialog(options);
-  }), []);
-
   const close = useCallback((result) => {
-    resolver.current?.(result);
+    const pending = resolver.current;
     resolver.current = null;
+    pending?.cleanup?.();
+    pending?.resolve(result);
     setDialog(null);
+  }, []);
+
+  const confirm = useCallback((options) => new Promise((resolve) => {
+    if (options.signal?.aborted) { resolve(false); return; }
+    const previous = resolver.current;
+    resolver.current = null;
+    previous?.cleanup?.();
+    previous?.resolve(false);
+    const pending = { resolve };
+    resolver.current = pending;
+    if (options.signal) {
+      const abort = () => { if (resolver.current === pending) close(false); };
+      options.signal.addEventListener('abort', abort, { once: true });
+      pending.cleanup = () => options.signal.removeEventListener('abort', abort);
+    }
+    setDialog(options);
+  }), [close]);
+
+  useEffect(() => () => {
+    const pending = resolver.current;
+    resolver.current = null;
+    pending?.cleanup?.();
+    pending?.resolve(false);
   }, []);
 
   useEffect(() => {
@@ -41,6 +61,7 @@ export const ConfirmProvider = ({ children }) => {
           className="fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/50 p-4"
           onMouseDown={(e) => e.target === e.currentTarget && close(false)}
           role="dialog"
+          aria-label={dialog.title || 'Are you sure?'}
           aria-modal="true"
         >
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
@@ -55,13 +76,14 @@ export const ConfirmProvider = ({ children }) => {
             </div>
             <div className="mt-6 flex justify-end gap-3">
               <button
+                autoFocus={dialog.autoFocusConfirm === false}
                 onClick={() => close(false)}
                 className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
               >
                 {dialog.cancelText || 'Cancel'}
               </button>
               <button
-                autoFocus
+                autoFocus={dialog.autoFocusConfirm !== false}
                 onClick={() => close(true)}
                 className={`rounded-lg px-4 py-2 text-sm font-medium text-white ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-primary-600 hover:bg-primary-700'}`}
               >

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion as Motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import CompanyService from '../services/companyService';
@@ -15,8 +15,19 @@ import toast from 'react-hot-toast';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../services/firebase';
 import { useConfirm } from '../components/ConfirmProvider';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+
+const companyForm = (company = {}) => ({
+  name: company.name || '', description: company.description || '', address: company.address || '', city: company.city || '', state: company.state || '', zipCode: company.zipCode || '',
+  phone: company.phone || '', email: company.email || '', website: company.website || '', logo: company.logo || '', primaryColor: company.primaryColor || '#10b981', secondaryColor: company.secondaryColor || '#6b7280', invoiceRemindersEnabled: company.invoiceRemindersEnabled === true
+});
+const companySnapshot = (data, categories) => JSON.stringify({ ...data, serviceCategories: categories });
 
 const CompanySetupPage = () => {
+  const { currentUser, role } = useAuth();
+  return <CompanySetupForm key={`${currentUser?.uid}:${getClaims()?.companyId}:${role}`} />;
+};
+const CompanySetupForm = () => {
   const { currentUser, updateUserProfile, refreshSession } = useAuth();
   const confirm = useConfirm();
   const [currentStep, setCurrentStep] = useState(1);
@@ -26,23 +37,12 @@ const CompanySetupPage = () => {
   const [inviteLink, setInviteLink] = useState('');
   const [inviteDelivery, setInviteDelivery] = useState('');
   const [newOwnerId, setNewOwnerId] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [savedCompany, setSavedCompany] = useState(() => companySnapshot(companyForm(), []));
+  const alive = useRef(false), loadSequence = useRef(0), saving = useRef(false), dirtyRef = useRef(false);
 
   // Form states
-  const [companyData, setCompanyData] = useState({
-    name: '',
-    description: '',
-    address: '',
-    city: '',
-    state: '',
-    zipCode: '',
-    phone: '',
-    email: '',
-    website: '',
-    logo: '',
-    primaryColor: '#10b981',
-    secondaryColor: '#6b7280',
-    invoiceRemindersEnabled: false
-  });
+  const [companyData, setCompanyData] = useState(companyForm);
 
   const [serviceCategories, setServiceCategories] = useState([]);
   const [newCategory, setNewCategory] = useState('');
@@ -59,47 +59,41 @@ const CompanySetupPage = () => {
 
   const companyId = getClaims()?.companyId;
   const isOwner = !companyId || company?.ownerId === currentUser?.uid;
+  const companyDirty = companySnapshot(companyData, serviceCategories) !== savedCompany;
+  dirtyRef.current = companyDirty;
+  useUnsavedChanges(isOwner && (companyDirty || !!newCategory.trim()), { message: 'You have unsaved company settings. Leave without saving them?' });
 
-  useEffect(() => {
-    loadCompanyData();
-  }, [companyId]);
-
-  const loadCompanyData = async () => {
+  const loadCompanyData = useCallback(async () => {
     if (!companyId) return;
-    
+    const sequence = ++loadSequence.current;
     setIsLoading(true);
+    setLoadError('');
     try {
       const result = await CompanyService.getCompany(companyId);
+      if (!alive.current || sequence !== loadSequence.current) return;
       if (result.success) {
         setCompany(result.company);
-        setCompanyData({
-          name: result.company.name || '',
-          description: result.company.description || '',
-          address: result.company.address || '',
-          city: result.company.city || '',
-          state: result.company.state || '',
-          zipCode: result.company.zipCode || '',
-          phone: result.company.phone || '',
-          email: result.company.email || '',
-          website: result.company.website || '',
-          logo: result.company.logo || '',
-          primaryColor: result.company.primaryColor || '#10b981',
-          secondaryColor: result.company.secondaryColor || '#6b7280',
-          invoiceRemindersEnabled: result.company.invoiceRemindersEnabled === true
-        });
-        setServiceCategories(result.company.serviceCategories || []);
+        const values = companyForm(result.company), categories = result.company.serviceCategories || [];
+        if (!dirtyRef.current) { setCompanyData(values); setServiceCategories(categories); }
+        setSavedCompany(companySnapshot(values, categories));
         
         // Load team members
         const teamResult = result.company.ownerId === currentUser?.uid ? await CompanyService.getTeamMembers(companyId) : { success: false };
-        if (teamResult.success) {
+        if (alive.current && sequence === loadSequence.current && teamResult.success) {
           setTeamMembers(teamResult.teamMembers);
         }
-      }
+      } else setLoadError(result.error || 'Unable to load company settings. Retry before editing.');
     } catch (error) {
-      console.error('Error loading company data:', error);
+      if (alive.current && sequence === loadSequence.current) setLoadError(error.message || 'Unable to load company settings. Retry before editing.');
     }
-    setIsLoading(false);
-  };
+    finally { if (alive.current && sequence === loadSequence.current) setIsLoading(false); }
+  }, [companyId, currentUser?.uid]);
+
+  useEffect(() => {
+    alive.current = true;
+    loadCompanyData();
+    return () => { alive.current = false; };
+  }, [loadCompanyData]);
 
   const handleInputChange = (field, value) => {
     setCompanyData(prev => ({
@@ -109,32 +103,36 @@ const CompanySetupPage = () => {
   };
 
   const handleSaveCompany = async () => {
+    if (isLoading || saving.current || !companyDirty || !isOwner) return;
+    saving.current = true;
     setIsLoading(true);
+    const submitted = { ...companyData, serviceCategories: [...serviceCategories] };
     try {
       let result;
       
       if (company) {
         // Update existing company
-        result = await CompanyService.updateCompany(company.id, companyData);
+        result = await CompanyService.updateCompany(company.id, submitted);
       } else {
         // Create new company
-        result = await CompanyService.createCompany(companyData);
+        result = await CompanyService.createCompany(submitted);
         if (result.success) {
           await updateUserProfile({ companyId: result.companyId });
         }
       }
 
+      if (!alive.current) return;
       if (result.success) {
         setCompany(result.company);
+        setSavedCompany(companySnapshot(companyForm(result.company || submitted), result.company?.serviceCategories || submitted.serviceCategories));
         toast.success(company ? 'Company updated successfully!' : 'Company created successfully!');
       } else {
         toast.error(result.error);
       }
     } catch (error) {
-      console.error('Error saving company:', error);
-      toast.error('Error saving company');
+      if (alive.current) toast.error(error.message || 'Unable to save company settings. Your changes are still available to retry.');
     }
-    setIsLoading(false);
+    finally { saving.current = false; if (alive.current) setIsLoading(false); }
   };
 
   const handleAddServiceCategory = () => {
@@ -603,6 +601,8 @@ const CompanySetupPage = () => {
     );
   }
 
+  if (companyId && !company && loadError) return <section className="rounded border bg-white p-6"><p role="alert">{loadError}</p><button type="button" className="btn-secondary mt-3" onClick={loadCompanyData}>Retry company settings</button></section>;
+
   if (company && !isOwner) return <div className="rounded-lg border bg-white p-6"><h1 className="text-2xl font-bold">{company.name}</h1><p className="mt-3">Company settings and invitations are managed by the owner.</p></div>;
 
   return (
@@ -689,7 +689,7 @@ const CompanySetupPage = () => {
             <button
               type="button"
               onClick={handleSaveCompany}
-              disabled={isLoading}
+              disabled={isLoading || !companyDirty}
               className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? 'Saving...' : 'Save Changes'}

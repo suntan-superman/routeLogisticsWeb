@@ -5,6 +5,8 @@ import { auth, db, functions } from '../services/firebase';
 import { scopeWhere, can, getClaims } from '../services/tenancy';
 import { useAuth } from '../contexts/AuthContext';
 import { useConfirm } from '../components/ConfirmProvider';
+import toast from 'react-hot-toast';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import SmsSettings from '../components/SmsSettings';
 import PaymentReadiness from '../components/PaymentReadiness';
 const collections = { Customer: 'customers', Item: 'estimateTemplates', Invoice: 'invoices' };
@@ -61,7 +63,7 @@ export default function IntegrationsPage() {
 }
 function IntegrationsWorkspace({ scopeKey, owner }) {
   const [status, setStatus] = useState(null), [error, setError] = useState(''), [busy, setBusy] = useState(false), [type, setType] = useState('Customer'), [records, setRecords] = useState([]), [localId, setLocalId] = useState(''), [remoteId, setRemoteId] = useState(''), [preview, setPreview] = useState(null), [account, setAccount] = useState(''), [item, setItem] = useState('');
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useState(''), [savingDefaults, setSavingDefaults] = useState(false);
   const [options, setOptions] = useState(null), [optionsLoading, setOptionsLoading] = useState(false), [optionsError, setOptionsError] = useState('');
   const mounted = useRef(false), locked = useRef(false);
   const optionsRequest = useRef(0), loadedConnection = useRef(null), defaultsDirty = useRef(false), activeConnection = useRef(null);
@@ -94,7 +96,7 @@ function IntegrationsWorkspace({ scopeKey, owner }) {
   useEffect(() => {
     mounted.current = true;
     const params = new URLSearchParams(window.location.search), code = params.get('qbError');
-    if (code) { setError(oauthErrors[code] || oauthErrors.failed); params.delete('qbError'); window.history.replaceState(null, '', window.location.pathname + (params.size ? '?' + params.toString() : '') + window.location.hash); }
+    if (code) { setError(oauthErrors[code] || oauthErrors.failed); params.delete('qbError'); window.history.replaceState(window.history.state, '', window.location.pathname + (params.size ? '?' + params.toString() : '') + window.location.hash); }
     load().catch(e => { if (current()) setError(e.message); });
     return () => { mounted.current = false; };
   }, [load, current]);
@@ -117,7 +119,26 @@ function IntegrationsWorkspace({ scopeKey, owner }) {
   const selected = records.find((record) => record.id === localId);
   const accountAvailable = !!options?.accounts.some(option => option.id === account), itemAvailable = !!options?.items.some(option => option.id === item);
   const defaultsChanged = !!options && (account !== (options.incomeAccountId || '') || item !== (options.defaultItemId || ''));
+  defaultsDirty.current = defaultsChanged;
+  useUnsavedChanges(owner && !!status?.connected && loadedConnection.current === connectionKey && defaultsChanged, { message: 'You have unsaved accounting defaults. Leave without saving them?' });
   const defaultsUnavailable = busy || optionsLoading || !options || !!optionsError || status?.reconnectRequired || status?.credentialMismatch;
+  const saveDefaults = () => run(async () => {
+    const incomeAccountId = account, defaultItemId = item, connectionId = options.connectionId, connection = activeConnection.current;
+    setSavingDefaults(true);
+    try {
+      const result = await invoke('Settings', { incomeAccountId, defaultItemId, connectionId });
+      if (result?.saved !== true) throw new Error('Accounting defaults were not saved. Please try again.');
+    } catch (failure) {
+      if (current()) toast.error(failure.message || 'Accounting defaults could not be saved. Please try again.');
+      throw failure;
+    } finally { if (current()) setSavingDefaults(false); }
+    if (!current() || connection !== activeConnection.current) return;
+    defaultsDirty.current = false; setOptions(value => ({ ...value, incomeAccountId, defaultItemId }));
+    setNotice('Accounting defaults saved. No QuickBooks records were changed.');
+    toast.success('Accounting defaults saved.');
+    try { await load(); }
+    catch { if (current()) setError('Accounting defaults were saved, but connection status could not be refreshed. Use Refresh connection status to retry.'); }
+  });
   return <div className="space-y-6 max-w-4xl"><h1 className="text-2xl font-bold">Company integrations</h1>{error && <p role="alert" className="text-red-700">{error}</p>}{notice && <p role="status">{notice}</p>}<section className="bg-white rounded-lg border p-6 space-y-4"><h2 className="text-xl font-semibold">QuickBooks Online</h2><p>{status?.connected ? `Connected to ${status.companyName || 'QuickBooks company'} (${status.realmId})` : 'Not connected'} · {status?.environment || 'sandbox'} · {status?.writesEnabled ? 'Accounting exports enabled' : 'Accounting exports disabled'}</p><p>Each company authorizes its own QuickBooks connection using platform-managed credentials.</p>{!status && <p>Loading connection status…</p>}<button className="btn-secondary" disabled={busy} onClick={() => run(load)}>Refresh connection status</button>{healthMessages[status?.health] && <p>{healthMessages[status.health]}</p>}{status?.credentialMismatch && <p className="text-amber-800">The platform accounting credentials changed. Reconnect your company before using QuickBooks.</p>}{status?.reconnectRequired && status?.health !== 'reconnect-required' && <p className="text-amber-800">Your QuickBooks authorization needs to be renewed. Use Reconnect to restore access.</p>}{status?.lastError && <p role="alert" className="text-amber-800">{status.lastError}</p>}{status?.disconnectWarning && <p className="text-amber-800">{status.disconnectWarning}</p>}{status?.disconnecting && <p>QuickBooks is disconnected locally. Reconnection is briefly paused while the previous revocation request settles; the status will refresh automatically.</p>}{owner && <div className="flex gap-3"><button className="btn-primary" disabled={busy || !status?.enabled || status?.disconnecting} onClick={() => run(async () => { const result = await invoke('Connect'); if (current()) window.location.assign(result.url); })}>{status?.connected || status?.reconnectRequired ? 'Reconnect' : 'Connect QuickBooks'}</button>{status?.connected && <button className="btn-secondary" disabled={busy || status?.disconnecting} onClick={() => run(async () => { if (await confirm({ title: 'Disconnect QuickBooks?', message: 'Sync will stop. Saved mappings and accounting records will be retained.' })) { const result = await invoke('Disconnect'), value = await load(), warning = result.warning || result.disconnectWarning; setNotice(warning && warning === value.disconnectWarning ? '' : warning || 'QuickBooks disconnected. Your company can reconnect when ready.'); } })}>Disconnect</button>}</div>}</section>
     {status?.connected && <><section aria-label="Accounting defaults" className="bg-white rounded-lg border p-6 space-y-4"><h2 className="text-lg font-semibold">Accounting defaults</h2><p>Select the existing QuickBooks income account and service item used for invoice lines without a specific service mapping. This saves your company preferences without changing QuickBooks records.</p>
       {!owner ? <><p>Only the company owner can change accounting defaults.</p><p>Default income account: {status.incomeAccountName || (status.incomeAccountId ? 'Selection needs owner review' : 'Not selected')}</p><p>Default service item: {status.defaultItemName || (status.defaultItemId ? 'Selection needs owner review' : 'Not selected')}</p></> : <>
@@ -133,13 +154,7 @@ function IntegrationsWorkspace({ scopeKey, owner }) {
         </div>
         {options && account && !accountAvailable && <p role="alert" className="text-amber-800">The saved income account is no longer available. Select an active income account before saving.</p>}
         {options && item && !itemAvailable && <p role="alert" className="text-amber-800">The saved service item is no longer available. Select an active service item before saving.</p>}
-        <button className="btn-primary" disabled={defaultsUnavailable || !accountAvailable || !itemAvailable || !defaultsChanged} onClick={() => run(async () => {
-          const incomeAccountId = account, defaultItemId = item, connectionId = options.connectionId, connection = activeConnection.current;
-          await invoke('Settings', { incomeAccountId, defaultItemId, connectionId });
-          if (!current() || connection !== activeConnection.current) return;
-          defaultsDirty.current = false; setOptions(value => ({ ...value, incomeAccountId, defaultItemId }));
-          setNotice('Accounting defaults saved. No QuickBooks records were changed.'); await load();
-        })}>Save defaults</button>
+        <button className="btn-primary" aria-busy={savingDefaults} disabled={defaultsUnavailable || !accountAvailable || !itemAvailable || !defaultsChanged} onClick={saveDefaults}>{savingDefaults ? 'Saving…' : 'Save defaults'}</button>
       </>}
     </section>
     <section className="bg-white rounded-lg border p-6 space-y-4"><h2 className="text-lg font-semibold">Record mapping and review</h2><select aria-label="Record type" value={type} onChange={(e) => setType(e.target.value)}>{Object.keys(collections).map((value) => <option key={value}>{value}</option>)}</select><select className="ml-3 max-w-full" aria-label="Route Logistics record" value={localId} onChange={(e) => { setLocalId(e.target.value); setPreview(null); }}>{[<option key="" value="">Select a record (up to 500 shown)</option>, ...records.map((record) => <option key={record.id} value={record.id}>{record.name}</option>)]}</select>{selected?.legacyId && <p>Legacy accounting reference: {selected.legacyId}. Verify this reference against the connected company before adopting it.</p>}

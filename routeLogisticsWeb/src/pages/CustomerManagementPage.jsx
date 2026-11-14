@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { formatCustomerDate, legacyDate } from '../utils/legacyCustomer';
 import { motion as Motion } from 'framer-motion';
 import CustomerService from '../services/customerService';
@@ -19,11 +19,14 @@ import toast from 'react-hot-toast';
 import CustomerImport from '../components/CustomerImport';
 import CustomerSmsConsent from '../components/CustomerSmsConsent';
 import { canManage, can } from '../services/tenancy';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+
+const customerForm = (customer = {}) => ({name:customer.name || '',email:customer.email || '',phone:formatPhone(customer.phone || ''),address:customer.address || '',city:customer.city || '',state:customer.state || '',zipCode:customer.zipCode || '',notes:customer.notes || '',isActive:customer.isActive !== false,emailConsent:customer.emailConsent === true});
+const customerSnapshot = data => JSON.stringify(customerForm(data));
 
 const CustomerManagementPage = () => {
   const confirm = useConfirm();
   const [customers, setCustomers] = useState([]);
-  const [filteredCustomers, setFilteredCustomers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [lastCustomer, setLastCustomer] = useState(null);
   const [hasMoreCustomers, setHasMoreCustomers] = useState(false);
@@ -40,36 +43,26 @@ const CustomerManagementPage = () => {
   });
 
   // Form states
-  const [customerData, setCustomerData] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    address: '',
-    city: '',
-    state: '',
-    zipCode: '',
-    notes: '',
-    isActive: true,
-    emailConsent: false
-  });
+  const [customerData, setCustomerData] = useState(customerForm);
+  const [savedCustomer, setSavedCustomer] = useState(() => customerSnapshot(customerForm()));
+  const closing = useRef(false), saving = useRef(false);
+  const formDirty = (showAddModal || showEditModal) && canManage() && customerSnapshot(customerData) !== savedCustomer;
+  const { confirmDiscard } = useUnsavedChanges(formDirty, { message:'You have unsaved customer details. Leave without saving them?' });
+  const closeEditor = useCallback(async () => {
+    if(saving.current || closing.current)return;closing.current=true;
+    try{if(formDirty && !(await confirmDiscard()))return;setShowAddModal(false);setShowEditModal(false);setSelectedCustomer(null);const empty=customerForm();setCustomerData(empty);setSavedCustomer(customerSnapshot(empty));}
+    finally{closing.current=false;}
+  },[formDirty,confirmDiscard]);
+  useEffect(()=>{if(!showAddModal&&!showEditModal)return;const onKey=event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();closeEditor();}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[showAddModal,showEditModal,closeEditor]);
 
   // Filter states
   const [activeFilter, setActiveFilter] = useState('all'); // all, active, inactive
   const [sortBy, setSortBy] = useState('name'); // name, createdAt, totalSpent
 
-  useEffect(() => {
-    loadCustomers();
-    loadStats();
-  }, []);
-
-  useEffect(() => {
-    filterAndSortCustomers();
-  }, [customers, searchTerm, activeFilter, sortBy]);
-
-  const loadCustomers = async (append = false) => {
+  const loadCustomers = useCallback(async (append = false, cursor = null) => {
     setIsLoading(true);
     try {
-      const result = await CustomerService.getCustomers(100, append ? lastCustomer : null);
+      const result = await CustomerService.getCustomers(100, append ? cursor : null);
       if (result.success) {
         setCustomers((current) => append ? [...current, ...result.customers] : result.customers);
         setLastCustomer(result.lastDoc);
@@ -82,7 +75,7 @@ const CustomerManagementPage = () => {
       toast.error('Error loading customers');
     }
     setIsLoading(false);
-  };
+  }, []);
 
   const loadStats = async () => {
     try {
@@ -95,7 +88,9 @@ const CustomerManagementPage = () => {
     }
   };
 
-  const filterAndSortCustomers = () => {
+  useEffect(() => {loadCustomers();loadStats();},[loadCustomers]);
+
+  const filteredCustomers = useMemo(() => {
     let filtered = [...customers];
 
     // Apply search filter
@@ -132,8 +127,8 @@ const CustomerManagementPage = () => {
       }
     });
 
-    setFilteredCustomers(filtered);
-  };
+    return filtered;
+  },[customers,searchTerm,activeFilter,sortBy]);
 
   const handleInputChange = (field, value) => {
     setCustomerData(prev => ({
@@ -143,28 +138,18 @@ const CustomerManagementPage = () => {
   };
 
   const resetForm = () => {
-    setCustomerData({
-      name: '',
-      email: '',
-      phone: '',
-      address: '',
-      city: '',
-      state: '',
-      zipCode: '',
-      notes: '',
-      isActive: true,
-    emailConsent: false
-    });
+    const empty=customerForm();setCustomerData(empty);setSavedCustomer(customerSnapshot(empty));
   };
 
   const handleAddCustomer = async () => {
     if (!canManage()) return toast.error('Your role does not allow customer changes.');
+    if (!formDirty || saving.current || isLoading) return;
     if (!customerData.name.trim()) {
       toast.error('Customer name is required');
       return;
     }
 
-    setIsLoading(true);
+    saving.current=true;setIsLoading(true);
     try {
       const result = await CustomerService.createCustomer(customerData);
       if (result.success) {
@@ -180,17 +165,18 @@ const CustomerManagementPage = () => {
       console.error('Error adding customer:', error);
       toast.error('Error adding customer');
     }
-    setIsLoading(false);
+    saving.current=false;setIsLoading(false);
   };
 
   const handleEditCustomer = async () => {
     if (!canManage()) return toast.error('Your role does not allow customer changes.');
+    if (!formDirty || saving.current || isLoading) return;
     if (!customerData.name.trim()) {
       toast.error('Customer name is required');
       return;
     }
 
-    setIsLoading(true);
+    saving.current=true;setIsLoading(true);
     try {
       const result = await CustomerService.updateCustomer(selectedCustomer.id, customerData);
       if (result.success) {
@@ -208,7 +194,7 @@ const CustomerManagementPage = () => {
       console.error('Error updating customer:', error);
       toast.error('Error updating customer');
     }
-    setIsLoading(false);
+    saving.current=false;setIsLoading(false);
   };
 
   const handleDeleteCustomer = async (customerId) => {
@@ -261,18 +247,7 @@ const CustomerManagementPage = () => {
   const openEditModal = (customer) => {
     if (!canManage()) return toast.error('Your role does not allow customer changes.');
     setSelectedCustomer(customer);
-    setCustomerData({
-      name: customer.name || '',
-      email: customer.email || '',
-      phone: customer.phone || '',
-      address: customer.address || '',
-      city: customer.city || '',
-      state: customer.state || '',
-      zipCode: customer.zipCode || '',
-      notes: customer.notes || '',
-      emailConsent: customer.emailConsent === true,
-      isActive: customer.isActive
-    });
+    const values=customerForm(customer);setCustomerData(values);setSavedCustomer(customerSnapshot(values));
     setShowEditModal(true);
   };
 
@@ -322,7 +297,7 @@ const CustomerManagementPage = () => {
     >
       {/* Header */}
       {can('customers.export') && <CustomerImport onComplete={async () => { await loadCustomers(); await loadStats(); }} />}
-      {hasMoreCustomers && <div className="flex flex-wrap items-center gap-3 rounded border bg-white p-4"><p>Showing {customers.length} customers. Search and filters apply to loaded customers.</p><button disabled={isLoading} className="text-primary-700 underline" onClick={() => loadCustomers(true)}>Load more customers</button></div>}
+      {hasMoreCustomers && <div className="flex flex-wrap items-center gap-3 rounded border bg-white p-4"><p>Showing {customers.length} customers. Search and filters apply to loaded customers.</p><button disabled={isLoading} className="text-primary-700 underline" onClick={() => loadCustomers(true, lastCustomer)}>Load more customers</button></div>}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center">
@@ -341,7 +316,7 @@ const CustomerManagementPage = () => {
               Export
             </button>}
             {canManage() && <button
-              onClick={() => setShowAddModal(true)}
+              onClick={() => { resetForm(); setShowAddModal(true); }}
               className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
             >
               <PlusIcon className="h-4 w-4 mr-2" />
@@ -480,7 +455,7 @@ const CustomerManagementPage = () => {
             {!searchTerm && canManage() && (
               <div className="mt-6">
                 <button
-                  onClick={() => setShowAddModal(true)}
+                  onClick={() => { resetForm(); setShowAddModal(true); }}
                   className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700"
                 >
                   <PlusIcon className="h-4 w-4 mr-2" />
@@ -588,10 +563,7 @@ const CustomerManagementPage = () => {
               <div className="flex items-center justify-between mb-5">
                 <h3 className="text-lg font-semibold text-gray-900">Add New Customer</h3>
                 <button
-                  onClick={() => {
-                    setShowAddModal(false);
-                    resetForm();
-                  }}
+                  onClick={closeEditor}
                   className="text-gray-400 hover:text-gray-600"
                 >
                   <span className="sr-only">Close</span>
@@ -695,17 +667,14 @@ const CustomerManagementPage = () => {
               
               <div className="flex justify-end space-x-3 mt-6">
                 <button
-                  onClick={() => {
-                    setShowAddModal(false);
-                    resetForm();
-                  }}
+                  onClick={closeEditor}
                   className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleAddCustomer}
-                  disabled={isLoading}
+                  disabled={isLoading || !formDirty}
                   className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isLoading ? 'Adding...' : 'Add Customer'}
@@ -724,11 +693,7 @@ const CustomerManagementPage = () => {
               <div className="flex items-center justify-between mb-5">
                 <h3 className="text-lg font-semibold text-gray-900">Edit Customer</h3>
                 <button
-                  onClick={() => {
-                    setShowEditModal(false);
-                    setSelectedCustomer(null);
-                    resetForm();
-                  }}
+                  onClick={closeEditor}
                   className="text-gray-400 hover:text-gray-600"
                 >
                   <span className="sr-only">Close</span>
@@ -845,18 +810,14 @@ const CustomerManagementPage = () => {
               
               <div className="flex justify-end space-x-3 mt-6">
                 <button
-                  onClick={() => {
-                    setShowEditModal(false);
-                    setSelectedCustomer(null);
-                    resetForm();
-                  }}
+                  onClick={closeEditor}
                   className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleEditCustomer}
-                  disabled={isLoading}
+                  disabled={isLoading || !formDirty}
                   className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isLoading ? 'Saving...' : 'Save Changes'}

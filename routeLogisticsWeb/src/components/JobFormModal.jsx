@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
 import JobManagementService from '../services/jobManagementService';
 import { buildJobEdit } from '../services/jobChanges';
 import { auth } from '../services/firebase';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 
 const SERVICE_TYPES = [
   'General Pest Control',
@@ -52,6 +53,7 @@ const emptyForm = (defaults, job) => (job ? {
   notes: '',
   ...defaults
 });
+const formSnapshot = form => JSON.stringify(Object.fromEntries(Object.entries(form).map(([field,value])=>[field,['estimatedDuration','totalCost'].includes(field)?Number(value || 0):String(value ?? '').trim()])));
 
 const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
   const isEdit = !!job;
@@ -59,14 +61,23 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [pastAck, setPastAck] = useState(false);
+  const [savedForm,setSavedForm] = useState(()=>formSnapshot(emptyForm(defaults,job)));
+  const alive = useRef(false), savingRef = useRef(false), closing = useRef(false);
+  const formDirty = formSnapshot(form) !== savedForm;
+  const warnDirty = formDirty || !!reason.trim();
+  const {confirmDiscard} = useUnsavedChanges(warnDirty,{message:'You have unsaved job details. Leave without saving them?'});
+  const requestClose = useCallback(async()=>{if(savingRef.current||closing.current)return;closing.current=true;try{if(!warnDirty||await confirmDiscard())onClose();}finally{closing.current=false;}},[warnDirty,confirmDiscard,onClose]);
+
+  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
 
   useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && onClose();
+    const onKey = (e) => {if(e.key==='Escape'&&!e.defaultPrevented){e.preventDefault();requestClose();}};
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [requestClose]);
 
   const set = (field, value) => {
+    if(savingRef.current)return;
     setPastAck(false);
     setForm((f) => ({ ...f, [field]: value }));
   };
@@ -78,12 +89,14 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
     [c.address, c.city, [c.state, c.zipCode].filter(Boolean).join(' ')].filter(Boolean).join(', ');
 
   const pickCustomer = (id) => {
+    if(savingRef.current)return;
     const c = customers.find((x) => x.id === id);
     setForm((f) => ({ ...f, customerId: id, address: c && !f.address ? customerAddress(c) : f.address }));
   };
 
   const submit = async (e) => {
     e.preventDefault();
+    if(savingRef.current || !formDirty)return;
     const customer = customers.find((c) => c.id === form.customerId);
     if (!customer) return toast.error('Select a customer');
     if (!form.serviceType.trim()) return toast.error('Enter a service type');
@@ -96,7 +109,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
       return;
     }
 
-    setSaving(true);
+    savingRef.current=true;setSaving(true);
     const details = {
       customerId: customer.id,
       customerName: customer.name,
@@ -111,26 +124,28 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
       notes: form.notes.trim()
     };
 
-    if (isEdit) {
+    let saved;
+    try { if (isEdit) {
       const by = auth.currentUser?.displayName || auth.currentUser?.email || 'Unknown';
       const edit = buildJobEdit(job, details, { by, reason });
       if (!edit) {
-        setSaving(false);
         toast('No changes to save');
         return onClose();
       }
       const res = await JobManagementService.updateJob(job.id, edit, job.updatedAt ?? null);
-      setSaving(false);
-      if (!res.success) return toast.error(res.error || 'Could not update job');
+      if (!alive.current)return;
+      if (!res.success) throw Error(res.error || 'Could not update job');
+      setSavedForm(formSnapshot(form));setReason('');
       toast.success('Job updated – flagged as modified from original');
-      return onCreated({ ...job, ...edit });
-    }
-
-    const result = await JobManagementService.createJob(details);
-    setSaving(false);
-    if (!result.success) return toast.error(result.error || 'Could not create job');
-    toast.success('Job scheduled');
-    onCreated(result.job);
+      saved={...job,...edit};
+    } else {
+      const result = await JobManagementService.createJob(details);
+      if (!alive.current)return;
+      if (!result.success) throw Error(result.error || 'Could not create job');
+      setSavedForm(formSnapshot(form));setReason('');toast.success('Job scheduled');saved=result.job;
+    } } catch(error) { if(alive.current)toast.error(error.message || 'Unable to save this job. Your changes are available to retry.');return; }
+    finally { savingRef.current=false;if(alive.current)setSaving(false); }
+    try { await onCreated(saved); } catch { if(alive.current)toast.error('The job was saved, but the job list could not refresh. Refresh the page to see it.'); }
   };
 
   return (
@@ -138,7 +153,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
       <form onSubmit={submit} className="w-full max-w-xl rounded-xl bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
           <h3 className="text-lg font-semibold text-gray-900">{isEdit ? 'Edit Job' : 'Schedule New Job'}</h3>
-          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600" aria-label="Close">
+          <button type="button" disabled={saving} onClick={requestClose} className="text-gray-400 hover:text-gray-600" aria-label="Close">
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -238,7 +253,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
             <label className={label}>Reason for change <span className="font-normal text-gray-400">(optional)</span></label>
             <input
               value={reason}
-              onChange={(e) => setReason(e.target.value)}
+              onChange={(e) => {if(!savingRef.current)setReason(e.target.value);}}
               className={input}
               placeholder="e.g. Customer added a second treatment area"
             />
@@ -259,13 +274,13 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
 
         <div className="flex justify-end gap-3 border-t border-gray-200 bg-gray-50 px-6 py-4 rounded-b-xl">
           <button
-            type="button" onClick={onClose}
+            type="button" disabled={saving} onClick={requestClose}
             className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             Cancel
           </button>
           <button
-            type="submit" disabled={saving}
+            type="submit" disabled={saving || !formDirty}
             className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
           >
             {saving ? 'Saving…' : pastAck ? 'Schedule anyway' : isEdit ? 'Save Changes' : 'Schedule Job'}

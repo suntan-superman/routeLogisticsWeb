@@ -3,9 +3,12 @@ import { useAuth } from '../contexts/AuthContext';
 import CustomerService from '../services/customerService';
 import { callEstimate, prepareEstimatePhoto, downloadEstimatePdf } from '../services/estimateService';
 import { blankEstimate, blankLine, draftFromEstimate, estimateInput, money, conversionInput } from '../utils/estimateDraft';
+import toast from 'react-hot-toast';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 const button = 'rounded bg-emerald-700 px-4 py-2 font-medium text-white disabled:opacity-50';
 const secondary = 'rounded border border-gray-300 bg-white px-4 py-2 font-medium disabled:opacity-50';
 const card = 'rounded-xl border bg-white p-5 space-y-4';
+const draftFingerprint = value => { try { return JSON.stringify(estimateInput(value)); } catch { return null; } };
 export default function EstimatesPage() {
   const { can, currentUser, company, role } = useAuth(), allowed = can('estimates.manage');
   const scope = [currentUser?.uid, company?.id, role].join(':');
@@ -15,6 +18,8 @@ export default function EstimatesPage() {
   const [createCustomer, setCreateCustomer] = useState(false), [conversionCustomerId, setConversionCustomerId] = useState(''), [delivery, setDelivery] = useState(null);
   const alive = useRef(false), generation = useRef(0), locked = useRef(false), pendingSave = useRef(null), photoRef = useRef(photos); photoRef.current = photos;
   const previewUrls = useRef(new Set());
+  const savedDraft = useRef(null);
+  useUnsavedChanges(allowed && editing && (dirty || uncertain), { message: 'Your estimate input and selected photos have not been saved. Leave without saving?' });
   const current = useCallback(ticket => alive.current && ticket === generation.current, []);
   const load = useCallback(async () => {
     if (!allowed) return; const ticket = generation.current, result = await callEstimate('list'); if (!current(ticket)) return;
@@ -27,19 +32,12 @@ export default function EstimatesPage() {
     if (allowed) load().catch(failure => { if (alive.current) setError(failure.message); });
     return () => { alive.current = false; generation.current = ticket + 1; urls.forEach(url => URL.revokeObjectURL(url)); urls.clear(); };
   }, [scope, allowed, load]);
-  useEffect(() => {
-    if (!dirty && !uncertain) return;
-    const unload = event => { event.preventDefault(); event.returnValue = ''; };
-    const leave = event => { const anchor = event.target.closest?.('a[href]'); if (anchor && anchor.href !== window.location.href && !window.confirm('Discard unsaved estimate input and selected photos? Saved versions remain.')) { event.preventDefault(); event.stopPropagation(); } };
-    window.addEventListener('beforeunload', unload); document.addEventListener('click', leave, true);
-    return () => { window.removeEventListener('beforeunload', unload); document.removeEventListener('click', leave, true); };
-  }, [dirty, uncertain]);
-  const change = (name, value) => { if (locked.current || uncertain) return; setDraft(previous => ({ ...previous, [name]: value })); setDirty(true); };
+  const change = (name, value) => { if (locked.current || uncertain) return; const next = { ...draft, [name]: value }, fingerprint = draftFingerprint(next); setDraft(next); setDirty(!record || fingerprint === null || fingerprint !== savedDraft.current || photoRef.current.some(photo => !photo.attached)); };
   const run = async work => { if (locked.current) return; locked.current = true; const ticket = generation.current; setBusy(true); setError(''); setMessage('');
-    try { await work(ticket); } catch (failure) { if (current(ticket)) setError(failure.message || 'The estimate operation failed. Your draft and selected photos are retained.'); }
+    try { await work(ticket); } catch (failure) { if (current(ticket)) { const detail = failure.message || 'The estimate operation failed. Your draft and selected photos are retained.'; setError(detail); toast.error(detail); } }
     finally { if (current(ticket)) { locked.current = false; setBusy(false); } }
   };
-  const open = estimate => run(async ticket => { const result = await callEstimate('get', { estimateId: estimate.id }); if (!current(ticket)) return; setRecord(result.estimate); setDraft(draftFromEstimate(result.estimate)); setPhotos((result.photos || []).map(photo => ({ ...photo, remoteId: photo.id, attached: true }))); setVersions(result.versions || []); setEmailEnabled(result.emailEnabled === true); setDelivery(result.delivery || null); setEditing(true); setDirty(false); setUncertain(false); setConfirm(null); setCreateCustomer(false); setConversionCustomerId(''); pendingSave.current = null; });
+  const open = estimate => run(async ticket => { const result = await callEstimate('get', { estimateId: estimate.id }); if (!current(ticket)) return; setRecord(result.estimate); savedDraft.current = draftFingerprint(draftFromEstimate(result.estimate)); setDraft(draftFromEstimate(result.estimate)); setPhotos((result.photos || []).map(photo => ({ ...photo, remoteId: photo.id, attached: true }))); setVersions(result.versions || []); setEmailEnabled(result.emailEnabled === true); setDelivery(result.delivery || null); setEditing(true); setDirty(false); setUncertain(false); setConfirm(null); setCreateCustomer(false); setConversionCustomerId(''); pendingSave.current = null; });
   const newEstimate = () => { setRecord(null); setDraft(blankEstimate()); setPhotos([]); setVersions([]); setEditing(true); setDirty(true); setError(''); setMessage(''); pendingSave.current = null; };
   const save = () => run(async ticket => {
     let next = record, values = estimateInput(draft), contentSaved = false;
@@ -53,7 +51,7 @@ export default function EstimatesPage() {
     }
     const photoIds = uploaded.map(photo => photo.remoteId).filter(Boolean);
     if (photoIds.join() !== (next.photoIds || []).join() || (!contentSaved && dirty)) { values = { ...values, photoIds }; if (!(await persist(values))) return; }
-    if (!current(ticket)) return; setDraft(draftFromEstimate(next)); setPhotos(uploaded.map(photo => ({ ...photo, attached: true }))); setDirty(false); setVersions(previous => [{ version: next.version, status: next.status, totalCents: next.totalCents }, ...previous.filter(item => item.version !== next.version)]); setMessage('Estimate saved. Totals and version were calculated on the server.'); await load();
+    if (!current(ticket)) return; savedDraft.current = draftFingerprint(draftFromEstimate(next)); setDraft(draftFromEstimate(next)); setPhotos(uploaded.map(photo => ({ ...photo, attached: true }))); setDirty(false); setVersions(previous => [{ version: next.version, status: next.status, totalCents: next.totalCents }, ...previous.filter(item => item.version !== next.version)]); setMessage('Estimate saved. Totals and version were calculated on the server.'); toast.success('Estimate saved.'); try { await load(); } catch { if (current(ticket)) { const detail = 'Estimate saved, but the list could not be refreshed. Refresh the page when ready.'; setError(detail); toast.error(detail); } }
   });
   const choosePhotos = files => run(async ticket => { if (photos.length + files.length > 6) throw new Error('Attach up to six photos per estimate.');
     if (files.some(file => !file.type.startsWith('image/'))) throw new Error('Select image files for estimate photos.');

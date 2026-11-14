@@ -1,10 +1,12 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
 import CustomerService from '../services/customerService';
 import { listServicePlans, createServicePlan, updateServicePlan, deleteServicePlan, generateNextJob, FREQUENCIES } from '../services/servicePlanService';
 import { listServiceLogs, logsToCsv } from '../services/serviceLogService';
 import { canManage } from '../services/tenancy';
 import { useConfirm } from '../components/ConfirmProvider';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useAuth } from '../contexts/AuthContext';
 
 const input = 'mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm';
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -16,18 +18,27 @@ const ServicePlansPage = () => {
   const [customers, setCustomers] = useState([]);
   const [form, setForm] = useState(blank);
   const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false), savingRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState({ start: '', end: '' });
   const manage = canManage();
   const confirm = useConfirm();
+  const formChanged = Object.keys(blank).some(key => key === 'frequencyDays' ? Number(form[key]) !== Number(blank[key]) : form[key] !== blank[key]);
+  const { confirmDiscard } = useUnsavedChanges(manage && showForm && formChanged, { message: 'You have an unsaved service plan. Leave without saving it?' });
+  const toggleForm = async () => {
+    if (savingRef.current || (showForm && formChanged && !(await confirmDiscard()))) return;
+    setForm(blank); setShowForm(value => !value);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [p, c] = await Promise.all([listServicePlans(), CustomerService.getCustomers(500)]);
-    setLoading(false);
-    if (p.success) setPlans(p.plans);
-    else toast.error(p.error || 'Could not load service plans');
-    if (c.success) setCustomers(c.customers);
+    try {
+      const [p, c] = await Promise.all([listServicePlans(), CustomerService.getCustomers(500)]);
+      if (p.success) setPlans(p.plans);
+      else toast.error(p.error || 'Could not load service plans');
+      if (c.success) setCustomers(c.customers);
+    } catch (failure) { toast.error(failure.message || 'Service plans could not be loaded.'); }
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => {
@@ -38,18 +49,23 @@ const ServicePlansPage = () => {
 
   const submit = async (e) => {
     e.preventDefault();
-    const customer = customers.find((c) => c.id === form.customerId);
-    const res = await createServicePlan({
-      ...form,
-      customerName: customer?.name || '',
-      customerPhone: customer?.phone || '',
-      address: customer?.address || '',
-    });
-    if (!res.success) return toast.error(res.error);
-    toast.success('Service plan created');
-    setForm(blank);
-    setShowForm(false);
-    load();
+    if (!manage || !canManage() || savingRef.current || !formChanged) return;
+    savingRef.current = true; setSaving(true);
+    try {
+      const customer = customers.find((c) => c.id === form.customerId);
+      const res = await createServicePlan({
+        ...form,
+        customerName: customer?.name || '',
+        customerPhone: customer?.phone || '',
+        address: customer?.address || '',
+      });
+      if (!res.success) return toast.error(res.error);
+      toast.success('Service plan created');
+      setForm(blank);
+      setShowForm(false);
+      load();
+    } catch (failure) { toast.error(failure.message || 'The service plan could not be saved. Please try again.'); }
+    finally { savingRef.current = false; setSaving(false); }
   };
 
   const generate = async (plan) => {
@@ -94,11 +110,12 @@ const ServicePlansPage = () => {
           <h1 className="text-2xl font-bold text-gray-900">Service Plans</h1>
           <p className="text-sm text-gray-500">Recurring pest-control routes. Generate each visit as a scheduled job.</p>
         </div>
-        {manage && <button onClick={() => setShowForm((s) => !s)} className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700">{showForm ? 'Cancel' : 'New plan'}</button>}
+        {manage && <button disabled={saving} onClick={toggleForm} className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700">{showForm ? 'Cancel' : 'New plan'}</button>}
       </div>
 
       {showForm && (
         <form onSubmit={submit} className="bg-white border rounded-lg p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <fieldset disabled={saving} className="contents">
           <label className="text-sm text-gray-700 sm:col-span-2">Customer *
             <select required className={input} value={form.customerId} onChange={set('customerId')}>
               <option value="">Select…</option>
@@ -113,7 +130,8 @@ const ServicePlansPage = () => {
           <label className="text-sm text-gray-700">Time<input type="time" className={input} value={form.time} onChange={set('time')} /></label>
           <label className="text-sm text-gray-700">Price per visit ($)<input type="number" min="0" step="0.01" className={input} value={form.price} onChange={set('price')} /></label>
           <label className="text-sm text-gray-700">Notes<input className={input} value={form.notes} onChange={set('notes')} /></label>
-          <div className="sm:col-span-2 flex justify-end"><button className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700">Create plan</button></div>
+          <div className="sm:col-span-2 flex justify-end"><button disabled={!formChanged || !form.customerId || !form.serviceType.trim()} className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700">{saving ? 'Saving…' : 'Create plan'}</button></div>
+          </fieldset>
         </form>
       )}
 
@@ -156,4 +174,7 @@ const ServicePlansPage = () => {
   );
 };
 
-export default ServicePlansPage;
+export default function ServicePlansWorkspace() {
+  const { company, currentUser } = useAuth();
+  return <ServicePlansPage key={`${currentUser?.uid || ''}:${company?.id || ''}`} />;
+}

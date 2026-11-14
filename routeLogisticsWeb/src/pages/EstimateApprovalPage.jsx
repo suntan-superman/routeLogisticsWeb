@@ -4,7 +4,7 @@ import { money, approvalCredentials } from '../utils/estimateDraft';
 export default function EstimateApprovalPage() {
   const credentials = useRef(null), live = useRef(false), generation = useRef(0), locked = useRef(false), [result, setResult] = useState(null), [error, setError] = useState(''), [busy, setBusy] = useState(false), [name, setName] = useState(''), [accepted, setAccepted] = useState(false), [approved, setApproved] = useState(false);
   useEffect(() => { live.current = true; const ticket = ++generation.current;
-    try { if (!credentials.current) credentials.current = approvalCredentials(window.location.hash); window.history.replaceState(null, '', window.location.pathname); callEstimateApproval({ action: 'get', ...credentials.current }).then(value => { if (live.current && generation.current === ticket) { setResult(value); setApproved(['approved', 'converted'].includes(value.estimate?.status)); } }).catch(failure => { if (live.current && generation.current === ticket) setError(failure.message || 'This estimate could not be loaded.'); }); }
+    try { if (!credentials.current) credentials.current = approvalCredentials(window.location.hash); window.history.replaceState(window.history.state, '', window.location.pathname); callEstimateApproval({ action: 'get', ...credentials.current }).then(value => { if (live.current && generation.current === ticket) { setResult(value); setApproved(['approved', 'converted'].includes(value.estimate?.status)); } }).catch(failure => { if (live.current && generation.current === ticket) setError(failure.message || 'This estimate could not be loaded.'); }); }
     catch (failure) { setError(failure.message); }
     return () => { live.current = false; generation.current = ticket + 1; };
   }, []);

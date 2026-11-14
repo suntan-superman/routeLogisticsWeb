@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion as Motion } from 'framer-motion';
 import JobManagementService from '../services/jobManagementService';
 import CustomerService from '../services/customerService';
@@ -29,6 +29,9 @@ import ServiceChecklist from '../components/ServiceChecklist';
 import JobApplicationLog from '../components/JobApplicationLog';
 import { createInvoiceFromJob } from '../services/invoiceService';
 import { canManage, can } from '../services/tenancy';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+
+const statusInput = job => ({ status: job?.status || '', actualWorkDone: job?.actualWorkDone || '', actualHours: String(job?.actualHours ?? ''), completionNotes: job?.completionNotes || '', cancellationReason: job?.cancellationReason || '' });
 
 const JobManagementPage = () => {
   const navigate = useNavigate();
@@ -69,23 +72,38 @@ const JobManagementPage = () => {
   const [sortBy, setSortBy] = useState('date'); // date, status, customer, cost
 
   // Status update form
-  const [statusData, setStatusData] = useState({
-    status: '',
-    actualWorkDone: '',
-    actualHours: '',
-    completionNotes: '',
-    cancellationReason: ''
-  });
+  const [statusData, setStatusData] = useState(() => statusInput(null));
+  const [statusBaseline, setStatusBaseline] = useState(null);
+  const statusSaving = useRef(false), localAction = useRef(0), live = useRef(false), currentJob = useRef(null), escapeAction = useRef(null), viewPanel = useRef(null), statusPanel = useRef(null);
+  currentJob.current = selectedJob;
+  const statusChanged = showStatusModal && JSON.stringify(statusData) !== JSON.stringify(statusBaseline);
+  const { confirmDiscard } = useUnsavedChanges(statusChanged, { message: 'Your job status changes have not been saved. Leave without saving them?' });
+  const transition = async action => {
+    if (statusSaving.current) return;
+    const ticket = ++localAction.current;
+    if (await confirmDiscard() && live.current && ticket === localAction.current) action();
+  };
+  const resetStatus = () => { setShowStatusModal(false); setSelectedJob(null); setStatusData(statusInput(null)); setStatusBaseline(null); };
+  const closeView = () => transition(() => { setShowViewModal(false); setSelectedJob(null); });
+  const closeStatus = () => transition(resetStatus);
+  escapeAction.current = showStatusModal ? closeStatus : showViewModal ? closeView : null;
+  useEffect(() => {
+    const lifecycle = localAction; live.current = true;
+    const keydown = event => {
+      if (event.key !== 'Escape' || event.defaultPrevented || !escapeAction.current) return;
+      const panel = statusPanel.current || viewPanel.current;
+      if ([...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].some(dialog => dialog !== panel && !panel?.contains(dialog))) return;
+      event.preventDefault(); escapeAction.current();
+    };
+    window.addEventListener('keydown', keydown);
+    return () => { live.current = false; lifecycle.current++; window.removeEventListener('keydown', keydown); };
+  }, []);
 
   useEffect(() => {
     loadJobs();
     loadStats();
     CustomerService.getCustomers(500).then((r) => r.success && setCustomers(r.customers));
   }, []);
-
-  useEffect(() => {
-    filterAndSortJobs();
-  }, [jobs, searchTerm, activeFilter, dateFilter, sortBy]);
 
   const loadJobs = async () => {
     setIsLoading(true);
@@ -114,7 +132,7 @@ const JobManagementPage = () => {
     }
   };
 
-  const filterAndSortJobs = () => {
+  const filterAndSortJobs = useCallback(() => {
     let filtered = [...jobs];
 
     // Apply search filter
@@ -183,40 +201,35 @@ const JobManagementPage = () => {
     });
 
     setFilteredJobs(filtered);
-  };
+  }, [jobs, searchTerm, activeFilter, dateFilter, sortBy]);
+
+  useEffect(() => { filterAndSortJobs(); }, [filterAndSortJobs]);
 
   const handleStatusUpdate = async () => {
+    if (statusSaving.current || !statusChanged || !selectedJob) return;
     if (!statusData.status) {
       toast.error('Please select a status');
       return;
     }
 
-    setIsLoading(true);
+    const submittedJob = selectedJob, submitted = { ...statusData }; statusSaving.current = true; setIsLoading(true);
     try {
-      const result = await JobManagementService.updateJobStatus(selectedJob.id, statusData.status, statusData);
+      const result = await JobManagementService.updateJobStatus(submittedJob.id, submitted.status, submitted);
+      if (!live.current || currentJob.current?.id !== submittedJob.id) return;
       if (result.success) {
         setJobs(prev => prev.map(job => 
-          job.id === selectedJob.id ? result.job : job
+          job.id === submittedJob.id ? result.job : job
         ));
-        setShowStatusModal(false);
-        setSelectedJob(null);
-        setStatusData({
-          status: '',
-          actualWorkDone: '',
-          actualHours: '',
-          completionNotes: '',
-          cancellationReason: ''
-        });
+        localAction.current++; resetStatus();
         loadStats();
         toast.success('Job status updated successfully!');
       } else {
-        toast.error(result.error);
+        toast.error(result.error || 'Job status was not saved. Your changes are retained.');
       }
     } catch (error) {
-      console.error('Error updating job status:', error);
-      toast.error('Error updating job status');
+      if (live.current) toast.error(error.message || 'Job status was not saved. Your changes are retained.');
     }
-    setIsLoading(false);
+    finally { statusSaving.current = false; if (live.current) setIsLoading(false); }
   };
 
   const handleDeleteJob = async (job) => {
@@ -245,27 +258,16 @@ const JobManagementPage = () => {
     setIsLoading(false);
   };
 
-  const openViewModal = (job) => {
-    setSelectedJob(job);
-    setShowViewModal(true);
+  const openViewModal = job => {
+    if (showViewModal && selectedJob?.id === job.id) return;
+    return transition(() => { setSelectedJob(job); setShowStatusModal(false); setShowEditModal(false); setShowNewJob(false); setShowViewModal(true); });
   };
 
-  const openEditModal = (job) => {
-    setSelectedJob(job);
-    setShowEditModal(true);
-  };
+  const openEditModal = job => transition(() => { setSelectedJob(job); setShowViewModal(false); setShowStatusModal(false); setShowNewJob(false); setShowEditModal(true); });
 
-  const openStatusModal = (job) => {
-    setSelectedJob(job);
-    setStatusData({
-      status: job.status,
-      actualWorkDone: job.actualWorkDone || '',
-      actualHours: job.actualHours || '',
-      completionNotes: job.completionNotes || '',
-      cancellationReason: job.cancellationReason || ''
-    });
-    setShowStatusModal(true);
-  };
+  const openStatusModal = job => transition(() => {
+    const values = statusInput(job); setSelectedJob(job); setStatusData(values); setStatusBaseline(values); setShowViewModal(false); setShowEditModal(false); setShowNewJob(false); setShowStatusModal(true);
+  });
 
   const exportJobs = async () => {
     try {
@@ -701,15 +703,12 @@ const JobManagementPage = () => {
       {/* View Job Modal */}
       {showViewModal && selectedJob && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-10 mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white">
+          <div ref={viewPanel} role="dialog" aria-modal="true" aria-label="Job Details" className="relative top-10 mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white">
             <div className="mt-3">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium text-gray-900">Job Details</h3>
                 <button
-                  onClick={() => {
-                    setShowViewModal(false);
-                    setSelectedJob(null);
-                  }}
+                  onClick={closeView}
                   className="text-gray-400 hover:text-gray-600"
                 >
                   <span className="sr-only">Close</span>
@@ -806,19 +805,13 @@ const JobManagementPage = () => {
                   </button>
                 )}
                 <button
-                  onClick={() => {
-                    setShowViewModal(false);
-                    setSelectedJob(null);
-                  }}
+                  onClick={closeView}
                   className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                 >
                   Close
                 </button>
                 <button
-                  onClick={() => {
-                    setShowViewModal(false);
-                    openStatusModal(selectedJob);
-                  }}
+                  onClick={() => openStatusModal(selectedJob)}
                   className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
                   Update Status
@@ -832,22 +825,13 @@ const JobManagementPage = () => {
       {/* Status Update Modal */}
       {showStatusModal && selectedJob && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-full max-w-lg shadow-lg rounded-md bg-white">
+          <div ref={statusPanel} role="dialog" aria-modal="true" aria-label="Update Job Status" className="relative top-20 mx-auto p-5 border w-full max-w-lg shadow-lg rounded-md bg-white">
             <div className="mt-3">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium text-gray-900">Update Job Status</h3>
                 <button
-                  onClick={() => {
-                    setShowStatusModal(false);
-                    setSelectedJob(null);
-                    setStatusData({
-                      status: '',
-                      actualWorkDone: '',
-                      actualHours: '',
-                      completionNotes: '',
-                      cancellationReason: ''
-                    });
-                  }}
+                  onClick={closeStatus}
+                  disabled={isLoading}
                   className="text-gray-400 hover:text-gray-600"
                 >
                   <span className="sr-only">Close</span>
@@ -861,6 +845,7 @@ const JobManagementPage = () => {
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Status *</label>
                   <select
+                    disabled={isLoading}
                     value={statusData.status}
                     onChange={(e) => setStatusData(prev => ({ ...prev, status: e.target.value }))}
                     className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
@@ -878,6 +863,7 @@ const JobManagementPage = () => {
                     <div>
                       <label className="block text-sm font-medium text-gray-700">Actual Work Done</label>
                       <textarea
+                        disabled={isLoading}
                         value={statusData.actualWorkDone}
                         onChange={(e) => setStatusData(prev => ({ ...prev, actualWorkDone: e.target.value }))}
                         rows={3}
@@ -889,6 +875,7 @@ const JobManagementPage = () => {
                     <div>
                       <label className="block text-sm font-medium text-gray-700">Actual Hours</label>
                       <input
+                        disabled={isLoading}
                         type="text"
                         value={statusData.actualHours}
                         onChange={(e) => setStatusData(prev => ({ ...prev, actualHours: e.target.value }))}
@@ -900,6 +887,7 @@ const JobManagementPage = () => {
                     <div>
                       <label className="block text-sm font-medium text-gray-700">Completion Notes</label>
                       <textarea
+                        disabled={isLoading}
                         value={statusData.completionNotes}
                         onChange={(e) => setStatusData(prev => ({ ...prev, completionNotes: e.target.value }))}
                         rows={3}
@@ -914,6 +902,7 @@ const JobManagementPage = () => {
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Cancellation Reason</label>
                     <textarea
+                      disabled={isLoading}
                       value={statusData.cancellationReason}
                       onChange={(e) => setStatusData(prev => ({ ...prev, cancellationReason: e.target.value }))}
                       rows={3}
@@ -926,24 +915,15 @@ const JobManagementPage = () => {
               
               <div className="flex justify-end space-x-3 mt-6">
                 <button
-                  onClick={() => {
-                    setShowStatusModal(false);
-                    setSelectedJob(null);
-                    setStatusData({
-                      status: '',
-                      actualWorkDone: '',
-                      actualHours: '',
-                      completionNotes: '',
-                      cancellationReason: ''
-                    });
-                  }}
+                  onClick={closeStatus}
+                  disabled={isLoading}
                   className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleStatusUpdate}
-                  disabled={isLoading}
+                  disabled={isLoading || !statusChanged}
                   className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isLoading ? 'Updating...' : 'Update Status'}

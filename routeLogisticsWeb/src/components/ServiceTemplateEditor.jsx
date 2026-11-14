@@ -1,7 +1,11 @@
 import { useState } from 'react';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 const TYPES = ['text','number','checklist','select','photos','notes'];
-export default function ServiceTemplateEditor({ starter, onPublish, onCancel, busy }) {
-  const [template, setTemplate] = useState(() => ({ ...starter, id: starter.id.startsWith('custom-') ? starter.id : `custom-${crypto.randomUUID().slice(0, 8)}`, name: starter.id.startsWith('custom-') ? starter.name : `${starter.name} — company`, version: starter.id.startsWith('custom-') ? starter.version + 1 : 1, fields: starter.fields.map(field => ({ ...field })) }));
+export default function ServiceTemplateEditor({ starter, onPublish, onCancel, busy, scope }) {
+  const [initial] = useState(() => ({ ...starter, id: starter.id.startsWith('custom-') ? starter.id : `custom-${crypto.randomUUID().slice(0, 8)}`, name: starter.id.startsWith('custom-') ? starter.name : `${starter.name} — company`, version: starter.id.startsWith('custom-') ? starter.version + 1 : 1, fields: starter.fields.map(field => ({ ...field })) }));
+  const [template, setTemplate] = useState(initial);
+  const dirty = JSON.stringify(template) !== JSON.stringify(initial);
+  const { confirmDiscard } = useUnsavedChanges(dirty, { scope, message: 'Your service template changes have not been published. Leave without publishing?' });
   const fieldChange = (index, patch) => setTemplate(previous => ({ ...previous, fields: previous.fields.map((field,i) => i === index ? { ...field, ...patch } : field) }));
   return <section className="space-y-4 rounded border bg-gray-50 p-4" aria-label="Customize service template"><h3 className="font-semibold">Company service template</h3><p className="text-sm">This creates a new immutable company template version. Existing jobs keep their assigned version. Keep chemical application requirements in the separate application log.</p>
     <label className="block">Template name<input className="input-field mt-1 block w-full" maxLength={150} value={template.name} disabled={busy} onChange={event => setTemplate(previous => ({ ...previous, name: event.target.value }))} /></label>
@@ -12,6 +16,6 @@ export default function ServiceTemplateEditor({ starter, onPublish, onCancel, bu
       <button className="min-h-11 text-sm text-red-700 underline" disabled={busy || template.fields.length === 1} onClick={() => setTemplate(previous => ({ ...previous, fields: previous.fields.filter((_field,i) => i !== index) }))}>Remove field</button>
     </div>)}
     <div className="flex flex-wrap gap-2">{TYPES.map(type => <button key={type} className="btn-secondary" disabled={busy || template.fields.length >= 40} onClick={() => setTemplate(previous => ({ ...previous, fields: [...previous.fields, { id: `field-${crypto.randomUUID().slice(0,8)}`, label: `New ${type} field`, type, required: false, ...(['select','checklist'].includes(type) ? { options: ['Choice 1','Choice 2'] } : {}), ...(type === 'photos' ? { maxPhotos: 8 } : {}), ...(['text','notes'].includes(type) ? { maxLength: 4000 } : {}) }] }))}>Add {type}</button>)}</div>
-    <div className="flex gap-3"><button className="btn-primary" disabled={busy} onClick={() => onPublish(template)}>Publish new version</button><button className="btn-secondary" disabled={busy} onClick={onCancel}>Cancel template editing</button></div>
+    <div className="flex gap-3"><button className="btn-primary" disabled={busy || !dirty || !template.name.trim() || !template.fields.length} onClick={() => { if (dirty && !busy) onPublish(template); }}>Publish new version</button><button className="btn-secondary" disabled={busy} onClick={async () => { if (!dirty || await confirmDiscard()) onCancel(); }}>Cancel template editing</button></div>
   </section>;
 }

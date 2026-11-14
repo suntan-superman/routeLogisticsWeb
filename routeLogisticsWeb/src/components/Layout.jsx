@@ -6,6 +6,7 @@ import NotificationToggle from './NotificationToggle';
 import { disablePush } from '../services/push';
 import EmailVerificationBanner from './EmailVerificationBanner';
 import ConnectionStatus from './ConnectionStatus';
+import { useConfirmUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { 
   HomeIcon, 
   BuildingOfficeIcon, 
@@ -23,8 +24,10 @@ import {
 
 const Layout = ({ children }) => {
   const { userProfile, company, can, role, logout: signOut } = useAuth();
+  const confirmDiscard = useConfirmUnsavedChanges();
   // Unregister this device's push token while still signed in so the next user on it isn't notified.
   const logout = async () => {
+    if (!(await confirmDiscard())) return;
     await disablePush().catch(() => {});
     return signOut();
   };

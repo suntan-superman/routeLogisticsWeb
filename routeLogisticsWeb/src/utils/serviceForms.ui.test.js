@@ -17,6 +17,8 @@ function load(filename){
   const mock=name=>{
     if(name==='react')return React;
     if(name==='react/jsx-runtime')return mobileRequire(name);
+    if(name==='react-hot-toast')return{__esModule:true,default:{success(){},error(){}}};
+    if(name.endsWith('/hooks/useUnsavedChanges'))return{useUnsavedChanges:()=>({confirmDiscard:async()=>true})};
     if(name.endsWith('/contexts/AuthContext'))return{useAuth:()=>({currentUser:{uid:'tech'},company:{id:'acme'},role,can:()=>role!=='technician'})};
     if(name.endsWith('/services/tenancy'))return{getClaims:()=>({membershipId:'member'})};
     if(name.endsWith('/services/workspaceApi'))return{callWorkspace:async(_name,payload)=>{
@@ -69,6 +71,9 @@ test('browser drafts survive reopening and ambiguous save retries keep the exact
 test('managers can customize and publish a separate company template without mutating the starter',async()=>{
   role='manager';await render();const selector=tree.root.findAll(node=>node.type==='select'&&!node.props.id)[0];
   await act(async()=>selector.props.onChange({target:{value:'pool-maintenance:1'}}));await press('Customize company template');assert.ok(buttons('Publish new version')[0]);
+  assert.equal(buttons('Publish new version')[0].props.disabled,true);
+  const name=tree.root.findAll(node=>node.type==='input'&&node.props.value===`${template.name} — company`)[0];
+  await act(async()=>name.props.onChange({target:{value:'Acme pool service'}}));
   await press('Publish new version');const published=calls.find(row=>row.action==='publish').template;
   assert.match(published.id,/^custom-/);assert.equal(published.version,1);assert.equal(template.id,'pool-maintenance');assert.equal(calls.filter(row=>row.action==='assign').length,0);
 });

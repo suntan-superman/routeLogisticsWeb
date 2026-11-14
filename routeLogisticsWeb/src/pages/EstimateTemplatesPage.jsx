@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion as Motion } from 'framer-motion';
 import EstimateTemplateService from '../services/estimateTemplateService';
 import { useConfirm } from '../components/ConfirmProvider';
@@ -13,6 +13,10 @@ import {
   CogIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+
+const templateForm = (template = {}) => ({name:template.name || '',description:template.description || '',serviceType:template.serviceType || '',scopeOfWork:template.scopeOfWork || '',materials:template.materials || '',laborHours:template.laborHours ?? '',laborRate:template.laborRate ?? '',materialCost:template.materialCost ?? '',totalCost:template.totalCost ?? '',notes:template.notes || '',terms:template.terms || '',validityDays:template.validityDays ?? 30,isActive:template.isActive !== false});
+const templateSnapshot = data => JSON.stringify(Object.fromEntries(Object.entries(templateForm(data)).map(([field,value])=>[field,['laborHours','laborRate','materialCost','totalCost','validityDays'].includes(field)?Number(value || 0):value])));
 
 const EstimateTemplatesPage = () => {
   const confirm = useConfirm();
@@ -32,21 +36,13 @@ const EstimateTemplatesPage = () => {
   });
 
   // Form states
-  const [templateData, setTemplateData] = useState({
-    name: '',
-    description: '',
-    serviceType: '',
-    scopeOfWork: '',
-    materials: '',
-    laborHours: '',
-    laborRate: '',
-    materialCost: '',
-    totalCost: '',
-    notes: '',
-    terms: '',
-    validityDays: 30,
-    isActive: true
-  });
+  const [templateData, setTemplateData] = useState(templateForm);
+  const [savedTemplate,setSavedTemplate] = useState(()=>templateSnapshot(templateForm()));
+  const closing = useRef(false), saving = useRef(false);
+  const formDirty = (showAddModal || showEditModal) && templateSnapshot(templateData) !== savedTemplate;
+  const {confirmDiscard} = useUnsavedChanges(formDirty,{message:'You have unsaved estimate template changes. Leave without saving them?'});
+  const closeEditor = useCallback(async()=>{if(saving.current||closing.current)return;closing.current=true;try{if(formDirty&&!(await confirmDiscard()))return;setShowAddModal(false);setShowEditModal(false);setSelectedTemplate(null);const empty=templateForm();setTemplateData(empty);setSavedTemplate(templateSnapshot(empty));}finally{closing.current=false;}},[formDirty,confirmDiscard]);
+  useEffect(()=>{if(!showAddModal&&!showEditModal)return;const onKey=event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();closeEditor();}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[showAddModal,showEditModal,closeEditor]);
 
   useEffect(() => {
     loadTemplates();
@@ -88,30 +84,17 @@ const EstimateTemplatesPage = () => {
   };
 
   const resetForm = () => {
-    setTemplateData({
-      name: '',
-      description: '',
-      serviceType: '',
-      scopeOfWork: '',
-      materials: '',
-      laborHours: '',
-      laborRate: '',
-      materialCost: '',
-      totalCost: '',
-      notes: '',
-      terms: '',
-      validityDays: 30,
-      isActive: true
-    });
+    const empty=templateForm();setTemplateData(empty);setSavedTemplate(templateSnapshot(empty));
   };
 
   const handleAddTemplate = async () => {
+    if(!formDirty||saving.current||isLoading)return;
     if (!templateData.name.trim()) {
       toast.error('Template name is required');
       return;
     }
 
-    setIsLoading(true);
+    saving.current=true;setIsLoading(true);
     try {
       const result = await EstimateTemplateService.createTemplate(templateData);
       if (result.success) {
@@ -127,16 +110,17 @@ const EstimateTemplatesPage = () => {
       console.error('Error adding template:', error);
       toast.error('Error adding template');
     }
-    setIsLoading(false);
+    saving.current=false;setIsLoading(false);
   };
 
   const handleEditTemplate = async () => {
+    if(!formDirty||saving.current||isLoading)return;
     if (!templateData.name.trim()) {
       toast.error('Template name is required');
       return;
     }
 
-    setIsLoading(true);
+    saving.current=true;setIsLoading(true);
     try {
       const result = await EstimateTemplateService.updateTemplate(selectedTemplate.id, templateData);
       if (result.success) {
@@ -155,7 +139,7 @@ const EstimateTemplatesPage = () => {
       console.error('Error updating template:', error);
       toast.error('Error updating template');
     }
-    setIsLoading(false);
+    saving.current=false;setIsLoading(false);
   };
 
   const handleDeleteTemplate = async (templateId) => {
@@ -225,21 +209,7 @@ const EstimateTemplatesPage = () => {
 
   const openEditModal = (template) => {
     setSelectedTemplate(template);
-    setTemplateData({
-      name: template.name || '',
-      description: template.description || '',
-      serviceType: template.serviceType || '',
-      scopeOfWork: template.scopeOfWork || '',
-      materials: template.materials || '',
-      laborHours: template.laborHours || '',
-      laborRate: template.laborRate || '',
-      materialCost: template.materialCost || '',
-      totalCost: template.totalCost || '',
-      notes: template.notes || '',
-      terms: template.terms || '',
-      validityDays: template.validityDays || 30,
-      isActive: template.isActive
-    });
+    const values=templateForm(template);setTemplateData(values);setSavedTemplate(templateSnapshot(values));
     setShowEditModal(true);
   };
 
@@ -296,7 +266,7 @@ const EstimateTemplatesPage = () => {
               </button>
             )}
             <button
-              onClick={() => setShowAddModal(true)}
+              onClick={() => { resetForm(); setShowAddModal(true); }}
               className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
             >
               <PlusIcon className="h-4 w-4 mr-2" />
@@ -403,7 +373,7 @@ const EstimateTemplatesPage = () => {
                 Create Defaults
               </button>
               <button
-                onClick={() => setShowAddModal(true)}
+                onClick={() => { resetForm(); setShowAddModal(true); }}
                 className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700"
               >
                 <PlusIcon className="h-4 w-4 mr-2" />
@@ -500,10 +470,7 @@ const EstimateTemplatesPage = () => {
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium text-gray-900">Create New Template</h3>
                 <button
-                  onClick={() => {
-                    setShowAddModal(false);
-                    resetForm();
-                  }}
+                  onClick={closeEditor}
                   className="text-gray-400 hover:text-gray-600"
                 >
                   <span className="sr-only">Close</span>
@@ -654,17 +621,14 @@ const EstimateTemplatesPage = () => {
               
               <div className="flex justify-end space-x-3 mt-6">
                 <button
-                  onClick={() => {
-                    setShowAddModal(false);
-                    resetForm();
-                  }}
+                  onClick={closeEditor}
                   className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleAddTemplate}
-                  disabled={isLoading}
+                  disabled={isLoading || !formDirty}
                   className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isLoading ? 'Creating...' : 'Create Template'}
@@ -683,11 +647,7 @@ const EstimateTemplatesPage = () => {
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium text-gray-900">Edit Template</h3>
                 <button
-                  onClick={() => {
-                    setShowEditModal(false);
-                    setSelectedTemplate(null);
-                    resetForm();
-                  }}
+                  onClick={closeEditor}
                   className="text-gray-400 hover:text-gray-600"
                 >
                   <span className="sr-only">Close</span>
@@ -851,18 +811,14 @@ const EstimateTemplatesPage = () => {
               
               <div className="flex justify-end space-x-3 mt-6">
                 <button
-                  onClick={() => {
-                    setShowEditModal(false);
-                    setSelectedTemplate(null);
-                    resetForm();
-                  }}
+                  onClick={closeEditor}
                   className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleEditTemplate}
-                  disabled={isLoading}
+                  disabled={isLoading || !formDirty}
                   className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isLoading ? 'Saving...' : 'Save Changes'}

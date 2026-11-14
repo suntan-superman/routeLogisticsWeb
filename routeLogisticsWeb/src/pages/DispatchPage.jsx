@@ -10,11 +10,13 @@ import ServiceChecklist from '../components/ServiceChecklist';
 import TeamLocationStatus from '../components/TeamLocationStatus';
 import { LOCATION_LABELS, locationState, nearestOnDuty } from '../utils/workLocations';
 import { addressKey, createDispatchAddressResolver, mapPoint } from '../utils/dispatchMap';
+import { useConfirmUnsavedChanges } from '../hooks/useUnsavedChanges';
 
 const today = () => new Date().toLocaleDateString('en-CA');
 const locationLabels = LOCATION_LABELS;
 export default function DispatchPage() {
   const { company, can } = useAuth();
+  const confirmDiscard = useConfirmUnsavedChanges();
   const [date, setDate] = useState(today), [jobs, setJobs] = useState([]), [team, setTeam] = useState([]), [locations, setLocations] = useState([]);
   const [roster, setRoster] = useState([]), [policy, setPolicy] = useState({ intervalMinutes: 3, freshAfterSeconds: 300 }), [nearbyJob, setNearbyJob] = useState(null);
   const [member, setMember] = useState('all'), [status, setStatus] = useState('all'), [area, setArea] = useState('');
@@ -22,10 +24,21 @@ export default function DispatchPage() {
   const [mapReady, setMapReady] = useState(false), [resolved, setResolved] = useState({}), [now, setNow] = useState(() => new Date());
   const [mapBusy, setMapBusy] = useState(false), [mapError, setMapError] = useState(''), [markerCount, setMarkerCount] = useState(0), [lookupRequest, setLookupRequest] = useState({ id: 0, retry: false });
   const element = useRef(null), map = useRef(null), markers = useRef([]), generation = useRef(0), resolver = useRef(null), mapJobs = useRef([]), mapAnchor = useRef(null), fitKey = useRef(''), opener = useRef(null), heading = useRef(null), mapOpening = useRef(false), mapLifetime = useRef(0);
+  const localAction = useRef(0), viewState = useRef(null); viewState.current = { selected, routeMember, date, companyId: company?.id };
   if (!resolver.current) resolver.current = createDispatchAddressResolver(loadMaps);
-  const openDetails = useCallback((job, trigger) => { opener.current = trigger || document.activeElement; setSelected(job); }, []);
-  const closeDetails = useCallback(() => setSelected(null), []);
-  useEffect(() => { const lifetime = ++mapLifetime.current; return () => { if (mapLifetime.current === lifetime) mapLifetime.current++; markers.current.forEach(marker => { marker.map = null; }); }; }, []);
+  const transition = useCallback(async (change, resetsForm, scope) => {
+    const ticket = ++localAction.current, companyId = viewState.current.companyId;
+    if (resetsForm && !(await confirmDiscard(scope))) return;
+    if (ticket === localAction.current && companyId === viewState.current.companyId) change();
+  }, [confirmDiscard]);
+  const openDetails = useCallback((job, trigger) => {
+    if (viewState.current.selected?.id === job.id) return;
+    return transition(() => { opener.current = trigger || document.activeElement; setSelected(job); }, !!viewState.current.selected, `job:${viewState.current.selected?.id}`);
+  }, [transition]);
+  const closeDetails = useCallback(() => transition(() => setSelected(null), true, `job:${viewState.current.selected?.id}`), [transition]);
+  const changeRoute = value => { if (value !== routeMember) return transition(() => setRouteMember(value), !!routeMember, 'route-planner'); };
+  const changeDate = value => { if (value !== date) return transition(() => setDate(value), !!(selected || routeMember)); };
+  useEffect(() => { const lifetimeCounter = mapLifetime, actionCounter = localAction, lifetime = ++lifetimeCounter.current; return () => { actionCounter.current++; if (lifetimeCounter.current === lifetime) lifetimeCounter.current++; markers.current.forEach(marker => { marker.map = null; }); }; }, []);
   const load = useCallback(async () => {
     const ticket = ++generation.current; setBusy(true); setError('');
     try {
@@ -100,7 +113,7 @@ export default function DispatchPage() {
   const assign = async (job, memberId) => {
     if (!can('jobs.assign')) return;
     setBusy(true); setError('');
-    try { await callWorkspace('rlManageJob', { action: 'assign', id: job.id, memberId: memberId || null, expectedVersion: job.updatedAt || null }); setSelected(null); await load(); }
+    try { await callWorkspace('rlManageJob', { action: 'assign', id: job.id, memberId: memberId || null, expectedVersion: job.updatedAt || null }); await load(); }
     catch (e) { setError(e.message); } finally { setBusy(false); }
   };
   const currentSelection = selected && (jobs.find(job => job.id === selected.id) || selected);
@@ -108,7 +121,7 @@ export default function DispatchPage() {
   return <><div className="space-y-5" inert={selected ? true : undefined}>
     <div><h1 ref={heading} tabIndex={-1} className="text-2xl font-bold">Dispatch Board</h1><p className="text-gray-600">{company?.name} · Daily field operations</p></div>
     <div className="flex flex-wrap items-end gap-3 rounded border bg-white p-4">
-      <label>Service date<input className="block rounded border-gray-300" type="date" value={date} onChange={e => setDate(e.target.value)} /></label>
+      <label>Service date<input className="block rounded border-gray-300" type="date" value={date} onChange={e => changeDate(e.target.value)} /></label>
       <label>Technician<select className="block rounded border-gray-300" value={member} onChange={e => setMember(e.target.value)}><option value="all">All technicians</option><option value="unassigned">Unassigned</option>{team.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
       <label>Status<select className="block rounded border-gray-300" value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option>{Object.keys(STATUS_COLORS).map(value => <option key={value}>{value}</option>)}</select></label>
       <label>Service area<input className="block rounded border-gray-300" value={area} onChange={e => setArea(e.target.value)} placeholder="Area, city or ZIP" /></label>
@@ -142,9 +155,9 @@ export default function DispatchPage() {
         </section>}
       </article>)}
     </div><aside className="space-y-3"><h2 className="font-semibold">Team shifts, locations and routes</h2><p className="text-sm text-gray-600">Staff start and end their shift in the mobile app. GPS updates target every {policy.intervalMinutes} minutes while on duty, including between jobs. Shift status and GPS freshness are separate. This board refreshes every 30 seconds.</p>
-      {team.map(row => { const staff = roster.find(item => item.memberId === row.id) || { memberId: row.id, name: row.name, dutyStatus: 'unknown', location: locations.find(item => item.memberId === row.id) }; return <div key={row.id} className="space-y-1 rounded border bg-white p-3"><strong>{row.name}</strong><TeamLocationStatus member={staff} now={now} freshAfterSeconds={policy.freshAfterSeconds} /><button className="underline" onClick={() => setRouteMember(row.id)}>Open daily route</button></div>; })}
+      {team.map(row => { const staff = roster.find(item => item.memberId === row.id) || { memberId: row.id, name: row.name, dutyStatus: 'unknown', location: locations.find(item => item.memberId === row.id) }; return <div key={row.id} className="space-y-1 rounded border bg-white p-3"><strong>{row.name}</strong><TeamLocationStatus member={staff} now={now} freshAfterSeconds={policy.freshAfterSeconds} /><button className="underline" onClick={() => changeRoute(row.id)}>Open daily route</button></div>; })}
     </aside></div>
-    {routeMember && <section className="rounded border bg-white p-5"><button className="mb-4 underline" onClick={() => setRouteMember('')}>Close route planner</button><RoutesPage key={`${date}:${routeMember}`} initialDate={date} initialMemberId={routeMember} /></section>}
+    {routeMember && <section className="rounded border bg-white p-5"><button className="mb-4 underline" onClick={() => changeRoute('')}>Close route planner</button><RoutesPage key={`${date}:${routeMember}`} initialDate={date} initialMemberId={routeMember} /></section>}
   </div>{currentSelection && <DispatchJobDetails job={currentSelection} onClose={closeDetails} returnFocus={opener.current} fallbackFocus={heading.current} destination={position(currentSelection)} />}</>;
 }
 

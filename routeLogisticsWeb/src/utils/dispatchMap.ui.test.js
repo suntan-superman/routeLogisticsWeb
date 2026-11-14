@@ -34,6 +34,7 @@ function load(filename) {
   const requireMock = name => {
     if (name === 'react') return React;
     if (name === 'react/jsx-runtime') return mobileRequire(name);
+    if (name.endsWith('/hooks/useUnsavedChanges')) return { useConfirmUnsavedChanges: () => async () => true, useUnsavedChanges: () => ({ confirmDiscard: async () => true }) };
     if (name.endsWith('/contexts/AuthContext')) return { useAuth: () => ({ company: { id: 'acme', name: 'Acme Pest Control' }, can: () => true }) };
     if (name.endsWith('/services/maps')) return { loadMaps: async () => maps };
     if (name.endsWith('/services/workspaceApi')) return {

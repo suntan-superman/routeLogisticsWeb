@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
 import { HelmetProvider } from 'react-helmet-async';
@@ -38,6 +38,7 @@ const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import { ConfirmProvider } from './components/ConfirmProvider';
+import { UnsavedChangesProvider } from './components/UnsavedChangesProvider';
 
 // Create a client
 // Register Syncfusion license
@@ -73,13 +74,9 @@ const HomeOrLanding = () => {
   );
 };
 
-function App() {
+function AppContent() {
   return (
-    <HelmetProvider>
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <ConfirmProvider>
-          <Router>
+          <UnsavedChangesProvider>
             <div className="min-h-screen bg-gray-50">
               <Suspense fallback={<div className="p-8" role="status">Loading…</div>}>
               <Routes>
@@ -192,7 +189,20 @@ function App() {
                 }}
               />
             </div>
-          </Router>
+          </UnsavedChangesProvider>
+  );
+}
+
+// Keep the existing route tree while enabling supported SPA/history blockers.
+const router = createBrowserRouter([{ path: '*', element: <AppContent /> }]);
+
+function App() {
+  return (
+    <HelmetProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <ConfirmProvider>
+            <RouterProvider router={router} />
           </ConfirmProvider>
         </AuthProvider>
       </QueryClientProvider>

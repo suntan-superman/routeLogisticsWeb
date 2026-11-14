@@ -11,7 +11,7 @@ const deferred = () => { let resolve, reject; const promise = new Promise((yes, 
 const result = (company, patch = {}) => ({ enabled: true, environment: 'sandbox', writesEnabled: false, productionApproved: false, connected: true, connectionId: `${company}-connection-1`, realmId: `${company}-realm`, companyName: `${company} QuickBooks`, health: 'connected', incomeAccountId: '12', defaultItemId: '34', mappings: [{ type: 'Customer', localId: `${company}-customer`, remoteId: '123', status: 'synced' }], operations: [], webhookEvents: [], ...patch });
 const catalog = (company, patch = {}) => ({ accounts: [{ id: '12', name: `${company} Field income`, qualifiedName: `${company} Services:Field income`, accountType: 'Income', accountNumber: '4000' }, { id: '56', name: `${company} Other services`, qualifiedName: `${company} Services:Other income`, accountType: 'Other Income' }], items: [{ id: '34', name: `${company} General pest service`, qualifiedName: `${company} Services:General pest`, description: 'Routine property service' }, { id: '78', name: `${company} Inspection`, qualifiedName: `${company} Services:Inspection`, description: 'Property inspection visit' }], incomeAccountId: '12', defaultItemId: '34', connectionId: `${company}-connection-1`, ...patch });
 function reset(role = 'owner') {
-  env = { uid: 'owner-a', company: 'company-a', role, membershipId: null, calls: [], redirects: [], replacements: [], status: new Map(), options: new Map(), records: new Map(), confirmations: [], confirm: async () => true, connect: null, settings: null };
+  env = { uid: 'owner-a', company: 'company-a', role, membershipId: null, calls: [], redirects: [], replacements: [], status: new Map(), options: new Map(), records: new Map(), confirmations: [], confirm: async () => true, connect: null, settings: null, toasts: [], unsaved: false, failStatusAfterSave: false, failNextStatus: false };
   global.window = { location: { pathname: '/integrations', search: '', hash: '', assign: value => env.redirects.push(value) }, history: { replaceState: (_a, _b, value) => { env.replacements.push(value); const parsed = new URL(value, 'https://route-logistics.com'); window.location.search = parsed.search; } } };
 }
 const claims = () => ({ companyId: env.company, membershipId: env.membershipId, role: env.role });
@@ -19,14 +19,17 @@ const firebase = { db: {}, functions: {}, auth: { get currentUser() { return { u
 const tenancy = { getClaims: claims, can: capability => capability === 'integrations.read' && ['owner', 'admin'].includes(env.role), scopeWhere: () => ({ field: 'companyId', value: env.company }) };
 const mock = name => {
   if (name === 'react') return React;
+  if (name === 'react-hot-toast') return { __esModule: true, default: { success: message => env.toasts.push({ type: 'success', message }), error: message => env.toasts.push({ type: 'error', message }) } };
+  if (name.endsWith('/hooks/useUnsavedChanges')) return { useUnsavedChanges: dirty => { env.unsaved = dirty; return { confirmDiscard: async () => true }; } };
   if (name === 'firebase/functions') return { httpsCallable: (_functions, fullName) => async data => {
     const name = fullName.replace(/^rlQuickBooks/, ''), company = env.company;
     env.calls.push({ name, company, data });
-    if (name === 'Status') return { data: await (env.status.get(company) || result(company)) };
+    if (name === 'Status') { if (env.failNextStatus) { env.failNextStatus = false; throw new Error('Connection status unavailable'); } return { data: await (env.status.get(company) || result(company)) }; }
     if (name === 'Options') return { data: await (env.options.get(company) || catalog(company)) };
     if (name === 'Settings') {
       if (env.settings) await env.settings.promise;
       env.status.set(company, result(company, { incomeAccountId: data.incomeAccountId, defaultItemId: data.defaultItemId }));
+      if (env.failStatusAfterSave) env.failNextStatus = true;
       return { data: { saved: true, ...data } };
     }
     if (name === 'Connect') return { data: env.connect ? await env.connect.promise : { url: 'https://intuit.test/authorize' } };
@@ -178,9 +181,10 @@ test('dropdown keyboard selection saves internal IDs once with the connection ve
   await act(async () => { button('Save defaults').props.onClick(); button('Save defaults').props.onClick(); });
   const calls = env.calls.filter(call => call.name === 'Settings'); assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].data, { incomeAccountId: '56', defaultItemId: '78', connectionId: 'company-a-connection-1' });
-  assert.equal(button('Save defaults').props.disabled, true);
+  assert.equal(button('Saving…').props.disabled, true);
   await act(async () => env.settings.resolve()); await act(settle);
   assert.match(text(), /Accounting defaults saved. No QuickBooks records were changed/); assert.equal(button('Save defaults').props.disabled, true);
+  assert.deepEqual(env.toasts, [{ type: 'success', message: 'Accounting defaults saved.' }]); assert.equal(env.unsaved, false);
   assert.equal(env.calls.some(call => ['Sync', 'Adopt'].includes(call.name)), false);
 });
 
@@ -197,8 +201,23 @@ test('saving invalidated defaults reports the server error and retains the owner
   await act(async () => env.settings.reject(new Error('Choose an active income account and service item.'))); await act(settle);
   assert.match(text(), /Choose an active income account and service item/); assert.equal(combobox('Default income account').props.value, 'company-a Services:Other income');
   assert.equal(button('Save defaults').props.disabled, false); env.settings = null;
+  assert.equal(env.toasts[0].type, 'error'); assert.equal(env.unsaved, true);
   await act(async () => button('Save defaults').props.onClick()); await act(settle);
   assert.match(text(), /Accounting defaults saved/); assert.doesNotMatch(text(), /Choose an active income account and service item/);
+});
+
+test('unchanged and reverted accounting defaults disable Save and remove the unsaved guard', async () => {
+  reset(); await render(); assert.equal(button('Save defaults').props.disabled,true); assert.equal(env.unsaved,false);
+  await select('Default income account','Other'); assert.equal(button('Save defaults').props.disabled,false); assert.equal(env.unsaved,true);
+  await select('Default income account','Field'); assert.equal(button('Save defaults').props.disabled,true); assert.equal(env.unsaved,false);
+});
+
+test('successful defaults save remains successful when the following status refresh fails', async () => {
+  reset(); await render(); await select('Default income account','Other'); env.failStatusAfterSave=true;
+  await act(async()=>button('Save defaults').props.onClick()); await act(settle);
+  assert.match(text(),/Accounting defaults were saved, but connection status could not be refreshed/);
+  assert.equal(button('Save defaults').props.disabled,true); assert.equal(env.unsaved,false);
+  assert.deepEqual(env.toasts,[{type:'success',message:'Accounting defaults saved.'}]);
 });
 
 test('unavailable saved defaults are flagged without displaying raw provider IDs', async () => {

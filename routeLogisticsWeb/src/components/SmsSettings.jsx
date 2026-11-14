@@ -1,17 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 import { callWorkspace } from '../services/workspaceApi';
 import { SMS_PURPOSE_LABELS } from '../utils/smsLabels';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+const snapshot = settings => settings ? JSON.stringify({ ...settings, purposes: [...settings.purposes].sort(), templates: Object.fromEntries(Object.entries(settings.templates).sort(([a],[b])=>a.localeCompare(b))) }) : '';
 export default function SmsSettings() {
   const { company, currentUser } = useAuth(), owner = !!company && company.ownerId === currentUser?.uid;
+  return <SmsSettingsForm key={`${currentUser?.uid}:${company?.id}:${owner}`} company={company} owner={owner} />;
+}
+function SmsSettingsForm({ company, owner }) {
   const [data,setData] = useState(null), [settings,setSettings] = useState(null), [busy,setBusy] = useState(false), [error,setError] = useState(''), [message,setMessage] = useState('');
+  const [saved,setSaved] = useState('');
+  const alive = useRef(false), saving = useRef(false);
+  const dirty = owner && !!settings && snapshot(settings) !== saved;
+  useUnsavedChanges(dirty, { message: 'You have unsaved customer SMS settings. Leave without saving them?' });
   useEffect(() => {
-    let current=true;
-    if(owner) callWorkspace('rlSmsConfig',{action:'status',companyId:company.id}).then(value=>{if(current){setData(value);setSettings(value.settings);}}).catch(failure=>{if(current)setError(failure.message);});
-    return ()=>{current=false;};
+    alive.current = true;
+    if(owner) callWorkspace('rlSmsConfig',{action:'status',companyId:company.id}).then(value=>{if(alive.current){setData(value);setSettings(value.settings);setSaved(snapshot(value.settings));}}).catch(failure=>{if(alive.current)setError(failure.message || 'Unable to load SMS settings.');});
+    return ()=>{alive.current=false;};
   },[owner,company?.id]);
   if(!owner) return <section className="rounded border bg-white p-6"><h2 className="text-xl font-semibold">Customer SMS</h2><p>The company owner manages SMS templates and timing. Customer consent is managed in Customer Details.</p></section>;
-  const save=async()=>{setBusy(true);setError('');setMessage('');try{const value=await callWorkspace('rlSmsConfig',{action:'save',companyId:company.id,settings});setData(value);setSettings(value.settings);setMessage('SMS settings saved. Customer delivery still requires the server and registered sender approvals shown above.');}catch(failure){setError(failure.message);}finally{setBusy(false);}};
+  const save=async()=>{if(!dirty || saving.current || !alive.current)return;saving.current=true;setBusy(true);setError('');setMessage('');try{const value=await callWorkspace('rlSmsConfig',{action:'save',companyId:company.id,settings});if(!alive.current)return;setData(value);setSettings(value.settings);setSaved(snapshot(value.settings));setMessage('SMS settings saved. Customer delivery still requires the server and registered sender approvals shown above.');toast.success('SMS settings saved.');}catch(failure){if(alive.current){const text=failure.message || 'Unable to save SMS settings. Your changes are still available to retry.';setError(text);toast.error(text);}}finally{saving.current=false;if(alive.current)setBusy(false);}};
   const patch=value=>setSettings(previous=>({...previous,...value}));
   return <section aria-label="Customer SMS settings" className="rounded border bg-white p-6 space-y-4">
     <h2 className="text-xl font-semibold">Customer SMS</h2>
@@ -27,7 +37,7 @@ export default function SmsSettings() {
       <label className="block">Optional follow-up<select className="input-field block" value={settings.followUpMinutes} onChange={event=>patch({followUpMinutes:Number(event.target.value)})}>{[[60,'1 hour'],[1440,'1 day'],[2880,'2 days']].map(([value,label])=><option key={value} value={value}>{label} after completion</option>)}</select></label>
       <p className="text-sm text-gray-600">Templates support {'{date}'} and {'{time}'}. The company name and STOP/HELP instructions are added automatically. Keep customer details, account information, financial content and links out of templates.</p>
       {Object.entries(SMS_PURPOSE_LABELS).map(([purpose,label])=><div key={purpose} className="space-y-2"><label className="flex gap-2"><input type="checkbox" checked={settings.purposes.includes(purpose)} onChange={event=>patch({purposes:event.target.checked?[...settings.purposes,purpose]:settings.purposes.filter(value=>value!==purpose)})}/>{label}</label><textarea aria-label={`${label} template`} className="input-field w-full" maxLength={300} value={settings.templates[purpose]} onChange={event=>patch({templates:{...settings.templates,[purpose]:event.target.value}})}/></div>)}
-      <button className="btn-primary" onClick={save}>Save SMS settings</button>
+      <button className="btn-primary" disabled={busy || !dirty} onClick={save}>{busy ? 'Saving…' : 'Save SMS settings'}</button>
     </fieldset>}
   </section>;
 }

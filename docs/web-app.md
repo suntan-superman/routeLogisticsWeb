@@ -368,6 +368,14 @@ firebase deploy --only hosting
 - Proper error handling
 - Component composition over inheritance
 
+### Saving and unsaved changes
+
+- Show save success and failure with the existing `react-hot-toast` notifications. Keep failed drafts available for retry and show an in-progress state; prevent duplicate submissions.
+- Compare editable values with the last confirmed saved snapshot. Disable Save when unchanged, including when the user reverts an edit. A successful write updates that baseline; a later read/refresh failure must not be described as a failed save.
+- Register each editable form with `useUnsavedChanges` from `src/hooks/useUnsavedChanges`. The shared provider aggregates forms into one navigation guard for sidebar links, programmatic navigation, browser back/forward, and native reload/close warnings.
+- Local Cancel and Close actions use the shared `confirmDiscard` helper before discarding dirty forms; nested editors can register an explicit `scope` so local closure protects only the affected draft. Page navigation and sign-out protect every registered form. A cancelled warning keeps the draft. Remove registrations when forms close, save, or lose their tenant/role scope. Immediate actions and filters do not require dirty-form guards.
+- Keep existing authorization and tenant checks at submission time. Success messages follow the server result; client-side dirty state never grants permission to write.
+
 ### Git Workflow
 - Feature branch development
 - Pull request reviews

@@ -10,12 +10,15 @@ const React = mobileRequire('react');
 const { create, act } = mobileRequire('react-test-renderer');
 const { transformSync } = webRequire('esbuild');
 global.IS_REACT_ACT_ENVIRONMENT = true;
-let role, customers, writes;
+let role, customers, writes, dirty=false,discard=true,discardCalls=0,saveFailure=false;
+const keyListeners=new Set();
+global.window={addEventListener:(name,callback)=>{if(name==='keydown')keyListeners.add(callback);},removeEventListener:(name,callback)=>{if(name==='keydown')keyListeners.delete(callback);}};
 const user = { uid: 'test-user', emailVerified: true, getIdToken: async () => 'test-token', getIdTokenResult: async () => ({ claims: { companyId: 'test-company', role, membershipId: 'test-member' } }) };
 const service = {
   getCustomers: async () => ({ success: true, customers, hasMore: false }),
   getCustomerStats: async () => ({ success: true, stats: { totalCustomers: customers.length } }),
   createCustomer: async data => { writes.push(data); return { success: true, customer: { id: 'new', ...data } }; },
+  updateCustomer:async(id,data)=>{writes.push(data);return saveFailure?{success:false,error:'Customer save unavailable.'}:{success:true,customer:{id,...data}};},
 };
 const cache = new Map();
 function load(relative) {
@@ -29,6 +32,7 @@ function load(relative) {
     if (specifier === 'react-hot-toast') return { error() {}, success() {} };
     if (specifier.endsWith('/customerService')) return service;
     if (specifier.endsWith('/ConfirmProvider')) return { useConfirm: () => async () => true };
+    if (specifier.endsWith('/useUnsavedChanges')) return {useUnsavedChanges:value=>{dirty=value;return {confirmDiscard:async()=>{discardCalls++;return discard;}};}};
     if (specifier.endsWith('/CustomerImport')) return () => React.createElement('aside', null, 'Import customers');
     if (specifier.endsWith('/CustomerSmsConsent')) return () => React.createElement('aside', null, 'SMS consent controls');
     if (specifier === 'firebase/firestore') return { where() {} };
@@ -49,7 +53,7 @@ const Page = load('pages/CustomerManagementPage.jsx').default;
 const tenancy = load('services/tenancy.js');
 async function setRole(value) { role = value; await tenancy.syncTenancy(); }
 async function render(value, records = [{ id: 'active', name: 'Active customer', isActive: true }, { id: 'inactive', name: 'Inactive customer', isActive: false }]) {
-  await setRole(value); customers = records; writes = [];
+  await setRole(value); customers = records; writes = [];dirty=false;discard=true;discardCalls=0;saveFailure=false;
   let tree;
   await act(async () => { tree = create(React.createElement(Page)); });
   return tree;
@@ -97,4 +101,38 @@ test('an already-open add form cannot submit after claims downgrade to technicia
   await act(async () => tree.update(React.createElement(Page)));
   assert.equal(buttons(tree, 'Add Customer').length, 0);
   await act(async () => tree.unmount());
+});
+
+test('customer edit save and unsaved warning follow actual changed values and clear when reverted',async()=>{
+  const tree=await render('manager');await act(async()=>icons(tree,'PencilIcon')[0].parent.props.onClick());
+  const input=()=>tree.root.findByProps({placeholder:'Enter customer name'});
+  assert.equal(buttons(tree,'Save Changes')[0].props.disabled,true);assert.equal(dirty,false);
+  await act(async()=>input().props.onChange({target:{value:'Changed customer'}}));assert.equal(dirty,true);assert.equal(buttons(tree,'Save Changes')[0].props.disabled,false);
+  await act(async()=>input().props.onChange({target:{value:'Active customer'}}));assert.equal(dirty,false);assert.equal(buttons(tree,'Save Changes')[0].props.disabled,true);
+  await act(async()=>tree.unmount());
+});
+
+test('customer Cancel preserves a changed draft when kept and discards only after confirmation',async()=>{
+  const tree=await render('manager');await act(async()=>buttons(tree,'Add Customer')[0].props.onClick());
+  await act(async()=>tree.root.findByProps({placeholder:'Enter customer name'}).props.onChange({target:{value:'Pending customer'}}));discard=false;
+  await act(async()=>buttons(tree,'Cancel')[0].props.onClick());assert.equal(tree.root.findByProps({placeholder:'Enter customer name'}).props.value,'Pending customer');assert.equal(dirty,true);assert.equal(discardCalls,1);
+  discard=true;await act(async()=>buttons(tree,'Cancel')[0].props.onClick());assert.equal(buttons(tree,'Cancel').length,0);assert.equal(dirty,false);assert.equal(writes.length,0);
+  await act(async()=>tree.unmount());
+});
+
+test('customer Escape does not dismiss a changed form while a discard decision is pending',async()=>{
+  const tree=await render('manager');await act(async()=>buttons(tree,'Add Customer')[0].props.onClick());
+  await act(async()=>tree.root.findByProps({placeholder:'Enter customer name'}).props.onChange({target:{value:'Pending customer'}}));
+  let resolve;discard=new Promise(done=>{resolve=done;});const escape=()=>{const event={key:'Escape',defaultPrevented:false,preventDefault(){this.defaultPrevented=true;}};for(const listener of keyListeners)listener(event);};
+  await act(async()=>{escape();escape();});assert.equal(discardCalls,1);assert.equal(buttons(tree,'Cancel').length,1);
+  await act(async()=>resolve(false));assert.equal(tree.root.findByProps({placeholder:'Enter customer name'}).props.value,'Pending customer');
+  await act(async()=>tree.unmount());
+});
+
+test('failed customer saves keep edits and permit retry without dropping the warning',async()=>{
+  const tree=await render('manager');await act(async()=>icons(tree,'PencilIcon')[0].parent.props.onClick());
+  await act(async()=>tree.root.findByProps({placeholder:'Enter customer name'}).props.onChange({target:{value:'Retained customer'}}));saveFailure=true;
+  await act(async()=>buttons(tree,'Save Changes')[0].props.onClick());assert.equal(tree.root.findByProps({placeholder:'Enter customer name'}).props.value,'Retained customer');assert.equal(dirty,true);assert.equal(buttons(tree,'Save Changes')[0].props.disabled,false);
+  saveFailure=false;await act(async()=>buttons(tree,'Save Changes')[0].props.onClick());assert.equal(buttons(tree,'Save Changes').length,0);assert.equal(dirty,false);
+  await act(async()=>tree.unmount());
 });

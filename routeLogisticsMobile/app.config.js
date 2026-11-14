@@ -30,7 +30,8 @@ export default ({ config }) => ({
     icon: "./assets/brand/app-icon-ios.png",
     buildNumber: "1",
     supportsTablet: true,
-    bundleIdentifier: "com.workside.routelogistics",
+    bundleIdentifier: "com.worksidesoftware.routelogistics",
+    appleTeamId: "AXCZ2G99P6",
     infoPlist: {
       "ITSAppUsesNonExemptEncryption": false
     }

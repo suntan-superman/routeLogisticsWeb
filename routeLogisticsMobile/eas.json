@@ -12,10 +12,24 @@
       "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "distribution": "store",
+      "environment": "production",
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release",
+        "image": "macos-sequoia-15.6-xcode-26.0",
+        "credentialsSource": "remote"
+      }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "appleTeamId": "AXCZ2G99P6",
+        "companyName": "Workside Software LLC",
+        "bundleIdentifier": "com.worksidesoftware.routelogistics"
+      }
+    }
   }
 }

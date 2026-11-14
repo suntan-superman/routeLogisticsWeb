@@ -2,6 +2,8 @@
 
 November 13, 2026. Existing `main`, Firebase project `mi-factotum-field-service`.
 
+**Current iOS signing:** [Corporate signing migration](ios-corporate-signing.md) changes the bundle identifier and creates a separate app. The install-over instructions in this earlier report apply only to builds with the same identifier. Synchronize the old app's work/photos and end its shift before switching.
+
 ## Operator workflow
 
 The company owner opens **Team Locations → Location policy**, selects **1, 3 or 5 minutes**, and saves the interval. The default is three minutes. Existing active shifts receive a changed interval on their next successful update. Last-location retention remains a separate owner setting; this release does not change Acme's stored policy automatically.

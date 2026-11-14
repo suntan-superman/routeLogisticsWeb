@@ -1,5 +1,7 @@
 # Mobile job workflow repair
 
+**Current iOS signing:** See [corporate signing migration](ios-corporate-signing.md). Its new bundle identifier installs a separate app; the old installation's local queues/photos do not migrate automatically. Earlier signing/install-over instructions below describe the previous identity.
+
 Implemented on the existing `main` branch for Expo SDK 54 / React Native 0.81.5.
 Physical iPhone verification is still required. No production job, customer,
 membership, mi Factotum function or security rule was modified by this repair.

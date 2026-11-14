@@ -1,5 +1,7 @@
 # Mobile reliability and UX redesign
 
+**Current iOS signing:** See [corporate signing migration](ios-corporate-signing.md). Its new bundle identifier installs a separate app; the old installation's local queues/photos do not migrate automatically. Earlier signing/install-over instructions below describe the previous identity.
+
 November 13, 2026. Existing `main`, Firebase project `mi-factotum-field-service`.
 
 ## Confirmed cause of the false access alerts

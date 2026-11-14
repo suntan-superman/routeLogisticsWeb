@@ -12,6 +12,7 @@ const connectionPath = `rlQuickBooksConnections/${mappingId('qb-co', 'sandbox', 
 const transport = async (url, options) => {
   calls.push({ url, options });
   if (url.includes('/tokens/bearer')) { refreshes++; return { ok: true, json: async () => ({ access_token: 'fixture-access', refresh_token: 'fixture-refresh', expires_in: 3600 }) }; }
+  if (url.includes('/companyinfo/')) return { ok: true, json: async () => ({ CompanyInfo: { Id: '1', CompanyName: 'Controlled sandbox company' } }) };
   const entity = url.includes('/invoice') ? 'Invoice' : url.includes('/item') ? 'Item' : 'Customer';
   const posted = options.body ? JSON.parse(options.body) : {};
   return { ok: true, json: async () => ({ [entity]: { ...posted, Id: '123', SyncToken: syncToken, DisplayName: 'Fixture', TotalAmt: 20, Balance: 0, CurrencyRef: { value: 'USD' } } }) };
@@ -80,7 +81,7 @@ test('a lost accounting response retries the identical request without duplicati
   const retry = quickBooksHandlers(db, { ...config, writesEnabled: () => true }, retryTransport);
   const preview = await retry.preview(request({ type: 'Customer', localId: 'qb-retry' }));
   const data = { type: 'Customer', localId: 'qb-retry', fingerprint: preview.fingerprint };
-  await assert.rejects(retry.sync(request(data)), /Simulated lost response/);
+  await assert.rejects(retry.sync(request(data)), /temporarily unavailable/);
   await retry.sync(request(data)); await retry.sync(request(data));
   assert.equal(submitted.length, 2); assert.deepEqual(submitted[0], submitted[1]);
 });

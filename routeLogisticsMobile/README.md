@@ -3,7 +3,7 @@
 React Native mobile application for field service technicians.
 
 Current iOS signing uses **Workside Software LLC / AXCZ2G99P6** and
-`com.worksidesoftware.routelogistics`. This installs a separate app: synchronize
+`com.worksidesoftware.routelogisticsapp`. This installs a separate app: synchronize
 the previous installation's queued work/photos and end its shift before switching.
 See [corporate signing and exact Windows TestFlight commands](../docs/ios-corporate-signing.md).
 
@@ -125,7 +125,7 @@ registration. A fresh Mac checkout needs **no Firebase environment variables**:
 | Messaging sender ID | `1030013411579` |
 | Firebase JS app ID | `1:1030013411579:web:37cdb1ce1e57c1e75c505e` |
 | Measurement ID | `G-VS61WKSG39` (Analytics is not initialized) |
-| iOS bundle identifier | `com.worksidesoftware.routelogistics` |
+| iOS bundle identifier | `com.worksidesoftware.routelogisticsapp` |
 | Apple team | `AXCZ2G99P6` (Workside Software LLC) |
 | EAS project ID | `a6b5d885-dd99-4435-bef0-b7ffe09a2890` |
 
@@ -177,7 +177,7 @@ open ios/*.xcworkspace
 
 If Xcode or CocoaPods is missing, install it first. In Xcode, select Workside
 Software LLC (`AXCZ2G99P6`) under Signing & Capabilities, verify
-`com.worksidesoftware.routelogistics`, and select a simulator or connected device to run.
+`com.worksidesoftware.routelogisticsapp`, and select a simulator or connected device to run.
 For distribution, select a generic iOS device and use **Product > Archive**.
 An Apple signing identity and provisioning profile are needed for device and
 distribution builds; Firebase server credentials are not.

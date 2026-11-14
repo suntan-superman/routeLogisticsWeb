@@ -21,8 +21,9 @@ essential mark's maximum radius is 309.55 pixels, inside the 312.89-pixel safe
 circle (66dp within a 108dp adaptive canvas). The adaptive background is #046A36.
 Preview masks and backgrounds are not baked into production masters.
 
-Both app.config.js and app.json reference these assets. Bundle/package identifier
-com.workside.routelogistics and the existing EAS project are preserved.
+Both app.config.js and app.json reference these assets. iOS uses
+com.worksidesoftware.routelogisticsapp with corporate Team AXCZ2G99P6; Android
+remains com.workside.routelogistics. The existing EAS project is preserved.
 
 Validation passed: resolved Expo configuration points to existing assets; Expo
 Doctor 18/18; Expo's installed iOS icon generator emits a 1024 RGB AppIcon catalog

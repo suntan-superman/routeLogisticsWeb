@@ -2,6 +2,11 @@
 
 November 13, 2026. Existing `main`; Firebase `mi-factotum-field-service`.
 
+Apple-approved corporate identifier: `com.worksidesoftware.routelogisticsapp`.
+Use this exact identifier for new Apple App ID, provisioning and App Store Connect
+setup; the previous corporate proposal was unavailable. The corporate team and
+existing Expo/Firebase projects are unchanged.
+
 ## Release identity
 
 | Setting | Value |
@@ -9,7 +14,7 @@ November 13, 2026. Existing `main`; Firebase `mi-factotum-field-service`.
 | App name | Route Logistics |
 | Corporate Apple account | Workside Software LLC |
 | Apple Team ID | `AXCZ2G99P6` |
-| New iOS bundle ID | `com.worksidesoftware.routelogistics` |
+| New iOS bundle ID | `com.worksidesoftware.routelogisticsapp` |
 | Previous personal iOS bundle ID | `com.workside.routelogistics` |
 | Android package, unchanged | `com.workside.routelogistics` |
 | Expo owner, unchanged | `sjroy5` |
@@ -30,7 +35,7 @@ The submit profile specifies the corporate team, company name and new bundle ide
 | Native targets | Native directories are generated and untracked. EAS regenerates them from the current config; corporate team selection applies to native target build configurations. |
 | Entitlements | No manually configured application identifier, keychain access group, associated domain, Sign in with Apple or APNs entitlement exists. Signing supplies its own application/team identity. |
 | Background work | Existing location/background modes, permission descriptions and TaskManager registration are retained. Fresh device permission is required for the new app identity. |
-| URL schemes | No explicit custom scheme or incoming-link handler is implemented. Expo introspection generates `com.worksidesoftware.routelogistics`. No current auth/invitation flow relies on the old scheme. |
+| URL schemes | No explicit custom scheme or incoming-link handler is implemented. Expo introspection generates `com.worksidesoftware.routelogisticsapp`. No current auth/invitation flow relies on the old scheme. |
 | Authentication | Password, email OTP and browser email verification retain the existing Firebase accounts and company authorization. No native Google/Apple OAuth client or bundle-dependent redirect is configured. |
 | Push | Native APNs/FCM/Expo push registration is not implemented. Settings saves a notification preference only. Existing web FCM/backend notifications are unchanged. No personal-team APNs key is copied. |
 | Maps/payments | Mobile navigation hands off to Maps; no iOS Maps-key restriction, Apple Pay merchant identifier or native Stripe entitlement is configured. Existing web/provider configuration remains unchanged. |
@@ -92,13 +97,13 @@ npx --yes eas-cli@27.10.0 build:view $iosBuildId
 npx --yes eas-cli@27.10.0 submit --platform ios --profile production --id $iosBuildId --wait
 ```
 
-Verify the selected build uses `com.worksidesoftware.routelogistics`, then choose/create its corporate App Store Connect record. Avoid `--latest` during this migration because the preserved EAS project also contains older app identities. First-time Apple/app/API-key setup is interactive; do not add `--non-interactive` before it is configured. No passwords, `.p8` keys, certificates or provisioning files belong in Git or chat.
+Verify the selected build uses `com.worksidesoftware.routelogisticsapp`, then choose/create its corporate App Store Connect record. Avoid `--latest` during this migration because the preserved EAS project also contains older app identities. First-time Apple/app/API-key setup is interactive; do not add `--non-interactive` before it is configured. No passwords, `.p8` keys, certificates or provisioning files belong in Git or chat.
 
 Successful submission uploads to App Store Connect/TestFlight; Apple processing and test-group setup remain. It does not publish an App Store release. See [Expo iOS submission](https://docs.expo.dev/submit/ios/). Once configured, a future build and submission can be coupled with `npx --yes eas-cli@27.10.0 build --platform ios --profile production --auto-submit-with-profile production --wait` using the same corporate/root shell settings.
 
 ## Existing Mac native project
 
-If continuing local Xcode development, preserve intentional native customizations before regeneration. Pull parent `main`, run `npm ci` and `npm run ios:prepare`, then open the generated workspace. Verify the app target's bundle ID is `com.worksidesoftware.routelogistics` and every target uses Team `AXCZ2G99P6`. Existing personal provisioning profiles do not sign this new identity. This also installs a separate app; the old install-over/data-preservation instructions apply only within the same bundle identifier.
+If continuing local Xcode development, preserve intentional native customizations before regeneration. Pull parent `main`, run `npm ci` and `npm run ios:prepare`, then open the generated workspace. Verify the app target's bundle ID is `com.worksidesoftware.routelogisticsapp` and every target uses Team `AXCZ2G99P6`. Existing personal provisioning profiles do not sign this new identity. This also installs a separate app; the old install-over/data-preservation instructions apply only within the same bundle identifier.
 
 ## Verification and remaining operator steps
 

@@ -109,7 +109,17 @@ function smsHandlers(db, config = {}) {
   const statusUrl = config.statusUrl || 'https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlSmsStatus';
   const accountSid = config.accountSid || (() => ''),
     authToken = config.authToken || (() => ''),
-    serviceSid = config.messagingServiceSid || (() => '');
+    serviceSid = config.messagingServiceSid || (() => ''),
+    senderMode = config.senderMode || (() => 'messaging-service'),
+    fromNumber = config.fromNumber || (() => '');
+  const approvedSender = (registration, checkRuntime = false) => {
+    if (registration.get('status') !== 'approved') return null;
+    const mode = registration.get('senderMode') || 'messaging-service';
+    const reference = mode === 'phone-number' ? phoneE164(registration.get('fromNumber')) : registration.get('messagingServiceSid');
+    if (!['messaging-service', 'phone-number'].includes(mode) || (mode === 'phone-number' ? !reference : !/^MG[a-fA-F0-9]{32}$/.test(reference || ''))) return null;
+    if (checkRuntime && (mode !== senderMode() || reference !== (mode === 'phone-number' ? phoneE164(fromNumber()) : serviceSid()))) return null;
+    return { mode, reference };
+  };
   const ref = (name, id) => db.doc(`${name}/${id}`);
   const settingsRef = companyId => ref('rlSmsSettings', companyId),
     consentRef = (companyId, id) => ref('rlSmsConsents', hash(`${companyId}:${id}`));
@@ -162,9 +172,10 @@ function smsHandlers(db, config = {}) {
       };
       const [customer, company, stored, registration] = await Promise.all([tx.get(ref('customers', documentId(job.get('customerId'), 'customer'))), tx.get(ref('companies', companyId)), tx.get(settingsRef(companyId)), tx.get(ref('rlSmsSenderApprovals', companyId))]);
       const settings = settingsData(stored);
+      const sender = approvedSender(registration);
       // Producers have no provider secrets. The worker rechecks this operator
-      // approval against its bound Messaging Service immediately before sending.
-      if (!company.exists || !settings.enabled || !settings.purposes.includes(purpose) || registration.get('status') !== 'approved' || !/^MG[a-fA-F0-9]{32}$/.test(registration.get('messagingServiceSid') || '') || automatic && registration.get('automationApproved') !== true) return {
+      // approval against its bound sender immediately before sending.
+      if (!company.exists || !settings.enabled || !settings.purposes.includes(purpose) || !sender || automatic && registration.get('automationApproved') !== true) return {
         skipped: true,
         reason: 'company-delivery-not-approved'
       };
@@ -225,6 +236,8 @@ function smsHandlers(db, config = {}) {
         expiresAt: new Date(now() + 7200000),
         actorId: actor?.uid || null,
         automatic,
+        senderMode: sender.mode,
+        senderReference: sender.reference,
         consentVersion: consent.get('version'),
         jobSchedule: hash(`${job.get('date')}:${job.get('time')}`)
       });
@@ -246,7 +259,8 @@ function smsHandlers(db, config = {}) {
   async function eligible(row, tx) {
     const data = row.data(),
       [customer, consent, settings, registration, suppression, recipient, job] = await Promise.all([tx.get(ref('customers', data.customerId)), tx.get(consentRef(data.companyId, data.customerId)), tx.get(settingsRef(data.companyId)), tx.get(ref('rlSmsSenderApprovals', data.companyId)), tx.get(ref('rlSmsSuppressions', hash(data.to))), tx.get(ref('rlSmsRecipients', hash(data.to))), tx.get(ref('jobs', data.jobId))]);
-    if (!settings.get('enabled') || registration.get('status') !== 'approved' || registration.get('messagingServiceSid') !== serviceSid() || data.automatic && registration.get('automationApproved') !== true || !settings.get('purposes')?.includes(data.purpose) || customer.get('companyId') !== data.companyId || customer.get('isActive') === false || phoneE164(customer.get('phone')) !== data.to || consent.get('status') !== 'granted' || consent.get('phone') !== data.to || consent.get('version') !== data.consentVersion || !consent.get('purposes')?.includes(data.purpose) || suppression.get('blocked') || new Set((recipient.get('owners') || []).map(owner => owner.companyId)).size !== 1 || job.get('companyId') !== data.companyId || job.get('customerId') !== data.customerId || ['appointment-confirmation', 'pre-visit'].includes(data.purpose) && data.jobSchedule !== hash(`${job.get('date')}:${job.get('time')}`)) return false;
+    const sender = approvedSender(registration, true);
+    if (!settings.get('enabled') || !sender || (data.senderMode || 'messaging-service') !== sender.mode || data.senderReference !== undefined && data.senderReference !== sender.reference || data.automatic && registration.get('automationApproved') !== true || !settings.get('purposes')?.includes(data.purpose) || customer.get('companyId') !== data.companyId || customer.get('isActive') === false || phoneE164(customer.get('phone')) !== data.to || consent.get('status') !== 'granted' || consent.get('phone') !== data.to || consent.get('version') !== data.consentVersion || !consent.get('purposes')?.includes(data.purpose) || suppression.get('blocked') || new Set((recipient.get('owners') || []).map(owner => owner.companyId)).size !== 1 || job.get('companyId') !== data.companyId || job.get('customerId') !== data.customerId || ['appointment-confirmation', 'pre-visit'].includes(data.purpose) && data.jobSchedule !== hash(`${job.get('date')}:${job.get('time')}`)) return false;
     if (data.actorId) {
       const members = await tx.get(db.collection('teamMembers').where('companyId', '==', data.companyId).where('uid', '==', data.actorId).limit(5));
       const company = await tx.get(ref('companies', data.companyId));
@@ -496,7 +510,8 @@ function smsHandlers(db, config = {}) {
     },
     inbound: async (req, res) => {
       const body = req.body;
-      if (req.method !== 'POST' || !verifySignature(inboundUrl, body, authToken(), req.get('X-Twilio-Signature')) || body.AccountSid !== accountSid() || body.MessagingServiceSid !== serviceSid()) return res.status(403).send('Forbidden');
+      if (req.method !== 'POST' || !verifySignature(inboundUrl, body, authToken(), req.get('X-Twilio-Signature')) || body.AccountSid !== accountSid()
+        || (senderMode() === 'phone-number' ? !phoneE164(fromNumber()) || phoneE164(body.To) !== phoneE164(fromNumber()) : senderMode() !== 'messaging-service' || body.MessagingServiceSid !== serviceSid())) return res.status(403).send('Forbidden');
       const phone = phoneE164(body.From),
         sid = body.MessageSid;
       if (!phone || !/^SM[a-fA-F0-9]{32}$/.test(sid || '')) return res.status(400).send('Invalid message');
@@ -548,8 +563,8 @@ function smsHandlers(db, config = {}) {
           createdAt: new Date(now())
         });
       });
-      // Advanced Opt-Out on the approved Messaging Service supplies provider
-      // STOP/START/HELP acknowledgements. Never send a second automatic reply.
+      // Provider opt-out handling stays on the approved sender/service.
+      // Never send a second automatic reply from this callback.
       return res.type('text/xml').status(200).send('<Response/>');
     },
     status: async (req, res) => {
@@ -562,6 +577,7 @@ function smsHandlers(db, config = {}) {
         const target = ref('rlSmsOutbox', id),
           row = await tx.get(target);
         if (!row.exists || phoneE164(req.body.To) !== row.get('to') || row.get('providerSid') && row.get('providerSid') !== sid) return;
+        if (row.get('senderMode') === 'phone-number' && phoneE164(req.body.From) !== row.get('senderReference')) return;
         const eventRef = ref('rlSmsStatusEvents', hash(`${sid}:${status}:${req.body.ErrorCode || ''}`)),
           old = await tx.get(eventRef);
         if (old.exists) return;

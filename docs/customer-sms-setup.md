@@ -1,60 +1,80 @@
 # Customer SMS configuration
 
-Customer delivery remains disabled until the operator approves the sender, campaign/use case and tenant consent process. Existing phone numbers and notification preferences never constitute SMS consent.
+Automated customer delivery remains disabled. Existing phone numbers and notification preferences never constitute SMS consent. The narrowly authorized operator delivery test is separate from customer automation.
 
-Keep these Functions values until that review is complete:
+Keep these outbound Functions gates disabled during the controlled test:
 
 ```ini
 RL_SMS_ENABLED=false
 RL_SMS_LIVE_APPROVED=false
-RL_SMS_SECRETS_CONFIGURED=false
 ```
 
-The dedicated Firebase Secret Manager names are:
+The existing approved toll-free sender can be used directly without a Messaging Service. The controlled reuse configuration is:
+
+```ini
+RL_TWILIO_SENDER_MODE=phone-number
+RL_TWILIO_API_KEY_ENABLED=true
+RL_SMS_SECRETS_CONFIGURED=true
+```
+
+The dedicated Firebase Secret Manager names for that path are:
 
 - `RL_TWILIO_ACCOUNT_SID`
-- `RL_TWILIO_AUTH_TOKEN` — the primary Twilio Auth Token used for webhook validation.
-- `RL_TWILIO_MESSAGING_SERVICE_SID`
+- `RL_TWILIO_AUTH_TOKEN` — server-only callback signature validation.
+- `RL_TWILIO_FROM_NUMBER` — the existing approved sender.
+- `RL_TWILIO_API_KEY_SID` and `RL_TWILIO_API_KEY_SECRET` — application-specific send-only credentials.
+
+`RL_TWILIO_MESSAGING_SERVICE_SID` is required only for `senderMode: messaging-service`; none is needed or created for this direct-From configuration.
 
 Enter credentials through Secret Manager, never a committed environment file, chat or client build. A sender, campaign or customer consent from Merxus does not automatically authorize Route Logistics messaging.
 
-## November 14 activation verification
+## November 14 working-infrastructure investigation
 
-Existing Workside Twilio credentials were successfully inspected read-only through Merxus's current Cloud Run secret bindings. No Merxus deployment, callback, sender, credential or configuration was changed. No Twilio message was sent.
+The initial activation inspection examined Messaging Services but did not trace actual successful message records or toll-free verification. Its conclusion that the rejected CUSTOMER_CARE campaign blocked all existing infrastructure was incomplete. That historical campaign is not representative of the currently working paths.
 
-- Merxus currently selects its legacy Workside Home Advisor subaccount for default SMS. That account has no Messaging Service.
-- The primary account has **Customer Care A2P Messaging Service**, with ten US local SMS-capable numbers, but its customer-care campaign is **FAILED** and describes Merxus traffic.
-- **Merxus-AI-SMS** has configured callbacks but no attached sending number or campaign.
-- No approved Route Logistics sender/service was found. The three RL Twilio secrets and tenant sender approvals therefore remain unconfigured; all global customer-SMS flags remain false.
+Actual Twilio API records and number verification metadata establish:
 
-An Account SID/Auth Token pair carries account-wide provider authority. Reusing it would not create credential-level isolation from other applications. Use an appropriately isolated RL provider identity, such as a dedicated subaccount within the existing Workside account, and a dedicated approved Messaging Service/sender. Do not retarget Merxus's service or move its numbers. The actual RL/end-business service-message use case and consent flow must be covered by the approved registration. See [Twilio ISV onboarding](https://www.twilio.com/docs/messaging/compliance/a2p-10dlc/onboarding-isv) and [Twilio authentication](https://www.twilio.com/docs/usage/requests-to-twilio).
+| Existing sender | Account and transport | Carrier-delivery evidence | Verification |
+| --- | --- | --- | --- |
+| `+18889494776` | Workside Home Advisor subaccount; direct `From`, no Messaging Service | 84 delivered messages in the 100-record sample; seven in the last seven days; latest November 11 Pacific | `TWILIO_APPROVED`, Workside Software LLC; provider lead/service-request notifications |
+| `+18882506769` | Existing primary Workside account; direct `From`, no Messaging Service | 52 delivered messages in the 100-record sample; latest August 25 Pacific | `TWILIO_APPROVED`, Workside Software LLC; account notifications/customer care including service providers, appointment confirmations and service notifications |
+| `+12134661363` | Primary account; direct `From`, no Messaging Service | Five delivered messages in the sample; latest November 13 Pacific, including recent `outbound-reply` traffic | No approved associated Messaging Service established by this investigation; not selected for the RL test |
 
-Once those provider requirements are met, create the existing RL secret names above with secret-scoped runtime access, bind signed callbacks, record the reviewed sender approval, and perform the already-authorized single-recipient test. Keep automation disabled. The authorized test recipient was not converted into a customer or granted permanent consent.
+These are bounded samples, not complete historical counts. `delivered` is distinguished from merely `accepted`, `queued` or `sent`. No message bodies or recipient numbers are included in the operational report. The toll-free paths do not depend on the old failed 10DLC campaign, and absence of a Messaging Service does not mean absence of successful SMS.
+
+The primary toll-free number `+18882506769` is selected for the single explicitly authorized RL delivery test because its approved use-case summary includes the applicable service-message categories. The legacy toll-free registration is focused on provider lead notifications and is not treated as interchangeable merely because its messages are delivered. No new Twilio account, number purchase or campaign submission is needed for this controlled test.
+
+RL uses its own restricted key with message-create permission for outbound requests. The existing account Auth Token remains server-only for Twilio callback signature validation and retains account-wide authority; this is not a claim of independent Twilio-account isolation. Existing authenticated server role checks, exact sender binding, private outbox and per-message callbacks constrain the RL workflow. No Merxus credential, sender, inbound URL or deployment is changed.
+
+Controlled RL test status: **passed** on November 14, 2026 at 10:30 AM Pacific. Exactly one message-create request used the RL-specific restricted key and `+18882506769`. Twilio reported `delivered` with no error, and genuine signed `sent`/`delivered` callbacks reconciled the private RL outbox to `delivered` with the matching provider message ID. The authorized recipient confirmed receipt. The test used the existing RL template renderer and delivery transport, with an operator certification outbox record; it did not create or modify any customer or job, grant permanent customer consent, or enable scheduled delivery. Both global outbound gates remain false.
 
 The deployed STOP/START correction preserves an independently revoked consent: STOP may suspend a current grant, but a later START cannot restore a grant that staff or the customer had separately revoked. Regression tests cover grant → revoke → STOP → START and confirm sending remains blocked.
 
 ## Provider and tenant approval
 
-Use a Messaging Service and sender approved for the Route Logistics service-message use case and applicable business/tenant registration. Configure Advanced Opt-Out and its approved STOP, START and HELP responses. Configure the incoming-message webhook as form-encoded HTTP POST:
+Select an approved Messaging Service or an explicitly approved direct sender. A production tenant's provider approval must match the actual business/use case and consent flow. For an independently routed RL sender, the incoming-message webhook is form-encoded HTTP POST:
 
 `https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlSmsInbound`
 
-The worker supplies each message's status callback automatically:
+Do not point the existing shared toll-free number's inbound webhook at RL: its current Merxus inbound route remains unchanged. The controlled shared-sender test uses RL's per-message status callback only. Before enabling customer automation on this shared sender, verify that the registered brand/use case and actual RL opt-in flow remain covered, and that STOP/START replies reach RL's consent/suppression handling without disrupting Merxus. Existing provider opt-out enforcement is preserved; live RL reply synchronization is not certified by this one outbound test.
+
+The RL worker supplies each message's status callback automatically:
 
 `https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlSmsStatus?id=<outbox-id>`
 
-Twilio signs the exact URL including that query parameter. Do not replace it with a browser route, redirect or different hostname. The backend uses the official Twilio validator and checks the account and incoming Messaging Service.
+Twilio signs the exact URL including that query parameter. Do not replace it with a browser route, redirect or different hostname. The backend uses the official Twilio validator and checks the account and configured sender mode: exact Messaging Service in service mode, or exact `To` sender in direct-number inbound mode. Status reconciliation checks the recorded recipient, provider message ID and direct sender.
 
 After external registration and consent review, an authorized operator records a private `rlSmsSenderApprovals/{companyId}` document containing:
 
 - `status: "approved"`
-- `messagingServiceSid`: the exact approved service matching the Secret Manager configuration.
+- `senderMode`: `messaging-service` or `phone-number`.
+- `messagingServiceSid` for service mode, or `fromNumber` for direct-number mode: the exact approved sender matching the bound runtime configuration.
 - `automationApproved: true` only after separate approval for scheduled/job-triggered service messages.
 - Operator approval identity, date and registration references for the operational audit.
 
 Staff and company settings cannot write this collection or approve their own provider registration. Owner settings can prepare templates, purpose choices, reminder timing and the company time zone. They cannot override the global delivery gates.
 
-Only after credentials and approved metadata exist should `RL_SMS_SECRETS_CONFIGURED=true` bind the provider secrets during an RL-only deployment. Keep that binding enabled when temporarily disabling delivery so signed opt-out/status callbacks continue to work. Live delivery still requires both global flags to be explicitly enabled, company messaging enabled, matching sender approval and valid purpose-specific consent. Automation additionally requires its separate tenant approval.
+Only after credentials and reviewed sender metadata exist should `RL_SMS_SECRETS_CONFIGURED=true` bind the provider secrets during an RL-only deployment. Callback functions bind the signature Auth Token; the sending worker uses the RL-specific restricted key when `RL_TWILIO_API_KEY_ENABLED=true`. Keep callback bindings enabled when temporarily disabling outbound delivery. Public delivery still requires both global outbound gates, company messaging enabled, matching sender approval and valid purpose-specific consent. Automation additionally requires its separate tenant approval; it remains disabled throughout this operator test.
 
 ## Consent and delivery behavior
 

@@ -10,7 +10,7 @@ let app,db,sequence=0;const fixtureCompanies=[];
 before(()=>{if(!process.env.FIRESTORE_EMULATOR_HOST)throw Error('Local Firestore emulator required; production writes forbidden.');app=initializeApp({projectId:'demo-routelogistics'},'sms-tests');db=getFirestore(app);});
 after(()=>deleteApp(app));
 afterEach(async()=>{for(const companyId of fixtureCompanies.splice(0)){await db.doc(`rlSmsSettings/${companyId}`).update({enabled:false});const rows=await db.collection('rlSmsOutbox').where('companyId','==',companyId).get();const batch=db.batch();for(const row of rows.docs)if(['queued','dispatching'].includes(row.get('status')))batch.update(row.ref,{status:'cancelled'});await batch.commit();}});
-async function fixture({phone,delivery=true}={}){
+async function fixture({phone,delivery=true,directSender=false}={}){
   const id=`sms-${++sequence}`,companyId=id,customerId=`${id}-customer`,jobId=`${id}-job`,uid=`${id}-owner`,memberId=`${id}-member`,techUid=`${id}-tech`;
   fixtureCompanies.push(companyId);
   phone=phone||`+1661555${String(sequence).padStart(4,'0')}`;
@@ -19,17 +19,18 @@ async function fixture({phone,delivery=true}={}){
   await db.doc(`customers/${customerId}`).set({companyId,name:'Unchanged customer',phone,isActive:true});
   await db.doc(`jobs/${jobId}`).set({companyId,customerId,status:'scheduled',date:'2026-11-13',time:'10:00'});
   await db.doc(`rlSmsSettings/${companyId}`).set({...DEFAULT_SETTINGS,enabled:true});
-  await db.doc(`rlSmsSenderApprovals/${companyId}`).set({status:'approved',messagingServiceSid:serviceSid,automationApproved:true});
+  const fromNumber='+18005550123';
+  await db.doc(`rlSmsSenderApprovals/${companyId}`).set({status:'approved',...(directSender?{senderMode:'phone-number',fromNumber}:{messagingServiceSid:serviceSid}),automationApproved:true});
   let clock=Date.parse('2026-11-13T17:00:00Z'),live=delivery;
-  const config={enabled:()=>live,liveApproved:()=>live,accountSid:()=>accountSid,authToken:()=>token,messagingServiceSid:()=>serviceSid,inboundUrl,statusUrl,now:()=>clock};
+  const config={enabled:()=>live,liveApproved:()=>live,accountSid:()=>accountSid,authToken:()=>token,messagingServiceSid:()=>serviceSid,senderMode:()=>directSender?'phone-number':'messaging-service',fromNumber:()=>fromNumber,inboundUrl,statusUrl,now:()=>clock};
   const sms=smsHandlers(db,config),owner={uid,token:{companyId,role:'owner',email_verified:true}},tech={uid:techUid,token:{companyId,membershipId:memberId,role:'technician',email_verified:true}};
   const request=(data,auth=owner)=>({data,auth});
   const consent=async(purposes=['appointment-confirmation','pre-visit','en-route','service-completed'])=>{const status=await sms.consent(request({action:'status',customerId}));return sms.consent(request({action:'grant',customerId,purposes,source:'written',evidence:'Emulator-only signed form',disclosureAccepted:true,disclosure:status.disclosure}));};
   const queue=purpose=>sms.queue(request({jobId,purpose:purpose||'appointment-confirmation'}));
   const outbox=id=>db.doc(`rlSmsOutbox/${id}`);
-  const inbound=async(command,overrides={},valid=true)=>{const body={AccountSid:accountSid,MessagingServiceSid:serviceSid,From:phone,To:'+16615550000',MessageSid:'SM'+hash(`${id}:${command}:${clock}`).slice(0,32),Body:command,OptOutType:command,...overrides};const response=responseStub();await sms.inbound({method:'POST',body,get:()=>valid?signature(inboundUrl,body,token):'bad'},response);return response;};
-  const callback=async(id,status,overrides={})=>{const body={AccountSid:accountSid,To:phone,MessageSid:'SM'+hash(id).slice(0,32),MessageStatus:status,...overrides},response=responseStub();await sms.status({method:'POST',query:{id},body,get:()=>signature(`${statusUrl}?id=${id}`,body,token)},response);return response;};
-  return {id,companyId,customerId,jobId,phone,uid,memberId,owner,tech,sms,request,consent,queue,outbox,inbound,callback,advance:ms=>clock+=ms,disable:()=>live=false};
+  const inbound=async(command,overrides={},valid=true)=>{const body={AccountSid:accountSid,...(directSender?{}:{MessagingServiceSid:serviceSid}),From:phone,To:directSender?fromNumber:'+16615550000',MessageSid:'SM'+hash(`${id}:${command}:${clock}`).slice(0,32),Body:command,OptOutType:command,...overrides};const response=responseStub();await sms.inbound({method:'POST',body,get:()=>valid?signature(inboundUrl,body,token):'bad'},response);return response;};
+  const callback=async(id,status,overrides={})=>{const body={AccountSid:accountSid,To:phone,From:fromNumber,MessageSid:'SM'+hash(id).slice(0,32),MessageStatus:status,...overrides},response=responseStub();await sms.status({method:'POST',query:{id},body,get:()=>signature(`${statusUrl}?id=${id}`,body,token)},response);return response;};
+  return {id,companyId,customerId,jobId,phone,fromNumber,uid,memberId,owner,tech,sms,request,consent,queue,outbox,inbound,callback,advance:ms=>clock+=ms,disable:()=>live=false};
 }
 function responseStub(){return {code:200,body:null,status(code){this.code=code;return this;},type(){return this;},send(value){this.body=value;return this;}};}
 const acceptedTransport=()=>{let count=0;return {send:async message=>{count++;return {state:'accepted',sid:'SM'+hash(message.id).slice(0,32)};},count:()=>count};};
@@ -105,4 +106,26 @@ test('provider opt-out error suppresses subsequent texts without retrying delive
   const f=await fixture();await f.consent();const queued=await f.queue();let calls=0;await f.sms.drain({send:async()=>{calls++;return {state:'failed',code:'21610'};}});
   assert.equal(calls,1);assert.equal((await f.outbox(queued.id).get()).get('status'),'failed');assert.equal((await db.doc(`rlSmsSuppressions/${hash(f.phone)}`).get()).get('blocked'),true);
   assert.equal((await f.queue('pre-visit')).reason,'suppressed-or-ambiguous');
+});
+
+test('an approved direct sender preserves consent, exact sender identity, signed callbacks and duplicate suppression',async()=>{
+  const f=await fixture({directSender:true});assert.equal((await f.queue()).reason,'consent-required');await f.consent();
+  const first=await f.queue(),second=await f.queue();assert.equal(second.id,first.id);assert.equal(second.existing,true);
+  assert.equal((await f.outbox(first.id).get()).get('senderMode'),'phone-number');assert.equal((await f.outbox(first.id).get()).get('senderReference'),f.fromNumber);
+  const transport=acceptedTransport();await f.sms.drain(transport);await f.sms.drain(transport);assert.equal(transport.count(),1);
+  await f.callback(first.id,'delivered',{From:'+18005550999'});assert.equal((await f.outbox(first.id).get()).get('status'),'accepted');
+  await f.callback(first.id,'delivered');await f.callback(first.id,'delivered');assert.equal((await f.outbox(first.id).get()).get('status'),'delivered');assert.equal((await db.collection('rlSmsStatusEvents').where('outboxId','==',first.id).get()).size,1);
+});
+
+test('changing the approved direct sender before dispatch cancels pending work without a provider request',async()=>{
+  const f=await fixture({directSender:true});await f.consent();const queued=await f.queue();
+  await db.doc(`rlSmsSenderApprovals/${f.companyId}`).update({fromNumber:'+18005550999'});
+  const transport=acceptedTransport();await f.sms.drain(transport);assert.equal(transport.count(),0);assert.equal((await f.outbox(queued.id).get()).get('status'),'cancelled');
+});
+
+test('direct-sender STOP callbacks bind the exact receiving number without requiring a Messaging Service SID',async()=>{
+  const f=await fixture({directSender:true});await f.consent(['pre-visit']);
+  assert.equal((await f.inbound('STOP',{To:'+18005550999'})).code,403);assert.equal((await f.queue('pre-visit')).queued,true);
+  assert.equal((await f.inbound('STOP')).code,200);const transport=acceptedTransport();await f.sms.drain(transport);assert.equal(transport.count(),0);
+  assert.equal((await f.queue('pre-visit')).reason,'consent-required');
 });

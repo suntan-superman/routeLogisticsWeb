@@ -37,3 +37,19 @@ test('transport distinguishes a known rejection from ambiguous acceptance and ne
   assert.equal((await transport(()=>({ok:false,status:500,json:async()=>({})})).send(message)).state,'uncertain');
   assert.equal((await transport(()=>({ok:false,status:400,json:async()=>({code:21610})})).send(message)).state,'failed');assert.equal(calls,5);
 });
+
+test('direct sender transport uses its application API key and message-specific callback without a Messaging Service',async()=>{
+  const apiKeySid='SK'+'4'.repeat(32),apiKeySecret='synthetic-send-key',fromNumber='+18005550123';let calls=0;
+  const transport=createTwilioTransport({accountSid,apiKeySid,apiKeySecret,senderMode:'phone-number',fromNumber,statusUrl:'https://example.invalid/status',fetchImpl:async(url,options)=>{
+    calls++;assert.equal(url,`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`);
+    assert.equal(options.headers.Authorization,'Basic '+Buffer.from(apiKeySid+':'+apiKeySecret).toString('base64'));
+    const body=new URLSearchParams(options.body);assert.equal(body.get('From'),fromNumber);assert.equal(body.has('MessagingServiceSid'),false);assert.equal(body.get('To'),'+16615550101');assert.equal(body.get('StatusCallback'),'https://example.invalid/status?id=direct-test');
+    return {ok:true,json:async()=>({sid:'SM'+'5'.repeat(32)})};
+  }});
+  assert.equal((await transport.send({id:'direct-test',to:'+16615550101',body:'Controlled fixture only',from:'+18005550999'})).state,'accepted');assert.equal(calls,1);
+});
+
+test('sender mode and application-key configuration fail closed instead of falling back to broader credentials',()=>{
+  const base={accountSid,authToken,messagingServiceSid,statusUrl:'https://example.invalid/status'};
+  for(const config of [{senderMode:'unknown'},{senderMode:'phone-number',fromNumber:'bad'},{apiKeySid:'SK'+'4'.repeat(32)},{apiKeySecret:'partial-key'},{apiKeySid:'AC'+'4'.repeat(32),apiKeySecret:'wrong-type'}])assert.throws(()=>createTwilioTransport({...base,...config}),/Configure the Route Logistics Twilio secrets/);
+});

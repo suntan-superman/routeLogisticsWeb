@@ -1,30 +1,45 @@
 # SMS and native push activation
 
-November 14, 2026. Existing `main`, Firebase project `mi-factotum-field-service`. iOS status-push delivery passed; SMS provider acceptance is blocked by sender readiness.
+November 14, 2026. Existing `main`, Firebase project `mi-factotum-field-service`. iOS status-push delivery and tap navigation passed. The working SMS infrastructure has now been identified; the single controlled RL SMS delivery test is in progress.
 
 ## Deployed changes
 
-Only three RL functions were updated: `rlNativePush`, `rlDeliverNativePush`, and `rlSmsInbound`. Native registration and delivery now use `RL_NATIVE_PUSH_ENABLED=true`. No web asset, QuickBooks function, Merxus service or native app build was deployed.
+The initial activation updated three RL functions: `rlNativePush`, `rlDeliverNativePush`, and `rlSmsInbound`. Native registration and delivery use `RL_NATIVE_PUSH_ENABLED=true`. No QuickBooks function, Merxus service or native app build was changed. The subsequent direct-sender SMS configuration and its actual deployment result are recorded below when verification finishes.
 
-All customer-SMS flags remain false:
+Customer-SMS outbound gates remain false:
 
 ```ini
 RL_SMS_ENABLED=false
 RL_SMS_LIVE_APPROVED=false
-RL_SMS_SECRETS_CONFIGURED=false
 ```
+
+The callback-only secret configuration can be enabled independently of outbound delivery. The selected reuse path is `RL_TWILIO_SENDER_MODE=phone-number`, `RL_TWILIO_API_KEY_ENABLED=true`, and bound callback/sender secrets through `RL_SMS_SECRETS_CONFIGURED=true`. This does not activate scheduled customer messages.
 
 The inbound consent fix prevents STOP/START from restoring an independently revoked consent. Existing owner controls, tenant checks, five service-message purposes, disclosure/source/timestamps, opt-out suppression, rate limits, scheduled deduplication and signed status handling remain in place. See [SMS setup and provider findings](customer-sms-setup.md).
 
 ## SMS findings and actual delivery status
 
-Existing Merxus secret bindings successfully authenticated read-only Workside Twilio account/service lookups. Credentials were held only in operator memory; none was printed, committed, copied into RL client code, or permanently granted to RL. No Merxus messages or customer data were queried, and no provider configuration was changed.
+The first inspection checked account and Messaging Service metadata but did not trace successful SMS records or toll-free verification. Its sender-readiness conclusion was incomplete: the old rejected CUSTOMER_CARE 10DLC campaign is not the transport used by the proven direct toll-free paths.
 
-The legacy SMS account has no Messaging Service. The primary **Customer Care A2P Messaging Service** campaign is `FAILED`; **Merxus-AI-SMS** has no sender attached. Existing registration has not established coverage for RL/Acme service messages. No approved RL service, sender or credential boundary exists yet.
+Existing Merxus secret bindings authenticated read-only Twilio queries across the configured primary account and Workside Home Advisor subaccount. Actual recent outbound records were inspected without retaining message bodies or recipient numbers. The investigation sampled 100 records per account; counts are sample counts, not a complete historical census.
 
-The operator authorized one test recipient, but no SMS was attempted while registration was unverified. Therefore Twilio message acceptance, carrier delivery, genuine status callbacks and recipient receipt are **not certified**. No bulk, scheduled, invitation or other customer messaging was enabled, and no SMS consent was silently assigned to existing customers. The production SMS collections and outbox remain empty.
+| Sender and account | Observed transport and delivery | Registered use case |
+| --- | --- | --- |
+| `+18889494776`, Workside Home Advisor | Direct `From`; Messaging Service SID is null. 84 carrier-delivered records in the sample, seven in the last seven days; latest November 11 Pacific | Toll-free `TWILIO_APPROVED`, Workside Software LLC; provider lead/service-request notifications |
+| `+18882506769`, primary Workside account | Direct `From`; Messaging Service SID is null. 52 historic carrier-delivered records in the sample; latest August 25 Pacific | Toll-free `TWILIO_APPROVED`, Workside Software LLC; account notifications/customer care including service providers, appointment confirmations and service notifications |
+| `+12134661363`, primary account | Direct `From`; five delivered records, including November 13 Pacific reply traffic | An approved associated Messaging Service was not established; not used for the RL test |
 
-Required provider work: an isolated RL credential scope within the existing Workside infrastructure, an approved sender and Messaging Service covering the actual business/use case, Advanced Opt-Out and RL callbacks, then the three existing `RL_TWILIO_*` secrets with runtime access and a reviewed tenant sender approval. No new Firebase project or SMS architecture is needed. Existing shared account Auth Tokens cannot provide cross-application credential isolation.
+`delivered` above is final provider/carrier delivery status, not the initial API submission status. Merxus's normal and restaurant-verification flows can select different accounts/senders, and its implementation supports direct `From` delivery without a Messaging Service. The absence of a service therefore did not establish that SMS was unusable.
+
+The approved primary toll-free sender `+18882506769` is selected for the one explicitly authorized RL test. Its registered summary includes service-provider appointment and service notifications; the legacy number's provider-lead scope is not assumed interchangeable. No account creation, number purchase, new Messaging Service or campaign submission is required for this controlled reuse.
+
+RL is configured with its own message-create-only API key and Secret Manager entries `RL_TWILIO_ACCOUNT_SID`, `RL_TWILIO_FROM_NUMBER`, `RL_TWILIO_API_KEY_SID`, `RL_TWILIO_API_KEY_SECRET`, and callback-only `RL_TWILIO_AUTH_TOKEN`. All five have enabled version 1 and secret-scoped runtime Secret Accessor permission. No Messaging Service SID is required in direct-number mode. The account Auth Token retains account-wide authority, remains server-only, and is not described as credential-level account isolation. A new subaccount is not a prerequisite for this bounded test.
+
+The shared sender's Merxus inbound URL remains unchanged. RL supplies a per-message delivery-status callback for its own private outbox record; Merxus credentials, sender configuration, voice routing and workflows are not retargeted. This limited test does not claim real-time RL STOP/START reply synchronization on that shared number or enable broad customer automation.
+
+Current RL test status: **passed** on November 14, 2026 at 10:30 AM Pacific. One provider create used the restricted RL key and the existing template renderer/transport. Twilio's final status was `delivered`, with no error and no Messaging Service. Genuine signed `sent` and `delivered` callbacks updated the private operator certification outbox to `delivered` with the matching provider ID. The authorized recipient confirmed receipt. No customer/job fixture or permanent consent was created. Both global SMS gates remain false; automated delivery was not exercised or enabled.
+
+The seven affected RL SMS functions deployed successfully and report `ACTIVE`: manual queue, inbound/status callbacks, scheduled queue/delivery, and job-created/job-updated producers. Runtime configuration confirms `RL_TWILIO_SENDER_MODE=phone-number`, restricted-key mode and configured secret bindings; `RL_SMS_ENABLED=false` and `RL_SMS_LIVE_APPROVED=false`. Callbacks bind Account SID, From number and signature Auth Token; delivery binds Account SID, From number and the send-only API key pair. Producers have no provider secrets. Merxus was not deployed or reconfigured.
 
 ## iOS native push result
 
@@ -46,6 +61,12 @@ The Android package remains `com.workside.routelogistics`, with its existing pub
 
 ## Validation and preservation
 
+- Working-sender follow-up: Functions unit invocation passed 67 tests with no failures; one unrelated native-push emulator test was skipped in that unit-only invocation. The targeted 13-test SMS Firestore integration run passed without skips. The SMS unit subset passed eight tests. New coverage includes direct sender approval/snapshot validation, restricted-key authentication, exact sender/account callback checks, valid signed delivery and STOP suppression behavior. The seven-function deployment succeeded. The genuine test's two callback requests returned HTTP 200 with INFO severity and reconciled `sent`/`delivered` without an error.
+- Post-SMS read-only comparison confirmed all 508 customer, six job and six membership document versions unchanged. SMS tenant settings, sender-approval and customer-consent collections remain empty; only the controlled operator outbox and delivery audit/event records were added. Evidence is retained privately in ignored `.migration/rl-working-sms-test.json`, `.migration/rl-working-sms-preservation.json` and `.migration/rl-working-twilio-configuration.json`; no secret values are included in these reports.
+- Merxus isolation audit at 10:32 AM Pacific confirmed its original `merxus-ai-backend-00822-lis` revision and November 11 configuration timestamp unchanged. The selected sender retains `POST https://api.merxus.ai/twilio/sms/inbound`; its Twilio configuration timestamp remains August 14, predating this work. Account ownership and Merxus account-selection settings are unchanged.
+
+Initial activation checks, before the working-sender follow-up:
+
 - Functions: 65 passed; the one push emulator test skipped in the unit-only invocation was run separately with its emulator.
 - SMS and native-push Firestore integration: 11 passed, no skips.
 - Mobile: 168 passed, including 13 native-push tests. Two stale test-fixture imports were mocked; no mobile application behavior changed.
@@ -54,6 +75,6 @@ The Android package remains `com.workside.routelogistics`, with its existing pub
 
 Read-only initial activation metadata confirmed native registration/delivery enabled, SMS still disabled, one active iOS registration, one push delivery, and zero SMS outbox records. The separately authorized tap test added only one further push-delivery record. All Acme customer, job and membership document versions matched the preflight snapshot: 508 customers including the existing certification fixture, six jobs and six memberships. The original 507 customers remain intact. No accounting integration, Auth account, Firebase project, Merxus configuration or sender was altered.
 
-Sanitized operational evidence is retained in ignored `.migration/communications-final.json`, `.migration/communications-push-test.json`, `.migration/merxus-twilio-sender-readiness.json` and the native-push build/config audits. Provider credentials, private keys, phone values and device tokens are excluded.
+Sanitized operational evidence is retained in ignored `.migration/communications-final.json`, `.migration/communications-push-test.json`, `.migration/twilio-working-delivery-diagnostic.json` and the native-push build/config audits. Sender business numbers are retained for this investigation; provider credentials, message bodies, recipient phone values, private keys and device tokens are excluded.
 
-Remaining actions are provider sender/credential setup for the single SMS test and Android FCM v1 setup. The iOS visible-push delivery and notification-tap acceptance checks are complete. No current iOS rebuild or broad SMS automation is required.
+The single authorized RL SMS test, signed delivery callback and recipient receipt are complete. Before customer automation, verify the registered brand/use case and actual RL opt-in coverage, and shared-number STOP/START synchronization without changing Merxus routing. Android FCM v1 setup remains a separate previously identified item. The iOS visible-push delivery and notification-tap acceptance checks are complete. No new account, sender purchase, campaign or iOS rebuild was required for the controlled SMS path, and broad customer SMS automation remains disabled.

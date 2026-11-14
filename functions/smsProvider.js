@@ -17,15 +17,20 @@ function phoneE164(value) {
   else if (/^1\d{10}$/.test(cleaned)) cleaned = '+' + cleaned;
   return /^\+[1-9]\d{7,14}$/.test(cleaned) ? cleaned : null;
 }
-function createTwilioTransport({ accountSid, authToken, messagingServiceSid, statusUrl, fetchImpl = fetch }) {
-  if (!/^AC[a-fA-F0-9]{32}$/.test(accountSid || '') || !authToken || !/^MG[a-fA-F0-9]{32}$/.test(messagingServiceSid || '')) throw new Error('Configure the Route Logistics Twilio secrets before enabling delivery.');
+function createTwilioTransport({ accountSid, authToken, apiKeySid, apiKeySecret, senderMode = 'messaging-service', fromNumber, messagingServiceSid, statusUrl, fetchImpl = fetch }) {
+  const keyConfigured = !!(apiKeySid || apiKeySecret), sender = senderMode === 'phone-number' ? phoneE164(fromNumber) : messagingServiceSid;
+  if (!/^AC[a-fA-F0-9]{32}$/.test(accountSid || '')
+    || (keyConfigured ? !/^SK[a-fA-F0-9]{32}$/.test(apiKeySid || '') || typeof apiKeySecret !== 'string' || !apiKeySecret : !authToken)
+    || !['messaging-service', 'phone-number'].includes(senderMode)
+    || (senderMode === 'messaging-service' ? !/^MG[a-fA-F0-9]{32}$/.test(sender || '') : !sender)) throw new Error('Configure the Route Logistics Twilio secrets before enabling delivery.');
+  const authentication = keyConfigured ? `${apiKeySid}:${apiKeySecret}` : `${accountSid}:${authToken}`;
   return {
     async send(message) {
       let response;
       try {
         response = await fetchImpl(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
-          method: 'POST', headers: { Authorization: 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'), 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({ To: message.to, MessagingServiceSid: messagingServiceSid, Body: message.body, StatusCallback: `${statusUrl}?id=${message.id}` }),
+          method: 'POST', headers: { Authorization: 'Basic ' + Buffer.from(authentication).toString('base64'), 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ To: message.to, ...(senderMode === 'phone-number' ? { From: sender } : { MessagingServiceSid: sender }), Body: message.body, StatusCallback: `${statusUrl}?id=${message.id}` }),
           signal: AbortSignal.timeout(15000), redirect: 'error',
         });
       } catch {

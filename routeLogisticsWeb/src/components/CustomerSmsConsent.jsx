@@ -12,7 +12,8 @@ export default function CustomerSmsConsent({customer}) {
     <h4 className="font-semibold">SMS preferences and consent</h4><p className="text-sm">Recording a customer phone number does not provide permission to text. Select only purposes the customer explicitly agreed to.</p>
     {error&&<p role="alert" className="text-red-700">{error}</p>}{message&&<p role="status">{message}</p>}
     {data&&<><p>Consent: {data.consent?.status||'Not recorded'}{data.consent?.grantedAt?` · Recorded ${new Date(data.consent.grantedAt).toLocaleString()}`:''}</p>
-      {data.suppressed&&<p role="alert">This number opted out. Staff cannot override STOP. The customer must reply START to the approved sender; shared-company numbers require operator review.</p>}
+      <button className="btn-secondary" disabled={busy} onClick={async()=>{setBusy(true);setError('');try{const value=await callWorkspace('rlSmsCustomerConsent',{action:'status',customerId:customer.id});setData(value);setPurposes(value.consent?.purposes||[]);setMessage('SMS status refreshed. No message was sent.');}catch(failure){setError(failure.message);}finally{setBusy(false);}}}>Refresh SMS status</button>
+      {data.suppressed&&<p role="alert">This number opted out. Staff cannot override STOP. The customer must reply START or UNSTOP to the approved sender, then give fresh Route Logistics consent. START alone does not restore consent. Refresh SMS status after the provider confirms the reply; shared-company numbers require operator review.</p>}
       {data.ambiguous&&<p role="alert">This phone is associated with multiple companies. Delivery stays blocked until an operator reviews its messaging association.</p>}
       <fieldset disabled={busy||data.suppressed} className="space-y-3">
         <p className="rounded bg-gray-50 p-3 text-sm">{data.disclosure}</p>

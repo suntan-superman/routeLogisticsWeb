@@ -28,6 +28,7 @@ const { quickBooksHandlers } = require('./quickbooks');
 const { nativePushHandlers } = require('./nativePush');
 const { smsHandlers } = require('./sms');
 const { createTwilioTransport } = require('./smsProvider');
+const { createSmsProviderEventsHandler } = require('./smsProviderEvents');
 const { serviceFormsHandler } = require('./serviceForms');
 const { paymentLifecycleHandlers } = require('./paymentLifecycle');
 const { estimateHandlers } = require('./estimates');
@@ -185,6 +186,8 @@ const smsConfig = {
   messagingServiceSid: () => process.env.RL_TWILIO_MESSAGING_SERVICE_SID || '',
   senderMode: () => process.env.RL_TWILIO_SENDER_MODE || 'messaging-service',
   fromNumber: () => process.env.RL_TWILIO_FROM_NUMBER || '',
+  pilotEnabled: () => process.env.RL_SMS_PILOT_ENABLED === 'true',
+  pilotId: () => process.env.RL_SMS_PILOT_ID || '',
   inboundUrl: 'https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlSmsInbound',
   statusUrl: 'https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlSmsStatus',
 };
@@ -198,8 +201,12 @@ exports.rlSmsCustomerConsent = onCall(sms.consent);
 exports.rlQueueCustomerSms = onCall(sms.queue);
 exports.rlSmsInbound = onRequest({ secrets: smsCallbackSecrets }, sms.inbound);
 exports.rlSmsStatus = onRequest({ secrets: smsCallbackSecrets }, sms.status);
+exports.rlSmsProviderEvents = onRequest({ secrets: smsCallbackSecrets, timeoutSeconds: 30 }, createSmsProviderEventsHandler({
+  applyOptOut: sms.applyOptOut, accountSid: smsConfig.accountSid, authToken: smsConfig.authToken,
+  fromNumber: smsConfig.fromNumber, log: metadata => console.info('Route Logistics SMS provider event', metadata),
+}));
 exports.rlScheduleCustomerSms = onSchedule({ schedule: 'every 15 minutes', maxInstances: 1, timeoutSeconds: 540 }, sms.schedule);
-exports.rlDeliverCustomerSms = onSchedule({ schedule: 'every 1 minutes', secrets: smsDeliverySecrets, maxInstances: 1, timeoutSeconds: 540 }, () => smsEnabled() && smsConfig.liveApproved() ? sms.drain(createTwilioTransport({ accountSid: smsConfig.accountSid(), ...(process.env.RL_TWILIO_API_KEY_ENABLED === 'true' ? { apiKeySid: process.env.RL_TWILIO_API_KEY_SID, apiKeySecret: process.env.RL_TWILIO_API_KEY_SECRET } : { authToken: smsConfig.authToken() }), senderMode: smsConfig.senderMode(), fromNumber: smsConfig.fromNumber(), messagingServiceSid: smsConfig.messagingServiceSid(), statusUrl: smsConfig.statusUrl })) : undefined);
+exports.rlDeliverCustomerSms = onSchedule({ schedule: 'every 1 minutes', secrets: smsDeliverySecrets, maxInstances: 1, timeoutSeconds: 540 }, () => (smsEnabled() && smsConfig.liveApproved() || smsConfig.pilotEnabled()) ? sms.drain(createTwilioTransport({ accountSid: smsConfig.accountSid(), ...(process.env.RL_TWILIO_API_KEY_ENABLED === 'true' ? { apiKeySid: process.env.RL_TWILIO_API_KEY_SID, apiKeySecret: process.env.RL_TWILIO_API_KEY_SECRET } : { authToken: smsConfig.authToken() }), senderMode: smsConfig.senderMode(), fromNumber: smsConfig.fromNumber(), messagingServiceSid: smsConfig.messagingServiceSid(), statusUrl: smsConfig.statusUrl })) : undefined);
 exports.rlQueueSmsJobCreated = onDocumentCreated('jobs/{jobId}', event => sms.onJob(null, event.data?.data(), event.params.jobId));
 exports.rlQueueSmsJobUpdated = onDocumentUpdated('jobs/{jobId}', event => sms.onJob(event.data?.before.data(), event.data?.after.data(), event.params.jobId));
 const routing = routeHandlers(db);

@@ -49,6 +49,19 @@ test('suppressed customer numbers cannot be silently reconsented by staff',async
   assert.match(text(),/Staff cannot override STOP/);assert.equal(tree.root.findByType('fieldset').props.disabled,true);assert.equal(calls.some(call=>call.params.action==='grant'),false);
 });
 
+test('refreshing provider suppression never restores stopped consent or silently records a fresh grant',async()=>{
+  data={...status(),suppressed:true,consent:{status:'stopped',purposes:['pre-visit']}};
+  await act(async()=>{tree=create(React.createElement(Consent,{customer:{id:'customer'}}));});
+  assert.match(text(),/START alone does not restore consent/);
+  data={...status(),suppressed:false,consent:{status:'stopped',purposes:['pre-visit']}};
+  await act(async()=>tree.root.findAll(node=>node.type==='button'&&node.children.includes('Refresh SMS status'))[0].props.onClick());
+  const consentLabel=tree.root.findAllByType('p').find(node=>node.children.includes('Consent: '));
+  assert.equal(consentLabel.children.join(''),'Consent: stopped');
+  assert.equal(tree.root.findByType('fieldset').props.disabled,false);
+  assert.equal(calls.some(call=>call.params.action==='grant'),false);
+  assert.match(text(),/No message was sent/);
+});
+
 const button=label=>tree.root.findAll(node=>node.type==='button'&&node.children.join('')===label)[0];
 const zone=()=>tree.root.findAllByType('input').find(node=>node.props.value?.startsWith?.('America/'));
 test('SMS save enables only for changed values and reports success before resetting its dirty baseline',async()=>{

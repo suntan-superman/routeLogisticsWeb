@@ -56,11 +56,15 @@ test('individual messages deduplicate, signed status callbacks reconcile idempot
   assert.equal((await f.outbox(first.id).get()).get('status'),'delivered');assert.equal((await db.doc(`jobs/${f.jobId}`).get()).get('status'),'scheduled');
   assert.equal((await db.collection('rlSmsStatusEvents').where('outboxId','==',first.id).get()).size,2);
 });
-test('STOP wins before dispatch; staff cannot override it; signed START restores only the original purposes and HELP sends no duplicate reply',async()=>{
+test('STOP immediately cancels scheduled work; START requires independent RL re-consent and HELP sends no duplicate reply',async()=>{
   const f=await fixture();await f.consent(['pre-visit']);const queued=await f.queue('pre-visit');assert.equal((await f.inbound('STOP')).code,200);
+  assert.equal((await f.outbox(queued.id).get()).get('status'),'cancelled');
   const transport=acceptedTransport();await f.sms.drain(transport);assert.equal(transport.count(),0);assert.equal((await f.outbox(queued.id).get()).get('status'),'cancelled');
   await assert.rejects(f.consent(['appointment-confirmation']),{code:'failed-precondition'});f.advance(1000);await f.inbound('START');
-  const status=await f.sms.consent(f.request({action:'status',customerId:f.customerId}));assert.equal(status.consent.status,'granted');assert.deepEqual(status.consent.purposes,['pre-visit']);assert.equal((await f.queue()).reason,'consent-required');
+  const status=await f.sms.consent(f.request({action:'status',customerId:f.customerId}));assert.equal(status.consent.status,'stopped');assert.deepEqual(status.consent.purposes,['pre-visit']);assert.equal((await f.queue()).reason,'consent-required');
+  assert.equal((await db.doc(`rlSmsSuppressions/${hash(f.phone)}`).get()).get('blocked'),false);
+  const renewed=await f.consent(['pre-visit']);assert.equal(renewed.consent.status,'granted');assert.deepEqual(renewed.consent.purposes,['pre-visit']);
+  assert.equal((await f.outbox(queued.id).get()).get('status'),'cancelled');
   f.advance(1000);const help=await f.inbound('HELP');assert.equal(help.body,'<Response/>');assert.equal(transport.count(),0);
 });
 
@@ -128,4 +132,84 @@ test('direct-sender STOP callbacks bind the exact receiving number without requi
   assert.equal((await f.inbound('STOP',{To:'+18005550999'})).code,403);assert.equal((await f.queue('pre-visit')).queued,true);
   assert.equal((await f.inbound('STOP')).code,200);const transport=acceptedTransport();await f.sms.drain(transport);assert.equal(transport.count(),0);
   assert.equal((await f.queue('pre-visit')).reason,'consent-required');
+});
+
+test('a START without prior RL opt-in never creates a customer consent grant',async()=>{
+  const f=await fixture({directSender:true});assert.equal((await f.inbound('START')).code,200);
+  const status=await f.sms.consent(f.request({action:'status',customerId:f.customerId}));assert.equal(status.consent,null);
+  assert.equal((await f.queue()).reason,'consent-required');assert.equal((await db.collection('rlSmsConsents').where('companyId','==',f.companyId).get()).size,0);
+});
+
+test('toll-free YES does not clear a provider STOP, and START still leaves the independent RL consent stopped',async()=>{
+  const f=await fixture({directSender:true});await f.consent();await f.inbound('STOP');f.advance(1000);await f.inbound('YES');
+  assert.equal((await db.doc(`rlSmsSuppressions/${hash(f.phone)}`).get()).get('blocked'),true);
+  await assert.rejects(f.consent(),{code:'failed-precondition'});f.advance(1000);await f.inbound('START');
+  assert.equal((await db.doc(`rlSmsSuppressions/${hash(f.phone)}`).get()).get('blocked'),false);
+  assert.equal((await f.sms.consent(f.request({action:'status',customerId:f.customerId}))).consent.status,'stopped');
+  assert.equal((await f.queue()).reason,'consent-required');
+});
+
+test('explicit consent covers all four service purposes while optional follow-up remains separate',async()=>{
+  const f=await fixture();const approved=['appointment-confirmation','pre-visit','en-route','service-completed'];await f.consent(approved);
+  const consent=(await f.sms.consent(f.request({action:'status',customerId:f.customerId}))).consent;
+  assert.deepEqual(consent.purposes,approved);assert.equal(consent.source,'written');assert.ok(consent.grantedAt);assert.match(consent.disclosure,/selected below/);
+  assert.equal((await f.queue('appointment-confirmation')).queued,true);assert.equal((await f.queue('pre-visit')).queued,true);
+  await db.doc(`jobs/${f.jobId}`).update({status:'en-route'});assert.equal((await f.queue('en-route')).queued,true);
+  await db.doc(`jobs/${f.jobId}`).update({status:'completed'});assert.equal((await f.queue('service-completed')).queued,true);
+  assert.equal((await f.queue('service-follow-up')).reason,'company-delivery-not-approved');
+  await db.doc(`rlSmsSettings/${f.companyId}`).update({purposes:[...approved,'service-follow-up']});
+  assert.equal((await f.queue('service-follow-up')).reason,'consent-required');
+});
+
+test('replacing or revoking consent cancels queued work immediately and never deletes its history',async()=>{
+  for(const action of ['replace','revoke']){
+    const f=await fixture();await f.consent();const queued=await f.queue('pre-visit');
+    if(action==='replace')await f.consent(['appointment-confirmation']);else await f.sms.consent(f.request({action:'revoke',customerId:f.customerId}));
+    assert.equal((await f.outbox(queued.id).get()).get('status'),'cancelled');
+    const status=await f.sms.consent(f.request({action:'status',customerId:f.customerId}));assert.ok(status.history.some(row=>row.id===queued.id&&row.status==='cancelled'));
+    const transport=acceptedTransport();await f.sms.drain(transport);assert.equal(transport.count(),0);
+  }
+});
+
+test('provider STOP applies across shared-sender tenants while preserving other phones and terminal message history',async()=>{
+  const f=await fixture({directSender:true});await f.consent();const delivered=await f.queue('pre-visit');await f.callback(delivered.id,'delivered');
+  const queued=await f.queue('appointment-confirmation'),other=await fixture({phone:f.phone,directSender:true}),unrelated=await fixture({directSender:true});
+  await other.consent(['pre-visit']);await unrelated.consent();const unaffected=await unrelated.queue();
+  assert.equal((await f.inbound('STOP')).code,200);
+  assert.equal((await f.outbox(queued.id).get()).get('status'),'cancelled');assert.equal((await f.outbox(delivered.id).get()).get('status'),'delivered');
+  assert.equal((await unrelated.outbox(unaffected.id).get()).get('status'),'queued');
+  for(const owner of [f,other])assert.equal((await owner.sms.consent(owner.request({action:'status',customerId:owner.customerId}))).consent.status,'stopped');
+  f.advance(1000);await f.inbound('START');assert.equal((await db.doc(`rlSmsSuppressions/${hash(f.phone)}`).get()).get('blocked'),true);
+  for(const owner of [f,other])assert.equal((await owner.sms.consent(owner.request({action:'status',customerId:owner.customerId}))).consent.status,'stopped');
+});
+
+test('a signed asynchronous provider 21610 suppresses the phone and cancels other queued messages without a retry',async()=>{
+  const f=await fixture({directSender:true});await f.consent();const failed=await f.queue('appointment-confirmation'),pending=await f.queue('pre-visit');
+  await f.callback(failed.id,'failed',{ErrorCode:'21610'});
+  assert.equal((await f.outbox(failed.id).get()).get('status'),'failed');assert.equal((await f.outbox(pending.id).get()).get('status'),'cancelled');
+  assert.equal((await db.doc(`rlSmsSuppressions/${hash(f.phone)}`).get()).get('blocked'),true);
+  await f.callback(failed.id,'failed',{ErrorCode:'21610'});assert.equal((await db.collection('rlSmsStatusEvents').where('outboxId','==',failed.id).get()).size,1);
+  assert.equal((await f.queue('en-route')).reason,'job-status-changed');
+  const transport=acceptedTransport();await f.sms.drain(transport);assert.equal(transport.count(),0);
+});
+
+test('provider events retain occurrence order, deduplicate STOP and keep independent consent stopped after START',async()=>{
+  const f=await fixture({directSender:true});await f.consent();const at=Date.parse('2026-11-13T17:00:00Z');
+  const event=(label,command,eventTime)=>({phone:f.phone,sid:'SM'+hash(`${f.id}:${label}`).slice(0,32),command,eventTime,origin:'event-streams'});
+  const stop=event('new-stop','STOP',at+2000);await f.sms.applyOptOut(stop);
+  const consentRef=db.doc(`rlSmsConsents/${hash(`${f.companyId}:${f.customerId}`)}`),version=(await consentRef.get()).get('version');
+  await f.sms.applyOptOut(stop);assert.equal((await consentRef.get()).get('version'),version);
+  await f.sms.applyOptOut(event('late-start','START',at+1000));assert.equal((await db.doc(`rlSmsSuppressions/${hash(f.phone)}`).get()).get('blocked'),true);
+  await f.sms.applyOptOut(event('new-start','START',at+3000));assert.equal((await db.doc(`rlSmsSuppressions/${hash(f.phone)}`).get()).get('blocked'),false);
+  await f.sms.applyOptOut(event('late-stop','STOP',at+2500));assert.equal((await db.doc(`rlSmsSuppressions/${hash(f.phone)}`).get()).get('blocked'),false);
+  assert.equal((await consentRef.get()).get('status'),'stopped');assert.equal((await f.queue()).reason,'consent-required');
+});
+
+test('STOP wins a provider timestamp tie regardless of delivery order',async()=>{
+  for(const commands of [['STOP','START'],['START','STOP']]){
+    const f=await fixture({directSender:true});await f.consent();const eventTime=Date.parse('2026-11-13T17:00:00Z');
+    for(const command of commands)await f.sms.applyOptOut({phone:f.phone,sid:'SM'+hash(`${f.id}:tie:${command}`).slice(0,32),command,eventTime,origin:'event-streams'});
+    assert.equal((await db.doc(`rlSmsSuppressions/${hash(f.phone)}`).get()).get('blocked'),true);
+    assert.equal((await f.sms.consent(f.request({action:'status',customerId:f.customerId}))).consent.status,'stopped');
+  }
 });

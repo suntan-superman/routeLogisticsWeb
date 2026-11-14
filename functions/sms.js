@@ -17,6 +17,7 @@ const {
   phoneE164,
   verifySignature
 } = require('./smsProvider');
+const { pilotEligible } = require('./smsPilot');
 const PURPOSES = ['appointment-confirmation', 'pre-visit', 'en-route', 'service-completed', 'service-follow-up'];
 const DEFAULT_TEMPLATES = {
   'appointment-confirmation': 'Your service appointment is confirmed for {date} {time}.',
@@ -104,7 +105,13 @@ function smsHandlers(db, config = {}) {
   const enabled = config.enabled || (() => false),
     approved = config.liveApproved || (() => false),
     now = config.now || (() => Date.now());
-  const active = () => enabled() === true && approved() === true;
+  const broadActive = () => enabled() === true && approved() === true;
+  const pilotEnabled = config.pilotEnabled || (() => false);
+  const configuredPilotId = () => {
+    const id = config.pilotId?.();
+    return pilotEnabled() === true && typeof id === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(id) ? id : null;
+  };
+  const active = () => broadActive() || !!configuredPilotId();
   const inboundUrl = config.inboundUrl || 'https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlSmsInbound';
   const statusUrl = config.statusUrl || 'https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlSmsStatus';
   const accountSid = config.accountSid || (() => ''),
@@ -148,6 +155,87 @@ function smsHandlers(db, config = {}) {
       updatedAt: publicDate(data.updatedAt)
     } : null;
   }
+  async function cancelQueued(filters, reason, predicate = () => true) {
+    // Re-read each row transactionally: never overwrite a delivery callback or
+    // cancel a row that another worker has already submitted to the provider.
+    let query = db.collection('rlSmsOutbox').where('status', '==', 'queued');
+    for (const [field, value] of filters) query = query.where(field, '==', value);
+    let cursor, cancelled = 0;
+    for (let page = 0; page < 10; page++) {
+      const rows = await (cursor ? query.startAfter(cursor) : query).limit(100).get();
+      if (rows.empty) return cancelled;
+      cancelled += await db.runTransaction(async tx => {
+        const current = await Promise.all(rows.docs.map(row => tx.get(row.ref)));
+        let count = 0;
+        for (const row of current) {
+          if (!row.exists || row.get('status') !== 'queued' || !filters.every(([field, value]) => row.get(field) === value) || !predicate(row)) continue;
+          tx.update(row.ref, { status: 'cancelled', failureCode: reason, updatedAt: new Date(now()) });
+          tx.create(ref('rlSmsAudit', randomUUID()), {
+            companyId: row.get('companyId'), customerId: row.get('customerId') || null,
+            jobId: row.get('jobId') || null, event: 'queued-cancelled',
+            failureCode: reason, createdAt: new Date(now())
+          });
+          count++;
+        }
+        return count;
+      });
+      if (rows.size < 100) return cancelled;
+      cursor = rows.docs.at(-1);
+    }
+    throw new HttpsError('resource-exhausted', 'SMS suppression is saved. Pending message cleanup requires another attempt; delivery remains blocked.');
+  }
+  async function applyOptOut({ phone, sid, command, eventTime, origin = 'signed-inbound', providerEventId = null }) {
+    phone = phoneE164(phone);
+    command = String(command || '').trim().toUpperCase();
+    const stop = ['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT', 'REVOKE', 'OPTOUT'].includes(command);
+    const start = ['START', 'UNSTOP'].includes(command) || senderMode() !== 'phone-number' && ['YES', 'SUBSCRIBE'].includes(command);
+    const help = ['HELP', 'INFO'].includes(command);
+    const at = eventTime === undefined ? now() : time(eventTime);
+    if (!phone || !/^SM[a-fA-F0-9]{32}$/.test(sid || '') || !Number.isFinite(at) || at <= 0) throw new HttpsError('invalid-argument', 'A valid provider message and event timestamp are required.');
+    if (!stop && !start && !help) return { ignored: true };
+    const result = await db.runTransaction(async tx => {
+      const eventRef = ref('rlSmsInboundEvents', sid), suppressionRef = ref('rlSmsSuppressions', hash(phone));
+      const [event, binding, suppression] = await Promise.all([tx.get(eventRef), tx.get(ref('rlSmsRecipients', hash(phone))), tx.get(suppressionRef)]);
+      const owners = binding.get('owners') || [];
+      // The shared sender also receives Merxus traffic. Never import unrelated
+      // recipients or grant their numbers a Route Logistics customer association.
+      if (!owners.length) return { ignored: true };
+      if (event.exists) return { duplicate: true, cancel: stop && suppression.get('blocked') === true };
+      const ambiguous = new Set(owners.map(owner => owner.companyId)).size !== 1;
+      const previousAt = time(suppression.get('providerEventAt'));
+      const stale = !help && Number.isFinite(previousAt) && (at < previousAt || at === previousAt && !stop && suppression.get('providerCommand') === 'STOP');
+      const consents = !stale && stop ? await Promise.all(owners.map(owner => tx.get(consentRef(owner.companyId, owner.customerId)))) : [];
+      if (!stale && !help) {
+        tx.set(suppressionRef, {
+          blocked: stop || ambiguous,
+          reason: ambiguous && start ? 'ambiguous-shared-number' : start ? 'customer-start' : 'customer-stop',
+          updatedAt: new Date(now()), providerEventAt: new Date(at), providerEventId: sid,
+          providerCommand: stop ? 'STOP' : 'START', providerOrigin: origin
+        });
+        for (const consent of consents) {
+          if (!consent.exists || consent.get('phone') !== phone) continue;
+          tx.update(consent.ref, {
+            ...(consent.get('status') === 'granted' ? { status: 'stopped' } : {}),
+            updatedAt: new Date(now()), version: (consent.get('version') || 0) + 1
+          });
+        }
+        // START changes provider suppression only. A stopped or revoked RL
+        // preference requires a fresh, independently evidenced consent grant.
+      }
+      tx.create(eventRef, {
+        phoneHash: hash(phone), command, ambiguous, ignored: stale,
+        origin, providerEventId, eventTime: new Date(at), createdAt: new Date(now())
+      });
+      for (const owner of owners) tx.create(ref('rlSmsAudit', hash(`${sid}:${owner.companyId}:${owner.customerId}`)), {
+        ...owner, event: `customer-${stale ? 'stale-opt-out-event' : help ? 'help' : start ? 'start' : 'stop'}`,
+        ambiguous, origin, providerEventAt: new Date(at), createdAt: new Date(now())
+      });
+      return { ignored: stale, blocked: stale ? suppression.get('blocked') === true : stop || ambiguous, cancel: !stale && stop };
+    });
+    if (result.cancel) result.cancelled = await cancelQueued([['to', phone]], 'customer-stop');
+    const { cancel, ...publicResult } = result;
+    return publicResult;
+  }
   async function queue(jobId, purpose, {
     actor = null,
     automatic = false
@@ -173,9 +261,11 @@ function smsHandlers(db, config = {}) {
       const [customer, company, stored, registration] = await Promise.all([tx.get(ref('customers', documentId(job.get('customerId'), 'customer'))), tx.get(ref('companies', companyId)), tx.get(settingsRef(companyId)), tx.get(ref('rlSmsSenderApprovals', companyId))]);
       const settings = settingsData(stored);
       const sender = approvedSender(registration);
+      const broadAllowed = broadActive() && settings.enabled && settings.purposes.includes(purpose)
+        && (!automatic || registration.get('automationApproved') === true);
       // Producers have no provider secrets. The worker rechecks this operator
       // approval against its bound sender immediately before sending.
-      if (!company.exists || !settings.enabled || !settings.purposes.includes(purpose) || !sender || automatic && registration.get('automationApproved') !== true) return {
+      if (!company.exists || !sender || !broadAllowed && !configuredPilotId()) return {
         skipped: true,
         reason: 'company-delivery-not-approved'
       };
@@ -199,9 +289,16 @@ function smsHandlers(db, config = {}) {
         reason: 'suppressed-or-ambiguous'
       };
       const eventVersion = purpose === 'appointment-confirmation' || purpose === 'pre-visit' ? `${job.get('date')}:${job.get('time')}` : purpose;
-      const id = hash(`${companyId}:${job.id}:${purpose}:${eventVersion}`),
+      const pilotId = broadAllowed ? null : configuredPilotId();
+      const pilotRef = pilotId ? ref('rlSmsPilots', pilotId) : null;
+      const pilot = pilotRef ? await tx.get(pilotRef) : null;
+      const id = hash(`${companyId}:${job.id}:${purpose}:${eventVersion}${pilotId ? `:pilot:${pilotId}:${pilot.get('version')}` : ''}`),
         outbox = ref('rlSmsOutbox', id),
         old = await tx.get(outbox);
+      if (pilotId && (registration.get('pilotApproved') !== true || !pilotEligible(pilot.data(), {
+        companyId, customerId: customer.id, customer: customer.data(), phone,
+        consent: consent.data(), suppression: suppression.data(), purpose, now: now(), dispatch: old.exists
+      }))) return { skipped: true, reason: 'pilot-recipient-not-approved' };
       if (old.exists) return {
         queued: true,
         existing: true,
@@ -214,6 +311,7 @@ function smsHandlers(db, config = {}) {
         skipped: true,
         reason: 'daily-limit'
       };
+      if (pilotId) tx.update(pilotRef, { reservedMessages: pilot.get('reservedMessages') + 1, updatedAt: new Date(now()) });
       tx.set(companyLimit, {
         count: (companyCount.get('count') || 0) + 1,
         expiresAt: new Date(now() + 172800000)
@@ -238,6 +336,7 @@ function smsHandlers(db, config = {}) {
         automatic,
         senderMode: sender.mode,
         senderReference: sender.reference,
+        ...(pilotId ? { pilotId, pilotVersion: pilot.get('version') } : {}),
         consentVersion: consent.get('version'),
         jobSchedule: hash(`${job.get('date')}:${job.get('time')}`)
       });
@@ -260,7 +359,16 @@ function smsHandlers(db, config = {}) {
     const data = row.data(),
       [customer, consent, settings, registration, suppression, recipient, job] = await Promise.all([tx.get(ref('customers', data.customerId)), tx.get(consentRef(data.companyId, data.customerId)), tx.get(settingsRef(data.companyId)), tx.get(ref('rlSmsSenderApprovals', data.companyId)), tx.get(ref('rlSmsSuppressions', hash(data.to))), tx.get(ref('rlSmsRecipients', hash(data.to))), tx.get(ref('jobs', data.jobId))]);
     const sender = approvedSender(registration, true);
-    if (!settings.get('enabled') || !sender || (data.senderMode || 'messaging-service') !== sender.mode || data.senderReference !== undefined && data.senderReference !== sender.reference || data.automatic && registration.get('automationApproved') !== true || !settings.get('purposes')?.includes(data.purpose) || customer.get('companyId') !== data.companyId || customer.get('isActive') === false || phoneE164(customer.get('phone')) !== data.to || consent.get('status') !== 'granted' || consent.get('phone') !== data.to || consent.get('version') !== data.consentVersion || !consent.get('purposes')?.includes(data.purpose) || suppression.get('blocked') || new Set((recipient.get('owners') || []).map(owner => owner.companyId)).size !== 1 || job.get('companyId') !== data.companyId || job.get('customerId') !== data.customerId || ['appointment-confirmation', 'pre-visit'].includes(data.purpose) && data.jobSchedule !== hash(`${job.get('date')}:${job.get('time')}`)) return false;
+    let deliveryAllowed = !data.pilotId && broadActive() && settings.get('enabled') === true
+      && settings.get('purposes')?.includes(data.purpose) && (!data.automatic || registration.get('automationApproved') === true);
+    if (data.pilotId && data.pilotId === configuredPilotId() && registration.get('pilotApproved') === true) {
+      const pilot = await tx.get(ref('rlSmsPilots', data.pilotId));
+      deliveryAllowed = data.pilotVersion === pilot.get('version') && pilotEligible(pilot.data(), {
+        companyId: data.companyId, customerId: data.customerId, customer: customer.data(), phone: data.to,
+        consent: consent.data(), suppression: suppression.data(), purpose: data.purpose, now: now(), dispatch: true
+      });
+    }
+    if (!deliveryAllowed || !sender || (data.senderMode || 'messaging-service') !== sender.mode || data.senderReference !== undefined && data.senderReference !== sender.reference || customer.get('companyId') !== data.companyId || customer.get('isActive') === false || phoneE164(customer.get('phone')) !== data.to || consent.get('status') !== 'granted' || consent.get('phone') !== data.to || consent.get('version') !== data.consentVersion || !consent.get('purposes')?.includes(data.purpose) || suppression.get('blocked') || new Set((recipient.get('owners') || []).map(owner => owner.companyId)).size !== 1 || job.get('companyId') !== data.companyId || job.get('customerId') !== data.customerId || ['appointment-confirmation', 'pre-visit'].includes(data.purpose) && data.jobSchedule !== hash(`${job.get('date')}:${job.get('time')}`)) return false;
     if (data.actorId) {
       const members = await tx.get(db.collection('teamMembers').where('companyId', '==', data.companyId).where('uid', '==', data.actorId).limit(5));
       const company = await tx.get(ref('companies', data.companyId));
@@ -281,13 +389,16 @@ function smsHandlers(db, config = {}) {
           updatedBy: request.auth.uid
         });
       } else if (request.data.action !== 'status') throw new HttpsError('invalid-argument', 'Choose a settings action.');
-      const [stored, registration] = await Promise.all([settingsRef(companyId).get(), ref('rlSmsSenderApprovals', companyId).get()]);
+      const pilotId = configuredPilotId();
+      const [stored, registration, pilot] = await Promise.all([settingsRef(companyId).get(), ref('rlSmsSenderApprovals', companyId).get(), pilotId ? ref('rlSmsPilots', pilotId).get() : null]);
       return {
         settings: settingsData(stored),
         delivery: {
           enabled: enabled(),
           liveApproved: approved(),
-          active: active(),
+          active: broadActive(),
+          pilotEnabled: !!pilot && pilot.get('companyId') === companyId && pilot.get('testOnly') === true
+            && pilot.get('status') === 'active' && time(pilot.get('createdAt')) <= now() && time(pilot.get('expiresAt')) > now(),
           senderApproved: registration.get('status') === 'approved',
           automationApproved: registration.get('automationApproved') === true
         },
@@ -334,7 +445,7 @@ function smsHandlers(db, config = {}) {
         source = request.data.source,
         evidence = String(request.data.evidence || '').trim();
       if (action === 'grant' && (!Array.isArray(purposes) || !purposes.length || purposes.some(p => !PURPOSES.includes(p)) || !['written', 'web-form', 'verbal'].includes(source) || request.data.disclosureAccepted !== true || request.data.disclosure !== text || !evidence || evidence.length > 500)) throw new HttpsError('invalid-argument', 'Record the selected purposes, exact disclosure, consent source and evidence reference.');
-      return db.runTransaction(async tx => {
+      const result = await db.runTransaction(async tx => {
         const [previous, binding, suppression] = await Promise.all([tx.get(target), tx.get(ref('rlSmsRecipients', hash(phone))), tx.get(ref('rlSmsSuppressions', hash(phone)))]);
         if (action === 'grant' && suppression.get('blocked')) throw new HttpsError('failed-precondition', 'This number opted out. Staff cannot override STOP; the customer must reply START.');
         const version = (previous.get('version') || 0) + 1,
@@ -387,9 +498,13 @@ function smsHandlers(db, config = {}) {
         });
         return {
           consent: publicConsent(data),
-          ambiguous: new Set(owners.map(owner => owner.companyId)).size > 1
+          ambiguous: new Set(owners.map(owner => owner.companyId)).size > 1,
+          consentVersion: version
         };
       });
+      await cancelQueued([['companyId', staff.companyId], ['customerId', customerId]], 'consent-changed', row => row.get('consentVersion') !== result.consentVersion);
+      const { consentVersion, ...response } = result;
+      return response;
     },
     queue: async request => {
       const staff = await scope(request, 'jobs.schedule');
@@ -414,9 +529,16 @@ function smsHandlers(db, config = {}) {
       if (!active()) return {
         skipped: true
       };
-      const companies = await db.collection('rlSmsSettings').where('enabled', '==', true).limit(25).get();
+      const broadCompanies = broadActive() ? await db.collection('rlSmsSettings').where('enabled', '==', true).limit(25).get() : null;
+      const companies = new Map((broadCompanies?.docs || []).map(row => [row.id, row]));
+      const pilotId = configuredPilotId();
+      if (pilotId) {
+        const pilot = await ref('rlSmsPilots', pilotId).get();
+        const companyId = pilot.get('companyId');
+        if (pilot.get('status') === 'active' && typeof companyId === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(companyId) && !companies.has(companyId)) companies.set(companyId, await settingsRef(companyId).get());
+      }
       let queued = 0;
-      for (const company of companies.docs) {
+      for (const company of companies.values()) {
         const settings = settingsData(company),
           start = new Date(now() - 86400000).toISOString().slice(0, 10),
           end = new Date(now() + 172800000).toISOString().slice(0, 10);
@@ -483,7 +605,7 @@ function smsHandlers(db, config = {}) {
           const current = await tx.get(row.ref);
           if (current.get('lease') !== lease || current.get('providerSid')) return;
           let status = result.state === 'accepted' ? 'accepted' : result.state === 'retry' && (current.get('attempts') || 0) < 5 ? 'queued' : result.state === 'uncertain' ? 'uncertain' : 'failed';
-          if (result.code === '21610') tx.set(ref('rlSmsSuppressions', hash(message.to)), { blocked:true, reason:'provider-opt-out', updatedAt:new Date(now()) });
+          if (result.code === '21610') tx.set(ref('rlSmsSuppressions', hash(message.to)), { blocked:true, reason:'provider-opt-out', providerCommand:'STOP', providerEventAt:new Date(now()), providerOrigin:'provider-rejection', updatedAt:new Date(now()) });
           tx.update(row.ref, {
             status,
             ...(result.sid ? {
@@ -502,6 +624,7 @@ function smsHandlers(db, config = {}) {
             createdAt: new Date(now())
           });
         });
+        if (result.code === '21610') await cancelQueued([['to', message.to]], 'provider-opt-out');
         if (result.state === 'accepted') sent++;
       }
       return {
@@ -515,54 +638,7 @@ function smsHandlers(db, config = {}) {
       const phone = phoneE164(body.From),
         sid = body.MessageSid;
       if (!phone || !/^SM[a-fA-F0-9]{32}$/.test(sid || '')) return res.status(400).send('Invalid message');
-      const command = String(body.OptOutType || body.Body || '').trim().toUpperCase();
-      if (!['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT', 'REVOKE', 'OPTOUT', 'START', 'UNSTOP', 'YES', 'HELP', 'INFO'].includes(command)) return res.type('text/xml').status(200).send('<Response/>');
-      await db.runTransaction(async tx => {
-        const eventRef = ref('rlSmsInboundEvents', sid),
-          [event, binding] = await Promise.all([tx.get(eventRef), tx.get(ref('rlSmsRecipients', hash(phone)))]);
-        if (event.exists) return;
-        const owners = binding.get('owners') || [],
-          ambiguous = new Set(owners.map(owner => owner.companyId)).size !== 1;
-        const start = ['START', 'UNSTOP', 'YES'].includes(command),
-          help = ['HELP', 'INFO'].includes(command);
-        const consents = await Promise.all(owners.map(owner => tx.get(consentRef(owner.companyId, owner.customerId))));
-        if (!help) {
-          tx.set(ref('rlSmsSuppressions', hash(phone)), {
-            blocked: !start || ambiguous,
-            reason: ambiguous && start ? 'ambiguous-shared-number' : start ? 'customer-start' : 'customer-stop',
-            updatedAt: new Date(now()),
-            providerEventId: sid
-          });
-          for (let i = 0; i < consents.length; i++) {
-            const consent = consents[i];
-            if (!consent.exists || consent.get('phone') !== phone) continue;
-            if (!start) tx.update(consent.ref, {
-              // STOP may suspend an existing grant, but must not turn a
-              // separately revoked preference into something START can restore.
-              ...(consent.get('status') === 'granted' ? { status: 'stopped' } : {}),
-              updatedAt: new Date(now()),
-              version: (consent.get('version') || 0) + 1
-            });else if (!ambiguous && consent.get('status') === 'stopped') tx.update(consent.ref, {
-              status: 'granted',
-              source: 'customer-start',
-              updatedAt: new Date(now()),
-              version: (consent.get('version') || 0) + 1
-            });
-          }
-        }
-        tx.create(eventRef, {
-          phoneHash: hash(phone),
-          command,
-          ambiguous,
-          createdAt: new Date(now())
-        });
-        for (const owner of owners) tx.create(ref('rlSmsAudit', hash(`${sid}:${owner.companyId}:${owner.customerId}`)), {
-          ...owner,
-          event: `customer-${help ? 'help' : start ? 'start' : 'stop'}`,
-          ambiguous,
-          createdAt: new Date(now())
-        });
-      });
+      await applyOptOut({ phone, sid, command: body.OptOutType || body.Body, origin: 'signed-inbound' });
       // Provider opt-out handling stays on the approved sender/service.
       // Never send a second automatic reply from this callback.
       return res.type('text/xml').status(200).send('<Response/>');
@@ -573,14 +649,15 @@ function smsHandlers(db, config = {}) {
       const sid = req.body.MessageSid,
         status = req.body.MessageStatus;
       if (!/^SM[a-fA-F0-9]{32}$/.test(sid || '') || !['accepted', 'queued', 'sending', 'sent', ...TERMINAL].includes(status)) return res.status(400).send('Invalid status');
-      await db.runTransaction(async tx => {
+      const optedOutPhone = await db.runTransaction(async tx => {
         const target = ref('rlSmsOutbox', id),
           row = await tx.get(target);
         if (!row.exists || phoneE164(req.body.To) !== row.get('to') || row.get('providerSid') && row.get('providerSid') !== sid) return;
         if (row.get('senderMode') === 'phone-number' && phoneE164(req.body.From) !== row.get('senderReference')) return;
         const eventRef = ref('rlSmsStatusEvents', hash(`${sid}:${status}:${req.body.ErrorCode || ''}`)),
           old = await tx.get(eventRef);
-        if (old.exists) return;
+        const providerOptOut = ['failed', 'undelivered'].includes(status) && req.body.ErrorCode === '21610';
+        if (old.exists) return providerOptOut ? row.get('to') : null;
         const rank = {
           accepted: 0,
           queued: 1,
@@ -597,6 +674,11 @@ function smsHandlers(db, config = {}) {
           failureCode: /^\d{1,8}$/.test(req.body.ErrorCode || '') ? req.body.ErrorCode : null,
           updatedAt: new Date(now())
         });
+        if (providerOptOut) tx.set(ref('rlSmsSuppressions', hash(row.get('to'))), {
+          blocked: true, reason: 'provider-opt-out', providerCommand: 'STOP',
+          providerEventAt: new Date(now()), providerOrigin: 'signed-status', providerEventId: sid,
+          updatedAt: new Date(now())
+        });
         tx.create(eventRef, {
           companyId: row.get('companyId'),
           outboxId: id,
@@ -609,9 +691,13 @@ function smsHandlers(db, config = {}) {
           event: `delivery-${status}`,
           createdAt: new Date(now())
         });
+        return providerOptOut ? row.get('to') : null;
       });
+      if (optedOutPhone) await cancelQueued([['to', optedOutPhone]], 'provider-opt-out');
       return res.status(200).send('OK');
-    }
+    },
+    // Internal provider adapter hook; never exported as an unauthenticated callable.
+    applyOptOut
   };
 }
 module.exports = {

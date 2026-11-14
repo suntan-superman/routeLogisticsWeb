@@ -62,6 +62,18 @@ test('STOP wins before dispatch; staff cannot override it; signed START restores
   const status=await f.sms.consent(f.request({action:'status',customerId:f.customerId}));assert.equal(status.consent.status,'granted');assert.deepEqual(status.consent.purposes,['pre-visit']);assert.equal((await f.queue()).reason,'consent-required');
   f.advance(1000);const help=await f.inbound('HELP');assert.equal(help.body,'<Response/>');assert.equal(transport.count(),0);
 });
+
+test('STOP followed by START never restores an independently revoked consent',async()=>{
+  const f=await fixture();await f.consent(['pre-visit']);
+  await f.sms.consent(f.request({action:'revoke',customerId:f.customerId}));
+  f.advance(1000);assert.equal((await f.inbound('STOP')).code,200);
+  assert.equal((await f.sms.consent(f.request({action:'status',customerId:f.customerId}))).consent.status,'revoked');
+  f.advance(1000);assert.equal((await f.inbound('START')).code,200);
+  const status=await f.sms.consent(f.request({action:'status',customerId:f.customerId}));
+  assert.equal(status.consent.status,'revoked');assert.deepEqual(status.consent.purposes,['pre-visit']);
+  assert.equal((await f.queue('pre-visit')).reason,'consent-required');
+  const transport=acceptedTransport();await f.sms.drain(transport);assert.equal(transport.count(),0);
+});
 test('unsigned or wrong-service callbacks are rejected and a shared cross-company phone stays suppressed on START',async()=>{
   const f=await fixture(),other=await fixture({phone:f.phone});await f.consent();await other.consent();
   assert.equal((await f.queue()).reason,'suppressed-or-ambiguous');assert.equal((await f.inbound('STOP',{},false)).code,403);

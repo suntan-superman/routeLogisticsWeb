@@ -16,7 +16,22 @@ The dedicated Firebase Secret Manager names are:
 - `RL_TWILIO_AUTH_TOKEN` — the primary Twilio Auth Token used for webhook validation.
 - `RL_TWILIO_MESSAGING_SERVICE_SID`
 
-Enter credentials through Secret Manager, never a committed environment file, chat or client build. No sender, campaign, credential or consent from Merxus or mi Factotum is adopted automatically. The reference MF Functions source did not contain a Twilio implementation. Actual Workside account/service eligibility remains an operator/provider check.
+Enter credentials through Secret Manager, never a committed environment file, chat or client build. A sender, campaign or customer consent from Merxus does not automatically authorize Route Logistics messaging.
+
+## November 14 activation verification
+
+Existing Workside Twilio credentials were successfully inspected read-only through Merxus's current Cloud Run secret bindings. No Merxus deployment, callback, sender, credential or configuration was changed. No Twilio message was sent.
+
+- Merxus currently selects its legacy Workside Home Advisor subaccount for default SMS. That account has no Messaging Service.
+- The primary account has **Customer Care A2P Messaging Service**, with ten US local SMS-capable numbers, but its customer-care campaign is **FAILED** and describes Merxus traffic.
+- **Merxus-AI-SMS** has configured callbacks but no attached sending number or campaign.
+- No approved Route Logistics sender/service was found. The three RL Twilio secrets and tenant sender approvals therefore remain unconfigured; all global customer-SMS flags remain false.
+
+An Account SID/Auth Token pair carries account-wide provider authority. Reusing it would not create credential-level isolation from other applications. Use an appropriately isolated RL provider identity, such as a dedicated subaccount within the existing Workside account, and a dedicated approved Messaging Service/sender. Do not retarget Merxus's service or move its numbers. The actual RL/end-business service-message use case and consent flow must be covered by the approved registration. See [Twilio ISV onboarding](https://www.twilio.com/docs/messaging/compliance/a2p-10dlc/onboarding-isv) and [Twilio authentication](https://www.twilio.com/docs/usage/requests-to-twilio).
+
+Once those provider requirements are met, create the existing RL secret names above with secret-scoped runtime access, bind signed callbacks, record the reviewed sender approval, and perform the already-authorized single-recipient test. Keep automation disabled. The authorized test recipient was not converted into a customer or granted permanent consent.
+
+The deployed STOP/START correction preserves an independently revoked consent: STOP may suspend a current grant, but a later START cannot restore a grant that staff or the customer had separately revoked. Regression tests cover grant → revoke → STOP → START and confirm sending remains blocked.
 
 ## Provider and tenant approval
 

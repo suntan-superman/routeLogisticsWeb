@@ -522,7 +522,9 @@ function smsHandlers(db, config = {}) {
             const consent = consents[i];
             if (!consent.exists || consent.get('phone') !== phone) continue;
             if (!start) tx.update(consent.ref, {
-              status: 'stopped',
+              // STOP may suspend an existing grant, but must not turn a
+              // separately revoked preference into something START can restore.
+              ...(consent.get('status') === 'granted' ? { status: 'stopped' } : {}),
               updatedAt: new Date(now()),
               version: (consent.get('version') || 0) + 1
             });else if (!ambiguous && consent.get('status') === 'stopped') tx.update(consent.ref, {

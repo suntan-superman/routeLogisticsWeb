@@ -37,6 +37,8 @@ function fixture(role = 'manager') {
     const module = { exports: {} }; modules.set(filename, module);
     const mockRequire = name => {
       if (name === 'react') return React;
+      if (name === 'react-hot-toast') return { success() {}, error() {} };
+      if (name.endsWith('/hooks/useUnsavedChanges')) return { useUnsavedChanges: () => ({ confirmDiscard: async () => false }) };
       if (name.startsWith('@babel/runtime/')) return require(name);
       if (name === 'react-native') return { View: 'View', Text: 'Text', Image: 'Image', ScrollView: 'ScrollView', Pressable: 'Pressable' };
       if (name === 'expo-crypto') return { randomUUID: () => `11111111-1111-4111-8111-${String(++sequence).padStart(12, '0')}` };

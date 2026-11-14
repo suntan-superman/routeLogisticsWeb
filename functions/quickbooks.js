@@ -30,11 +30,12 @@ function quickBooksHandlers(db, config, transport = fetch) {
     if (!productionApproved()) throw new HttpsError('failed-precondition', 'Production QuickBooks synchronization is awaiting explicit operator approval.');
   };
   const credentials = () => Buffer.from(`${config.clientId()}:${config.clientSecret()}`).toString('base64');
-  async function http(url, options) {
+  async function http(url, options, { parseJson = true } = {}) {
     let response;
     try { response = await transport(url, { ...options, signal: AbortSignal.timeout(20000) }); }
-    catch { throw new HttpsError('unavailable', 'QuickBooks is temporarily unavailable. Retry shortly.'); }
+    catch (cause) { const error = new HttpsError('unavailable', 'QuickBooks is temporarily unavailable. Retry shortly.'); error.providerFailure = ['TimeoutError', 'AbortError'].includes(cause?.name) ? 'timeout' : 'transport'; throw error; }
     if (!response.ok) { const error = new HttpsError(response.status === 401 ? 'unauthenticated' : [429, 500, 502, 503, 504].includes(response.status) ? 'unavailable' : 'failed-precondition', response.status === 401 ? 'Reconnect QuickBooks to renew access.' : `QuickBooks request failed (${response.status}). Review the connection and accounting record.`); error.providerStatus = response.status; throw error; }
+    if (!parseJson) return { httpStatus: response.status };
     if (response.status === 204) return {};
     try { return await response.json(); } catch { throw new HttpsError('unavailable', 'QuickBooks returned an incomplete response. Retry shortly.'); }
   }
@@ -194,12 +195,12 @@ function quickBooksHandlers(db, config, transport = fetch) {
       const configuredHash = config.clientId?.() ? currentCredentialHash() : null;
       const credentialMismatch = credentialEnvironment() !== environment() || !!snap.get('credentialEnvironment') && snap.get('credentialEnvironment') !== credentialEnvironment() || !!snap.get('credentialHash') && !!configuredHash && snap.get('credentialHash') !== configuredHash;
       const reconnectRequired = snap.get('reconnectRequired') === true || connected && snap.get('refreshExpiresAt') <= Date.now();
-      const disconnecting = intent.get('disconnectLeaseUntil') > Date.now();
+      const disconnectRetryAfterMs = Math.max(0, Number(intent.get('disconnectLeaseUntil') || 0) - Date.now()), disconnecting = disconnectRetryAfterMs > 0;
       const health = !enabled() ? 'disabled' : !productionApproved() ? 'awaiting-production-approval' : credentialMismatch ? 'credentials-mismatch' : disconnecting ? 'disconnecting' : !connected ? 'disconnected'
         : reconnectRequired ? 'reconnect-required' : snap.get('accessExpiresAt') <= Date.now() ? 'refresh-needed' : 'connected';
       return { enabled: enabled() && productionApproved() && credentialEnvironment() === environment(), configured: enabled(), environment: environment(), productionApproved: config.productionApproved?.() === true, environmentReady: productionApproved(),
         writesEnabled: enabled() && config.writesEnabled?.() === true && productionApproved() && !credentialMismatch, connected, health,
-        realmId: snap.get('realmId') || null, companyName: snap.get('companyName') || null, credentialMismatch, reconnectRequired, disconnecting, disconnectWarning: snap.get('disconnectWarning') || null,
+        realmId: snap.get('realmId') || null, companyName: snap.get('companyName') || null, credentialMismatch, reconnectRequired, disconnecting, disconnectRetryAfterMs, disconnectWarning: snap.get('disconnectWarning') || null,
         lastError: snap.get('lastError') || intent.get('lastError') || null,
         accessExpiresAt: snap.get('accessExpiresAt') || null, refreshExpiresAt: snap.get('refreshExpiresAt') || null,
         incomeAccountId: snap.get('incomeAccountId') || '', defaultItemId: snap.get('defaultItemId') || '',
@@ -294,12 +295,16 @@ function quickBooksHandlers(db, config, transport = fetch) {
         return revoke ? old : null;
       });
       if (!previous) return { disconnected: true };
-      let warning = null, uncertain = false;
-      try { ensureEnabled(); if (previous.credentialHash && previous.credentialHash !== currentCredentialHash()) throw new HttpsError('failed-precondition', 'Credentials changed.'); await http('https://developer.api.intuit.com/v2/oauth2/tokens/revoke', { method: 'POST', headers: { Authorization: `Basic ${credentials()}`, 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ token: previous.refreshToken }) }); }
-      catch (error) { warning = 'QuickBooks is disconnected in Route Logistics. Intuit could not confirm revocation; reconnect to authorize again.'; uncertain = error.code === 'unavailable'; }
+      let warning = null, uncertain = false, httpStatus = null, failureCategory = null; const revokeStarted = Date.now();
+      // Intuit confirms revocation by HTTP status; its successful body can be empty.
+      try { ensureEnabled(); if (previous.credentialHash && previous.credentialHash !== currentCredentialHash()) throw new HttpsError('failed-precondition', 'Credentials changed.'); const result = await http('https://developer.api.intuit.com/v2/oauth2/tokens/revoke', { method: 'POST', headers: { Authorization: `Basic ${credentials()}`, 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ token: previous.refreshToken }) }, { parseJson: false }); httpStatus = result.httpStatus; }
+      catch (error) { warning = 'QuickBooks is disconnected in Route Logistics. Intuit could not confirm revocation; reconnect to authorize again.'; uncertain = error.code === 'unavailable'; httpStatus = Number.isInteger(error.providerStatus) ? error.providerStatus : null; failureCategory = error.providerFailure || (httpStatus ? 'http-error' : 'configuration'); }
       await db.runTransaction(async tx => {
         const [latest, intent] = await Promise.all([tx.get(ref), tx.get(intentRef(companyId))]);
-        if (latest.get('connectionId') === connectionId && intent.get('attemptId') === attemptId) { tx.update(ref, { disconnectWarning: warning }); tx.update(intentRef(companyId), { status: 'disconnected', disconnectLeaseUntil: uncertain ? intent.get('disconnectLeaseUntil') : 0 }); }
+        if (latest.get('connectionId') === connectionId && intent.get('attemptId') === attemptId) {
+          tx.update(ref, { disconnectWarning: warning }); tx.update(intentRef(companyId), { status: 'disconnected', disconnectLeaseUntil: uncertain ? intent.get('disconnectLeaseUntil') : 0 });
+          tx.create(db.collection('rlQbAudit').doc(), { action: 'oauth.revocation', companyId, environment: environment(), connectionId, outcome: warning ? 'unconfirmed' : 'confirmed', httpStatus, failureCategory, durationMs: Date.now()-revokeStarted, createdAt: new Date() });
+        }
       });
       return { disconnected: true, ...(warning ? { warning } : {}) };
     },

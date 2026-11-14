@@ -19,7 +19,7 @@ after(async () => { await rules?.cleanup(); await deleteApp(app); });
 
 async function fixture({ connect = true } = {}) {
   const prefix = `qb-tenancy-${++sequence}`, calls = [], gates = {}, identities = {};
-  const env = { currentClientId: 'dedicated-platform-development-client', environment: 'sandbox', credentialEnvironment: 'sandbox', productionApproved: false, refreshFailure: false, revokeFailure: false, companyInfoFailure: false, companyInfoMalformed: false, tokenCount: 0, refreshCount: 0 };
+  const env = { currentClientId: 'dedicated-platform-development-client', environment: 'sandbox', credentialEnvironment: 'sandbox', productionApproved: false, refreshFailure: false, revokeFailure: false, revokeTimeout: false, companyInfoFailure: false, companyInfoMalformed: false, tokenCount: 0, refreshCount: 0 };
   const config = { enabled: () => true, environment: () => env.environment, credentialEnvironment: () => env.credentialEnvironment, productionApproved: () => env.productionApproved, writesEnabled: () => false, clientId: () => env.currentClientId, clientSecret: () => 'fixture-platform-secret', redirectUri: () => 'https://example.invalid/rlQuickBooksOAuthCallback', appUrl: () => 'https://example.invalid', webhookSecret: () => 'fixture-platform-verifier' };
   const transport = async (url, options) => {
     calls.push({ url, method: options.method, body: options.body, authorization: options.headers.Authorization });
@@ -30,7 +30,7 @@ async function fixture({ connect = true } = {}) {
       const version = ++env.tokenCount;
       return { ok: true, json: async () => ({ access_token: `fixture-access-${prefix}-${version}`, refresh_token: `fixture-refresh-${prefix}-${version}`, expires_in: 3600, x_refresh_token_expires_in: 8640000 }) };
     }
-    if (url.includes('/tokens/revoke')) { if (gates.revoke) await gates.revoke(); return env.revokeFailure ? { ok: false, status: 400, json: async () => ({ error: 'invalid_token' }) } : { ok: true, status: 200, json: async () => ({}) }; }
+    if (url.includes('/tokens/revoke')) { if (gates.revoke) await gates.revoke(); if (env.revokeTimeout) throw new DOMException('Synthetic provider deadline', 'TimeoutError'); return env.revokeFailure ? { ok: false, status: 400, json: async () => ({ error: 'invalid_token' }) } : new Response('', { status: 200 }); }
     const match = new URL(url).pathname.match(/\/v3\/company\/(\d+)\/(\w+)(?:\/(\d+))?/), realm = match?.[1], type = match?.[2], id = match?.[3] || '77';
     if (type === 'companyinfo') {
       assert.equal(new URL(url).hostname, env.environment === 'production' ? 'quickbooks.api.intuit.com' : 'sandbox-quickbooks.api.intuit.com');
@@ -122,9 +122,40 @@ test('disconnect fences provider revocation before allowing another owner author
   assert.equal(disconnected.disconnected, true); assert.ok(connected(await f.authorize('A', 'after-disconnect'))); assert.equal((await f.connection('A').get()).get('connected'), true);
 });
 
+test('empty-body revocation success clears local tokens and permits immediate owner reconnect', async () => {
+  const f = await fixture(), previous = (await f.connection('A').get()).data(), other = (await f.connection('B').get()).get('refreshToken');
+  const result = await f.handlers.disconnect(f.request('A'));
+  assert.deepEqual(result, { disconnected: true });
+  const call = f.calls.find(row => row.url.includes('/tokens/revoke'));
+  assert.equal(call.url, 'https://developer.api.intuit.com/v2/oauth2/tokens/revoke'); assert.equal(call.method, 'POST');
+  assert.equal(call.authorization, 'Basic ' + Buffer.from(f.env.currentClientId + ':fixture-platform-secret').toString('base64'));
+  assert.deepEqual(JSON.parse(call.body), { token: previous.refreshToken });
+  const state = (await f.connection('A').get()).data(), status = await f.handlers.status(f.request('A'));
+  assert.equal(state.connected, false); assert.equal(state.accessToken, null); assert.equal(state.refreshToken, null); assert.notEqual(state.connectionId, previous.connectionId);
+  assert.equal(status.disconnecting, false); assert.equal(status.disconnectWarning, null); assert.equal(status.disconnectRetryAfterMs, 0);
+  const realms = await db.collection('rlQbRealms').where('companyId','==',f.identities.A.companyId).get(); assert.equal(realms.docs[0].get('active'), false);
+  const audit = await db.collection('rlQbAudit').where('companyId','==',f.identities.A.companyId).where('action','==','oauth.revocation').get();
+  assert.equal(audit.size, 1); assert.equal(audit.docs[0].get('httpStatus'), 200); assert.equal(audit.docs[0].get('outcome'), 'confirmed'); assert.equal(audit.docs[0].get('failureCategory'), null);
+  assert.ok(connected(await f.authorize('A', 'after-empty-response'))); assert.equal((await f.connection('B').get()).get('refreshToken'), other);
+});
+
+test('revocation timeout keeps local tokens invalid and reconnect fenced only until its safety lease expires', async () => {
+  const f = await fixture(); f.env.revokeTimeout = true;
+  const result = await f.handlers.disconnect(f.request('A')); assert.match(result.warning, /disconnected in Route Logistics/);
+  const state = (await f.connection('A').get()).data(), status = await f.handlers.status(f.request('A'));
+  assert.equal(state.connected, false); assert.equal(state.accessToken, null); assert.equal(state.refreshToken, null);
+  assert.equal(status.disconnecting, true); assert.ok(status.disconnectRetryAfterMs > 0 && status.disconnectRetryAfterMs <= 60000);
+  await assert.rejects(f.begin('A'), { code:'unavailable' });
+  const audit = await db.collection('rlQbAudit').where('companyId','==',f.identities.A.companyId).where('action','==','oauth.revocation').get();
+  assert.equal(audit.docs[0].get('outcome'), 'unconfirmed'); assert.equal(audit.docs[0].get('httpStatus'), null); assert.equal(audit.docs[0].get('failureCategory'), 'timeout');
+  const intent = db.doc(`rlQbOAuthIntents/${mappingId(f.identities.A.companyId,'sandbox','authorization','current')}`); await intent.update({ disconnectLeaseUntil:Date.now()-1 });
+  assert.equal((await f.handlers.status(f.request('A'))).disconnecting, false); f.env.revokeTimeout = false; assert.ok(await f.begin('A'));
+});
+
 test('an already-invalid provider grant cannot prevent local disconnect or owner reconnect', async () => {
   const f = await fixture(); f.env.revokeFailure = true;
   assert.equal((await f.handlers.disconnect(f.request('A'))).disconnected, true); assert.equal((await f.connection('A').get()).get('connected'), false);
+  const audit = await db.collection('rlQbAudit').where('companyId','==',f.identities.A.companyId).where('action','==','oauth.revocation').get(); assert.equal(audit.docs[0].get('httpStatus'), 400); assert.equal(audit.docs[0].get('failureCategory'), 'http-error');
   f.env.revokeFailure = false; assert.ok(connected(await f.authorize('A', 'recover-invalid-grant')));
 });
 

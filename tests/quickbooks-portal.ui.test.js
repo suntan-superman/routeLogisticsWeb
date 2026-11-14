@@ -97,7 +97,46 @@ test('pending disconnect confirmation cannot mutate a newly selected tenant', as
 test('an in-progress disconnect blocks competing connect actions and keeps status refresh available', async () => {
   reset(); env.status.set('company-a', result('company-a', { disconnecting: true })); await render();
   assert.equal(button('Reconnect').props.disabled, true); assert.equal(button('Disconnect').props.disabled, true);
-  assert.equal(button('Refresh connection status').props.disabled, false); assert.match(text(), /finishing a disconnect/);
+  assert.equal(button('Refresh connection status').props.disabled, false); assert.match(text(), /previous revocation request settles/);
+});
+
+test('disconnect safety wait refreshes at the server duration and enables owner reconnect without another click', async t => {
+  reset(); t.mock.timers.enable({ apis: ['setTimeout'] });
+  env.status.set('company-a', result('company-a', { connected: false, disconnecting: true, disconnectRetryAfterMs: 60000, health: 'disconnecting' })); await render();
+  assert.equal(button('Connect QuickBooks').props.disabled, true);
+  env.status.set('company-a', result('company-a', { connected: false, disconnecting: false, disconnectRetryAfterMs: 0, health: 'disconnected' }));
+  await act(async () => t.mock.timers.tick(59999));
+  assert.equal(env.calls.filter(call => call.name === 'Status').length, 1);
+  await act(async () => t.mock.timers.tick(1)); await act(settle);
+  assert.equal(env.calls.filter(call => call.name === 'Status').length, 2);
+  assert.equal(button('Connect QuickBooks').props.disabled, false); assert.doesNotMatch(text(), /previous revocation request settles/);
+  assert.equal(env.calls.some(call => call.name === 'Connect'), false);
+});
+
+test('disconnect safety refresh is cancelled when the owner changes company', async t => {
+  reset(); t.mock.timers.enable({ apis: ['setTimeout'] });
+  env.status.set('company-a', result('company-a', { connected: false, disconnecting: true, disconnectRetryAfterMs: 60000 })); await render();
+  env.company = 'company-b'; env.uid = 'owner-b'; await update();
+  await act(async () => t.mock.timers.tick(60000)); await act(settle);
+  assert.equal(env.calls.filter(call => call.name === 'Status' && call.company === 'company-a').length, 1);
+  assert.equal(env.calls.filter(call => call.name === 'Status' && call.company === 'company-b').length, 1);
+  assert.match(text(), /company-b QuickBooks/); assert.doesNotMatch(text(), /previous revocation request settles/);
+});
+
+test('disconnect safety refresh is cancelled when the portal unmounts', async t => {
+  reset(); t.mock.timers.enable({ apis: ['setTimeout'] });
+  env.status.set('company-a', result('company-a', { connected: false, disconnecting: true, disconnectRetryAfterMs: 60000 })); await render();
+  await act(async () => tree.unmount()); tree = null;
+  await act(async () => t.mock.timers.tick(60000)); await act(settle);
+  assert.equal(env.calls.filter(call => call.name === 'Status').length, 1);
+});
+
+test('a stored revocation warning is displayed once after disconnect', async () => {
+  reset(); await render();
+  const warning = 'Disconnected locally; provider revocation could not be confirmed.';
+  env.status.set('company-a', result('company-a', { connected: false, disconnecting: false, health: 'disconnected', disconnectWarning: warning }));
+  await act(async () => button('Disconnect').props.onClick()); await act(settle);
+  assert.equal(text().split(warning).length - 1, 1);
 });
 
 test('a failed initial status request remains visibly retryable without a connection record', async () => {

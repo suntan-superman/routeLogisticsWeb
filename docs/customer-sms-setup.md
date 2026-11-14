@@ -1,6 +1,6 @@
 # Customer SMS configuration
 
-Broad automated customer delivery remains disabled. Existing phone numbers and notification preferences never constitute SMS consent. The verified one-message delivery test is separate from the narrowly scoped pilot described below, which is prepared but inactive pending fresh provider opt-out acceptance.
+Broad automated customer delivery remains disabled. Existing phone numbers and notification preferences never constitute SMS consent. Genuine provider STOP/START acceptance and independent renewed consent passed; only the authorized test-customer pilot described below is active.
 
 Keep these outbound Functions gates disabled during the controlled test:
 
@@ -64,7 +64,7 @@ Use a dedicated RL webhook sink/subscription for `com.twilio.messaging.inbound-m
 
 The receiver accepts batches, verifies account/receiving sender, and forwards only classified STOP/START events for known RL recipient bindings. It discards unrelated messages without retaining their body or creating another application's recipient records. START/UNSTOP are the only accepted toll-free unblock keywords; YES and SUBSCRIBE do not prove carrier re-opt-in. The transactional reducer deduplicates provider message IDs, orders by provider timestamps and keeps STOP on timestamp ties. Provider suppression spans RL tenants sharing the sender, while consent and message history remain tenant-specific. Event Streams delivery is asynchronous and may be duplicated or out of order; provider-side filtering remains the final delivery guard.
 
-Fresh physical-handset STOP → START verification is **pending**. An emulator event, a self-signed probe or the earlier successful outbound message is not evidence that this new provider synchronization passed.
+Fresh physical-handset STOP → START verification **passed November 14, 2026**. Genuine signed Twilio events returned HTTP 200 and agreed with handset-confirmed acknowledgements. STOP blocked the recipient, stopped RL consent and cancelled the dedicated queued test with zero provider attempts. START cleared provider suppression only: RL consent stayed stopped and the cancelled row did not revive. The operator then independently renewed the four purposes before pilot activation. This provider result is separate from emulator/self-signed tests and the earlier outbound delivery result.
 
 The RL worker supplies each message's status callback automatically:
 
@@ -103,7 +103,7 @@ Both immediate provider rejection and a genuine signed asynchronous failure with
 
 The owner explicitly approved appointment confirmations, pre-visit reminders, technician en-route notifications and service-completion messages for the previously authorized test number on November 14, 2026. That approval does not cover optional `service-follow-up` messages or any other customer.
 
-The current private pilot is **prepared/inactive**. Dedicated customer `rl-sms-pilot-20261114` is an inactive synthetic record; the pre-existing 508 customer records remain intact. Initial purpose-specific consent is recorded separately from provider state. No fresh handset STOP/START result or active pilot approval is claimed.
+The current private pilot is **active for the dedicated test customer only**. Customer `rl-sms-pilot-20261114` is explicitly marked synthetic/test-only; the pre-existing 508 customer records remain intact. Real STOP/START acceptance and fresh independent four-purpose consent were verified before activation. The pilot expires **November 15, 2026 at 11:07 AM Pacific**, with **four RL messages total**; the setup message used one reservation, leaving three. Optional service follow-up is excluded. No real job was created or changed.
 
 Pilot runtime configuration can be deployed while all broad gates remain false:
 
@@ -120,6 +120,6 @@ Only after the fresh physical STOP/START sequence and independently renewed RL c
 
 ## Verification performed without real SMS
 
-Automated tests use synthetic credentials, stub transports and the local `demo-routelogistics` emulator. They cover disabled gates, current role/tenant checks, scoped consent, STOP/START/HELP, shared-number ambiguity, queue deduplication, schedule changes, immediate/asynchronous provider opt-out, rate-limit retry, ambiguous acceptance and signed status reconciliation. The readiness run passed 75 Functions tests with one unrelated native-push emulator skip, all 31 SMS/pilot emulator tests (21 consent/delivery plus 10 pilot tests), nine SMS/settings UI tests and the web build. Eight Event Streams unit tests are included in the Functions count. Pilot tests verify atomic caps, expiry, independent re-consent, queued-message cancellation, scheduler isolation and tenant/customer/phone enforcement. Fresh physical provider acceptance remains pending. No Twilio campaign registration or customer text is performed by emulator/unit tests.
+Automated tests use synthetic credentials, stub transports and the local `demo-routelogistics` emulator. They cover disabled gates, current role/tenant checks, scoped consent, STOP/START/HELP, shared-number ambiguity, queue deduplication, schedule changes, immediate/asynchronous provider opt-out, rate-limit retry, ambiguous acceptance and signed status reconciliation. The readiness run passed 75 Functions tests with one unrelated native-push emulator skip, all 31 SMS/pilot emulator tests (21 consent/delivery plus 10 pilot tests), nine SMS/settings UI tests and the web build. Eight Event Streams unit tests are included in the Functions count. Pilot tests verify atomic caps, expiry, independent re-consent, queued-message cancellation, scheduler isolation and tenant/customer/phone enforcement. The separately executed real provider acceptance is recorded above; emulator/unit tests do not contact Twilio or send messages.
 
 Primary provider references: [webhook security](https://www.twilio.com/docs/usage/webhooks/webhooks-security), [Advanced Opt-Out and toll-free keywords](https://www.twilio.com/docs/messaging/tutorials/advanced-opt-out), [delivery-status callbacks](https://www.twilio.com/docs/messaging/guides/outbound-message-status-in-status-callbacks), [Event Streams webhook setup](https://www.twilio.com/docs/events/webhook-quickstart), [provider opt-out classification](https://help.twilio.com/articles/31560110671259-How-to-Track-Opt-Out-Opt-In-and-Help-Messages-Using-the-OptOutType-Parameter), [retry and duplicate handling](https://www.twilio.com/docs/events/event-delivery-and-duplication).

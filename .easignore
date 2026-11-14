@@ -1,5 +1,14 @@
 # EAS reads this repository-root file instead of all .gitignore files.
-# Keep the shared capability policy: mobile imports functions/shared/capabilities.json.
+# Run EAS in routeLogisticsMobile; normal Git discovery uploads this parent tree.
+# Keep all shared mobile helpers while excluding unrelated applications/docs/server code.
+/routeLogisticsWeb/
+/docs/
+/scripts/
+/tests/
+/.github/
+/functions/*
+!/functions/shared
+
 node_modules/
 .git/
 .aws/

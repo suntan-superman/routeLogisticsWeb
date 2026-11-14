@@ -95,21 +95,16 @@ Run from the existing main checkout after pulling this release:
 ```powershell
 Set-Location C:\Users\sjroy\Source\routeLogistics
 git pull --ff-only origin main
-$env:EAS_PROJECT_ROOT = (Get-Location).Path
-$env:EAS_NO_VCS = '1'
-$env:EXPO_APPLE_TEAM_ID = 'AXCZ2G99P6'
-$env:EXPO_APPLE_TEAM_TYPE = 'COMPANY_OR_ORGANIZATION'
 Remove-Item Env:DEBUG -ErrorAction SilentlyContinue
 Set-Location routeLogisticsMobile
 npm ci
 npx expo-doctor
-npx eas-cli build --platform ios --profile production
-npx eas-cli submit --platform ios --profile production --latest
+eas build --platform ios --auto-submit
 # Android, after configuring its FCM v1 credential:
 npx eas-cli build --platform android --profile production
 ```
 
-The repository-root EAS settings keep the existing project despite the pre-existing nested mobile Git metadata. For a Mac local Xcode build, pull main, run `npm ci` in `routeLogisticsMobile`, run `npm run ios:prepare`, open the generated `.xcworkspace`, select Workside Software LLC and the approved bundle ID, and build/archive. Do not restore an old generated native project or old signing profile. A different iOS bundle ID is a separate app container; existing offline files/preferences are not automatically migrated.
+Normal EAS Git discovery includes the parent repository and shared helpers; no root/no-VCS environment overrides are required. If an older checkout still contains a nested mobile `.git`, use the one-time preservation/cleanup instructions in [corporate signing](ios-corporate-signing.md). Choose Workside Software LLC / `AXCZ2G99P6` during first-time Apple authentication if prompted. For a Mac local Xcode build, pull main, run `npm ci` in `routeLogisticsMobile`, run `npm run ios:prepare`, open the generated `.xcworkspace`, select Workside Software LLC and the approved bundle ID, and build/archive. Do not restore an old generated native project or old signing profile. A different iOS bundle ID is a separate app container; existing offline files/preferences are not automatically migrated.
 
 ## Validation and release evidence
 

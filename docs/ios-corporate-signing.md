@@ -33,23 +33,38 @@ The submit profile specifies the corporate team, company name and new bundle ide
 | --- | --- |
 | Firebase | Modular Firebase JavaScript SDK with the existing registered web-app client configuration and AsyncStorage Auth persistence. No native Firebase module/plist is used. No new Firebase iOS registration or project is required. |
 | Native targets | Native directories are generated and untracked. EAS regenerates them from the current config; corporate team selection applies to native target build configurations. |
-| Entitlements | No manually configured application identifier, keychain access group, associated domain, Sign in with Apple or APNs entitlement exists. Signing supplies its own application/team identity. |
+| Entitlements | No manually configured application identifier, keychain access group, associated domain or Sign in with Apple entitlement exists. Expo Notifications supplies its APNs capability; signing supplies application/team identity. |
 | Background work | Existing location/background modes, permission descriptions and TaskManager registration are retained. Fresh device permission is required for the new app identity. |
 | URL schemes | No explicit custom scheme or incoming-link handler is implemented. Expo introspection generates `com.worksidesoftware.routelogisticsapp`. No current auth/invitation flow relies on the old scheme. |
 | Authentication | Password, email OTP and browser email verification retain the existing Firebase accounts and company authorization. No native Google/Apple OAuth client or bundle-dependent redirect is configured. |
-| Push | Native APNs/FCM/Expo push registration is not implemented. Settings saves a notification preference only. Existing web FCM/backend notifications are unchanged. No personal-team APNs key is copied. |
+| Push | Expo native push is configured by the commercial-readiness release. Delivery remains gated pending credentials/device verification. Existing notification configuration is preserved by this cleanup; no personal-team APNs key is copied. |
 | Maps/payments | Mobile navigation hands off to Maps; no iOS Maps-key restriction, Apple Pay merchant identifier or native Stripe entitlement is configured. Existing web/provider configuration remains unchanged. |
 | Backend/web | No backend, rules, customer records, web code, or mi Factotum changes are required or deployed. |
 
-Firebase's JS-only setup is documented in [Expo's Firebase guide](https://docs.expo.dev/guides/using-firebase/). Native push, if introduced later, will require separate corporate Apple/Firebase configuration.
+Firebase's JS setup is documented in [Expo's Firebase guide](https://docs.expo.dev/guides/using-firebase/). See [commercial readiness](commercial-readiness.md) for the existing native push credential requirements.
 
-## Upload-root handling
+## Normal EAS workflow
 
-This Windows checkout contains an existing nested `routeLogisticsMobile/.git` in addition to the parent repository. Building from that nested Git root would omit `functions/shared/capabilities.json`, which mobile imports. Neither repository is deleted, moved, initialized or rewritten.
+Run EAS directly from `routeLogisticsMobile`, where `eas.json` and the Expo config live. EAS discovers the parent Git repository and includes the required `functions/shared` helpers automatically. No `EAS_PROJECT_ROOT` or `EAS_NO_VCS` override is needed. This follows [Expo's normal monorepo workflow](https://docs.expo.dev/build-reference/build-with-monorepos/).
 
-The commands below explicitly use the absolute parent directory as `EAS_PROJECT_ROOT` with supported `EAS_NO_VCS=1` packaging. The builder application directory remains `routeLogisticsMobile`. Verify and update parent `main` first; no-VCS upload does not attach Git branch/commit metadata to the build. See [Expo's no-VCS upload workflow](https://docs.expo.dev/build-reference/project-upload/#no-vcs-workflow).
+The old Windows workaround was caused by an accidental nested `routeLogisticsMobile/.git`. Its complete metadata/history is now preserved under ignored `.migration/eas-mobile-git-backup-*`, outside the app's Git discovery path. No history was deleted and no branch was created. Fresh clones of the parent repository do not contain that untracked nested metadata.
 
-Repository-root `.easignore` preserves required source/shared policy and excludes both `.git` directories, generated native projects, environment files, local audits, signing keys, service-account credentials and build/cache output. A `.easignore` replaces Git ignore rules, so its exclusions are explicit. [Expo archive rules](https://docs.expo.dev/build-reference/easignore/)
+If another existing checkout has the same nested metadata, preserve it outside the mobile directory once before building. From the parent checkout on the Mac:
+
+```sh
+git branch --show-current
+mkdir -p .migration
+if [ -d routeLogisticsMobile/.git ]; then
+  mv routeLogisticsMobile/.git ".migration/mobile-git-backup-$(date +%Y%m%d%H%M%S)"
+fi
+cd routeLogisticsMobile
+git rev-parse --show-toplevel
+unset EAS_PROJECT_ROOT EAS_NO_VCS
+```
+
+The detected root must be the parent Route Logistics repository on `main`. Remove any old exports of these overrides from the shell profile as well. This one-time repair is unnecessary in a normal fresh clone.
+
+Repository-root `.easignore` keeps the mobile app and all required shared helpers while excluding unrelated web/backend code and documentation, generated native projects, environment files, local audits, signing keys, service-account credentials and build/cache output. Both Git ignore files remain intact; no npm workspace manager or build wrapper is needed. [Expo archive rules](https://docs.expo.dev/build-reference/easignore/)
 
 ## Before switching apps
 
@@ -68,38 +83,25 @@ Set-Location -LiteralPath 'C:\Users\sjroy\Source\routeLogistics'
 git switch main
 git pull --ff-only origin main
 
-# Use the parent source tree even if this checkout has a nested mobile .git.
-$env:EAS_PROJECT_ROOT = (Get-Location).Path
-$env:EAS_NO_VCS = '1'
-
-# These are public team metadata, not passwords or signing keys.
-$env:EXPO_APPLE_TEAM_ID = 'AXCZ2G99P6'
-$env:EXPO_APPLE_TEAM_TYPE = 'COMPANY_OR_ORGANIZATION'
+# Clear old workaround overrides once if they are still set.
+Remove-Item Env:EAS_PROJECT_ROOT, Env:EAS_NO_VCS -ErrorAction SilentlyContinue
 Remove-Item Env:DEBUG -ErrorAction SilentlyContinue
 
 Set-Location -LiteralPath '.\routeLogisticsMobile'
 npm ci
-npx --yes eas-cli@27.10.0 login
-npx --yes eas-cli@27.10.0 project:info
-npx --yes eas-cli@27.10.0 config --platform ios --profile production
-npx --yes eas-cli@27.10.0 build --platform ios --profile production --wait
+eas login
+eas project:info
+eas config --platform ios --profile production
+eas build --platform ios --auto-submit
 ```
 
 Log into Expo as `sjroy5`. Project info must show `@sjroy5/route-logistics` and the existing EAS UUID above. Complete Apple authentication locally with a user authorized for **Workside Software LLC / AXCZ2G99P6**. The first corporate build needs the explicit new Apple App ID and a matching corporate distribution certificate/App Store provisioning profile. EAS can guide this setup. Retain existing personal/other-app credentials; use the corporate credentials for this new app.
 
-The shell team variables matter: EAS CLI's Apple credential authentication can otherwise use a cached team independently of the native `ios.appleTeamId`. [Expo Apple authentication settings](https://docs.expo.dev/build/building-on-ci/#optional-provide-an-asc-api-token-for-your-apple-team)
+The omitted profile defaults to `production`; `--auto-submit` uses the matching `submit.production` profile and submits this exact new build. No separate build UUID or submit command is required. Native configuration retains Team `AXCZ2G99P6`, and the submission profile explicitly selects the same team and approved bundle ID.
 
-After the build succeeds, copy the UUID from **that new corporate build** and submit it explicitly:
+On first Apple authentication, choose **Workside Software LLC / AXCZ2G99P6** if prompted; a cached Apple login can select a team independently of native configuration. First-time App Store Connect app/API-key setup remains interactive. The real numeric `ascAppId` can be added later for unattended submission; it is not needed for this interactive command. Do not add `--non-interactive` before that setup is complete, or store passwords/signing keys in Git or chat.
 
-```powershell
-$iosBuildId = Read-Host 'Paste the UUID of the new corporate iOS production build'
-npx --yes eas-cli@27.10.0 build:view $iosBuildId
-npx --yes eas-cli@27.10.0 submit --platform ios --profile production --id $iosBuildId --wait
-```
-
-Verify the selected build uses `com.worksidesoftware.routelogisticsapp`, then choose/create its corporate App Store Connect record. Avoid `--latest` during this migration because the preserved EAS project also contains older app identities. First-time Apple/app/API-key setup is interactive; do not add `--non-interactive` before it is configured. No passwords, `.p8` keys, certificates or provisioning files belong in Git or chat.
-
-Successful submission uploads to App Store Connect/TestFlight; Apple processing and test-group setup remain. It does not publish an App Store release. See [Expo iOS submission](https://docs.expo.dev/submit/ios/). Once configured, a future build and submission can be coupled with `npx --yes eas-cli@27.10.0 build --platform ios --profile production --auto-submit-with-profile production --wait` using the same corporate/root shell settings.
+Successful auto-submission uploads to App Store Connect/TestFlight; Apple processing and test-group setup remain. It does not publish an App Store release. See [Expo automated submission](https://docs.expo.dev/build/automate-submissions/).
 
 ## Existing Mac native project
 
@@ -107,8 +109,8 @@ If continuing local Xcode development, preserve intentional native customization
 
 ## Verification and remaining operator steps
 
-Validation passed: **132 mobile tests**, **Expo Doctor 18/18**, and the iOS Hermes export. Authenticated EAS project metadata confirms `@sjroy5/route-logistics` and the unchanged project UUID. EAS 27.10 resolved the corporate iOS team/bundle, store distribution, Release/device profile, remote credentials, auto-increment and the pinned Xcode 26.0 image. Expo introspection confirms the new URL scheme, preserved background modes and empty custom entitlements.
+The simplified workflow was validated using EAS 27.10 without either root/no-VCS override: normal Git discovery from the mobile directory, authenticated production configuration, and default build/submission profiles both resolving to `production`. Expo Doctor passed **18/18** checks. The resolved configuration preserves `@sjroy5/route-logistics`, the existing EAS UUID, corporate iOS team/bundle, Android package, store distribution, Release/device profile, remote credentials, auto-increment and pinned Xcode 26.0 image. No application code or infrastructure was changed.
 
-The actual local EAS upload archive includes `functions/shared/capabilities.json` and the mobile config, and excludes both Git directories, generated iOS files, server environment files, credential files and local audit output. Local evidence is retained under ignored `.migration/corporate-*` paths. A local Windows iOS prebuild is intentionally unsupported by Expo; no signed native build or TestFlight submission is claimed.
+The actual default-Git local upload archive passed checks for nine required app/shared files and twelve excluded private/generated/unrelated paths. The nested Git backup is excluded; root Git commit metadata is retained by the normal EAS workflow. Local validation evidence is under ignored `.migration/eas-simple-*` paths. No cloud build, Apple credential setup or TestFlight submission was triggered.
 
 Remaining external steps are corporate Apple authentication/membership, registration of the new explicit App ID when prompted, corporate signing/provisioning, the new corporate App Store Connect record/optional numeric `ascAppId`, the actual signed cloud build, and TestFlight processing/device testing. No new Firebase registration or backend deployment is a prerequisite.

@@ -88,6 +88,29 @@ function quickBooksHandlers(db, config, transport = fetch) {
     if (ownerUid) { const company = await tx.get(db.doc(`companies/${companyId}`)); if (company.get('ownerId') !== ownerUid) throw new HttpsError('permission-denied', 'Only the current company owner can manage accounting.'); }
     return latest;
   }
+  async function accountingOptions(companyId, current, type) {
+    const pageSize = 1000, maximum = 10000, found = new Map();
+    const filter = type === 'Account' ? "Active = true AND AccountType IN ('Income', 'Other Income')" : "Active = true AND Type = 'Service'";
+    for (let start = 1; start <= maximum + 1; start += pageSize) {
+      const statement = `SELECT * FROM ${type} WHERE ${filter} ORDERBY Name STARTPOSITION ${start} MAXRESULTS ${pageSize}`;
+      const data = await api(companyId, `query?query=${encodeURIComponent(statement)}`, undefined, undefined, current);
+      if (!data?.QueryResponse || typeof data.QueryResponse !== 'object' || Array.isArray(data.QueryResponse)) throw new HttpsError('unavailable', 'QuickBooks returned incomplete accounting options. Retry the lookup.');
+      const rows = data.QueryResponse[type] === undefined ? [] : data.QueryResponse[type];
+      if (!Array.isArray(rows) || rows.length > pageSize) throw new HttpsError('unavailable', 'QuickBooks returned incomplete accounting options. Retry the lookup.');
+      if (start + rows.length - 1 > maximum) throw new HttpsError('resource-exhausted', 'There are too many accounting options to load safely. Contact support.');
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') throw new HttpsError('unavailable', 'QuickBooks returned incomplete accounting options. Retry the lookup.');
+        if (row.Active !== true || (type === 'Account' ? !['Income', 'Other Income'].includes(row.AccountType) : row.Type !== 'Service')) continue;
+        if (!/^\d{1,30}$/.test(String(row.Id || '')) || typeof row.Name !== 'string' || !row.Name.trim()) throw new HttpsError('unavailable', 'QuickBooks returned an accounting option without a valid name. Retry the lookup.');
+        const option = { id: String(row.Id), name: row.Name.trim().slice(0,500), qualifiedName: String(row.FullyQualifiedName || row.Name).trim().slice(0,1000) };
+        if (type === 'Account') Object.assign(option, { accountType: row.AccountType, ...(typeof row.AcctNum === 'string' && row.AcctNum ? { accountNumber: row.AcctNum.slice(0,100) } : {}) });
+        else if (typeof row.Description === 'string' && row.Description.trim()) option.description = row.Description.trim().slice(0,500);
+        found.set(option.id, option);
+      }
+      if (rows.length < pageSize) return [...found.values()].sort((a,b) => a.qualifiedName.localeCompare(b.qualifiedName, 'en', { sensitivity: 'base' }) || a.id.localeCompare(b.id));
+    }
+    throw new HttpsError('resource-exhausted', 'There are too many accounting options to load safely. Contact support.');
+  }
   const oauthFailure = code => Object.assign(new HttpsError('failed-precondition', 'QuickBooks authorization could not be completed. Reconnect from Company integrations.'), { qbCode: code });
   async function finishOAuthFailure(identity, code) {
     if (!identity?.attemptId) return;
@@ -200,10 +223,10 @@ function quickBooksHandlers(db, config, transport = fetch) {
         : reconnectRequired ? 'reconnect-required' : snap.get('accessExpiresAt') <= Date.now() ? 'refresh-needed' : 'connected';
       return { enabled: enabled() && productionApproved() && credentialEnvironment() === environment(), configured: enabled(), environment: environment(), productionApproved: config.productionApproved?.() === true, environmentReady: productionApproved(),
         writesEnabled: enabled() && config.writesEnabled?.() === true && productionApproved() && !credentialMismatch, connected, health,
-        realmId: snap.get('realmId') || null, companyName: snap.get('companyName') || null, credentialMismatch, reconnectRequired, disconnecting, disconnectRetryAfterMs, disconnectWarning: snap.get('disconnectWarning') || null,
+        realmId: snap.get('realmId') || null, companyName: snap.get('companyName') || null, connectionId: snap.get('connectionId') || null, credentialMismatch, reconnectRequired, disconnecting, disconnectRetryAfterMs, disconnectWarning: snap.get('disconnectWarning') || null,
         lastError: snap.get('lastError') || intent.get('lastError') || null,
         accessExpiresAt: snap.get('accessExpiresAt') || null, refreshExpiresAt: snap.get('refreshExpiresAt') || null,
-        incomeAccountId: snap.get('incomeAccountId') || '', defaultItemId: snap.get('defaultItemId') || '',
+        incomeAccountId: snap.get('incomeAccountId') || '', defaultItemId: snap.get('defaultItemId') || '', incomeAccountName: snap.get('incomeAccountId') ? snap.get('incomeAccountName') || null : null, defaultItemName: snap.get('defaultItemId') ? snap.get('defaultItemName') || null : null,
         mappings: maps.docs.map(row => ({ type: row.get('type'), localId: row.get('localId'), remoteId: row.get('remoteId'), status: row.get('status'), lastSyncedAt: row.get('lastSyncedAt') || null })),
         operations: operations.docs.map(row => ({ id: row.id, type: row.get('type'), localId: row.get('localId'), status: row.get('status'), error: row.get('error') || null, attempts: row.get('attempts') || 0 })),
         webhookEvents: events.docs.map(row => ({ id: row.id, type: row.get('type'), status: row.get('status'), error: row.get('error') || null, attempts: row.get('attempts') || 0 })),
@@ -308,7 +331,22 @@ function quickBooksHandlers(db, config, transport = fetch) {
       });
       return { disconnected: true, ...(warning ? { warning } : {}) };
     },
-    settings: async request => { const companyId = await scope(request, true), current = await connection(companyId); const incomeAccountId = remoteId(request.data?.incomeAccountId), defaultItemId = remoteId(request.data?.defaultItemId); const account = (await api(companyId, `account/${incomeAccountId}`, undefined, undefined, current)).Account, item = (await api(companyId, `item/${defaultItemId}`, undefined, undefined, current)).Item; if (!['Income', 'Other Income'].includes(account.AccountType) || account.Active === false || item.Active === false || item.Type !== 'Service') throw new HttpsError('invalid-argument', 'Choose an active income account and service item.'); await db.runTransaction(async tx => { await checkCurrent(tx, companyId, current, request.auth.uid); tx.update(connectionRef(companyId), { incomeAccountId, defaultItemId }); }); return { saved: true }; },
+    options: async request => {
+      const companyId = await scope(request, true), current = await connection(companyId);
+      const [accounts, items] = await Promise.all([accountingOptions(companyId, current, 'Account'), accountingOptions(companyId, current, 'Item')]);
+      const latest = await db.runTransaction(tx => checkCurrent(tx, companyId, current, request.auth.uid));
+      return { accounts, items, incomeAccountId: latest.get('incomeAccountId') || '', defaultItemId: latest.get('defaultItemId') || '', connectionId: current.connectionId };
+    },
+    settings: async request => {
+      const companyId = await scope(request, true), current = await connection(companyId);
+      if (request.data?.connectionId !== undefined && request.data.connectionId !== current.connectionId) throw new HttpsError('aborted', 'The accounting connection changed. Refresh the available options before saving.');
+      const incomeAccountId = remoteId(request.data?.incomeAccountId), defaultItemId = remoteId(request.data?.defaultItemId);
+      const account = (await api(companyId, `account/${incomeAccountId}`, undefined, undefined, current))?.Account, item = (await api(companyId, `item/${defaultItemId}`, undefined, undefined, current))?.Item;
+      if (String(account?.Id) !== incomeAccountId || String(item?.Id) !== defaultItemId || account.Active !== true || !['Income', 'Other Income'].includes(account.AccountType) || item.Active !== true || item.Type !== 'Service' || typeof account.Name !== 'string' || !account.Name.trim() || typeof item.Name !== 'string' || !item.Name.trim()) throw new HttpsError('invalid-argument', 'Choose an active income account and service item from the connected QuickBooks company.');
+      const selection = { incomeAccountId, defaultItemId, incomeAccountName: String(account.FullyQualifiedName || account.Name).slice(0,1000), defaultItemName: String(item.FullyQualifiedName || item.Name).slice(0,1000) };
+      await db.runTransaction(async tx => { await checkCurrent(tx, companyId, current, request.auth.uid); tx.update(connectionRef(companyId), selection); });
+      return { saved: true, ...selection, connectionId: current.connectionId };
+    },
     adopt: async request => {
       const companyId = await scope(request, true), { type, localId } = request.data || {}, id = remoteId(request.data?.remoteId), local = await source(companyId, type, localId);
       const current = await connection(companyId), remote = (await api(companyId, `${type.toLowerCase()}/${id}`, undefined, undefined, current))[type];

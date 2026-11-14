@@ -8,9 +8,10 @@ global.IS_REACT_ACT_ENVIRONMENT = true;
 let tree, env;
 const settle = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
-const result = (company, patch = {}) => ({ enabled: true, environment: 'sandbox', writesEnabled: false, productionApproved: false, connected: true, realmId: `${company}-realm`, companyName: `${company} QuickBooks`, health: 'connected', incomeAccountId: '12', defaultItemId: '34', mappings: [{ type: 'Customer', localId: `${company}-customer`, remoteId: '123', status: 'synced' }], operations: [], webhookEvents: [], ...patch });
+const result = (company, patch = {}) => ({ enabled: true, environment: 'sandbox', writesEnabled: false, productionApproved: false, connected: true, connectionId: `${company}-connection-1`, realmId: `${company}-realm`, companyName: `${company} QuickBooks`, health: 'connected', incomeAccountId: '12', defaultItemId: '34', mappings: [{ type: 'Customer', localId: `${company}-customer`, remoteId: '123', status: 'synced' }], operations: [], webhookEvents: [], ...patch });
+const catalog = (company, patch = {}) => ({ accounts: [{ id: '12', name: `${company} Field income`, qualifiedName: `${company} Services:Field income`, accountType: 'Income', accountNumber: '4000' }, { id: '56', name: `${company} Other services`, qualifiedName: `${company} Services:Other income`, accountType: 'Other Income' }], items: [{ id: '34', name: `${company} General pest service`, qualifiedName: `${company} Services:General pest`, description: 'Routine property service' }, { id: '78', name: `${company} Inspection`, qualifiedName: `${company} Services:Inspection`, description: 'Property inspection visit' }], incomeAccountId: '12', defaultItemId: '34', connectionId: `${company}-connection-1`, ...patch });
 function reset(role = 'owner') {
-  env = { uid: 'owner-a', company: 'company-a', role, membershipId: null, calls: [], redirects: [], replacements: [], status: new Map(), records: new Map(), confirmations: [], confirm: async () => true, connect: null };
+  env = { uid: 'owner-a', company: 'company-a', role, membershipId: null, calls: [], redirects: [], replacements: [], status: new Map(), options: new Map(), records: new Map(), confirmations: [], confirm: async () => true, connect: null, settings: null };
   global.window = { location: { pathname: '/integrations', search: '', hash: '', assign: value => env.redirects.push(value) }, history: { replaceState: (_a, _b, value) => { env.replacements.push(value); const parsed = new URL(value, 'https://route-logistics.com'); window.location.search = parsed.search; } } };
 }
 const claims = () => ({ companyId: env.company, membershipId: env.membershipId, role: env.role });
@@ -22,6 +23,12 @@ const mock = name => {
     const name = fullName.replace(/^rlQuickBooks/, ''), company = env.company;
     env.calls.push({ name, company, data });
     if (name === 'Status') return { data: await (env.status.get(company) || result(company)) };
+    if (name === 'Options') return { data: await (env.options.get(company) || catalog(company)) };
+    if (name === 'Settings') {
+      if (env.settings) await env.settings.promise;
+      env.status.set(company, result(company, { incomeAccountId: data.incomeAccountId, defaultItemId: data.defaultItemId }));
+      return { data: { saved: true, ...data } };
+    }
     if (name === 'Connect') return { data: env.connect ? await env.connect.promise : { url: 'https://intuit.test/authorize' } };
     if (name === 'Preview') return { data: { payload: { marker: company }, environment: 'sandbox', fingerprint: 'review', action: 'create' } };
     if (name === 'Disconnect') return { data: { disconnected: true, warning: 'Disconnected locally; provider revocation could not be confirmed.' } };
@@ -41,6 +48,8 @@ new Function('React', 'require', 'module', 'exports', transformSync(source, { lo
 const Page = moduleValue.exports.default;
 const text = () => JSON.stringify(tree.toJSON());
 const button = title => tree.root.findAll(node => node.type === 'button' && node.children.join('') === title)[0];
+const combobox = label => tree.root.findAll(node => node.type === 'input' && node.props.role === 'combobox' && node.props['aria-label'] === label)[0];
+const select = async (label, search) => { await act(async () => combobox(label).props.onChange({ target: { value: search } })); await act(async () => combobox(label).props.onKeyDown({ key: 'Enter', preventDefault() {} })); };
 const render = async () => { await act(async () => { tree = create(React.createElement(Page)); }); await act(settle); };
 const update = async () => { await act(async () => tree.update(React.createElement(Page))); await act(settle); };
 afterEach(async () => { if (tree) await act(async () => tree.unmount()); tree = null; });
@@ -145,4 +154,109 @@ test('a failed initial status request remains visibly retryable without a connec
   assert.match(text(), /Reconnect to check your company access/); assert.ok(button('Refresh connection status'));
   env.status.set('company-a', result('company-a')); await act(async () => button('Refresh connection status').props.onClick()); await act(settle);
   assert.match(text(), /company-a QuickBooks/); assert.doesNotMatch(text(), /Reconnect to check your company access/);
+});
+
+test('accounting defaults load named searchable options and preserve valid saved selections', async () => {
+  reset(); const pending = deferred(); env.options.set('company-a', pending.promise); await render();
+  assert.match(text(), /Loading accounts and service items/); assert.equal(combobox('Default income account').props.disabled, true);
+  await act(async () => pending.resolve(catalog('company-a'))); await act(settle);
+  assert.equal(combobox('Default income account').props.value, 'company-a Services:Field income');
+  assert.equal(combobox('Default service item').props.value, 'company-a Services:General pest');
+  assert.equal(button('Save defaults').props.disabled, true); assert.doesNotMatch(text(), /Income account ID|Default service item ID/);
+  await act(async () => combobox('Default income account').props.onFocus());
+  assert.match(text(), /Account 4000/); assert.equal(combobox('Default income account').props['aria-expanded'], true);
+  await select('Default income account', 'Other');
+  assert.equal(combobox('Default income account').props.value, 'company-a Services:Other income'); assert.equal(button('Save defaults').props.disabled, false);
+});
+
+test('dropdown keyboard selection saves internal IDs once with the connection version and confirms success', async () => {
+  reset(); await render();
+  await act(async () => combobox('Default income account').props.onFocus());
+  await act(async () => combobox('Default income account').props.onKeyDown({ key: 'ArrowDown', preventDefault() {} }));
+  await act(async () => combobox('Default income account').props.onKeyDown({ key: 'Enter', preventDefault() {} }));
+  await select('Default service item', 'inspection'); env.settings = deferred();
+  await act(async () => { button('Save defaults').props.onClick(); button('Save defaults').props.onClick(); });
+  const calls = env.calls.filter(call => call.name === 'Settings'); assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].data, { incomeAccountId: '56', defaultItemId: '78', connectionId: 'company-a-connection-1' });
+  assert.equal(button('Save defaults').props.disabled, true);
+  await act(async () => env.settings.resolve()); await act(settle);
+  assert.match(text(), /Accounting defaults saved. No QuickBooks records were changed/); assert.equal(button('Save defaults').props.disabled, true);
+  assert.equal(env.calls.some(call => ['Sync', 'Adopt'].includes(call.name)), false);
+});
+
+test('incidental connection status refresh does not overwrite unsaved accounting selections', async () => {
+  reset(); await render(); await select('Default income account', 'Other');
+  await act(async () => button('Refresh connection status').props.onClick()); await act(settle);
+  assert.equal(combobox('Default income account').props.value, 'company-a Services:Other income'); assert.equal(button('Save defaults').props.disabled, false);
+  assert.equal(env.calls.filter(call => call.name === 'Options').length, 1);
+});
+
+test('saving invalidated defaults reports the server error and retains the owner selections for retry', async () => {
+  reset(); await render(); await select('Default income account', 'Other'); env.settings = deferred();
+  await act(async () => { button('Save defaults').props.onClick(); });
+  await act(async () => env.settings.reject(new Error('Choose an active income account and service item.'))); await act(settle);
+  assert.match(text(), /Choose an active income account and service item/); assert.equal(combobox('Default income account').props.value, 'company-a Services:Other income');
+  assert.equal(button('Save defaults').props.disabled, false); env.settings = null;
+  await act(async () => button('Save defaults').props.onClick()); await act(settle);
+  assert.match(text(), /Accounting defaults saved/); assert.doesNotMatch(text(), /Choose an active income account and service item/);
+});
+
+test('unavailable saved defaults are flagged without displaying raw provider IDs', async () => {
+  reset(); env.options.set('company-a', catalog('company-a', { incomeAccountId: '9999999', defaultItemId: '8888888' })); await render();
+  assert.match(text(), /saved income account is no longer available/); assert.match(text(), /saved service item is no longer available/);
+  assert.equal(combobox('Default income account').props['aria-invalid'], true); assert.equal(combobox('Default service item').props['aria-invalid'], true);
+  assert.doesNotMatch(text(), /9999999|8888888/); assert.equal(button('Save defaults').props.disabled, true);
+  await select('Default income account', 'Field'); await select('Default service item', 'pest');
+  assert.equal(button('Save defaults').props.disabled, false);
+});
+
+test('refreshing options retains a dirty valid selection and flags it if it becomes unavailable', async () => {
+  reset(); await render(); await select('Default income account', 'Other');
+  await act(async () => button('Refresh available options').props.onClick()); await act(settle);
+  assert.equal(combobox('Default income account').props.value, 'company-a Services:Other income');
+  env.options.set('company-a', catalog('company-a', { accounts: catalog('company-a').accounts.slice(0, 1) }));
+  await act(async () => button('Refresh available options').props.onClick()); await act(settle);
+  assert.match(text(), /saved income account is no longer available/); assert.equal(button('Save defaults').props.disabled, true);
+});
+
+test('empty accounting catalogs explain the QuickBooks-side action and do not create provider records', async () => {
+  reset(); env.options.set('company-a', catalog('company-a', { accounts: [], items: [], incomeAccountId: '', defaultItemId: '' })); await render();
+  assert.match(text(), /No active income accounts are available/); assert.match(text(), /No active service items are available/);
+  assert.equal(combobox('Default income account').props.disabled, true); assert.equal(button('Save defaults').props.disabled, true);
+  assert.equal(env.calls.some(call => ['Settings', 'Sync', 'Adopt'].includes(call.name)), false);
+});
+
+test('catalog API failures and expired authorization provide visible retry or reconnect actions', async () => {
+  reset(); const pending = deferred(); env.options.set('company-a', pending.promise); await render();
+  await act(async () => pending.reject(new Error('QuickBooks is temporarily unavailable. Retry shortly.'))); await act(settle);
+  assert.match(text(), /temporarily unavailable/); assert.ok(button('Refresh available options')); assert.equal(button('Save defaults').props.disabled, true);
+  env.options.set('company-a', catalog('company-a')); await act(async () => button('Refresh available options').props.onClick()); await act(settle);
+  assert.doesNotMatch(text(), /temporarily unavailable/); assert.equal(combobox('Default income account').props.value, 'company-a Services:Field income');
+  env.status.set('company-a', result('company-a', { reconnectRequired: true, health: 'reconnect-required' }));
+  await act(async () => button('Refresh connection status').props.onClick()); await act(settle);
+  assert.match(text(), /Reconnect QuickBooks before loading accounting options/); assert.ok(button('Reconnect')); assert.equal(button('Save defaults').props.disabled, true);
+});
+
+test('late accounting options cannot leak from the previously selected tenant', async () => {
+  reset(); const pending = deferred(); env.options.set('company-a', pending.promise); await render();
+  env.company = 'company-b'; env.uid = 'owner-b'; await update();
+  assert.equal(combobox('Default income account').props.value, 'company-b Services:Field income');
+  await act(async () => pending.resolve(catalog('company-a'))); await act(settle);
+  assert.doesNotMatch(text(), /company-a/); assert.equal(combobox('Default service item').props.value, 'company-b Services:General pest');
+});
+
+test('a new connection version reloads catalogs and rejects late options from the old authorization', async () => {
+  reset(); const previous = deferred(); env.options.set('company-a', previous.promise); await render();
+  const connectionId = 'company-a-connection-2'; env.status.set('company-a', result('company-a', { connectionId }));
+  env.options.set('company-a', catalog('company-a', { connectionId, accounts: [{ id: '90', name: 'Reconnected income', qualifiedName: 'Reconnected company:Income', accountType: 'Income' }], incomeAccountId: '90' }));
+  await act(async () => button('Refresh connection status').props.onClick()); await act(settle);
+  assert.equal(combobox('Default income account').props.value, 'Reconnected company:Income');
+  await act(async () => previous.resolve(catalog('company-a'))); await act(settle);
+  assert.equal(combobox('Default income account').props.value, 'Reconnected company:Income'); assert.equal(env.calls.filter(call => call.name === 'Options').length, 2);
+});
+
+test('non-owner accounting defaults are read-only names and never fetch provider options', async () => {
+  reset('admin'); env.status.set('company-a', result('company-a', { incomeAccountName: 'Field service income', defaultItemName: 'Property inspection' })); await render();
+  assert.match(text(), /Field service income/); assert.match(text(), /Property inspection/); assert.match(text(), /Only the company owner can change/);
+  assert.equal(combobox('Default income account'), undefined); assert.equal(button('Save defaults'), undefined); assert.equal(env.calls.some(call => call.name === 'Options' || call.name === 'Settings'), false);
 });

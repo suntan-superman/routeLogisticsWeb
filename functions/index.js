@@ -219,6 +219,7 @@ exports.rlQuickBooksConnect = onCall({ secrets: qbSecrets }, qb.begin);
 exports.rlQuickBooksOAuthCallback = onRequest({ secrets: qbSecrets }, qb.callback);
 exports.rlQuickBooksDisconnect = onCall({ secrets: qbSecrets }, qb.disconnect);
 exports.rlQuickBooksSettings = onCall({ secrets: qbSecrets }, qb.settings);
+exports.rlQuickBooksOptions = onCall({ secrets: qbSecrets, timeoutSeconds: 120 }, qb.options);
 exports.rlQuickBooksAdopt = onCall({ secrets: qbSecrets }, qb.adopt);
 exports.rlQuickBooksPreview = onCall({ secrets: qbSecrets }, qb.preview);
 exports.rlQuickBooksSync = onCall({ secrets: qbSecrets }, qb.sync);

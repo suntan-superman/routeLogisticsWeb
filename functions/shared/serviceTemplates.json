@@ -1,0 +1,436 @@
+[
+  {
+    "id": "pest-control",
+    "name": "Pest control inspection",
+    "industry": "pest",
+    "version": 1,
+    "status": "starter",
+    "description": "Inspection and visit findings. Chemical application records remain separate.",
+    "fields": [
+      {
+        "id": "targetPest",
+        "label": "Target pest",
+        "type": "select",
+        "required": true,
+        "options": [
+          "Ants",
+          "Cockroaches",
+          "Rodents",
+          "Termites",
+          "Other"
+        ]
+      },
+      {
+        "id": "findings",
+        "label": "Inspection findings",
+        "type": "text",
+        "required": true,
+        "maxLength": 4000
+      },
+      {
+        "id": "inspection",
+        "label": "Inspection completed",
+        "type": "checklist",
+        "required": true,
+        "options": [
+          "Entry points inspected",
+          "Activity inspected",
+          "Conditions documented",
+          "Customer instructions provided"
+        ]
+      },
+      {
+        "id": "followUp",
+        "label": "Follow-up recommendation",
+        "type": "text"
+      },
+      {
+        "id": "photos",
+        "label": "Visit photos",
+        "type": "photos",
+        "maxPhotos": 8
+      },
+      {
+        "id": "technicianNotes",
+        "label": "Technician notes",
+        "type": "notes",
+        "maxLength": 4000
+      }
+    ]
+  },
+  {
+    "id": "pool-maintenance",
+    "name": "Pool maintenance",
+    "industry": "pool",
+    "version": 1,
+    "status": "starter",
+    "description": "Water readings and equipment checks; readings are observations, not dosing instructions.",
+    "fields": [
+      {
+        "id": "ph",
+        "label": "pH reading",
+        "type": "number",
+        "required": true,
+        "unit": "pH",
+        "min": 0,
+        "max": 14
+      },
+      {
+        "id": "freeChlorine",
+        "label": "Free chlorine",
+        "type": "number",
+        "required": true,
+        "unit": "ppm",
+        "min": 0,
+        "max": 50
+      },
+      {
+        "id": "alkalinity",
+        "label": "Total alkalinity",
+        "type": "number",
+        "unit": "ppm",
+        "min": 0,
+        "max": 1000
+      },
+      {
+        "id": "temperature",
+        "label": "Water temperature",
+        "type": "number",
+        "unit": "°F",
+        "min": 0,
+        "max": 150
+      },
+      {
+        "id": "equipment",
+        "label": "Pump and filter condition",
+        "type": "select",
+        "required": true,
+        "options": [
+          "Normal",
+          "Issue observed",
+          "Not inspected"
+        ]
+      },
+      {
+        "id": "tasks",
+        "label": "Maintenance completed",
+        "type": "checklist",
+        "options": [
+          "Skimmed",
+          "Brushed",
+          "Vacuumed",
+          "Baskets emptied",
+          "Equipment inspected"
+        ]
+      },
+      {
+        "id": "photos",
+        "label": "Visit photos",
+        "type": "photos",
+        "maxPhotos": 8
+      },
+      {
+        "id": "technicianNotes",
+        "label": "Technician notes",
+        "type": "notes",
+        "maxLength": 4000
+      }
+    ]
+  },
+  {
+    "id": "hvac-maintenance",
+    "name": "HVAC maintenance inspection",
+    "industry": "hvac",
+    "version": 1,
+    "status": "foundation",
+    "description": "Starter inspection foundation; customize for equipment and approved service procedures.",
+    "fields": [
+      {
+        "id": "equipment",
+        "label": "Equipment identification",
+        "type": "text",
+        "required": true
+      },
+      {
+        "id": "supplyTemperature",
+        "label": "Supply air temperature",
+        "type": "number",
+        "unit": "°F",
+        "min": -50,
+        "max": 250
+      },
+      {
+        "id": "checks",
+        "label": "Checks completed",
+        "type": "checklist",
+        "options": [
+          "Filter inspected",
+          "Thermostat checked",
+          "Condensate checked",
+          "Equipment operation observed"
+        ]
+      },
+      {
+        "id": "condition",
+        "label": "Equipment condition",
+        "type": "select",
+        "options": [
+          "Normal",
+          "Service recommended",
+          "Not inspected"
+        ]
+      },
+      {
+        "id": "photos",
+        "label": "Visit photos",
+        "type": "photos",
+        "maxPhotos": 8
+      },
+      {
+        "id": "technicianNotes",
+        "label": "Technician notes",
+        "type": "notes",
+        "maxLength": 4000
+      }
+    ]
+  },
+  {
+    "id": "lawn-care",
+    "name": "Lawn care visit",
+    "industry": "lawn",
+    "version": 1,
+    "status": "foundation",
+    "description": "General maintenance foundation. Regulated applications retain their specialized records.",
+    "fields": [
+      {
+        "id": "area",
+        "label": "Area serviced",
+        "type": "text",
+        "required": true
+      },
+      {
+        "id": "tasks",
+        "label": "Work completed",
+        "type": "checklist",
+        "required": true,
+        "options": [
+          "Mowing",
+          "Edging",
+          "Trimming",
+          "Debris removal",
+          "Irrigation inspection"
+        ]
+      },
+      {
+        "id": "conditions",
+        "label": "Site conditions",
+        "type": "text"
+      },
+      {
+        "id": "photos",
+        "label": "Visit photos",
+        "type": "photos",
+        "maxPhotos": 8
+      },
+      {
+        "id": "technicianNotes",
+        "label": "Technician notes",
+        "type": "notes",
+        "maxLength": 4000
+      }
+    ]
+  },
+  {
+    "id": "gutter-cleaning",
+    "name": "Gutter cleaning inspection",
+    "industry": "gutters",
+    "version": 1,
+    "status": "foundation",
+    "description": "Inspection and cleaning observations; use approved access and safety procedures.",
+    "fields": [
+      {
+        "id": "areas",
+        "label": "Areas serviced",
+        "type": "text",
+        "required": true
+      },
+      {
+        "id": "checks",
+        "label": "Checks completed",
+        "type": "checklist",
+        "required": true,
+        "options": [
+          "Debris removed",
+          "Downspouts checked",
+          "Flow checked",
+          "Visible damage documented"
+        ]
+      },
+      {
+        "id": "condition",
+        "label": "Drainage condition",
+        "type": "select",
+        "options": [
+          "Clear",
+          "Obstruction observed",
+          "Not tested"
+        ]
+      },
+      {
+        "id": "photos",
+        "label": "Visit photos",
+        "type": "photos",
+        "maxPhotos": 8
+      },
+      {
+        "id": "technicianNotes",
+        "label": "Technician notes",
+        "type": "notes",
+        "maxLength": 4000
+      }
+    ]
+  },
+  {
+    "id": "window-cleaning",
+    "name": "Window cleaning visit",
+    "industry": "windows",
+    "version": 1,
+    "status": "foundation",
+    "description": "Interior and exterior window service observations.",
+    "fields": [
+      {
+        "id": "panes",
+        "label": "Panes serviced",
+        "type": "number",
+        "unit": "panes",
+        "min": 0,
+        "max": 10000
+      },
+      {
+        "id": "areas",
+        "label": "Areas serviced",
+        "type": "text",
+        "required": true
+      },
+      {
+        "id": "checks",
+        "label": "Work completed",
+        "type": "checklist",
+        "options": [
+          "Interior glass",
+          "Exterior glass",
+          "Frames",
+          "Screens"
+        ]
+      },
+      {
+        "id": "photos",
+        "label": "Visit photos",
+        "type": "photos",
+        "maxPhotos": 8
+      },
+      {
+        "id": "technicianNotes",
+        "label": "Technician notes",
+        "type": "notes",
+        "maxLength": 4000
+      }
+    ]
+  },
+  {
+    "id": "house-cleaning",
+    "name": "House cleaning visit",
+    "industry": "cleaning",
+    "version": 1,
+    "status": "foundation",
+    "description": "Configurable room and task checklist.",
+    "fields": [
+      {
+        "id": "areas",
+        "label": "Rooms or areas serviced",
+        "type": "text",
+        "required": true
+      },
+      {
+        "id": "tasks",
+        "label": "Tasks completed",
+        "type": "checklist",
+        "required": true,
+        "options": [
+          "Kitchen",
+          "Bathrooms",
+          "Floors",
+          "Dusting",
+          "Trash removed"
+        ]
+      },
+      {
+        "id": "exceptions",
+        "label": "Exceptions or inaccessible areas",
+        "type": "text"
+      },
+      {
+        "id": "photos",
+        "label": "Visit photos",
+        "type": "photos",
+        "maxPhotos": 8
+      },
+      {
+        "id": "technicianNotes",
+        "label": "Technician notes",
+        "type": "notes",
+        "maxLength": 4000
+      }
+    ]
+  },
+  {
+    "id": "security-inspection",
+    "name": "Security system service check",
+    "industry": "security",
+    "version": 1,
+    "status": "foundation",
+    "description": "Equipment observations only. Do not enter alarm codes, passwords or access secrets.",
+    "fields": [
+      {
+        "id": "equipment",
+        "label": "Equipment identification",
+        "type": "text",
+        "required": true
+      },
+      {
+        "id": "checks",
+        "label": "Checks completed",
+        "type": "checklist",
+        "required": true,
+        "options": [
+          "Panel inspected",
+          "Sensors inspected",
+          "Power inspected",
+          "Communications observed"
+        ]
+      },
+      {
+        "id": "condition",
+        "label": "System condition",
+        "type": "select",
+        "options": [
+          "Normal",
+          "Issue observed",
+          "Not tested"
+        ]
+      },
+      {
+        "id": "photos",
+        "label": "Visit photos",
+        "type": "photos",
+        "maxPhotos": 8
+      },
+      {
+        "id": "technicianNotes",
+        "label": "Technician notes",
+        "type": "notes",
+        "maxLength": 4000
+      }
+    ]
+  }
+]

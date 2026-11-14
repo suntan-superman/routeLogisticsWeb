@@ -4,7 +4,7 @@ import { onAuthStateChanged, signInWithCustomToken, signOut } from 'firebase/aut
 import { httpsCallable } from 'firebase/functions';
 import { portalAuth, portalFunctions, portalReady } from '../services/portal';
 import InvoicePayment from '../components/InvoicePayment';
-import { testPaymentsConfigured } from '../services/paymentConfig';
+import { paymentsConfigured, paymentMode } from '../services/paymentConfig';
 const call = (name, data) => httpsCallable(portalFunctions, name)(data).then((result) => result.data);
 const money = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
 
@@ -63,7 +63,7 @@ export default function CustomerPortalPage() {
     </>}
     {message && <p role="status" className="mt-4">{message}</p>}
     {error && <p role="alert" className="mt-4 text-red-700">{error}</p>}
-    {user && testPaymentsConfigured && accounts.some((a) => a.invoices.some((i) => i.status === 'sent')) && <section className="mt-6 rounded border p-4"><h2 className="font-semibold">Test card payments</h2><p className="mb-3 text-sm">No real money is collected. Invoice balances remain unchanged.</p>{accounts.flatMap((a) => a.invoices.filter((i) => i.status === 'sent' && i.total >= 0.5).map((invoice) => <button className="mr-3 underline" key={invoice.id} onClick={() => setPaymentInvoice(invoice.id)}>Test payment for {invoice.invoiceNumber}</button>))}</section>}
+    {user && paymentsConfigured && accounts.some((a) => a.invoices.some((i) => i.status === 'sent')) && <section className="mt-6 rounded border p-4"><h2 className="font-semibold">{paymentMode === 'test' ? 'Test card payments' : 'Secure card payments'}</h2><p className="mb-3 text-sm">{paymentMode === 'test' ? 'No real money is collected. Invoice balances remain unchanged.' : 'Choose an invoice to pay securely through Stripe.'}</p>{accounts.flatMap((a) => a.invoices.filter((i) => i.status === 'sent' && i.total >= 0.5).map((invoice) => <button className="mr-3 underline" key={invoice.id} onClick={() => setPaymentInvoice(invoice.id)}>{paymentMode === 'test' ? 'Test payment for' : 'Pay'} {invoice.invoiceNumber}</button>))}</section>}
     {paymentInvoice && <InvoicePayment invoiceId={paymentInvoice} functionClient={portalFunctions} onClose={() => setPaymentInvoice(null)} onRefresh={load} />}
   </main>;
 }

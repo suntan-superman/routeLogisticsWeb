@@ -25,6 +25,14 @@ before(async () => {
   qb = quickBooksHandlers(db, config, transport);
 });
 after(() => deleteApp(app));
+test('production accounting requires explicit operator approval for OAuth and reconciliation', async () => {
+  const production = quickBooksHandlers(db, { ...config, environment: () => 'production', productionApproved: () => false, writesEnabled: () => true }, transport);
+  const before = calls.length;
+  await assert.rejects(production.begin(request()), { code: 'failed-precondition' });
+  await assert.rejects(production.reconcile(request({ localId: 'qb-invoice' })), { code: 'failed-precondition' });
+  const status = await production.status(request()); assert.equal(status.enabled, false); assert.equal(status.writesEnabled, false); assert.equal(status.health, 'awaiting-production-approval');
+  assert.equal(calls.length, before);
+});
 test('QuickBooks OAuth uses owner-bound single-use state and never returns credentials', async () => {
   await assert.rejects(qb.begin({ auth: { uid: 'outsider', token: auth.token }, data: {} }), { code: 'permission-denied' });
   const begin = await qb.begin(request()), url = new URL(begin.url), state = url.searchParams.get('state');
@@ -85,4 +93,13 @@ test('webhook signatures are raw-body verified and duplicate notifications creat
   await qb.webhook({ rawBody, headers: { 'intuit-signature': signature } }, res); await qb.webhook({ rawBody, headers: { 'intuit-signature': signature } }, res); assert.equal(code, 200);
   assert.equal((await db.collection('rlQbWebhookEvents').where('companyId', '==', 'qb-co').get()).size, 1);
   await qb.drain(); assert.equal((await db.collection('rlQbWebhookEvents').where('companyId', '==', 'qb-co').get()).docs[0].get('status'), 'reconciled');
+});
+
+test('accounting invoice export rejects missing, non-numeric, negative and non-finite totals', async () => {
+  await db.doc(connectionPath).update({ defaultItemId: '123' });
+  for (const total of [undefined, null, 'invalid', NaN, Infinity, -1]) {
+    const invoice = { companyId: 'qb-co', customerId: 'qb-customer', status: 'sent', tax: 0, lineItems: [{ description: 'Service', amount: 20, unitPrice: 20, quantity: 1 }], ...(total === undefined ? {} : { total }) };
+    await db.doc('invoices/qb-invalid-total').set(invoice);
+    await assert.rejects(qb.preview(request({ type: 'Invoice', localId: 'qb-invalid-total' })), { code: 'failed-precondition' });
+  }
 });

@@ -6,6 +6,7 @@ import { STATUS_COLORS, scheduleWarning, jobPosition, jobAddress } from '../util
 import { googleNavigation } from '../utils/routePlanning';
 import RoutesPage from './RoutesPage';
 import JobPhotos from '../components/JobPhotos';
+import ServiceChecklist from '../components/ServiceChecklist';
 import TeamLocationStatus from '../components/TeamLocationStatus';
 import { LOCATION_LABELS, locationState, nearestOnDuty } from '../utils/workLocations';
 import { addressKey, createDispatchAddressResolver, mapPoint } from '../utils/dispatchMap';
@@ -183,7 +184,7 @@ function DispatchJobDetails({ job, onClose, returnFocus, fallbackFocus, destinat
         {!!(job.actualWorkDone || job.completionNotes) && <section><h3 className="mb-2 font-semibold">Completed work</h3><p className="whitespace-pre-wrap">{job.actualWorkDone}</p><p className="whitespace-pre-wrap">{job.completionNotes}</p></section>}
         <section><h3 className="mb-2 font-semibold">Visit record</h3><p className="mb-2 text-xs text-gray-600">Manual reports and GPS evidence do not independently verify access to the property.</p>{loading && <p role="status">Loading visit records…</p>}{error && <div><p role="alert" className="text-red-700">{error}</p><button className="mt-2 underline" onClick={() => setRetry(value => value + 1)}>Retry visit records</button></div>}{!loading && !error && !visits.length && <p>No visit events recorded.</p>}
           {visits.map(visit => <article key={visit.id} className="mb-3 rounded border p-3"><strong>{{ arrived: 'Arrived', departed: 'Departed', 'access-blocked': 'Couldn’t access property' }[visit.type] || 'Visit event'}</strong><p className="text-sm">{new Date(visit.capturedAt || visit.recordedAt).toLocaleString()} · {{ manual: 'Reported manually', 'manual-gps': 'Reported manually with GPS', 'gps-evidence': 'Estimated from GPS evidence' }[visit.source] || 'Visit report'}</p>{Number.isFinite(visit.accuracy) && <p className="text-sm">GPS accuracy: ±{Math.round(visit.accuracy)} m</p>}{visit.note && <p className="whitespace-pre-wrap">{visit.note}</p>}</article>)}
-        </section><JobPhotos key={job.id} job={job} />
+        </section><JobPhotos key={job.id} job={job} /><ServiceChecklist key={'form-' + job.id} job={job} />
       </div>
     </section>
   </div>;

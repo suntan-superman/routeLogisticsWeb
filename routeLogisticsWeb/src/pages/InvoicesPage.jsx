@@ -8,7 +8,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../services/firebase';
 import InvoicePayment from '../components/InvoicePayment';
-import { testPaymentsConfigured } from '../services/paymentConfig';
+import { paymentsConfigured, paymentMode } from '../services/paymentConfig';
+import PaymentHistory from '../components/PaymentHistory';
 
 const money = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -48,6 +49,7 @@ const InvoicesPage = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [paymentInvoice, setPaymentInvoice] = useState(null);
+  const [historyInvoice, setHistoryInvoice] = useState(null);
   const manage = canManage();
   const confirm = useConfirm();
 
@@ -131,7 +133,8 @@ const InvoicesPage = () => {
                     <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-semibold capitalize ${BADGE[status]}`}>{status}</span></td>
                     <td className="px-4 py-3 text-right">{money(inv.total)}</td>
                     <td className="px-4 py-3 space-x-2 whitespace-nowrap">
-                      {manage && inv.status === 'sent' && testPaymentsConfigured && <button className="text-primary-700 underline" onClick={() => setPaymentInvoice(inv.id)}>Test card payment</button>}
+                      {manage && inv.status === 'sent' && paymentsConfigured && <button className="text-primary-700 underline" onClick={() => setPaymentInvoice(inv.id)}>{paymentMode === 'test' ? 'Test card payment' : 'Card payment'}</button>}
+                      {manage && <button className="text-primary-700 underline" onClick={() => setHistoryInvoice(inv.id)}>Payment history</button>}
                       {manage && inv.paymentLock && <button className="text-amber-700 underline" onClick={async () => { if (!(await confirm({ title: 'Cancel payment attempt?', message: 'This cancels an uncompleted card payment and unlocks invoice changes. It does not issue a refund.', confirmText: 'Cancel attempt' }))) return; try { await httpsCallable(functions, 'rlCancelInvoicePayment')({ invoiceId: inv.id }); await load(); } catch (error) { toast.error(error.message); } }}>Cancel payment attempt</button>}
                       {inv.testPaymentStatus && <span className="text-xs text-gray-500">Test: {inv.testPaymentStatus}</span>}
                       <button className="text-primary-600 hover:underline" onClick={() => printInvoice(inv, userProfile?.businessName)}>Print</button>
@@ -153,6 +156,7 @@ const InvoicesPage = () => {
         )}
       </div>
       {paymentInvoice && <InvoicePayment invoiceId={paymentInvoice} onClose={() => setPaymentInvoice(null)} onRefresh={load} />}
+      {historyInvoice && <div role="dialog" aria-modal="true" aria-label="Invoice payment history" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl bg-white p-6"><button className="float-right underline" onClick={() => setHistoryInvoice(null)}>Close history</button><PaymentHistory invoiceId={historyInvoice} /></div></div>}
     </div>
   );
 };

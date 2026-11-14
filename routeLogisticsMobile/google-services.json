@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1030013411579",
+    "project_id": "mi-factotum-field-service",
+    "storage_bucket": "mi-factotum-field-service.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1030013411579:android:5a32749da69638635c505e",
+        "android_client_info": {
+          "package_name": "com.workside.routelogistics"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBSyueFHsNDzJ72iSnhpdMHI_hxtL7LEgA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,5 +1,42 @@
 # RouteLogistics migration progress — November 12, 2026
 
+## Commercial readiness release — November 13, 2026
+
+Implemented the independently executable commercial-readiness work in the existing main checkout and production project. Detailed configuration, rebuild commands and operational limitations are in [commercial readiness](commercial-readiness.md) and [customer SMS setup](customer-sms-setup.md).
+
+- Native push: scoped installation registration, explicit opt-in/preferences, monotonic token rotation, membership invalidation, stale-token expiry, assignment/schedule/status outbox, receipt processing and authorized/deferred notification navigation. Ambiguous send acceptance is retained for review. Existing web push is preserved. Native delivery stays disabled pending EAS APNs/FCM credentials and device verification.
+- SMS: purpose-scoped consent evidence, suppression, signed STOP/START/HELP and delivery callbacks, company templates/timing, idempotent scheduling, controlled retries, audit and private per-company sender/automation approval. No legacy phone number constitutes consent. Delivery remains disabled; Twilio credentials and registered-sender authorization are missing.
+- Stripe: payment eligibility, history, review alerts, current-state refund/dispute reconciliation and guarded customer confirmation. Deployed Stripe remains enabled in test mode with `RL_STRIPE_LIVE_APPROVED=false`; no real charges or refunds were issued.
+- QuickBooks: RL-owned OAuth/mappings/reviewed exports/reconciliation retained and hardened with explicit production approval, connection health and finite-total validation. Reviewed all three supplied `docs/QuickBooks` MF documents. Their callback/secrets/permissive connection rules are not copied. Production remains disabled. Sandbox credentials, reviewed service/account mappings and provider validation remain; taxed invoice export still requires explicit tax mapping. Automatic two-way customer/item or outbound Stripe-payment export is not claimed.
+- Service templates: eight versioned starter/foundation templates, required validation, readings/units, checklists/dropdowns/photos/notes, immutable service-date reports, company versions and durable mobile offline drafts/conflict review. Template attachment is explicit. Existing chemical application records and legacy job-completion rules remain intact.
+- Estimates: manager/owner/admin-only photo-first mobile/web workflow, server cents/tax totals, private JPEGs/PDFs, immutable versions, delivery status, expiring version-bound customer approval and idempotent approved-estimate conversion. Prospect conversion requires explicit customer creation or matching-customer reuse and never overwrites an existing customer. Existing estimates are preserved. SendGrid is enabled only through an explicit confirmed Send action; creating/revising an estimate does not send it. A pre-activation audit found zero pending estimate messages. No real estimate email was sent during testing.
+
+Validation:
+
+| Check | Result |
+| --- | --- |
+| Mobile/UI/service tests | 168 passed |
+| Web tests | 60 passed |
+| Functions unit tests | 55 passed; one emulator-only case skipped here and exercised in emulator run |
+| Combined Firestore/Storage/authorization/workflow tests | 133 passed |
+| Final estimate/QuickBooks regressions after JPEG and numeric-total fixes | 19 passed (targeted rerun, not an additional distinct-suite total) |
+| Auth/Functions end-to-end | 6 passed |
+| Expo Doctor | 18/18 passed |
+| Expo dependency compatibility | Up to date |
+| iOS and Android bundle exports | Passed |
+| Web lint/build | Passed; 8 existing hook warnings, 0 errors |
+
+The JPEG/PDF regression found and fixed pooled-buffer offset handling in the local PDF encoder. The Auth trigger test now waits for its actual asynchronous stamped-field condition with a bounded 30-second deadline; the expanded emulator trigger queue exceeded the old 10-second bound. No application modal/picker delays were introduced.
+
+Production deployment verified: all **82** `routelogistics` functions are `ACTIVE`. The full RL codebase deployment succeeded; the estimate callables and existing email worker then received the enabled estimate-email configuration. Representative revisions: `rlestimate-00002-pur`, `rlestimateapproval-00002-pol`, `rldeliveremail-00013-kes`, `rlserviceforms-00001-biy`. The existing SMTP secret remains bound only where required; Stripe webhook retains both existing Stripe secret bindings. Missing optional/provider secrets are not bound prematurely.
+
+The narrow managed-estimate Firestore rule guard is deployed, and the new SMS/payment-history indexes are READY. All **29 mi Factotum function definitions/hashes remain unchanged**. All **507 Acme customer document versions match the pre-release fingerprint**. No memberships, existing invoices, service plans or chemical logs were migrated or rewritten. No unsolicited messages or live financial transactions were performed.
+
+Firebase Android registration `1:1030013411579:android:5a32749da69638635c505e` now supports the unchanged `com.workside.routelogistics` package in the existing project; its checked-in Google Services file is public client configuration. iOS bundle `com.worksidesoftware.routelogisticsapp`, corporate team `AXCZ2G99P6`, Expo owner `sjroy5` and EAS project `a6b5d885-dd99-4435-bef0-b7ffe09a2890` are preserved. No Firebase iOS registration was needed for the existing JS SDK plus Expo APNs integration.
+
+Remaining acceptance: signed native rebuild; iOS/Android foreground/background/cold-start push, account/role switching and opt-out; camera/gallery/cancellation/retry/offline service-report workflow; estimate photo capture/PDF share, actual authorized email inbox delivery/customer approval; Twilio sandbox/approved-recipient delivery and sender registration; QuickBooks sandbox OAuth/export/reconciliation. Live Stripe and production accounting need explicit operator approval. This release does not mark provider/device acceptance or the historical Acme invitation-acceptance migration complete.
+
+
 **Subsequent ten-phase release:** See [accelerated production progress](accelerated-production-progress.md) for the new company/membership/customer fixes, payment/accounting integrations, routing, foreground location and offline queues. It supersedes the remaining-work and Storage-revocation statements in this earlier report; historical evidence below is preserved.
 
 This report records the autonomous implementation run against the two existing plans. RouteLogistics was the only source tree edited; mifactotum was used as read-only reference. Work stayed on the existing `main` branch and shared Firebase project `mi-factotum-field-service`, without a staging environment.

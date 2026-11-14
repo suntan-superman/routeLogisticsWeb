@@ -7,6 +7,7 @@ import WorkspaceTabs from '../components/WorkspaceTabs';
 import JobWorkflow from '../components/JobWorkflow';
 import OfflineStatus from '../components/OfflineStatus';
 import WorkLocation from '../components/WorkLocation';
+import NativePushBridge from '../components/NativePushBridge';
 import { ScreenHeader, InlineNotice, LoadingState, PrimaryButton, SecondaryButton, ConfirmationPanel } from '../components/MobileUI';
 import { useWorkJobs, useWorkJob } from '../services/useWorkQueries';
 import TechnicianHomeScreen from './TechnicianHomeScreen';
@@ -14,6 +15,7 @@ import ScheduleScreen from './ScheduleScreen';
 import RouteScreen from './RouteScreen';
 import SettingsScreen from './SettingsScreen';
 import HomeScreen from './HomeScreen';
+import EstimatesScreen from './EstimatesScreen';
 
 function RetainedPage({ visible, children }) {
   return <View style={{ flex: 1, display: visible ? 'flex' : 'none' }} pointerEvents={visible ? 'auto' : 'none'}
@@ -42,10 +44,11 @@ export default function WorkspaceScreen() {
     if (destination.current) { setTab(destination.current); destination.current = null; }
   }, []);
   const requestTab = useCallback(next => {
+    if (next === 'estimates' && !permissions.can('estimates.manage')) return;
     if (interactionRef.current.busy) { setNotice('Finish or cancel the current photo or save operation before changing screens.'); return; }
     if (interactionRef.current.hasDraft) { destination.current = selection ? next : null; setNotice('Your draft is still here. Save it, or use Close to review discarding it before changing screens.'); return; }
     setSelection(null); setNotice(''); destination.current = null; setTab(next);
-  }, [selection]);
+  }, [selection, permissions]);
   const openJob = useCallback(next => {
     if (!next?.id) return;
     destination.current = null; setNotice(''); setConfirmLeave(false);
@@ -82,6 +85,7 @@ export default function WorkspaceScreen() {
   const navigation = { navigate: requestTab, goBack: () => requestTab('home') };
   const pendingAccess = ['checking','unavailable'].includes(auth.accessStatus);
   return <GlassScreen><View style={{ flex: 1 }}>
+    <NativePushBridge onOpenJob={openJob} onUpdate={refreshWork} blocked={interaction.busy || interaction.hasDraft} />
     {!selection && pendingAccess && <View style={{ paddingHorizontal: 20, paddingTop: 8 }}><InlineNotice tone={auth.accessStatus === 'unavailable' ? 'error' : 'info'} message={auth.accessError?.message || auth.accessError || (auth.accessStatus === 'checking' ? 'Checking your workspace access…' : 'Access could not be checked. Reconnect or retry to continue.')}>
       {auth.accessStatus === 'unavailable' && <SecondaryButton title="Retry access check" onPress={refreshUser} />}
     </InlineNotice></View>}
@@ -98,6 +102,7 @@ export default function WorkspaceScreen() {
       <RetainedPage visible={tab === 'schedule'}><ScheduleScreen user={user} query={schedule} period={period} onPeriodChange={setPeriod} onOpenJob={openJob} /></RetainedPage>
       <RetainedPage visible={tab === 'route'}><RouteScreen user={user} active={tab === 'route' && !selection} onOpenJob={openJob} /></RetainedPage>
       <RetainedPage visible={tab === 'settings'}><SettingsScreen navigation={navigation} embedded /></RetainedPage>
+      {permissions.can('estimates.manage') && <RetainedPage visible={tab === 'estimates'}><EstimatesScreen active={tab === 'estimates' && !selection} onInteractionChange={onInteractionChange} /></RetainedPage>}
     </View>
     {!!selection && <View accessibilityViewIsModal testID="selected-work-order" style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: palette.background }}>
       {!!job && <RetainedPage visible={!blocked}><JobWorkflow key={selection.id} job={job} onClose={closeSelection} onChanged={refreshWork} onInteractionChange={onInteractionChange}

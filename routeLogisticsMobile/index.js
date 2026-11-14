@@ -1,5 +1,6 @@
 import { registerRootComponent } from 'expo';
 import './services/backgroundTracking';
+import './services/nativePushRegistration';
 
 import App from './App';
 

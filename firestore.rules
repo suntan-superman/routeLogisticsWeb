@@ -174,10 +174,15 @@ service cloud.firestore {
 
     // ---------- estimates ----------
     match /estimates/{id} {
-      allow read: if readable(resource.data);
-      allow create: if validCreate(false);
-      allow update: if manageable(resource.data) && tenancyUnchanged();
-      allow delete: if manageable(resource.data);
+      allow read: if readable(resource.data)
+        && (resource.data.get('rlManaged', false) != true || manageable(resource.data));
+      // Versioned Route Logistics estimates are written only through the callable.
+      // Legacy estimate documents retain their existing permissions.
+      allow create: if validCreate(false) && request.resource.data.get('rlManaged', false) != true;
+      allow update: if manageable(resource.data) && tenancyUnchanged()
+        && resource.data.get('rlManaged', false) != true
+        && request.resource.data.get('rlManaged', false) != true;
+      allow delete: if manageable(resource.data) && resource.data.get('rlManaged', false) != true;
     }
 
     // ---------- estimate templates ----------

@@ -35,6 +35,7 @@ function load() {
     }
     if (specifier === './JobPhotos') return Photos;
     if (specifier === './FieldWorkTools') return props => { workProps = props; return React.createElement('WorkTools'); };
+    if (specifier === './ServiceChecklist') return () => React.createElement('ServiceChecklist');
     if (specifier.endsWith('/services/jobCompletion')) return { completeJob: async (job, draft, options) => { calls.push({ job, draft, options }); return loader(job, draft, options); } };
     if (specifier.endsWith('/services/offline')) return { getQueuedOperation: async id => { reads.push(id); return savedRead(id); }, resolveOffline: async (id, action) => { discarded.push({ id, action }); saved.delete(id); } };
     throw new Error(`Unexpected dependency ${specifier}`);
@@ -199,7 +200,7 @@ test('work-note, application and visit drafts protect back navigation and comple
   await render();
   await act(async () => workProps.onDraftChange(true));
   assert.deepEqual(interactions.at(-1), { busy: false, hasDraft: true });
-  await press('Complete'); assert.match(text(), /Save or cancel your work notes, product application or visit record draft/); assert.equal(calls.length, 0);
+  await press('Complete'); assert.match(text(), /Save or cancel your work notes, product application, visit record or service checklist draft/); assert.equal(calls.length, 0);
   await press('Close job details'); assert.equal(closes, 0); await press('Keep editing');
   await act(async () => workProps.onBusyChange(true));
   assert.equal(control('Close job details').props.disabled, true);

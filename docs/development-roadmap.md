@@ -1,5 +1,18 @@
 # Prioritized Development List
 
+## Commercial readiness implementation — November 13, 2026
+
+See [commercial readiness and operator setup](commercial-readiness.md) for the current production flags, provider setup, native rebuild commands and remaining acceptance work. This update supersedes historical implementation-gap statements below for these features:
+
+- Native push registration, scoped preferences, assignment/schedule/status outbox, token rotation/invalidation, receipts and authorized notification navigation are implemented. Delivery remains disabled pending EAS APNs/FCM credentials and device testing; existing web push is preserved.
+- Customer SMS consent/disclosure/purpose scopes, signed opt-out/status callbacks, suppression, templates, scheduling, retries and audits are implemented. Twilio secrets, registered sender/campaign approval and explicit operator delivery approval are still required. No bulk or unsolicited messages were sent.
+- Stripe payment history, live-readiness gates, refund/dispute reconciliation and guarded confirmation email are implemented. Stripe remains in test mode with `RL_STRIPE_LIVE_APPROVED=false`.
+- RL QuickBooks OAuth, mapping review, exports/reconciliation and connection health are implemented. Sandbox credentials and operator validation remain; production activity is blocked by `RL_QB_PRODUCTION_APPROVED=false`.
+- Eight versioned service-template starters/foundations support validated readings/units, checklists, photos and immutable reports. Existing chemical records remain separate. Mobile reports use the existing offline queue; attaching templates is explicit.
+- Mobile/web photo estimates support server totals, private photos, local branded PDFs, immutable versions, expiring customer approval and idempotent scheduled-job conversion. Email uses the existing SendGrid worker through an explicit confirmed action; actual inbox/customer approval and device capture/share remain acceptance steps. Legacy estimates are preserved.
+
+Provider acceptance, physical-device tests and actual App Store builds remain separate from automated code verification. No mi Factotum functions or credentials are migrated or redeployed by this release.
+
 ## Accelerated implementation update — November 12, 2026
 
 The subsequent ten-phase directive is implemented as described in [accelerated production progress](accelerated-production-progress.md): company headers, atomic invitations/removal, legacy customer compatibility, Stripe test payments, RL QuickBooks OAuth/mappings/reconciliation, Maps routing, foreground location and persistent native offline queues. Provider credentials/acceptance and physical-device checks remain explicit blockers to full operational readiness. This supersedes older gap statements below.

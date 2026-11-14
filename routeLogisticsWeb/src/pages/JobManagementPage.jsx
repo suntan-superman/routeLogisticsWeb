@@ -25,6 +25,7 @@ import {
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import JobPhotos from '../components/JobPhotos';
+import ServiceChecklist from '../components/ServiceChecklist';
 import JobApplicationLog from '../components/JobApplicationLog';
 import { createInvoiceFromJob } from '../services/invoiceService';
 import { canManage, can } from '../services/tenancy';
@@ -791,7 +792,7 @@ const JobManagementPage = () => {
                 )}
 
                 <JobChangeHistory job={selectedJob} />
-                <div className="border-t pt-4"><JobPhotos job={selectedJob} /></div>
+                <div className="border-t pt-4"><JobPhotos job={selectedJob} /><ServiceChecklist key={selectedJob.id} job={selectedJob} /></div>
                 <div className="border-t pt-4"><JobApplicationLog job={selectedJob} /></div>
               </div>
               

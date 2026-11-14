@@ -472,6 +472,7 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
   };
 
   const handleEstimatesPress = () => {
+    if (embedded) { navigation.navigate('estimates'); return; }
     if (!canManage()) { Alert.alert('Manager access required', 'Ask your manager to make this change.'); return; }
     loadEstimates();
     setShowEstimatesModal(true);

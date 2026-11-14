@@ -30,6 +30,7 @@ function load(relative) {
     if (specifier.endsWith('/customerService')) return service;
     if (specifier.endsWith('/ConfirmProvider')) return { useConfirm: () => async () => true };
     if (specifier.endsWith('/CustomerImport')) return () => React.createElement('aside', null, 'Import customers');
+    if (specifier.endsWith('/CustomerSmsConsent')) return () => React.createElement('aside', null, 'SMS consent controls');
     if (specifier === 'firebase/firestore') return { where() {} };
     if (specifier === 'firebase/functions') return { httpsCallable: () => async () => ({ data: { workspace: { status: 'company' } } }) };
     if (specifier === './firebase') return { auth: { currentUser: user }, functions: {} };

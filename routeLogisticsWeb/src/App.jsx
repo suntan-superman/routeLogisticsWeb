@@ -18,6 +18,8 @@ const LandingPage = lazy(() => import('./pages/LandingPage'));
 const CompanySetupPage = lazy(() => import('./pages/CompanySetupPage'));
 const CustomerManagementPage = lazy(() => import('./pages/CustomerManagementPage'));
 const EstimateTemplatesPage = lazy(() => import('./pages/EstimateTemplatesPage'));
+const EstimatesPage = lazy(() => import('./pages/EstimatesPage'));
+const EstimateApprovalPage = lazy(() => import('./pages/EstimateApprovalPage'));
 const JobManagementPage = lazy(() => import('./pages/JobManagementPage'));
 const ReportsPage = lazy(() => import('./pages/ReportsPage'));
 const CalendarPage = lazy(() => import('./pages/CalendarPage'));
@@ -91,6 +93,8 @@ function App() {
                 <Route path="/signup" element={<SignupPage />} />
                 <Route path="/accept-invite" element={<AcceptInvitePage />} />
                 <Route path="/portal" element={<CustomerPortalPage />} />
+                <Route path="/estimate-approval" element={<EstimateApprovalPage />} />
+                <Route path="/estimates" element={<ProtectedRoute><Layout><EstimatesPage /></Layout></ProtectedRoute>} />
                 <Route path="/privacy" element={<PrivacyPage />} />
                 <Route path="/notifications" element={<ProtectedRoute><Layout><NotificationsPage /></Layout></ProtectedRoute>} />
                 <Route path="/routes" element={<ProtectedRoute><Layout><RoutesPage /></Layout></ProtectedRoute>} />

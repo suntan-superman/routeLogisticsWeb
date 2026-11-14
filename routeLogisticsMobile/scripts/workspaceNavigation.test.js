@@ -62,7 +62,9 @@ function load(relative) {
     if (name.endsWith('/components/JobWorkflow')) return Workflow;
     if (name.endsWith('/components/OfflineStatus')) return ({ onSynced }) => React.createElement('View', null, React.createElement('Text', null, 'Compact sync summary'), buttonElement({ title: 'Simulate synchronized work', onPress: onSynced }));
     if (name.endsWith('/components/WorkLocation')) return () => React.createElement('Text', null, 'Explicit foreground location controls');
+    if (name.endsWith('/components/NativePushBridge')) return () => null;
     if (name === './SettingsScreen') return () => React.createElement('Text', null, 'Settings and company services catalogue');
+    if (name === './EstimatesScreen') return () => React.createElement('Text', null, 'Authorized estimate management');
     if (name === './HomeScreen') return props => { managementProps = props; return React.createElement('View', { testID: 'management-home' }, React.createElement('Text', null, 'Legacy management workspace'), buttonElement({ title: 'Management schedule', onPress: () => props.navigation.navigate('schedule') })); };
     if (name.startsWith('.')) { const next = path.resolve(path.dirname(filename), name); return load(next.endsWith('.js') ? next : next + '.js'); }
     return localRequire(name);

@@ -13,9 +13,13 @@ function validSignature(raw, signature, secret) {
 function quickBooksHandlers(db, config, transport = fetch) {
   const environment = () => config.environment?.() === 'production' ? 'production' : 'sandbox';
   const enabled = () => config.enabled?.() === true;
+  const productionApproved = () => environment() !== 'production' || config.productionApproved?.() === true;
   const connectionRef = (companyId) => db.doc(`rlQuickBooksConnections/${mappingId(companyId, environment(), 'connection', 'current')}`);
   const mapRef = (companyId, type, id) => db.doc(`rlQbMappings/${mappingId(companyId, environment(), type, id)}`);
-  const ensureEnabled = () => { if (!enabled()) throw new HttpsError('failed-precondition', 'QuickBooks connection is awaiting configuration.'); };
+  const ensureEnabled = () => {
+    if (!enabled()) throw new HttpsError('failed-precondition', 'QuickBooks connection is awaiting configuration.');
+    if (!productionApproved()) throw new HttpsError('failed-precondition', 'Production QuickBooks synchronization is awaiting explicit operator approval.');
+  };
   const credentials = () => Buffer.from(`${config.clientId()}:${config.clientSecret()}`).toString('base64');
   async function http(url, options) {
     const response = await transport(url, { ...options, signal: AbortSignal.timeout(20000) });
@@ -86,7 +90,9 @@ function quickBooksHandlers(db, config, transport = fetch) {
       if (!itemId || !Number.isFinite(amount) || amount < 0 || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || Math.abs(amount - quantity * unitPrice) > 0.011) throw new HttpsError('failed-precondition', 'Each line needs a mapped service and valid amount.');
       lines.push({ DetailType: 'SalesItemLineDetail', Description: String(item.description || '').slice(0, 4000), Amount: amount, SalesItemLineDetail: { ItemRef: { value: itemId }, Qty: quantity, UnitPrice: unitPrice } });
     }
-    if (Math.abs(lines.reduce((sum, line) => sum + line.Amount, 0) - Number(data.total)) > 0.011) throw new HttpsError('failed-precondition', 'Invoice totals require review.');
+    const lineTotal = lines.reduce((sum, line) => sum + line.Amount, 0);
+    if (typeof data.total !== 'number' || !Number.isFinite(data.total) || data.total < 0 || !Number.isFinite(lineTotal)
+      || Math.abs(lineTotal - data.total) > 0.011) throw new HttpsError('failed-precondition', 'Invoice totals require review.');
     return { CustomerRef: { value: customer.get('remoteId') }, Line: lines, ...(data.invoiceNumber ? { DocNumber: String(data.invoiceNumber).slice(0, 21) } : {}), ...(data.issueDate ? { TxnDate: data.issueDate } : {}), ...(data.dueDate ? { DueDate: data.dueDate } : {}) };
   }
   async function preview(companyId, type, id) {
@@ -117,7 +123,26 @@ function quickBooksHandlers(db, config, transport = fetch) {
     }
   }
   return {
-    status: async (request) => { const companyId = await scope(request), snap = await connectionRef(companyId).get(); const maps = await db.collection('rlQbMappings').where('companyId', '==', companyId).where('environment', '==', environment()).limit(200).get(); return { enabled: enabled(), environment: environment(), writesEnabled: config.writesEnabled?.() === true, connected: snap.get('connected') === true, realmId: snap.get('realmId') || null, lastError: snap.get('lastError') || null, incomeAccountId: snap.get('incomeAccountId') || '', defaultItemId: snap.get('defaultItemId') || '', mappings: maps.docs.map((row) => ({ type: row.get('type'), localId: row.get('localId'), remoteId: row.get('remoteId'), status: row.get('status'), lastSyncedAt: row.get('lastSyncedAt') || null })) }; },
+    status: async (request) => {
+      const companyId = await scope(request), snap = await connectionRef(companyId).get();
+      const [maps, operations, events] = await Promise.all([
+        db.collection('rlQbMappings').where('companyId', '==', companyId).where('environment', '==', environment()).limit(200).get(),
+        db.collection('rlQbOperations').where('companyId', '==', companyId).where('environment', '==', environment()).limit(100).get(),
+        db.collection('rlQbWebhookEvents').where('companyId', '==', companyId).where('environment', '==', environment()).limit(100).get(),
+      ]);
+      const connected = snap.get('connected') === true;
+      const health = !enabled() ? 'disabled' : !productionApproved() ? 'awaiting-production-approval' : !connected ? 'disconnected'
+        : snap.get('refreshExpiresAt') <= Date.now() ? 'reconnect-required' : snap.get('accessExpiresAt') <= Date.now() ? 'refresh-needed' : 'connected';
+      return { enabled: enabled() && productionApproved(), configured: enabled(), environment: environment(), productionApproved: productionApproved(),
+        writesEnabled: enabled() && config.writesEnabled?.() === true && productionApproved(), connected, health,
+        realmId: snap.get('realmId') || null, lastError: snap.get('lastError') || null,
+        accessExpiresAt: snap.get('accessExpiresAt') || null, refreshExpiresAt: snap.get('refreshExpiresAt') || null,
+        incomeAccountId: snap.get('incomeAccountId') || '', defaultItemId: snap.get('defaultItemId') || '',
+        mappings: maps.docs.map(row => ({ type: row.get('type'), localId: row.get('localId'), remoteId: row.get('remoteId'), status: row.get('status'), lastSyncedAt: row.get('lastSyncedAt') || null })),
+        operations: operations.docs.map(row => ({ id: row.id, type: row.get('type'), localId: row.get('localId'), status: row.get('status'), error: row.get('error') || null, attempts: row.get('attempts') || 0 })),
+        webhookEvents: events.docs.map(row => ({ id: row.id, type: row.get('type'), status: row.get('status'), error: row.get('error') || null, attempts: row.get('attempts') || 0 })),
+      };
+    },
     begin: async (request) => { const companyId = await scope(request, true); ensureEnabled(); const state = randomBytes(32).toString('hex'); await db.doc(`rlQbOAuthStates/${hash(state)}`).create({ companyId, userId: request.auth.uid, environment: environment(), expiresAt: Date.now() + 600000, used: false }); const url = new URL('https://appcenter.intuit.com/connect/oauth2'); Object.entries({ client_id: config.clientId(), scope: 'com.intuit.quickbooks.accounting', redirect_uri: config.redirectUri(), response_type: 'code', state }).forEach(([key, value]) => url.searchParams.set(key, value)); return { url: url.href }; },
     callback: async (req, res) => {
       try {
@@ -159,7 +184,7 @@ function quickBooksHandlers(db, config, transport = fetch) {
     },
     reconcile: async (request) => { const companyId = await scope(request); const mapping = await mapRef(companyId, 'Invoice', documentId(request.data?.localId)).get(); if (!mapping.exists) throw new HttpsError('failed-precondition', 'Map the invoice first.'); await reconcileInvoice(companyId, mapping.get('remoteId')); return { reconciled: true }; },
     webhook: async (req, res) => {
-      if (!enabled() || !validSignature(req.rawBody, req.headers['intuit-signature'], config.webhookSecret?.())) return res.status(401).send('Invalid signature');
+      if (!enabled() || !productionApproved() || !validSignature(req.rawBody, req.headers['intuit-signature'], config.webhookSecret?.())) return res.status(401).send('Invalid or disabled webhook');
       try {
         const body = JSON.parse(req.rawBody.toString('utf8')); const notifications = body.eventNotifications; if (!Array.isArray(notifications)) return res.status(400).send('Invalid notification');
         for (const group of notifications.slice(0, 100)) { const realmId = remoteId(group.realmId), realm = await db.doc(`rlQbRealms/${hash(`${environment()}:${realmId}`)}`).get(); if (!realm.exists) continue; for (const entity of (group.dataChangeEvent?.entities || []).slice(0, 100)) { if (!['Customer', 'Item', 'Invoice', 'Payment'].includes(entity.name)) continue; const id = remoteId(entity.id), ref = db.doc(`rlQbWebhookEvents/${hash(`${environment()}:${realmId}:${entity.name}:${id}:${entity.operation}:${entity.lastUpdated}`)}`); await db.runTransaction(async (tx) => { if (!(await tx.get(ref)).exists) tx.create(ref, { companyId: realm.get('companyId'), environment: environment(), realmId, type: entity.name, remoteId: id, status: 'pending', attempts: 0, nextAttempt: 0, createdAt: new Date() }); }); } }
@@ -167,7 +192,7 @@ function quickBooksHandlers(db, config, transport = fetch) {
       } catch { return res.status(503).send('Retry notification'); }
     },
     drain: async () => {
-      if (!enabled()) return;
+      if (!enabled() || !productionApproved()) return;
       const rows = await db.collection('rlQbWebhookEvents').where('status', '==', 'pending').limit(100).get();
       for (const row of rows.docs) {
         const data = row.data(); if (data.environment !== environment() || data.nextAttempt > Date.now()) continue;

@@ -6,6 +6,7 @@ import { GlassButton, GlassInput } from './Glass';
 import { Card, ScreenHeader, SectionHeader, StatusBadge, InlineNotice, ConfirmationPanel } from './MobileUI';
 import JobPhotos from './JobPhotos';
 import FieldWorkTools from './FieldWorkTools';
+import ServiceChecklist from './ServiceChecklist';
 import { completeJob } from '../services/jobCompletion';
 import { getQueuedOperation, resolveOffline } from '../services/offline';
 
@@ -26,13 +27,15 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
   const [error, setError] = useState(''), [notice, setNotice] = useState('');
   const [saving, setSaving] = useState(false), [reviewing, setReviewing] = useState(false), [photoBusy, setPhotoBusy] = useState(false), [photoDraft, setPhotoDraft] = useState(false);
   const [workBusy, setWorkBusy] = useState(false), [workDraft, setWorkDraft] = useState(false);
+  const [serviceBusy, setServiceBusy] = useState(false), [serviceDraft, setServiceDraft] = useState(false);
   const [retryOperationId, setRetryOperationId] = useState(null), [savedChange, setSavedChange] = useState(null);
   const [submitted, setSubmitted] = useState(null), [closeRequested, setCloseRequested] = useState(false);
   const mounted = useRef(true), generation = useRef(0), submitting = useRef(null), reviewPending = useRef(null), photoBusyRef = useRef(false), photoDraftRef = useRef(false);
   const workBusyRef = useRef(false), workDraftRef = useRef(false);
+  const serviceBusyRef = useRef(false), serviceDraftRef = useRef(false);
   const notify = useRef(onInteractionChange); notify.current = onInteractionChange;
   const hasCompletionDraft = Object.values(draft).some(value => String(value).trim());
-  const hasDraft = photoDraft || workDraft || hasCompletionDraft, busy = saving || reviewing || photoBusy || workBusy;
+  const hasDraft = photoDraft || workDraft || serviceDraft || hasCompletionDraft, busy = saving || reviewing || photoBusy || workBusy || serviceBusy;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; generation.current++; notify.current?.({ busy: false, hasDraft: false }); }; }, []);
   useEffect(() => { notify.current?.({ busy, hasDraft }); }, [busy, hasDraft]);
   useEffect(() => {
@@ -40,6 +43,7 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
     setMode('details'); setDraft(emptyDraft()); setError(''); setNotice(''); setSaving(false); setReviewing(false);
     setPhotoBusy(false); setPhotoDraft(false); photoBusyRef.current = false; photoDraftRef.current = false;
     setWorkBusy(false); setWorkDraft(false); workBusyRef.current = false; workDraftRef.current = false;
+    setServiceBusy(false); setServiceDraft(false); serviceBusyRef.current = false; serviceDraftRef.current = false;
     setRetryOperationId(null); setSavedChange(null); setSubmitted(null); setCloseRequested(false);
   }, [job?.id]);
   useEffect(() => {
@@ -60,6 +64,8 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
   const updatePhotoDraft = useCallback(value => { photoDraftRef.current = value; if (mounted.current) setPhotoDraft(value); }, []);
   const updateWorkBusy = useCallback(value => { workBusyRef.current = value; if (mounted.current) setWorkBusy(value); }, []);
   const updateWorkDraft = useCallback(value => { workDraftRef.current = value; if (mounted.current) setWorkDraft(value); }, []);
+  const updateServiceBusy = useCallback(value => { serviceBusyRef.current = value; if (mounted.current) setServiceBusy(value); }, []);
+  const updateServiceDraft = useCallback(value => { serviceDraftRef.current = value; if (mounted.current) setServiceDraft(value); }, []);
   const accessReason = workAccessReason(job, user, permissions);
   const displayJob = submitted?.jobId === job?.id ? { ...job, ...submitted.draft, status: 'completed' } : job;
   const canComplete = !accessReason && ['scheduled', 'en-route', 'in-progress'].includes(displayJob?.status);
@@ -69,13 +75,13 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
     return false;
   };
   const close = () => {
-    if (submitting.current !== null || reviewPending.current !== null || workBusyRef.current || explainBlockedPhoto()) return;
-    if (hasCompletionDraft || workDraftRef.current || retryOperationId) { setCloseRequested(true); return; }
+    if (submitting.current !== null || reviewPending.current !== null || workBusyRef.current || serviceBusyRef.current || explainBlockedPhoto()) return;
+    if (hasCompletionDraft || workDraftRef.current || serviceDraftRef.current || retryOperationId) { setCloseRequested(true); return; }
     onClose?.();
   };
   const openCompletion = () => {
     if (explainBlockedPhoto()) return;
-    if (workDraftRef.current) { setError('Save or cancel your work notes, product application or visit record draft before completing the visit.'); return; }
+    if (workDraftRef.current || serviceDraftRef.current) { setError('Save or cancel your work notes, product application, visit record or service checklist draft before completing the visit.'); return; }
     if (!canComplete) { setError(accessReason || (displayJob?.status === 'cancelled' ? 'This job was cancelled. A manager must reopen it before it can be completed.' : 'This job is already completed. Refresh the job list.')); return; }
     setError(''); setNotice(''); setCloseRequested(false); setMode('completion');
   };
@@ -129,7 +135,7 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
     } catch (failure) { if (mounted.current && generation.current === ticket) setError(failure.message || 'Could not discard this saved completion. Keep this screen open and retry.'); }
     finally { if (submitting.current === ticket) submitting.current = null; if (mounted.current && generation.current === ticket) setSaving(false); }
   };
-  const edit = () => { if (explainBlockedPhoto() || workBusyRef.current || workDraftRef.current || hasCompletionDraft || retryOperationId) { if (!photoBusyRef.current && !photoDraftRef.current) setError('Save or discard your work draft before editing the job.'); return; } onEdit?.(job); };
+  const edit = () => { if (explainBlockedPhoto() || workBusyRef.current || workDraftRef.current || serviceBusyRef.current || serviceDraftRef.current || hasCompletionDraft || retryOperationId) { if (!photoBusyRef.current && !photoDraftRef.current) setError('Save or discard your work draft before editing the job.'); return; } onEdit?.(job); };
   if (!job?.id) return <View><InlineNotice tone="error" message="Reopen the job from your job list." /><GlassButton title="Return to jobs" onPress={onClose} /></View>;
   const address = [displayJob.address, displayJob.city, displayJob.state, displayJob.zipCode].filter(value => typeof value === 'string' && value.trim()).join(', ');
   const destination = typeof displayJob.latitude === 'number' && typeof displayJob.longitude === 'number' ? displayJob.latitude + ',' + displayJob.longitude : address;
@@ -170,6 +176,9 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
           <JobPhotos key={job.id} job={job} onBusyChange={updatePhotoBusy} onDraftChange={updatePhotoDraft} />
         </Card>
       </View>
+      <View style={{ display: mode === 'details' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details'} importantForAccessibility={mode === 'details' ? 'auto' : 'no-hide-descendants'} pointerEvents={mode === 'details' ? 'auto' : 'none'}>
+        <ServiceChecklist key={job.id} job={job} readOnly={!!accessReason || ['completed','cancelled','canceled'].includes(displayJob.status)} onBusyChange={updateServiceBusy} onDraftChange={updateServiceDraft} />
+      </View>
       {mode === 'details' && (displayJob.actualWorkDone || displayJob.completedAt || displayJob.completionNotes) && <Card><SectionHeader title="Completion summary" />
         {!!displayJob.actualWorkDone && <Text style={{ color: palette.text, fontSize: 15, lineHeight: 23 }}>Work completed: {displayJob.actualWorkDone}</Text>}
         {displayJob.actualHours != null && displayJob.actualHours !== '' && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Actual hours: {displayJob.actualHours}</Text>}
@@ -179,7 +188,7 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
       {mode === 'details' && <View style={{ gap: 10 }}>
         {canComplete && <GlassButton title={hasCompletionDraft ? 'Resume completion' : 'Complete'} secondary={displayJob.status !== 'in-progress'} disabled={busy} onPress={openCompletion} />}
         {permissions.canManage && onEdit && !submitted && <GlassButton secondary title="Edit job" disabled={busy} onPress={edit} />}
-        {permissions.canManage && onFollowUp && displayJob.status === 'completed' && <GlassButton secondary title="Schedule follow-up" disabled={busy} onPress={() => { if (!explainBlockedPhoto() && !workDraftRef.current && !hasCompletionDraft) onFollowUp(displayJob); }} />}
+        {permissions.canManage && onFollowUp && displayJob.status === 'completed' && <GlassButton secondary title="Schedule follow-up" disabled={busy} onPress={() => { if (!explainBlockedPhoto() && !workDraftRef.current && !serviceDraftRef.current && !hasCompletionDraft) onFollowUp(displayJob); }} />}
       </View>}
       {mode === 'completion' && <Card><SectionHeader title="Document completed work" subtitle="Work description is required. Actual hours and completion notes are optional." />
         <GlassInput label="Work completed" value={draft.actualWorkDone} onChangeText={value => setDraft(current => ({ ...current, actualWorkDone: value }))} editable={!saving} multiline />

@@ -37,6 +37,7 @@ const Layout = ({ children }) => {
     { name: can('company.edit') ? 'Company Setup' : 'Company', href: '/company-setup', icon: BuildingOfficeIcon },
     { name: 'Customers', href: '/customers', icon: UsersIcon },
     { name: 'Estimate Templates', href: '/estimate-templates', icon: DocumentTextIcon },
+    { name: 'Estimates', href: '/estimates', icon: DocumentTextIcon },
     { name: 'Jobs', href: '/jobs', icon: ClipboardDocumentListIcon },
     { name: 'Calendar', href: '/calendar', icon: CalendarIcon },
     { name: 'Daily Routes', href: '/routes', icon: ArrowPathIcon },

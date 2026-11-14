@@ -8,6 +8,7 @@ import { GlassScreen, GlassCard, GlassButton, GlassInput } from '../components/G
 import ServiceSelectionScreen from './ServiceSelectionScreen';
 import { ScreenHeader } from '../components/MobileUI';
 import { formatPhone, displayPhone } from '../services/phoneFormat';
+import NativePushSettings from '../components/NativePushSettings';
 
 export default function SettingsScreen({ navigation, embedded = false }) {
   const { user, permissions, updateUserProfile, signOut, refreshUser } = useAuth();
@@ -18,7 +19,7 @@ export default function SettingsScreen({ navigation, embedded = false }) {
   const [notifications, setNotifications] = useState({}), [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState('');
   const [selectServices, setSelectServices] = useState(false);
   const [dirty, setDirty] = useState(false);
-  useEffect(() => { if (dirty) return; setName(user.name || ''); setPhone(displayPhone(user.phoneNumber)); setBusinessName(user.businessName || ''); setAddress(user.businessAddress || ''); setNotifications({ notificationsEnabled: user.notificationsEnabled ?? true, emailNotifications: user.emailNotifications ?? true, smsNotifications: user.smsNotifications ?? false }); }, [user, dirty]);
+  useEffect(() => { if (dirty) return; setName(user.name || ''); setPhone(displayPhone(user.phoneNumber)); setBusinessName(user.businessName || ''); setAddress(user.businessAddress || ''); setNotifications({ emailNotifications: user.emailNotifications ?? true, smsNotifications: user.smsNotifications ?? false }); }, [user, dirty]);
   const save = async extra => {
     setBusy(true); setMessage(''); setError('');
     try {
@@ -49,7 +50,8 @@ export default function SettingsScreen({ navigation, embedded = false }) {
       {title('Your profile')}
       <GlassCard><GlassInput label="Display name" value={name} onChangeText={value => { setDirty(true); setName(value); }} editable={!busy} /><GlassInput label="Your phone number" value={phone} onChangeText={value => { setDirty(true); setPhone(formatPhone(value)); }} keyboardType="phone-pad" autoComplete="tel" textContentType="telephoneNumber" placeholder="(661) 555-0123" editable={!busy} /><Text style={{ color: palette.secondary, fontSize: 13 }}>Language</Text><View style={{ flexDirection: 'row', gap: 10 }}>{[['en','English'],['es','Español']].map(([value,label]) => <GlassButton key={value} secondary={language !== value} title={label} onPress={() => changeLanguage(value)} style={{ flex: 1 }} />)}</View></GlassCard>
       {title('Notification preferences')}
-      <GlassCard>{[['notificationsEnabled','Push notifications'],['emailNotifications','Email notifications'],['smsNotifications','SMS notifications']].map(([key,label]) => <View key={key} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}><Text style={{ color: palette.text, flex: 1 }}>{label}</Text><Switch accessibilityLabel={label} value={!!notifications[key]} disabled={busy} onValueChange={value => { setDirty(true); setNotifications(current => ({ ...current, [key]: value })); }} trackColor={{ false: palette.border, true: palette.button }} thumbColor="#FFFFFF" /></View>)}</GlassCard>
+      <NativePushSettings />
+      <GlassCard>{[['emailNotifications','Email notifications'],['smsNotifications','SMS notifications']].map(([key,label]) => <View key={key} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}><Text style={{ color: palette.text, flex: 1 }}>{label}</Text><Switch accessibilityLabel={label} value={!!notifications[key]} disabled={busy} onValueChange={value => { setDirty(true); setNotifications(current => ({ ...current, [key]: value })); }} trackColor={{ false: palette.border, true: palette.button }} thumbColor="#FFFFFF" /></View>)}</GlassCard>
       {!!error && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{error}</Text>}{!!message && <Text accessibilityLiveRegion="polite" style={{ color: palette.accent }}>{message}</Text>}
       <GlassButton title="Save profile & preferences" busy={busy} onPress={() => save()} icon="checkmark" />
       <GlassButton secondary title="Sign out" icon="log-out-outline" disabled={busy} onPress={() => Alert.alert('Sign out?', 'Your appearance preference stays on this device.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign out', onPress: signOut }])} />

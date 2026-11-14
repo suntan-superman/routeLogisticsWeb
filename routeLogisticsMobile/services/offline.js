@@ -82,6 +82,19 @@ export async function saveApplicationOffline(jobId, record) {
   await queue(scope).add({ id, kind: 'application', jobId, record, createdAt: Date.now() });
   void flushOffline().catch(() => {}); return { success: true, queued: true };
 }
+export async function saveServiceFormOffline(job, record) {
+  const scope = offlineScope(), claims = getClaims();
+  if (!auth.currentUser?.emailVerified || !job?.id || ['completed','cancelled','canceled'].includes(job.status) || (claims?.companyId ? job.companyId !== claims.companyId : job.companyId || job.userId !== auth.currentUser.uid)
+    || claims?.role === 'technician' && job.assignedTo !== claims.membershipId) throw new Error('Your verified current workspace and job assignment are required to save this service form.');
+  const cached = await readCache(`service-form:${job.id}`, scope);
+  if (!cached?.enabled || !cached.form || cached.form.assignmentVersion !== record.assignmentVersion) throw new Error('Open this service template online before saving it offline.');
+  const id = Crypto.randomUUID(), payload = { templateId: record.templateId, templateVersion: record.templateVersion, assignmentVersion: record.assignmentVersion, expectedVersion: record.expectedVersion, status: record.status, answers: record.answers };
+  await queue(scope).edit(rows => {
+    if (rows.some(row => row.kind === 'service-form' && row.jobId === job.id && !['synced','discarded'].includes(row.state))) throw new Error('A service report is already saved for this job. Synchronize or review it before adding another revision.');
+    rows.push({ id, kind: 'service-form', jobId: job.id, record: payload, template: cached.form.template, createdAt: Date.now(), state: 'pending', attempts: 0, nextAttempt: 0 });
+  });
+  void flushOffline().catch(() => {}); return { success: true, queued: true, operationId: id };
+}
 export async function purgeLegacyReadCaches() {
   const keys = await AsyncStorage.getAllKeys();
   const legacy = keys.filter(key => (key.startsWith('rl-offline-v1:') && key.includes(':cache:') && !key.includes(':cache:policy2:')) || /^rl-session-v[12]:/.test(key));
@@ -106,11 +119,13 @@ export function flushOffline() {
       if (AppState.currentState !== 'active' || offlineScope() !== scope || await isOffline()) break;
       if (row.state !== 'pending' || row.nextAttempt > Date.now()) continue;
       const ordered = await work.read();
-      const earlier = ordered.slice(0, ordered.findIndex((entry) => entry.id === row.id)).find((other) => other.jobId === row.jobId && other.kind === 'job' && !['synced', 'discarded'].includes(other.state));
+      const earlier = ordered.slice(0, ordered.findIndex((entry) => entry.id === row.id)).find((other) => other.jobId === row.jobId && (other.kind === 'job' || row.patch?.status === 'completed' && other.kind === 'service-form') && !['synced', 'discarded'].includes(other.state));
       if (row.kind === 'job' && earlier) continue;
       await work.patch(row.id, { state: 'syncing' });
       try {
-        const result = row.kind === 'job' ? (await httpsCallable(functions, 'rlApplyJobOperation')({ operationId: row.id, jobId: row.jobId, patch: row.patch, expectedVersion: row.expectedVersion })).data : row.kind === 'application' ? await callWorkspace('rlRecordApplication', { jobId: row.jobId, operationId: row.id, record: row.record }).then(() => ({ status: 'synced' })) : await sendPhoto(row, scope);
+        const result = row.kind === 'job' ? (await httpsCallable(functions, 'rlApplyJobOperation')({ operationId: row.id, jobId: row.jobId, patch: row.patch, expectedVersion: row.expectedVersion })).data : row.kind === 'application' ? await callWorkspace('rlRecordApplication', { jobId: row.jobId, operationId: row.id, record: row.record }).then(() => ({ status: 'synced' }))
+          : row.kind === 'service-form' ? await callWorkspace('rlServiceForms', { action: 'save', jobId: row.jobId, operationId: row.id, ...row.record })
+          : row.kind === 'photo' ? await sendPhoto(row, scope) : (() => { throw new Error('Unsupported saved-work type. Retain this change for review.'); })();
         await work.edit((rows) => {
           const current = rows.find((entry) => entry.id === row.id);
           Object.assign(current, { state: result.status, server: result.server || null, serverVersion: result.version || null, error: result.status === 'conflict' ? 'This job changed online. Review before retrying.' : '' });
@@ -118,6 +133,10 @@ export function flushOffline() {
         });
         if (result.status === 'synced' && row.kind === 'job') { const bases = await readCache('job-bases', scope) || {}; bases[row.jobId] = { ...bases[row.jobId], ...row.patch, updatedAt: result.version }; await writeCache('job-bases', bases, scope); }
         if (result.status === 'synced' && row.kind === 'photo') await FileSystem.deleteAsync(row.localUri, { idempotent: true });
+        if (result.status === 'synced' && row.kind === 'service-form') {
+          const cached = await readCache(`service-form:${row.jobId}`, scope);
+          if (cached?.form?.assignmentVersion === row.record.assignmentVersion) await writeCache(`service-form:${row.jobId}`, { ...cached, form: { ...cached.form, answers: row.record.answers, status: row.record.status, responseVersion: result.version } }, scope);
+        }
       } catch (error) {
         const attempts = row.attempts + 1, retryable = ['functions/unavailable', 'functions/deadline-exceeded', 'functions/internal', 'functions/resource-exhausted', 'storage/retry-limit-exceeded', 'unavailable'].includes(error.code) || await isOffline();
         await work.patch(row.id, { state: retryable && attempts < 5 ? 'pending' : 'failed', attempts, nextAttempt: Date.now() + retryDelay(attempts), error: error.message || 'Sync failed.', errorCode: error.code || null });
@@ -134,7 +153,12 @@ export async function resolveOffline(id, action) {
   await work.edit((rows) => {
     const row = rows.find((entry) => entry.id === id); if (!row) return;
     if (action === 'discard') { row.state = 'discarded'; return; }
-    if (row.state === 'conflict') { row.id = Crypto.randomUUID(); row.expectedVersion = row.serverVersion; operationId = row.id; }
+    if (row.state === 'conflict') {
+      if (row.kind === 'service-form' && row.server?.assignmentVersion !== row.record.assignmentVersion) throw new Error('The assigned service template changed. Review the saved answers and current template before discarding this old change.');
+      row.id = Crypto.randomUUID(); row.expectedVersion = row.serverVersion;
+      if (row.kind === 'service-form') row.record.expectedVersion = row.serverVersion;
+      operationId = row.id;
+    }
     row.state = 'pending'; row.attempts = 0; row.nextAttempt = 0; row.error = ''; row.errorCode = null;
   });
   void flushOffline().catch(() => {});

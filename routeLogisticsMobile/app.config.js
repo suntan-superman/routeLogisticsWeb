@@ -10,15 +10,15 @@ export default ({ config }) => ({
   icon: "./assets/brand/app-icon-ios.png",
   userInterfaceStyle: "automatic",
   newArchEnabled: true,
-  plugins: ["expo-font", "@react-native-community/datetimepicker", ["expo-location", {
+  plugins: ["expo-font", "expo-notifications", "@react-native-community/datetimepicker", ["expo-location", {
     locationWhenInUsePermission: "Share your work location with your company during your on-duty shift.",
     locationAlwaysAndWhenInUsePermission: "Share your work location during an active shift, including when the app is in the background. End your shift to stop tracking.",
     isIosBackgroundLocationEnabled: true,
     isAndroidBackgroundLocationEnabled: true,
     isAndroidForegroundServiceEnabled: true
   }], ["expo-image-picker", {
-    photosPermission: "Choose photos to document completed jobs.",
-    cameraPermission: "Take photos to document completed jobs.",
+    photosPermission: "Choose photos to document service jobs and prepare estimates.",
+    cameraPermission: "Take photos to document service jobs and prepare estimates.",
     microphonePermission: false
   }]],
   splash: {
@@ -37,6 +37,8 @@ export default ({ config }) => ({
     }
   },
   android: {
+    // Public Firebase client registration for native FCM; no Admin credentials.
+    googleServicesFile: "./google-services.json",
     icon: "./assets/brand/app-icon-ios.png",
     adaptiveIcon: {
       foregroundImage: "./assets/brand/android-adaptive-foreground.png",

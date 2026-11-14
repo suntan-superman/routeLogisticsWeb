@@ -8,7 +8,7 @@ const root = path.resolve(__dirname, '..');
 
 function fixture() {
   const storage = new Map(), copies = [], calls = [], operations = new Map(), modules = new Map();
-  let online = true, nextId = 0, syncError = null, hold = null, storageError = null;
+  let online = true, nextId = 0, syncError = null, hold = null, storageError = null, serviceResult = {status:'synced',version:1};
   const claims = { companyId: 'acme', role: 'technician', membershipId: 'member' };
   const auth = { currentUser: { uid: 'tech', emailVerified: true }, app: { options: { projectId: 'mi-factotum-field-service' } } };
   const job = { id: 'job', companyId: 'acme', assignedTo: 'member', status: 'in-progress', updatedAt: '2026-11-13T10:00:00.000Z' };
@@ -18,7 +18,7 @@ function fixture() {
   };
   const workspace = {
     readWorkspace: async (resource, data) => { assert.equal(resource, 'jobs'); assert.equal(data.id, job.id); assertAccess(); return { job: { ...job } }; },
-    callWorkspace: async (name, data) => { assertAccess(); calls.push({ name, ...data }); if (syncError) throw syncError; return { status: 'synced' }; },
+    callWorkspace: async (name, data) => { assertAccess(); calls.push({ name, ...data }); if (syncError) throw syncError; return name==='rlServiceForms'?serviceResult:{ status: 'synced' }; },
   };
   function load(relative) {
     const filename = path.resolve(root, relative);
@@ -56,7 +56,7 @@ function fixture() {
   }
   const offline = load('services/offline.js'), completion = load('services/jobCompletion.js');
   return { ...offline, ...completion, job, claims, auth, copies, calls, operations,
-    online: value => { online = value; }, failSync: value => { syncError = value; }, holdSync: value => { hold = value; }, failStorage: value => { storageError = value; } };
+    online: value => { online = value; }, failSync: value => { syncError = value; }, holdSync: value => { hold = value; }, failStorage: value => { storageError = value; }, serviceResult:value=>{serviceResult=value;} };
 }
 const draft = { actualWorkDone: 'Applied treatment', actualHours: '1.5', completionNotes: 'Work documented.' };
 
@@ -140,4 +140,41 @@ test('photo queue preserves metadata, copied file and scoped operation when offl
   await assert.rejects(f.savePhotoOffline({ ...f.job }, 'file:///selected-still-available.jpg'), /Storage full/);
   assert.equal(f.copies.at(-1).from, 'file:///selected-still-available.jpg');
   assert.equal((await f.queuedWork()).length, 1);
+});
+
+test('service reports queue durably with a pinned template and reject duplicate pending saves or unauthorized jobs', async () => {
+  const f = fixture(); f.online(false);
+  const template={id:'pool-maintenance',version:1,name:'Pool maintenance',fields:[{id:'ph',label:'pH',type:'number',unit:'pH'}]};
+  await f.writeCache(`service-form:${f.job.id}`,{enabled:true,form:{template,assignmentVersion:1,responseVersion:0,answers:{}}});
+  const record={templateId:template.id,templateVersion:1,assignmentVersion:1,expectedVersion:0,status:'completed',answers:{ph:7.4}};
+  const result=await f.saveServiceFormOffline({...f.job},record);
+  const row=await f.getQueuedOperation(result.operationId);
+  assert.equal(row.kind,'service-form'); assert.equal(row.jobId,f.job.id); assert.equal(row.record.templateVersion,1); assert.equal(row.record.answers.ph,7.4);
+  await assert.rejects(f.saveServiceFormOffline({...f.job},record),/already saved/);
+  await assert.rejects(f.saveServiceFormOffline({...f.job,companyId:'another'},record),/assignment/);
+  await assert.rejects(f.saveServiceFormOffline({...f.job,assignedTo:'another'},record),/assignment/);
+  assert.equal((await f.queuedWork()).length,1);
+  f.online(true); await f.flushOffline(); assert.equal((await f.getQueuedOperation(result.operationId)).state,'synced');
+  assert.equal(f.calls.filter(row=>row.name==='rlServiceForms').length,1); assert.equal(f.calls.filter(row=>row.name==='rlJobPhoto').length,0);
+});
+
+test('service conflicts require reviewed response versions and cannot silently adopt a different assigned template', async()=>{
+  const f=fixture();f.online(false);const template={id:'pool-maintenance',version:1,name:'Pool maintenance',fields:[]};
+  await f.writeCache('service-form:job',{enabled:true,form:{template,assignmentVersion:1,responseVersion:0}});
+  const record={templateId:template.id,templateVersion:1,assignmentVersion:1,expectedVersion:0,status:'draft',answers:{}};
+  const saved=await f.saveServiceFormOffline({...f.job},record);await f.flushOffline();f.serviceResult({status:'conflict',version:3,server:{assignmentVersion:1,responseVersion:3,answers:{}}});f.online(true);await f.flushOffline();
+  assert.equal((await f.getQueuedOperation(saved.operationId)).state,'conflict');f.online(false);
+  const retried=await f.resolveOffline(saved.operationId,'retry');const row=await f.getQueuedOperation(retried.operationId);
+  assert.notEqual(row.id,saved.operationId);assert.equal(row.record.expectedVersion,3);assert.equal(row.record.assignmentVersion,1);
+  await f.flushOffline();f.serviceResult({status:'conflict',version:0,server:{assignmentVersion:2,responseVersion:0,answers:{}}});f.online(true);await f.flushOffline();f.online(false);
+  await assert.rejects(f.resolveOffline(row.id,'retry'),/assigned service template changed/);
+});
+
+test('job completion waits for an earlier service report to synchronize or be explicitly discarded',async()=>{
+  const f=fixture();f.online(false);const template={id:'pool-maintenance',version:1,name:'Pool maintenance',fields:[]};
+  await f.writeCache('service-form:job',{enabled:true,form:{template,assignmentVersion:1,responseVersion:0}});
+  const saved=await f.saveServiceFormOffline({...f.job},{templateId:template.id,templateVersion:1,assignmentVersion:1,expectedVersion:0,status:'draft',answers:{}});
+  await f.completeJob({...f.job},draft);f.serviceResult({status:'conflict',version:1,server:{assignmentVersion:1,responseVersion:1}});f.online(true);await f.flushOffline();
+  assert.equal(f.job.status,'in-progress');assert.equal(f.calls.filter(row=>row.name==='rlApplyJobOperation').length,0);
+  f.online(false);await f.resolveOffline(saved.operationId,'discard');await f.flushOffline();f.online(true);await f.flushOffline();assert.equal(f.job.status,'completed');
 });

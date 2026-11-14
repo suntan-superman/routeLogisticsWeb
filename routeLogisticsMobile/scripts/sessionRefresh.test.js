@@ -36,6 +36,7 @@ function fixture() {
       if (name === '../services/staffLogin') return { requestStaffCode: async () => {}, signInWithStaffCode: async () => {} };
       if (name === '../services/nativeInteraction') return { isNativeInteractionActive: () => false, subscribeNativeInteraction: () => () => {} };
       if (name === '../services/workTracking') return { stopShiftTracking: async () => {} };
+      if (name === '../services/nativePush') return { signOutNativePush: async () => {} };
       if (name === '../services/workspaceApi') return { readWorkspace: async () => { if (companyFailure) throw companyFailure; return { company: { name: 'Acme', services: ['Inspection'] } }; } };
       if (name.startsWith('.')) { const target = path.resolve(path.dirname(filename), name); if (target.endsWith('.json')) return nativeRequire(name); return load(target.endsWith('.js') ? target : target + '.js'); }
       return nativeRequire(name);

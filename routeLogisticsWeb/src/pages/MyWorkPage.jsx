@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { getClaims } from '../services/tenancy';
 import { readWorkspace, callWorkspace } from '../services/workspaceApi';
 import JobPhotos from '../components/JobPhotos';
+import ServiceChecklist from '../components/ServiceChecklist';
 import JobApplicationLog from '../components/JobApplicationLog';
 import WorkLocation from '../components/WorkLocation';
 import { readWorkQueue, updateWorkQueue, settleWorkOperation } from '../utils/workQueue';
@@ -80,7 +81,7 @@ export default function MyWorkPage() {
     {selected && <section className="space-y-5 rounded border bg-white p-5"><div className="flex justify-between"><h2 className="text-xl font-semibold">{selected.serviceType}</h2><button className="underline" onClick={() => setSelected(null)}>Close job</button></div><p>{customer?.name || selected.customerName} · {customer?.phone || customer?.phoneNumber || selected.customerPhone}</p><p>{selected.address || customer?.address}</p>{customer?.serviceInstructions && <p>{customer.serviceInstructions}</p>}<a className="underline" href={navigation(selected.address || customer?.address || '')} target="_blank" rel="noreferrer">Open navigation</a>
       <label className="block">Work notes<textarea className="input-field mt-1 block w-full" value={notes} onChange={e => setNotes(e.target.value)} /></label>
       {!['completed','cancelled'].includes(selected.status) && <div className="flex flex-wrap gap-3"><button className="btn-secondary" onClick={() => work()}>Save notes</button>{selected.status === 'scheduled' && <button className="btn-secondary" onClick={() => work('en-route')}>En route</button>}{['scheduled','en-route'].includes(selected.status) && <button className="btn-primary" onClick={() => work('in-progress')}>Start work</button>}<button className="btn-primary" onClick={() => work('completed')}>Complete job</button></div>}
-      <WorkLocation job={selected} /><JobPhotos job={selected} /><JobApplicationLog job={selected} />
+      <WorkLocation job={selected} /><JobPhotos job={selected} /><ServiceChecklist key={selected.id} job={selected} /><JobApplicationLog job={selected} />
     </section>}
     <section className="space-y-2"><h2 className="font-semibold">Saved work · {queue.filter(row => row.state === 'pending').length} awaiting sync</h2><button className="underline" onClick={() => sync().then(load)}>Synchronize now</button>{queue.filter(row => row.state !== 'synced').map(row => <div key={row.id} className="rounded border p-3"><p>{row.state}: {row.message || 'Saved on this device'}</p>{['failed','conflict'].includes(row.state) && <button className="underline" onClick={() => { if (window.confirm('Discard this local change? Your other saved work is retained.')) persist(rows => rows.filter(item => item.id !== row.id)).catch(e => setMessage(e.message)); }}>Discard after review</button>}</div>)}</section>
   </div>;

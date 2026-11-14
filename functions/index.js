@@ -25,6 +25,12 @@ const { routeHandlers } = require('./routes');
 const { locationHandlers } = require('./locations');
 const { offlineHandler } = require('./offline');
 const { quickBooksHandlers } = require('./quickbooks');
+const { nativePushHandlers } = require('./nativePush');
+const { smsHandlers } = require('./sms');
+const { createTwilioTransport } = require('./smsProvider');
+const { serviceFormsHandler } = require('./serviceForms');
+const { paymentLifecycleHandlers } = require('./paymentLifecycle');
+const { estimateHandlers } = require('./estimates');
 
 initializeApp();
 const db = getFirestore();
@@ -151,6 +157,47 @@ exports.rlCreateInvoicePayment = onCall({ secrets: stripeSecrets }, payments.cre
 exports.rlGetInvoicePaymentStatus = onCall(payments.status);
 exports.rlCancelInvoicePayment = onCall({ secrets: stripeSecrets }, payments.cancel);
 exports.rlStripeWebhook = onRequest({ secrets: stripeEnabled() ? [...stripeSecrets, 'RL_STRIPE_WEBHOOK_SECRET'] : [] }, (req, res) => payments.webhook(req, res, process.env.RL_STRIPE_WEBHOOK_SECRET));
+const paymentLifecycle = paymentLifecycleHandlers(db, { enabled: stripeEnabled, mode: stripeMode, liveApproved: () => process.env.RL_STRIPE_LIVE_APPROVED === 'true', emailEnabled, appUrl: () => appUrl.value() });
+exports.rlGetPaymentReadiness = onCall(paymentLifecycle.readiness);
+exports.rlGetInvoicePaymentHistory = onCall(paymentLifecycle.history);
+exports.rlSendPaymentConfirmation = onDocumentCreated('rlPaymentEvents/{id}', paymentLifecycle.receipt);
+exports.rlServiceForms = onCall(serviceFormsHandler(db, { enabled: () => process.env.RL_SERVICE_FORMS_ENABLED === 'true' }));
+const estimates = estimateHandlers(db, { enabled: () => process.env.RL_ESTIMATES_ENABLED === 'true', emailEnabled: () => emailEnabled() && process.env.RL_ESTIMATE_EMAIL_ENABLED === 'true', appUrl: () => appUrl.value() });
+exports.rlEstimate = onCall({ memory: '512MiB', timeoutSeconds: 120 }, estimates.handle);
+exports.rlEstimateApproval = onCall({ memory: '512MiB', timeoutSeconds: 120 }, estimates.approval);
+
+const nativePush = nativePushHandlers(db, {
+  enabled: () => process.env.RL_NATIVE_PUSH_ENABLED === 'true',
+  getUser: uid => getAuth().getUser(uid),
+  accessToken: () => process.env.RL_EXPO_ACCESS_TOKEN || '',
+});
+exports.rlNativePush = onCall(nativePush.manage);
+exports.rlQueueNativeJobCreated = onDocumentCreated('jobs/{jobId}', nativePush.created);
+exports.rlQueueNativeJobUpdated = onDocumentUpdated('jobs/{jobId}', nativePush.updated);
+exports.rlDeliverNativePush = onSchedule({ schedule: 'every 1 minutes', maxInstances: 1, timeoutSeconds: 540, secrets: process.env.RL_EXPO_ACCESS_TOKEN_ENABLED === 'true' ? ['RL_EXPO_ACCESS_TOKEN'] : [] }, nativePush.drain);
+exports.rlNativePushMemberUpdated = onDocumentUpdated('teamMembers/{id}', nativePush.revokeMembership);
+exports.rlNativePushMemberDeleted = onDocumentDeleted('teamMembers/{id}', nativePush.revokeMembership);
+
+const smsEnabled = () => process.env.RL_SMS_ENABLED === 'true';
+const smsConfig = {
+  enabled: smsEnabled, liveApproved: () => process.env.RL_SMS_LIVE_APPROVED === 'true',
+  accountSid: () => process.env.RL_TWILIO_ACCOUNT_SID || '', authToken: () => process.env.RL_TWILIO_AUTH_TOKEN || '',
+  messagingServiceSid: () => process.env.RL_TWILIO_MESSAGING_SERVICE_SID || '',
+  inboundUrl: 'https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlSmsInbound',
+  statusUrl: 'https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlSmsStatus',
+};
+const sms = smsHandlers(db, smsConfig);
+// Keep signed STOP/status callbacks bound after activation even when delivery is disabled.
+const smsSecrets = process.env.RL_SMS_SECRETS_CONFIGURED === 'true' ? ['RL_TWILIO_ACCOUNT_SID', 'RL_TWILIO_AUTH_TOKEN', 'RL_TWILIO_MESSAGING_SERVICE_SID'] : [];
+exports.rlSmsConfig = onCall(sms.config);
+exports.rlSmsCustomerConsent = onCall(sms.consent);
+exports.rlQueueCustomerSms = onCall(sms.queue);
+exports.rlSmsInbound = onRequest({ secrets: smsSecrets }, sms.inbound);
+exports.rlSmsStatus = onRequest({ secrets: smsSecrets }, sms.status);
+exports.rlScheduleCustomerSms = onSchedule({ schedule: 'every 15 minutes', maxInstances: 1, timeoutSeconds: 540 }, sms.schedule);
+exports.rlDeliverCustomerSms = onSchedule({ schedule: 'every 1 minutes', secrets: smsSecrets, maxInstances: 1, timeoutSeconds: 540 }, () => smsEnabled() && smsConfig.liveApproved() ? sms.drain(createTwilioTransport({ accountSid: smsConfig.accountSid(), authToken: smsConfig.authToken(), messagingServiceSid: smsConfig.messagingServiceSid(), statusUrl: smsConfig.statusUrl })) : undefined);
+exports.rlQueueSmsJobCreated = onDocumentCreated('jobs/{jobId}', event => sms.onJob(null, event.data?.data(), event.params.jobId));
+exports.rlQueueSmsJobUpdated = onDocumentUpdated('jobs/{jobId}', event => sms.onJob(event.data?.before.data(), event.data?.after.data(), event.params.jobId));
 const routing = routeHandlers(db);
 exports.rlGetRoutingTeam = onCall(routing.team);
 exports.rlGetDailyRoute = onCall(routing.get);
@@ -166,7 +213,7 @@ exports.rlSetLocationRetention = onCall(locations.retention);
 exports.rlCleanupLocations = onSchedule({ schedule: 'every 60 minutes', maxInstances: 1, timeoutSeconds: 540 }, locations.cleanup);
 const qbEnabled = () => process.env.RL_QB_ENABLED === 'true';
 const qbSecrets = qbEnabled() ? ['RL_QB_CLIENT_ID', 'RL_QB_CLIENT_SECRET'] : [];
-const qb = quickBooksHandlers(db, { enabled: qbEnabled, environment: () => process.env.RL_QB_ENV || 'sandbox', writesEnabled: () => process.env.RL_QB_WRITES_ENABLED === 'true', clientId: () => process.env.RL_QB_CLIENT_ID, clientSecret: () => process.env.RL_QB_CLIENT_SECRET, webhookSecret: () => process.env.RL_QB_WEBHOOK_VERIFIER, redirectUri: () => process.env.RL_QB_REDIRECT_URI || 'https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlQuickBooksOAuthCallback', appUrl: () => appUrl.value() });
+const qb = quickBooksHandlers(db, { enabled: qbEnabled, environment: () => process.env.RL_QB_ENV || 'sandbox', productionApproved: () => process.env.RL_QB_PRODUCTION_APPROVED === 'true', writesEnabled: () => process.env.RL_QB_WRITES_ENABLED === 'true', clientId: () => process.env.RL_QB_CLIENT_ID, clientSecret: () => process.env.RL_QB_CLIENT_SECRET, webhookSecret: () => process.env.RL_QB_WEBHOOK_VERIFIER, redirectUri: () => process.env.RL_QB_REDIRECT_URI || 'https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlQuickBooksOAuthCallback', appUrl: () => appUrl.value() });
 exports.rlQuickBooksStatus = onCall(qb.status);
 exports.rlQuickBooksConnect = onCall({ secrets: qbSecrets }, qb.begin);
 exports.rlQuickBooksOAuthCallback = onRequest({ secrets: qbSecrets }, qb.callback);

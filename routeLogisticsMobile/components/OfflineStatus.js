@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { GlassCard, GlassButton } from './Glass';
 import { queuedWork, subscribeOffline, flushOffline, resolveOffline } from '../services/offline';
 
-const workName = row => row.kind === 'photo' ? 'Photo' : row.kind === 'application' ? 'Application record' : 'Job update';
+const workName = row => row.kind === 'photo' ? 'Photo' : row.kind === 'application' ? 'Application record' : row.kind === 'service-form' ? 'Service report' : 'Job update';
 const reviewLabels = { status: 'Status', actualWorkDone: 'Work completed', actualHours: 'Actual hours', completionNotes: 'Completion notes', notes: 'Work notes', completedAt: 'Completed at' };
 function ReviewValues({ title, values, palette }) {
   return <View style={{ gap: 4 }}><Text style={{ color: palette.text, fontWeight: '600' }}>{title}</Text>{Object.entries(reviewLabels).filter(([key]) => values?.[key] != null).map(([key, label]) => <Text key={key} style={{ color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{label}: {String(values[key])}</Text>)}</View>;
@@ -75,7 +75,11 @@ export default function OfflineStatus({ onSynced }) {
       {outstanding.map(row => <View key={row.id} style={{ borderTopWidth: 1, borderColor: palette.border, paddingTop: 12, gap: 8 }}>
         <Text style={{ color: palette.text, fontWeight: '600' }}>{workName(row)} · {row.state === 'conflict' ? 'Needs review' : row.state}</Text>
         {!!row.error && <Text accessibilityRole="alert" style={{ color: palette.danger, lineHeight: 21 }}>{row.error}</Text>}
-        {row.state === 'conflict' && <><ReviewValues title="Latest online work" values={row.server} palette={palette} /><ReviewValues title="Your saved change" values={row.patch} palette={palette} /></>}
+        {row.kind === 'service-form' && <View style={{ gap: 5 }}><Text style={{ color: palette.text }}>{row.template?.name || 'Service template'} · version {row.record.templateVersion}</Text>
+          {row.template?.fields?.filter(field => row.record.answers?.[field.id] != null).map(field => <Text key={field.id} style={{ color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{field.label}: {Array.isArray(row.record.answers[field.id]) ? row.record.answers[field.id].join(', ') : String(row.record.answers[field.id])}{field.unit ? ` ${field.unit}` : ''}</Text>)}
+          {row.state === 'conflict' && <Text style={{ color: palette.danger }}>Online report revision {row.serverVersion}; saved revision {row.record.expectedVersion}. Reopen the service form to review current answers.</Text>}
+        </View>}
+        {row.state === 'conflict' && row.kind !== 'service-form' && <><ReviewValues title="Latest online work" values={row.server} palette={palette} /><ReviewValues title="Your saved change" values={row.patch} palette={palette} /></>}
         {['failed', 'conflict'].includes(row.state) && <><GlassButton secondary title={row.state === 'conflict' ? 'Retry after review' : 'Retry saved change'} disabled={busy || !canSynchronize} onPress={() => setConfirmation({ id: row.id, action: 'retry' })} /><GlassButton secondary title="Discard this local change" disabled={busy} onPress={() => setConfirmation({ id: row.id, action: 'discard' })} /></>}
       </View>)}
       {confirmation && <View accessibilityLabel="Confirm saved-work action" style={{ padding: 12, gap: 10, borderWidth: 1, borderColor: palette.border, borderRadius: 12 }}><Text style={{ color: palette.text, lineHeight: 22 }}>{confirmation.action === 'discard' ? 'Discard only this saved change? Your other queued work and photos are kept.' : 'Retry this saved change? Your current assignment and the latest job will be checked again.'}</Text><GlassButton title={confirmation.action === 'discard' ? 'Confirm discard' : 'Confirm retry'} busy={busy} disabled={busy || (confirmation.action === 'retry' && !canSynchronize)} onPress={change} /><GlassButton secondary title="Keep saved change" disabled={busy} onPress={() => setConfirmation(null)} /></View>}

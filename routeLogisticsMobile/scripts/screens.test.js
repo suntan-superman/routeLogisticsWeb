@@ -38,7 +38,8 @@ function load(relative) {
     if (specifier.endsWith('/contexts/LanguageContext')) return { LanguageProvider: pass, useLanguage: () => ({ t: key => key, language: 'en', changeLanguage() {} }) };
     if (specifier.endsWith('/theme/ThemeProvider')) return { ThemeProvider: pass, useTheme: () => ({ palette, colors: load('constants/colors.js').COLORS, isDark: true, ready: true, mode: 'dark', changeMode: async value => changes.push(value), reduceTransparency: false }) };
     if (specifier.endsWith('/constants/responsiveSizes')) return { FONT_SIZES: new Proxy({}, { get: () => 16 }), SPACING: new Proxy({}, { get: () => 12 }), BORDER_RADIUS: new Proxy({}, { get: () => 12 }), ICON_SIZES: new Proxy({}, { get: () => 20 }), hp: () => 20, wp: () => 20, rf: () => 16 };
-    if (/\/components\/(JobPhotos|WorkLocation|OfflineStatus|FieldWorkTools|MyRoute)$/.test(specifier)) return () => null;
+    if (/\/components\/(JobPhotos|WorkLocation|OfflineStatus|FieldWorkTools|MyRoute|NativePushBridge|NativePushSettings)$/.test(specifier)) return () => null;
+    if (specifier === './EstimatesScreen') return () => null;
     if (specifier.endsWith('/components/JobWorkflow')) return ({ job, onClose }) => React.createElement('View', null,
       React.createElement('Text', null, job.customerName), React.createElement('Pressable', { accessibilityLabel: 'Close job details', onPress: onClose }, 'Close'));
     if (specifier.endsWith('/services/tenancy')) return { canManage: () => currentAuth.permissions.canManage, localDate: () => '2026-11-13' };

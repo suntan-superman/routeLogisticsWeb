@@ -17,6 +17,7 @@ import {
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import CustomerImport from '../components/CustomerImport';
+import CustomerSmsConsent from '../components/CustomerSmsConsent';
 import { canManage, can } from '../services/tenancy';
 
 const CustomerManagementPage = () => {
@@ -950,6 +951,7 @@ const CustomerManagementPage = () => {
                   </dl>
                 </div>
               </div>
+              {canManage() && <CustomerSmsConsent key={selectedCustomer.id} customer={selectedCustomer} />}
               
               <div className="flex justify-end space-x-3 mt-6">
                 <button

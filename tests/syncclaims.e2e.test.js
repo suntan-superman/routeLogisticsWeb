@@ -122,10 +122,13 @@ test('new docs are stamped with the author company by trigger', async () => {
   const u = await signIn('owner@example.com');
   await fsCreate('customers', 'newCust', { userId: u.localId, name: 'Bob' });
   let stamped;
-  for (let i = 0; i < 20; i++) {
+  // Additional independent job triggers can delay the emulator's Eventarc queue.
+  // Wait for the actual stamped field, with a bounded failure deadline.
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
     stamped = await fsGet('customers', 'newCust');
     if (stamped.fields?.companyId) break;
     await new Promise((r) => setTimeout(r, 500));
   }
-  assert.strictEqual(stamped.fields.companyId.stringValue, 'co1');
+  assert.strictEqual(stamped.fields?.companyId?.stringValue, 'co1', 'Customer trigger did not stamp the company within 30 seconds.');
 });

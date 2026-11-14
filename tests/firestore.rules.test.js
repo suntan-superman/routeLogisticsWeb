@@ -41,6 +41,19 @@ const owner = () => as('owner1', { companyId: 'c1', role: 'owner' });
 const tech = () => as('tech1', { companyId: 'c1', role: 'technician', membershipId: 't1' });
 const manager = () => as('mgr1', { companyId: 'c1', role: 'manager', membershipId: 'm1' });
 
+test('managed estimates cannot bypass server totals, versions or customer approval via client writes', async () => {
+  const record = { userId: 'owner1', companyId: 'c1', rlManaged: true, status: 'draft', total: 20 };
+  await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), 'estimates/managed'), record));
+  await assertSucceeds(getDoc(doc(manager(), 'estimates/managed')));
+  await assertFails(getDoc(doc(tech(), 'estimates/managed')));
+  await assertFails(setDoc(doc(owner(), 'estimates/spoof'), record));
+  await assertFails(updateDoc(doc(owner(), 'estimates/managed'), { status: 'approved', total: 1 }));
+  await assertFails(updateDoc(doc(owner(), 'estimates/managed'), { rlManaged: false }));
+  await assertFails(deleteDoc(doc(owner(), 'estimates/managed')));
+  await assertSucceeds(setDoc(doc(manager(), 'estimates/legacy'), { userId: 'mgr1', companyId: 'c1', total: 20 }));
+  await assertFails(updateDoc(doc(manager(), 'estimates/legacy'), { rlManaged: true }));
+});
+
 test('a membership labeled owner cannot substitute for actual company ownership', async () => {
   await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), 'teamMembers/fakeOwner'), {
     companyId: 'c1', uid: 'notOwner', status: 'active', role: 'owner',

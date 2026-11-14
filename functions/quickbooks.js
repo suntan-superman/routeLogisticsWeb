@@ -152,6 +152,36 @@ function quickBooksHandlers(db, config, transport = fetch) {
   async function requireReviewedExport(companyId, type, localId) {
     if (!(await reviewOperations(companyId,type,localId).get()).empty) throw new HttpsError('failed-precondition', 'An export of this record needs accounting review. Confirm and adopt the existing QuickBooks record first.');
   }
+  async function invoiceTax(companyId, data, current, subtotal) {
+    const tax = data.tax === undefined ? 0 : data.tax, rate = data.taxRate === undefined ? 0 : data.taxRate;
+    const invalid = message => new HttpsError('failed-precondition', message);
+    if (typeof tax !== 'number' || !Number.isFinite(tax) || tax < 0 || typeof rate !== 'number' || !Number.isFinite(rate) || rate < 0) throw invalid('Review the invoice tax amount and rate before export.');
+    if (tax === 0 && rate === 0 && data.taxTreatment !== 'taxable') return { tax: 0, lineCode: data.taxTreatment === 'non-taxable' ? 'NON' : null };
+    const mapping = data.qbTaxMapping;
+    if (data.taxTreatment !== 'taxable' || !mapping || mapping.companyId !== companyId || mapping.environment !== environment() || mapping.realmId !== current.realmId) throw invalid('Taxed invoices require an accounting tax mapping for this company and QuickBooks realm.');
+    const taxCodeId = remoteId(mapping.taxCodeId);
+    const info = await companyInfo(current.realmId, current.accessToken);
+    const preferences = (await api(companyId, 'preferences', undefined, undefined, current))?.Preferences;
+    if (info.Country !== 'US' || preferences?.TaxPrefs?.UsingSalesTax !== true) throw invalid('This tax mapping requires a US QuickBooks company with sales tax enabled.');
+    // AST requires location-based calculations and is deliberately not treated
+    // as a manual rate. Never override an automated tax result to force a match.
+    if (preferences.TaxPrefs.PartnerTaxEnabled !== undefined && preferences.TaxPrefs.PartnerTaxEnabled !== false) throw invalid('Automated QuickBooks sales tax requires verified sale and ship-from locations before export.');
+    const code = (await api(companyId, `taxcode/${taxCodeId}`, undefined, undefined, current))?.TaxCode;
+    const details = code?.SalesTaxRateList?.TaxRateDetail;
+    if (!code || String(code.Id) !== taxCodeId || code.Active !== true || code.Taxable !== true || !Array.isArray(details) || !details.length || details.length > 10) throw invalid('Select an active taxable QuickBooks sales tax code with valid sales rates.');
+    const rates = [], seen = new Set();
+    for (const detail of details) {
+      const id = remoteId(detail.TaxRateRef?.value);
+      if (seen.has(id) || detail.TaxTypeApplicable !== 'TaxOnAmount' || detail.TaxOnTaxOrder !== undefined) throw invalid('Compound or ambiguous QuickBooks tax rates require accounting review.');
+      seen.add(id);
+      const remote = (await api(companyId, `taxrate/${id}`, undefined, undefined, current))?.TaxRate;
+      if (!remote || String(remote.Id) !== id || remote.Active !== true || typeof remote.RateValue !== 'number' || !Number.isFinite(remote.RateValue) || remote.RateValue < 0 || remote.RateValue > 100 || remote.EffectiveTaxRate !== undefined && (!Array.isArray(remote.EffectiveTaxRate) || remote.EffectiveTaxRate.length > 0) || remote.SpecialTaxType !== undefined && remote.SpecialTaxType !== 'NONE') throw invalid('The QuickBooks tax rate is inactive, date-dependent or unsupported. Review the tax mapping.');
+      rates.push(remote.RateValue);
+    }
+    const expectedRate = rates.reduce((sum, value) => sum + value, 0), expectedTax = rates.reduce((sum, value) => sum + Math.round((subtotal * value / 100 + Number.EPSILON) * 100) / 100, 0);
+    if (Math.abs(expectedRate - rate) > 0.000001 || Math.abs(expectedTax - tax) > 0.001) throw invalid('Invoice tax does not match the mapped QuickBooks sales tax rates. Review the rate and rounding.');
+    return { tax, lineCode: 'TAX', detail: { TxnTaxCodeRef: { value: taxCodeId }, TotalTax: tax } };
+  }
   async function payload(companyId, type, snap, current) {
     const data = snap.data();
     if (type === 'Customer') {
@@ -169,9 +199,6 @@ function quickBooksHandlers(db, config, transport = fetch) {
     const customer = await mapRef(companyId, 'Customer', documentId(data.customerId)).get();
     if (!customer.exists || customer.get('realmId') !== current.realmId) throw new HttpsError('failed-precondition', 'Map or sync the customer first.');
     if (!Array.isArray(data.lineItems) || !data.lineItems.length) throw new HttpsError('failed-precondition', 'Invoice has no line items.');
-    // Tax must be mapped deliberately; do not silently create an incorrect tax treatment.
-    const tax = data.tax === undefined ? 0 : data.tax, taxRate = data.taxRate === undefined ? 0 : data.taxRate;
-    if (typeof tax !== 'number' || !Number.isFinite(tax) || tax < 0 || typeof taxRate !== 'number' || !Number.isFinite(taxRate) || taxRate < 0 || tax !== 0 || taxRate !== 0) throw new HttpsError('failed-precondition', 'Taxed invoices require an accounting tax mapping before export. Review the tax amount and rate.');
     if ((data.currency || 'USD') !== 'USD') throw new HttpsError('failed-precondition', 'Only USD invoices are supported. Review the accounting currency before export.');
     if (['discount','discountAmount','discountPercent'].some(key => data[key] !== undefined && (typeof data[key] !== 'number' || !Number.isFinite(data[key]) || data[key] !== 0))) throw new HttpsError('failed-precondition', 'Invoice discounts need an accounting discount mapping before export.');
     const lines = [], items = new Map(), accounts = new Map();
@@ -182,12 +209,14 @@ function quickBooksHandlers(db, config, transport = fetch) {
       if (!itemId || !Number.isFinite(amount) || amount < 0 || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || Math.abs(amount - quantity * unitPrice) > 0.011) throw new HttpsError('failed-precondition', 'Each line needs a mapped service and valid amount.');
       itemId = remoteId(itemId);
       if (!items.has(itemId)) items.set(itemId, await serviceItem(companyId, itemId, current, undefined, accounts));
-      lines.push({ DetailType: 'SalesItemLineDetail', Description: String(item.description || '').slice(0, 4000), Amount: amount, SalesItemLineDetail: { ItemRef: { value: itemId }, Qty: quantity, UnitPrice: unitPrice, ...(data.taxTreatment === 'non-taxable' ? { TaxCodeRef: { value: 'NON' } } : {}) } });
+      lines.push({ DetailType: 'SalesItemLineDetail', Description: String(item.description || '').slice(0, 4000), Amount: amount, SalesItemLineDetail: { ItemRef: { value: itemId }, Qty: quantity, UnitPrice: unitPrice } });
     }
     const lineTotal = lines.reduce((sum, line) => sum + line.Amount, 0);
+    const tax = await invoiceTax(companyId, data, current, lineTotal);
+    if (tax.lineCode) for (const line of lines) line.SalesItemLineDetail.TaxCodeRef = { value: tax.lineCode };
     if (typeof data.total !== 'number' || !Number.isFinite(data.total) || data.total < 0 || !Number.isFinite(lineTotal)
-      || Math.abs(lineTotal - data.total) > 0.011) throw new HttpsError('failed-precondition', 'Invoice totals require review.');
-    return { CustomerRef: { value: customer.get('remoteId') }, CurrencyRef: { value: 'USD' }, Line: lines, ...(data.invoiceNumber ? { DocNumber: String(data.invoiceNumber).slice(0, 21) } : {}), ...(data.issueDate ? { TxnDate: data.issueDate } : {}), ...(data.dueDate ? { DueDate: data.dueDate } : {}) };
+      || Math.abs(lineTotal + tax.tax - data.total) > 0.011) throw new HttpsError('failed-precondition', 'Invoice totals require review.');
+    return { CustomerRef: { value: customer.get('remoteId') }, CurrencyRef: { value: 'USD' }, Line: lines, ...(tax.detail ? { TxnTaxDetail: tax.detail } : {}), ...(typeof data.notes === 'string' && data.notes.trim() ? { PrivateNote: data.notes.trim().slice(0, 4000) } : {}), ...(data.invoiceNumber ? { DocNumber: String(data.invoiceNumber).slice(0, 21) } : {}), ...(data.issueDate ? { TxnDate: data.issueDate } : {}), ...(data.dueDate ? { DueDate: data.dueDate } : {}) };
   }
   async function preview(companyId, type, id) {
     const snap = await source(companyId, type, id), current = await connection(companyId), map = await mapRef(companyId, type, id).get();
@@ -437,6 +466,10 @@ function quickBooksHandlers(db, config, transport = fetch) {
         const remote = (await api(companyId, type.toLowerCase(), payloadJson, requestId, result.current))[type];
         if (!remote || !/^\d{1,30}$/.test(String(remote.Id || '')) || providerVersion(remote.SyncToken) === null) throw new HttpsError('unavailable', 'QuickBooks returned an incomplete export receipt. Retry the original request.');
         receipt = { remoteId: String(remote.Id), syncToken: String(remote.SyncToken) };
+        if (type === 'Invoice') {
+          const expectedTax = result.body.TxnTaxDetail?.TotalTax || 0, returnedTax = remote.TxnTaxDetail?.TotalTax ?? 0, expectedTotal = result.body.Line.reduce((sum, line) => sum + line.Amount, 0) + expectedTax;
+          if ((remote.CurrencyRef?.value || 'USD') !== 'USD' || remote.CustomerRef?.value !== result.body.CustomerRef.value || typeof remote.TotalAmt !== 'number' || !Number.isFinite(remote.TotalAmt) || Math.abs(remote.TotalAmt - expectedTotal) > 0.011 || typeof returnedTax !== 'number' || !Number.isFinite(returnedTax) || returnedTax < 0 || Math.abs(returnedTax - expectedTax) > 0.011) throw new HttpsError('failed-precondition', 'QuickBooks accepted the invoice with different tax, total or customer details. Review and adopt the existing invoice before retrying.');
+        }
         const unique = db.doc(`rlQbRemoteMappings/${hash(`${environment()}:${result.current.realmId}:${type}:${remote.Id}`)}`);
         const review = await db.runTransaction(async tx => {
           const [current, taken, latestSource] = await Promise.all([tx.get(operation), tx.get(unique), tx.get(result.source.ref)]);

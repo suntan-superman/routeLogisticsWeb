@@ -1,72 +1,76 @@
-# QuickBooks sandbox synchronization certification — blocked
+# QuickBooks sandbox synchronization results
 
-Date: November 14, 2026. Starting release: `ac1174c` on the existing `main` branch, retaining the later web UX fixes after `0770810`.
+November 14, 2026. Actual customer, service mapping, invoice, manual tax, payment and retry tests passed. Genuine Intuit webhook delivery remains unverified; this is not a claim of full provider-webhook or production certification.
 
-**End-to-end accounting synchronization is not certified. No live sandbox accounting writes or synthetic production-tenant records were created.** A material isolation blocker was found before the temporary write capability was armed.
+## Environment and retirement
 
-## Isolation blocker
+- Firebase project: `mi-factotum-field-service`; existing `main` branch.
+- RL tenant: Acme Pest Control, `z7DJMjeigjG64YfN4H5h`.
+- QuickBooks: `Sandbox Company_US_1`, realm `9341455727000797`, US, USD.
+- Accounting host: `sandbox-quickbooks.api.intuit.com`; existing development credentials accepted.
+- Run: `1411ac01`, 17:09:56–17:10:57 UTC. Synthetic prefix: `RL-CERT-1411ac01`.
 
-Route Logistics tenant `z7DJMjeigjG64YfN4H5h` (Acme Pest Control) is connected to `Sandbox Company_US_1`, realm `9341455727000797`. A token-free production query also found an existing mi Factotum `quickbooksConnections` record for that same realm, with `syncStatus: active`.
+All 29 independent legacy mi Factotum functions are retired, their backing services removed, all four legacy event triggers removed, and all four legacy schedules paused. Route Logistics has no code dependency on these endpoints. Shared Firebase infrastructure, Auth, data, secrets and runtime IAM remain intact. See [legacy retirement](legacy-retirement.md).
 
-The deployed mi Factotum webhook source looks up connections by realm and can import QuickBooks customer changes. Its lookup does not establish the environment or active status before importing. This proves a shared-consumer risk; it does not prove that Intuit is presently delivering to that endpoint or that the legacy token remains valid. Those external conditions could not be ruled out without changing or inspecting the legacy application's configuration. No such change was made.
+The previous blocked attempt is preserved in Git commit `54875b9`. Its requirement to protect active legacy processing was superseded by the explicit retirement decision. No separate sandbox, Firebase project or staging environment was needed.
 
-Creating an RL synthetic customer in this sandbox could therefore cause legacy imports and MF data writes. The directive requires preserving MF integrations and records, so writes stopped before any test customer, invoice or payment was created. Merely pausing the MF customer scheduler would not isolate its webhook.
+## Actual Intuit sandbox operations
 
-Two additional deployed-source safeguards were inspected read-only for future fixture design: the legacy invoice portal trigger returns before writes if `customerEmail` is absent, and the legacy customer scheduler selects `quickbooks_sync_status == pending`. Neither removes the shared provider-webhook risk.
+| Capability | Actual result |
+| --- | --- |
+| Customer | PASS. Customer `59` has the synthetic name, contact details and tenant/realm mapping. Query confirmed exactly one matching customer. |
+| Accepted-response failure and retry | PASS. The first accepted customer response was deliberately discarded. Retrying identical request bytes and request ID returned the same customer; a further cached synchronization created nothing. |
+| Service mapping | PASS. A new labeled RL service maps to existing active QuickBooks Service item `10`; no account or item was created or modified. |
+| Non-taxable invoice | PASS. Invoice `145`: two units at $10, subtotal/total $20, explicit `NON`, correct customer, service, dates and USD. Repeated export reused its mapping. |
+| Taxable invoice | PASS. Invoice `146`: $20 subtotal, California code `2`, rate `3` at 8%, tax $1.60, total $21.60. Provider values matched RL. The configured default service fallback worked. |
+| Partial payment | PASS. Payment `147`: $5 on invoice `145`; RL test status `partial`, balance $15, amount paid $5. |
+| Full payment | PASS. Payment `148`: remaining $15; RL test status `paid`, balance $0, amount paid $20. Actual RL invoice status remained `sent`. |
+| Payment duplicates and reconciliation | PASS. Repeating each identical provider request returned its original payment ID. Repeating reconciliation left the invoice document version unchanged. Payment mappings preserve amount, date, currency, customer and invoice allocation. |
+| Existing data and connection | PASS. Every original customer version remains unchanged, as do the OAuth connection identity/realm and saved accounting defaults. Normal token rotation occurred during preflight without disconnecting or reauthorizing. |
 
-To continue safely, a separate, verified Intuit sandbox realm and dedicated RL test tenant are needed while retaining the current Acme connection. No suitable alternate provider connection was available for this run. Phase 8 permits a second test tenant when a sandbox is available; operator action is needed to supply that provider connection. Altering or disconnecting the legacy integration would require an explicit change to the current constraints. No additional per-customer developer credentials or Firebase project are needed.
+The existing service item `10` uses its own active income account `54`. The saved default income account `45` remains unchanged; selecting that default does not override the account already configured on a QuickBooks service item.
 
-## Actual Intuit operations
+The controlled run made 33 accounting GETs and eight accounting POST attempts, creating exactly five distinct provider records: one customer, two invoices and two payments. Three POSTs were deliberate idempotency replays. No existing QuickBooks accounting record was edited. Both payments used `ProcessPayment=false`; no card, bank, Stripe, charge or refund request was made.
 
-Only read-only requests were made against `sandbox-quickbooks.api.intuit.com` and the exact recorded realm. Intuit accepted the existing sandbox token. CompanyInfo identified `Sandbox Company_US_1` in the US, and Preferences confirmed:
+Four new RL fixture documents are retained for audit: customer `rl-cert-1411ac01-customer`, service `rl-cert-1411ac01-service`, and invoices `rl-cert-1411ac01-invoice` / `rl-cert-1411ac01-tax-invoice`. The original 507 customers are preserved; total Acme customer count is now 508 including the labeled fixture. Synthetic contact email uses `example.invalid`; no invitation, invoice or reminder was sent. No cleanup deleted records.
 
-- Home currency: USD; multicurrency disabled.
-- Sales tax enabled; partner-tax/AST mode not independently established.
-- Custom transaction numbering disabled.
-- 22 active income accounts and 31 active service items were returned; both saved default selections were present.
+Private sanitized execution evidence is in ignored `.migration/qb-live-1411ac01.json`. Credentials and raw OAuth responses are not stored there. The runner uses existing server handlers in a privileged operator process with the verified company owner context; this is not a browser sign-in or callable authentication end-to-end test.
 
-The four accounting API GETs checked accounts, items, company identity and preferences. They did not refresh, revoke or replace the OAuth connection. Its document version was unchanged during the read-only checks. No Secret Manager payloads were read by the operator; version/access metadata and runtime bindings were sufficient for the blocked preflight.
+## Tax validation and limits
 
-## Automated verification and corrections
+Taxed invoices require explicit `taxTreatment: taxable` and `qbTaxMapping` containing matching `companyId`, accounting `environment`, `realmId` and active `taxCodeId`. The handler checks the current US company preferences, linked active tax rates, local percentage, per-rate rounding and gross total. Returned invoice tax, total, currency and customer must match; a provider-accepted mismatch retains the remote receipt for accounting review instead of retrying a new invoice.
 
-| Capability | Automated result | Actual Intuit sandbox result |
-| --- | --- | --- |
-| Owner authorization and tenant isolation | Passed: owner checks, foreign records/claims denied, independent synthetic tenant fixtures | Existing Acme connection verified read-only; no second provider tenant connected |
-| Customer export and contact mapping | Passed: contacts, mapping reuse, duplicate prevention and lost-response replay | Not attempted because the realm is shared with MF |
-| Service-item mapping | Passed: existing active Service item and active income-account validation; mapped/default fallback | Existing lists/defaults verified read-only; no mapping or item/account mutation |
-| Invoice export | Passed: USD, quantities/prices/totals/dates, mapping and retry controls | No invoice exported; provider totals/numbering behavior remain unverified |
-| Tax | Passed: nonzero tax, unmapped positive rates and malformed values fail closed | Sales tax is enabled; taxable export remains unsupported and uncertified |
-| Discounts and other currencies | Explicitly rejected until supported mappings exist | Not attempted |
-| Partial/full payments | Passed: balances, amount/date/currency/allocations and customer association | No payment created; no Stripe calls or financial processing |
-| Out-of-order and concurrent reconciliation | Passed: invoice lease, independent provider-version/time fences and payment-version checks | Not exercised through real provider events |
-| Webhooks | Passed: raw-body signatures, legacy and modern Intuit CloudEvents, deduplication, malformed/disconnected/tenant handling and retries | Genuine provider delivery not attempted or certified; invalid-signature endpoint probe remains safe |
-| Source changes after provider acceptance | Passed: retained review receipts and remote IDs; no duplicate create after source/ownership changes | Not attempted |
+This run certified the existing simple US manual 8% mapping only. Automated sales tax, jurisdiction/address calculations, compound rates, effective-dated rates, discounts and non-USD exports are outside that scope and remain blocked where unsupported. No tax agency, account, rate or item was created. Custom transaction numbering is disabled in this sandbox, so fixtures omit `DocNumber` and identify themselves through `PrivateNote` and their synthetic customer.
 
-The export operation now persists exact serialized request bytes, not only a Firestore map whose field order may change. Uncertain retries reuse the original body and request ID. Accepted exports whose source or ownership changes are retained for explicit accounting review rather than silently finalized or recreated. Older uncertain operations lacking the required retry receipt need review.
+## Webhook verification
 
-Invoice/payment reconciliation verifies customer associations, serializes invoice checks and rejects older provider versions/timestamps when present. Genuine provider ordering remains untested. Sandbox reconciliation updates `qbTestPaymentStatus`, `qbTestBalance` and `qbTestAmountPaid`; it does not mark the actual invoice paid. Payment mappings retain validated amount, date, currency and invoice allocations.
+The deployed endpoint is:
 
-The temporary operator transport is process-local and denies writes by default. It restricts tenant, exact sandbox realm/host, observed CompanyInfo/bearer, synthetic record identity, amounts, write budget and lifetime. It blocks account/item mutation and payment processing. Arming additionally requires an affirmative legacy-consumer isolation preflight, which this realm fails. It was never armed, and no public test endpoint was introduced.
+`https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlQuickBooksWebhook`
 
-## Tax mapping requirements before production
+A real-secret, empty operator probe passed: valid HMAC returned 200; changing the raw body without changing its signature returned 401; unsigned input returned 401. The empty probe created no events or accounting records. Automated tests cover signatures, legacy/CloudEvents parsing, tenant routing, duplicates, retries, disconnected tenants and older/concurrent provider snapshots.
 
-The US realm needs verified tenant/realm tax preferences and tax-code/rate or AST configuration, explicit taxable/exempt line classifications (`TAX`/`NON`), correct sale/service and ship-from/customer jurisdiction data, and tested tax detail, rounding and total reconciliation. US and non-US tax models differ; `GlobalTaxCalculation` must not be blindly added for this US realm. See the [Intuit Invoice reference](https://developer.intuit.com/docs/api/accounting/invoice) and [Intuit tax validation errors](https://static.developer.intuit.com/output_html/qbo/docs/develop/troubleshooting/error-codes.html).
+The actual payment reconciliation above used clearly marked operator queue events (`origin: operator-sandbox-certification`) and actual Intuit payment/invoice GETs. Those rows are not genuine provider notifications. No provider-origin events for customer `59`, invoices `145`/`146`, or payments `147`/`148` were observed during the run. The operator's empty signed probe must not be counted as provider delivery.
 
-An explicit non-taxable synthetic fixture can set `taxTreatment: non-taxable`; it must not stand in for taxable-invoice certification. No tax engine, tax accounts or rates were created automatically.
+Remaining external action: confirm the dedicated Intuit app's **Webhooks → Development** endpoint and Customer, Item, Invoice and Payment subscriptions, then inspect its delivery status. Registration is managed in the [Intuit developer dashboard](https://static.developer.intuit.com/output_html/qbo/docs/develop/webhooks/configure-webhooks.html); it is not independently visible through the available OAuth accounting API. Keep the verifier value out of chat. Genuine delivery and subsequent processing remain uncertified until an actual provider event is observed.
 
-## Validation and deployment
+## Validation, deployment and safe final state
 
-- 71 targeted Firestore emulator/integration/authorization tests passed.
-- 13 sandbox transport safety tests passed.
-- 65 Functions unit tests passed, including 10 webhook-normalization tests; one unrelated native-push emulator test was skipped without its emulator.
-- 144 web tests passed. The web production build and focused Integrations ESLint check passed.
-- The accounting-review lookup was verified against existing production Firestore indexes using a read-only query.
-- Six affected RL functions deployed successfully: `rlQuickBooksAdopt`, `rlQuickBooksPreview`, `rlQuickBooksSync`, `rlQuickBooksReconcile`, `rlQuickBooksWebhook` and `rlQuickBooksProcessEvents`. No web component or MF function was deployed.
+- 78 QuickBooks emulator/integration/authorization tests passed.
+- 21 operator-runner and sandbox-transport safety tests passed.
+- 65 Functions unit tests passed; one unrelated native-push emulator test skipped.
+- JavaScript syntax and Git whitespace checks passed. No web application source changed.
+- Only `rlQuickBooksPreview` and `rlQuickBooksSync` were deployed for the tax, invoice-note and accepted-receipt checks. Deployment succeeded; revisions are `rlquickbookspreview-00013-sin` and `rlquickbookssync-00013-cow`.
+- Final production verification at 17:16:28 UTC passed: all 83 RL functions active, zero legacy functions or backing services remaining, all 12 QB endpoints using expected sandbox flags and secret bindings, four legacy schedules and the RL QB scheduler paused, original 507 customers unchanged, exactly one expected new customer, OAuth association/defaults preserved, and the existing web site responding HTTP 200.
 
-Final production metadata checks confirmed all 12 QuickBooks endpoints active with the expected sandbox configuration and secret bindings. All 83 RL functions are active. Unauthenticated connect/status/sync requests returned 401, an incomplete OAuth callback returned 400, and an unsigned webhook returned 401.
+The temporary operator capability was disarmed in `finally` and cannot be reused. No public test endpoint or permanent write exception was introduced. Deployed settings remain:
 
-All original 507 customer document versions are unchanged. All 29 MF function deployment revisions match the existing canonical snapshot; a noncanonical JSON-order fingerprint mismatch was resolved using the canonical comparison. The Acme OAuth connection document, accounting defaults and legacy connection metadata are unchanged from this run's preflight. No synthetic records need cleanup because none were created.
+```ini
+RL_QB_ENABLED=true
+RL_QB_ENV=sandbox
+RL_QB_CREDENTIAL_ENV=sandbox
+RL_QB_WRITES_ENABLED=false
+RL_QB_PRODUCTION_APPROVED=false
+```
 
-The safe configuration remains `RL_QB_ENV=sandbox`, `RL_QB_CREDENTIAL_ENV=sandbox`, `RL_QB_WRITES_ENABLED=false`, and `RL_QB_PRODUCTION_APPROVED=false`. The RL scheduled event processor is paused after the hardening deployment, leaving no scheduled RL QuickBooks processing enabled for this blocked attempt. MF schedules and integrations remain untouched.
-
-Production approval must remain disabled until isolated provider writes, genuine webhook delivery, taxable invoice behavior, and a real second-tenant connection have been exercised successfully. Automated provider fixtures do not substitute for these acceptance steps.
+The RL QuickBooks processor schedule remains paused. The four legacy schedules remain paused with their target functions absent. Ordinary Route Logistics schedules and functions remain operational. Production accounting exports remain disabled. No real financial transaction occurred.

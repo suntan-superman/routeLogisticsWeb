@@ -53,6 +53,23 @@ test('only synthetic customers, invoices and linked non-processing payments are 
   assert.equal(f.gate.getSummary().writeAttempts,3);assert.equal(f.gate.getSummary().verifiedCustomers,1);assert.equal(f.gate.getSummary().verifiedInvoices,1);
   assert.ok(f.calls.every(call=>call.options.redirect==='error'));
 });
+
+test('automatic invoice numbering preserves synthetic identity through a private note',async()=>{
+  const f=await fixture();await f.arm();await f.send('customer',f.customer());
+  const body=f.invoice();delete body.DocNumber;body.PrivateNote=f.gate.labelPrefix+' synthetic invoice';
+  await f.send('invoice',body);assert.equal(f.gate.allowInvoice('22'),'22');
+  const g=await fixture();await g.arm();await g.send('customer',g.customer());
+  const missing=g.invoice();delete missing.DocNumber;await assert.rejects(g.send('invoice',missing),/denied/);
+});
+
+test('bounded mapped tax is allowed without admitting tax configuration mutations',async()=>{
+  const f=await fixture();await f.arm();await f.send('customer',f.customer());
+  const body=f.invoice();body.TxnTaxDetail={TxnTaxCodeRef:{value:'2'},TotalTax:2.8};body.Line[0].SalesItemLineDetail.TaxCodeRef={value:'TAX'};body.TotalAmt=37.8;
+  await f.send('invoice',body);
+  await f.gate.transport(base+'taxcode/2',{headers});await f.gate.transport(base+'taxrate/3',{headers});
+  const before=f.calls.length;await assert.rejects(f.send('taxcode',{Name:'Disallowed'}),/denied/);assert.equal(f.calls.length,before);
+  const g=await fixture();await g.arm();await g.send('customer',g.customer());const excessive=g.invoice();excessive.TxnTaxDetail={TxnTaxCodeRef:{value:'2'},TotalTax:101};excessive.Line[0].SalesItemLineDetail.TaxCodeRef={value:'TAX'};await assert.rejects(g.send('invoice',excessive),/denied/);
+});
 test('malformed synthetic scopes, real email, foreign customer/invoice and processing fields fail closed',async()=>{
   for(const scenario of ['email','name','customer','invoice','process','bank','amount','currency','missing-request-id']){
     const f=await fixture();await f.arm();await f.send('customer',f.customer());await f.send('invoice',f.invoice());let resource='payment',body=f.payment();

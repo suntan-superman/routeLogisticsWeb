@@ -2,6 +2,8 @@
 
 Route Logistics uses one dedicated Intuit application's platform credentials. A customer company does not need an Intuit developer application or Google Secret Manager secrets. Its current Route Logistics owner independently authorizes its QuickBooks company from **Integrations → Connect QuickBooks**. Reconnect and disconnect use the same owner portal.
 
+mi Factotum's independent legacy functions and synchronization have been [retired](legacy-retirement.md). Route Logistics continues using the existing shared Firebase project and its own OAuth connection. See the [actual sandbox synchronization results](quickbooks-sandbox-certification.md) for customer, invoice, manual tax and payment verification; genuine provider webhook delivery remains a separate unverified result. Public accounting exports remain disabled.
+
 ## Current deployment configuration
 
 Firebase project: `mi-factotum-field-service`, Functions codebase: `routelogistics`.

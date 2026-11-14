@@ -28,7 +28,7 @@ function createQuickBooksSandboxTransport({ companyId, realmId, runId, expiresAt
   const syntheticEmail = value => typeof value === 'string' && /^[^\s@]+@example\.invalid$/i.test(value);
   const tagged = value => typeof value === 'string' && (value === labelPrefix || value.startsWith(labelPrefix + '-') || value.startsWith(labelPrefix + ' '));
   const customerMatches = value => value && numericId(String(value.Id || '')) && tagged(value.DisplayName) && syntheticEmail(value.PrimaryEmailAddr?.Address);
-  const invoiceMatches = value => value && numericId(String(value.Id || '')) && tagged(value.DocNumber) && customers.has(String(value.CustomerRef?.value));
+  const invoiceMatches = value => value && numericId(String(value.Id || '')) && (tagged(value.PrivateNote) || tagged(value.DocNumber)) && customers.has(String(value.CustomerRef?.value));
   const observe = async (response, resource, authorization) => {
     if (!response.ok) return;
     let data;
@@ -45,14 +45,16 @@ function createQuickBooksSandboxTransport({ companyId, realmId, runId, expiresAt
     if (!body || typeof body !== 'object' || Array.isArray(body) || forbiddenMoneyProcessing(body) || !currencyIsUsd(body)) return false;
     if (resource === 'customer') return (!body.Id || customers.has(String(body.Id))) && tagged(body.DisplayName) && syntheticEmail(body.PrimaryEmailAddr?.Address);
     if (resource === 'invoice') {
-      if (body.Id && !invoices.has(String(body.Id)) || !customers.has(String(body.CustomerRef?.value)) || !tagged(body.DocNumber) || body.DocNumber.length > 21 || !validDate(body.TxnDate) || !validDate(body.DueDate) || !Array.isArray(body.Line) || !body.Line.length || body.Line.length > 10 || body.EmailStatus === 'NeedToSend' || body.AllowOnlineCreditCardPayment === true || body.AllowOnlineACHPayment === true) return false;
+      if (body.Id && !invoices.has(String(body.Id)) || !customers.has(String(body.CustomerRef?.value)) || !(tagged(body.PrivateNote) || tagged(body.DocNumber)) || body.DocNumber !== undefined && (!tagged(body.DocNumber) || body.DocNumber.length > 21) || !validDate(body.TxnDate) || !validDate(body.DueDate) || !Array.isArray(body.Line) || !body.Line.length || body.Line.length > 10 || body.EmailStatus === 'NeedToSend' || body.AllowOnlineCreditCardPayment === true || body.AllowOnlineACHPayment === true) return false;
       let sum = 0;
       for (const line of body.Line) {
         const detail = line.SalesItemLineDetail;
         if (line.DetailType !== 'SalesItemLineDetail' || !validMoney(line.Amount) || !detail || !ID.test(String(detail.ItemRef?.value || '')) || typeof detail.Qty !== 'number' || !Number.isFinite(detail.Qty) || detail.Qty <= 0 || typeof detail.UnitPrice !== 'number' || !Number.isFinite(detail.UnitPrice) || detail.UnitPrice < 0 || Math.abs(detail.Qty * detail.UnitPrice - line.Amount) > 0.011) return false;
         sum += line.Amount;
       }
-      return validMoney(sum) && (!body.TotalAmt || Math.abs(body.TotalAmt - sum) < 0.011);
+      const tax = body.TxnTaxDetail ? body.TxnTaxDetail.TotalTax : 0;
+      if (body.TxnTaxDetail && (!numericId(String(body.TxnTaxDetail.TxnTaxCodeRef?.value || '')) || typeof tax !== 'number' || !Number.isFinite(tax) || tax < 0 || tax > sum || body.Line.some(line => line.SalesItemLineDetail.TaxCodeRef?.value !== 'TAX'))) return false;
+      return validMoney(sum + tax) && (body.TotalAmt === undefined || typeof body.TotalAmt === 'number' && Math.abs(body.TotalAmt - sum - tax) < 0.011);
     }
     if (resource === 'payment') {
       if (body.Id || body.ProcessPayment !== false || !customers.has(String(body.CustomerRef?.value)) || !tagged(body.PaymentRefNum) || !validMoney(body.TotalAmt) || !validDate(body.TxnDate) || !Array.isArray(body.Line) || !body.Line.length || body.Line.length > 10) return false;
@@ -82,7 +84,7 @@ function createQuickBooksSandboxTransport({ companyId, realmId, runId, expiresAt
       await record(method, 'oauth-refresh', response.ok ? 'succeeded' : 'http-error', response.status);
       return response;
     }
-    const match = url.pathname.match(/^\/v3\/company\/(\d{1,30})\/(query|companyinfo|preferences|account|item|customer|invoice|payment)(?:\/(\d{1,30}))?$/);
+    const match = url.pathname.match(/^\/v3\/company\/(\d{1,30})\/(query|companyinfo|preferences|account|item|customer|invoice|payment|taxcode|taxrate)(?:\/(\d{1,30}))?$/);
     const resource = match?.[2] || 'invalid-resource';
     if (url.hostname !== HOST || !match || match[1] !== REALM_ID || !authorization?.startsWith('Bearer ')) return deny(method, resource);
     if (method === 'GET') {

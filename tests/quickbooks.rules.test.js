@@ -7,7 +7,7 @@ const { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, query, w
 const PRIVATE_COLLECTIONS = [
   'rlQuickBooksConnections', 'rlQbOAuthStates', 'rlQbRealms', 'rlQbMappings',
   'rlQbRemoteMappings', 'rlQbOperations', 'rlQbWebhookEvents', 'rlQbReconciliations',
-  'rlQbAudit', 'rlQbOAuthIntents', 'rlQbPaymentMappings', 'rlQbRealmClaims',
+  'rlQbAudit', 'rlQbOAuthIntents', 'rlQbPaymentMappings', 'rlQbRealmClaims', 'rlQbReconciliationLocks',
 ];
 const COMPANY_A = 'qb-rules-company-a', COMPANY_B = 'qb-rules-company-b';
 const OWNER_A = 'qb-rules-owner-a', OWNER_B = 'qb-rules-owner-b';

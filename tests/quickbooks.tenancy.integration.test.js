@@ -38,7 +38,7 @@ async function fixture({ connect = true } = {}) {
       return env.companyInfoFailure ? { ok: false, status: 401, json: async () => ({ error: 'fixture-token-not-valid-for-this-environment' }) } : { ok: true, json: async () => ({ CompanyInfo: env.companyInfoMalformed ? { Id: '', CompanyName: '' } : { Id: '1', CompanyName: `Controlled sandbox ${realm}`, Country: 'US' } }) };
     }
     if (type === 'invoice') return { ok: true, json: async () => ({ Invoice: { Id: id, SyncToken: '1', TotalAmt: 20, Balance: 0, CurrencyRef: { value: 'USD' }, CustomerRef: { value: '5' } } }) };
-    if (type === 'payment') return { ok: true, json: async () => ({ Payment: { Id: id, SyncToken: '1', TotalAmt: 20, CustomerRef: { value: '5' }, Line: [{ Amount: 20, LinkedTxn: [{ TxnId: '77', TxnType: 'Invoice' }] }] } }) };
+    if (type === 'payment') return { ok: true, json: async () => ({ Payment: { Id: id, SyncToken: '1', TotalAmt: 20, TxnDate: '2026-11-14', CurrencyRef: { value: 'USD' }, CustomerRef: { value: '5' }, Line: [{ Amount: 20, LinkedTxn: [{ TxnId: '77', TxnType: 'Invoice' }] }] } }) };
     const key = type === 'item' ? 'Item' : 'Customer';
     return { ok: true, json: async () => ({ [key]: { Id: id, SyncToken: '0', DisplayName: `Controlled ${key}`, Name: 'Controlled service' } }) };
   };
@@ -60,7 +60,7 @@ async function fixture({ connect = true } = {}) {
   const sign = payload => { const rawBody = Buffer.from(JSON.stringify(payload)); return { rawBody, headers: { 'intuit-signature': createHmac('sha256', config.webhookSecret()).update(rawBody).digest('base64') } }; };
   const webhook = async payload => { let status; await handlers.webhook(sign(payload), { status: value => ({ send: () => { status = value; } }) }); return status; };
   const payload = (type = 'Invoice', tenants = ['A', 'B']) => ({ eventNotifications: tenants.map(tenant => ({ realmId: identities[tenant].realm, companyId: identities[tenant === 'A' ? 'B' : 'A'].companyId, dataChangeEvent: { entities: [{ name: type, id: type === 'Payment' ? '55' : '77', operation: 'Update', lastUpdated: '2026-11-14T12:00:00Z' }] } })) });
-  const invoiceMapping = async tenant => { const item = identities[tenant], localId = `${item.companyId}-invoice`; await db.doc(`rlQbMappings/${mappingId(item.companyId, env.environment, 'Invoice', localId)}`).set({ companyId: item.companyId, environment: env.environment, realmId: item.realm, type: 'Invoice', localId, remoteId: '77', syncToken: '0' }); };
+  const invoiceMapping = async tenant => { const item = identities[tenant], localId = `${item.companyId}-invoice`; await db.doc(`rlQbMappings/${mappingId(item.companyId, env.environment, 'Invoice', localId)}`).set({ companyId: item.companyId, environment: env.environment, realmId: item.realm, type: 'Invoice', localId, remoteId: '77', syncToken: '0' }); await db.doc(`rlQbMappings/${mappingId(item.companyId, env.environment, 'Customer', `${item.companyId}-customer`)}`).set({ companyId:item.companyId, environment:env.environment, realmId:item.realm, type:'Customer', localId:`${item.companyId}-customer`, remoteId:'5', syncToken:'0' }); };
   return { prefix, calls, gates, env, config, identities, handlers, request, connection, callback, begin, authorize, sign, webhook, payload, invoiceMapping };
 }
 

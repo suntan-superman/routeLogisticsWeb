@@ -2,6 +2,7 @@ const { hasCapability } = require('./access');
 const { randomBytes, createHmac, timingSafeEqual } = require('node:crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { hash, documentId, requireAuth, requireStaff, requireCompanyOwner, rateLimit } = require('./security');
+const { normalizeQuickBooksWebhook, QuickBooksWebhookPayloadError } = require('./shared/quickbooksWebhook');
 const SOURCES = { Customer: 'customers', Item: 'estimateTemplates', Invoice: 'invoices' };
 const mappingId = (company, environment, type, id) => hash(`${company}:${environment}:${type}:${id}`);
 const remoteId = (value) => { if (!/^\d{1,30}$/.test(String(value || ''))) throw new HttpsError('invalid-argument', 'Invalid QuickBooks identifier.'); return String(value); };
@@ -23,6 +24,14 @@ function quickBooksHandlers(db, config, transport = fetch) {
   const safeError = error => error instanceof HttpsError ? error.message : 'QuickBooks is temporarily unavailable. Retry, or reconnect if access has expired.';
   const currentCredentialHash = () => { const id = config.clientId?.(); if (typeof id !== 'string' || !id.trim()) throw new HttpsError('failed-precondition', 'QuickBooks platform credentials are not configured.'); return hash(`${credentialEnvironment()}:${id}`); };
   const sameConnection = (current, expected) => current?.connected === true && current.companyId === expected.companyId && current.environment === expected.environment && current.realmId === expected.realmId && current.connectionId === expected.connectionId;
+  const providerVersion = value => /^\d{1,20}$/.test(String(value ?? '')) ? BigInt(value) : null;
+  const providerTime = value => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? Date.parse(value) : null;
+  const olderProviderRecord = (record, previous, versionKey = 'syncToken') => {
+    const incoming = providerVersion(record.SyncToken), saved = providerVersion(previous?.[versionKey]);
+    if (incoming === null) throw new HttpsError('failed-precondition', 'QuickBooks did not provide a valid record version. Retry the accounting check.');
+    const incomingTime = providerTime(record.MetaData?.LastUpdatedTime), savedTime = previous?.providerUpdatedAt;
+    return saved !== null && (incoming < saved || incoming === saved && incomingTime !== null && typeof savedTime === 'number' && incomingTime < savedTime);
+  };
   const apiHost = () => environment() === 'sandbox' ? 'sandbox-quickbooks.api.intuit.com' : 'quickbooks.api.intuit.com';
   const ensureEnabled = () => {
     if (!enabled()) throw new HttpsError('failed-precondition', 'QuickBooks connection is awaiting configuration.');
@@ -80,7 +89,7 @@ function quickBooksHandlers(db, config, transport = fetch) {
     const host = apiHost();
     const url = new URL(`https://${host}/v3/company/${remoteId(current.realmId)}/${path}`);
     if (requestId) url.searchParams.set('requestid', requestId);
-    return http(url.href, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${current.accessToken}`, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    return http(url.href, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${current.accessToken}`, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: typeof body === 'string' ? body : JSON.stringify(body) } : {}) });
   }
   async function checkCurrent(tx, companyId, expected, ownerUid) {
     const latest = await tx.get(connectionRef(companyId));
@@ -130,6 +139,19 @@ function quickBooksHandlers(db, config, transport = fetch) {
     const snap = await db.doc(`${SOURCES[type]}/${documentId(id)}`).get();
     if (!snap.exists || snap.get('companyId') !== companyId) throw new HttpsError('permission-denied', 'This record belongs to another workspace.'); return snap;
   }
+  async function serviceItem(companyId, id, current, existing, accounts = new Map()) {
+    const item = existing || (await api(companyId, `item/${remoteId(id)}`, undefined, undefined, current))?.Item;
+    if (!item || String(item.Id) !== String(id) || item.Active !== true || item.Type !== 'Service' || !item.IncomeAccountRef?.value) throw new HttpsError('failed-precondition', 'Select an active QuickBooks service item with an income account. Review the service mapping or default item.');
+    const accountId = remoteId(item.IncomeAccountRef.value);
+    if (!accounts.has(accountId)) accounts.set(accountId, (await api(companyId, `account/${accountId}`, undefined, undefined, current))?.Account);
+    const account = accounts.get(accountId);
+    if (!account || String(account.Id) !== accountId || account.Active !== true || !['Income', 'Other Income'].includes(account.AccountType)) throw new HttpsError('failed-precondition', 'The service item needs an active QuickBooks income account. Review its accounting setup.');
+    return item;
+  }
+  const reviewOperations = (companyId, type, localId) => db.collection('rlQbOperations').where('companyId','==',companyId).where('environment','==',environment()).where('type','==',type).where('localId','==',localId).where('status','==','review').limit(100);
+  async function requireReviewedExport(companyId, type, localId) {
+    if (!(await reviewOperations(companyId,type,localId).get()).empty) throw new HttpsError('failed-precondition', 'An export of this record needs accounting review. Confirm and adopt the existing QuickBooks record first.');
+  }
   async function payload(companyId, type, snap, current) {
     const data = snap.data();
     if (type === 'Customer') {
@@ -148,23 +170,30 @@ function quickBooksHandlers(db, config, transport = fetch) {
     if (!customer.exists || customer.get('realmId') !== current.realmId) throw new HttpsError('failed-precondition', 'Map or sync the customer first.');
     if (!Array.isArray(data.lineItems) || !data.lineItems.length) throw new HttpsError('failed-precondition', 'Invoice has no line items.');
     // Tax must be mapped deliberately; do not silently create an incorrect tax treatment.
-    if (Number(data.tax || 0) !== 0) throw new HttpsError('failed-precondition', 'Taxed invoices require an accounting tax mapping before export.');
-    const lines = [];
+    const tax = data.tax === undefined ? 0 : data.tax, taxRate = data.taxRate === undefined ? 0 : data.taxRate;
+    if (typeof tax !== 'number' || !Number.isFinite(tax) || tax < 0 || typeof taxRate !== 'number' || !Number.isFinite(taxRate) || taxRate < 0 || tax !== 0 || taxRate !== 0) throw new HttpsError('failed-precondition', 'Taxed invoices require an accounting tax mapping before export. Review the tax amount and rate.');
+    if ((data.currency || 'USD') !== 'USD') throw new HttpsError('failed-precondition', 'Only USD invoices are supported. Review the accounting currency before export.');
+    if (['discount','discountAmount','discountPercent'].some(key => data[key] !== undefined && (typeof data[key] !== 'number' || !Number.isFinite(data[key]) || data[key] !== 0))) throw new HttpsError('failed-precondition', 'Invoice discounts need an accounting discount mapping before export.');
+    const lines = [], items = new Map(), accounts = new Map();
     for (const item of data.lineItems) {
       let itemId = current.defaultItemId;
-      if (item.templateId) { const mapped = await mapRef(companyId, 'Item', documentId(item.templateId)).get(); if (mapped.get('realmId') === current.realmId) itemId = mapped.get('remoteId'); }
+      if (item.templateId) { const mapped = await mapRef(companyId, 'Item', documentId(item.templateId)).get(); if (mapped.exists && mapped.get('realmId') !== current.realmId) throw new HttpsError('failed-precondition', 'The service mapping belongs to another QuickBooks company. Review the mapping.'); if (mapped.exists) itemId = mapped.get('remoteId'); }
       const quantity = Number(item.quantity), unitPrice = Number(item.unitPrice), amount = Number(item.amount);
       if (!itemId || !Number.isFinite(amount) || amount < 0 || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || Math.abs(amount - quantity * unitPrice) > 0.011) throw new HttpsError('failed-precondition', 'Each line needs a mapped service and valid amount.');
-      lines.push({ DetailType: 'SalesItemLineDetail', Description: String(item.description || '').slice(0, 4000), Amount: amount, SalesItemLineDetail: { ItemRef: { value: itemId }, Qty: quantity, UnitPrice: unitPrice } });
+      itemId = remoteId(itemId);
+      if (!items.has(itemId)) items.set(itemId, await serviceItem(companyId, itemId, current, undefined, accounts));
+      lines.push({ DetailType: 'SalesItemLineDetail', Description: String(item.description || '').slice(0, 4000), Amount: amount, SalesItemLineDetail: { ItemRef: { value: itemId }, Qty: quantity, UnitPrice: unitPrice, ...(data.taxTreatment === 'non-taxable' ? { TaxCodeRef: { value: 'NON' } } : {}) } });
     }
     const lineTotal = lines.reduce((sum, line) => sum + line.Amount, 0);
     if (typeof data.total !== 'number' || !Number.isFinite(data.total) || data.total < 0 || !Number.isFinite(lineTotal)
       || Math.abs(lineTotal - data.total) > 0.011) throw new HttpsError('failed-precondition', 'Invoice totals require review.');
-    return { CustomerRef: { value: customer.get('remoteId') }, Line: lines, ...(data.invoiceNumber ? { DocNumber: String(data.invoiceNumber).slice(0, 21) } : {}), ...(data.issueDate ? { TxnDate: data.issueDate } : {}), ...(data.dueDate ? { DueDate: data.dueDate } : {}) };
+    return { CustomerRef: { value: customer.get('remoteId') }, CurrencyRef: { value: 'USD' }, Line: lines, ...(data.invoiceNumber ? { DocNumber: String(data.invoiceNumber).slice(0, 21) } : {}), ...(data.issueDate ? { TxnDate: data.issueDate } : {}), ...(data.dueDate ? { DueDate: data.dueDate } : {}) };
   }
   async function preview(companyId, type, id) {
     const snap = await source(companyId, type, id), current = await connection(companyId), map = await mapRef(companyId, type, id).get();
+    await requireReviewedExport(companyId, type, id);
     if (map.exists && map.get('realmId') !== current.realmId) throw new HttpsError('failed-precondition', 'Existing mapping belongs to a different QuickBooks company.');
+    if (map.get('status') === 'review') throw new HttpsError('failed-precondition', 'The previous export needs accounting review. Confirm and adopt the existing QuickBooks record before another export.');
     const body = await payload(companyId, type, snap, current);
     if (map.exists) {
       const remote = (await api(companyId, `${type.toLowerCase()}/${remoteId(map.get('remoteId'))}`, undefined, undefined, current))[type];
@@ -173,30 +202,48 @@ function quickBooksHandlers(db, config, transport = fetch) {
     }
     return { body, sourceHash: hash(JSON.stringify(body)), map, current, source: snap };
   }
-  async function reconcileInvoice(companyId, remoteInvoiceId, expected) {
+  async function reconcileInvoice(companyId, remoteInvoiceId, expected, expectedCustomer) {
     const current = await connection(companyId);
     if (expected && !sameConnection(current, expected)) throw new HttpsError('aborted', 'QuickBooks connection changed.');
-    const id = remoteId(remoteInvoiceId), remote = (await api(companyId, `invoice/${id}`, undefined, undefined, current)).Invoice;
+    const id = remoteId(remoteInvoiceId), lease = randomBytes(16).toString('hex'), lock = db.doc(`rlQbReconciliationLocks/${hash(`${companyId}:${environment()}:${current.realmId}:${id}`)}`);
+    await db.runTransaction(async tx => {
+      const previous = await tx.get(lock); await checkCurrent(tx, companyId, current);
+      if (previous.get('leaseUntil') > Date.now()) throw new HttpsError('unavailable', 'The invoice balance is already being checked. Retry shortly.');
+      tx.set(lock, { companyId, environment: environment(), realmId: current.realmId, lease, leaseUntil: Date.now()+60000 });
+    });
+    try {
+    const remote = (await api(companyId, `invoice/${id}`, undefined, undefined, current))?.Invoice;
     if (!remote || String(remote.Id) !== id) throw new HttpsError('failed-precondition', 'QuickBooks returned a different invoice. Review the mapping.');
+    const customerId = remoteId(remote.CustomerRef?.value);
+    if (expectedCustomer && customerId !== expectedCustomer) throw new HttpsError('failed-precondition', 'QuickBooks payment and invoice customers do not match. Review their accounting association.');
     const maps = await db.collection('rlQbMappings').where('companyId', '==', companyId).where('environment', '==', environment()).where('type', '==', 'Invoice').where('remoteId', '==', String(remote.Id)).get();
     const localIds = [];
     for (const mapping of maps.docs) {
       if (mapping.get('realmId') !== current.realmId) continue;
       const ref = db.doc(`invoices/${documentId(mapping.get('localId'))}`), eventRef = db.doc(`rlQbReconciliations/${hash(`${current.connectionId}:${mapping.id}:${remote.SyncToken}:${remote.Balance}:${remote.TotalAmt}`)}`);
       await db.runTransaction(async (tx) => {
-        const [invoice, seen, latestMap] = await Promise.all([tx.get(ref), tx.get(eventRef), tx.get(mapping.ref)]);
+        const [invoice, seen, latestMap, held] = await Promise.all([tx.get(ref), tx.get(eventRef), tx.get(mapping.ref), tx.get(lock)]);
         await checkCurrent(tx, companyId, current);
+        if (held.get('lease') !== lease) throw new HttpsError('aborted', 'The invoice reconciliation lease changed. Retry the check.');
         if (latestMap.get('companyId') !== companyId || latestMap.get('environment') !== environment() || latestMap.get('realmId') !== current.realmId || latestMap.get('remoteId') !== id) throw new HttpsError('aborted', 'QuickBooks invoice mapping changed.');
+        const localCustomerId = invoice.get('customerId'), customerMapping = localCustomerId ? await tx.get(mapRef(companyId, 'Customer', documentId(localCustomerId))) : null;
+        if (!customerMapping?.exists || customerMapping.get('companyId') !== companyId || customerMapping.get('environment') !== environment() || customerMapping.get('realmId') !== current.realmId || customerMapping.get('remoteId') !== customerId) throw new HttpsError('failed-precondition', 'The QuickBooks invoice customer does not match this invoice customer mapping. Review the accounting association.');
         if (seen.exists) return;
-        const eligible = invoice.get('companyId') === companyId && ['sent', 'paid'].includes(invoice.get('status')) && !invoice.get('paymentLock') && (remote.CurrencyRef?.value || 'USD') === 'USD' && Math.abs(Number(invoice.get('total')) - Number(remote.TotalAmt)) < 0.011 && Number.isFinite(Number(remote.Balance)) && Number(remote.Balance) >= 0 && Number(remote.Balance) <= Number(remote.TotalAmt);
+        if (olderProviderRecord(remote, { syncToken: latestMap.get('lastReconciledSyncToken'), providerUpdatedAt: latestMap.get('providerUpdatedAt') })) {
+          tx.create(eventRef, { companyId, environment: environment(), realmId: current.realmId, connectionId: current.connectionId, invoiceId: ref.id, remoteId: id, skipped: 'older-provider-version', createdAt: new Date() }); return;
+        }
+        const eligible = invoice.get('companyId') === companyId && ['sent', 'paid'].includes(invoice.get('status')) && !invoice.get('paymentLock') && (invoice.get('currency') || 'USD') === 'USD' && (remote.CurrencyRef?.value || 'USD') === 'USD' && Math.abs(Number(invoice.get('total')) - Number(remote.TotalAmt)) < 0.011 && Number.isFinite(Number(remote.Balance)) && Number(remote.Balance) >= 0 && Number(remote.Balance) <= Number(remote.TotalAmt);
         const paid = eligible && Number(remote.Balance) === 0;
-        const updates = environment() === 'sandbox' ? { qbTestPaymentStatus: paid ? 'paid' : eligible ? 'open' : 'review' } : { qbBalance: Number(remote.Balance) || 0, qbPaymentReview: !eligible || (invoice.get('status') === 'paid' && !paid), ...(paid && invoice.get('status') === 'sent' ? { status: 'paid', paidAt: new Date().toISOString(), paidVia: 'quickbooks' } : {}) };
+        const balance = eligible ? Number(remote.Balance) : null, amountPaid = eligible ? Math.round((Number(remote.TotalAmt)-balance)*100)/100 : null;
+        const updates = environment() === 'sandbox' ? { qbTestPaymentStatus: paid ? 'paid' : eligible ? amountPaid > 0 ? 'partial' : 'open' : 'review', qbTestBalance: balance, qbTestAmountPaid: amountPaid } : { qbBalance: Number(remote.Balance) || 0, qbPaymentReview: !eligible || (invoice.get('status') === 'paid' && !paid), ...(paid && invoice.get('status') === 'sent' ? { status: 'paid', paidAt: new Date().toISOString(), paidVia: 'quickbooks' } : {}) };
         if (invoice.exists && invoice.get('companyId') === companyId) tx.update(ref, { ...updates, qbReconciledAt: new Date().toISOString() });
         tx.create(eventRef, { companyId, environment: environment(), realmId: current.realmId, connectionId: current.connectionId, invoiceId: ref.id, remoteId: String(remote.Id), eligible, paid, createdAt: new Date() });
+        tx.update(mapping.ref, { lastReconciledSyncToken: String(remote.SyncToken), providerUpdatedAt: providerTime(remote.MetaData?.LastUpdatedTime), lastReconciledAt: new Date() });
       });
       localIds.push(ref.id);
     }
     return localIds;
+    } finally { await db.runTransaction(async tx => { const held = await tx.get(lock); if (held.get('lease') === lease) tx.update(lock, { leaseUntil: 0 }); }); }
   }
   async function eventConnection(data) {
     if (data.environment !== environment()) return null;
@@ -351,14 +398,16 @@ function quickBooksHandlers(db, config, transport = fetch) {
       const companyId = await scope(request, true), { type, localId } = request.data || {}, id = remoteId(request.data?.remoteId), local = await source(companyId, type, localId);
       const current = await connection(companyId), remote = (await api(companyId, `${type.toLowerCase()}/${id}`, undefined, undefined, current))[type];
       if (!remote?.Id || String(remote.Id) !== id) throw new HttpsError('not-found', 'Accounting record not found.');
+      if (type === 'Item') await serviceItem(companyId, id, current, remote);
       const unique = db.doc(`rlQbRemoteMappings/${hash(`${environment()}:${current.realmId}:${type}:${id}`)}`), ref = mapRef(companyId, type, localId);
       await db.runTransaction(async tx => {
-        const [taken, previous, latestSource] = await Promise.all([tx.get(unique), tx.get(ref), tx.get(local.ref)]); await checkCurrent(tx, companyId, current, request.auth.uid);
+        const [taken, previous, latestSource, reviews] = await Promise.all([tx.get(unique), tx.get(ref), tx.get(local.ref), tx.get(reviewOperations(companyId,type,localId))]); await checkCurrent(tx, companyId, current, request.auth.uid);
         if (latestSource.get('companyId') !== companyId) throw new HttpsError('permission-denied', 'Accounting source is no longer available.');
         if (taken.exists && (taken.get('companyId') !== companyId || taken.get('localId') !== localId)) throw new HttpsError('already-exists', 'This accounting record is already mapped.');
         if (previous.exists && (previous.get('remoteId') !== id || previous.get('realmId') !== current.realmId)) throw new HttpsError('failed-precondition', 'Changing an existing mapping requires a reviewed migration.');
         const data = { companyId, environment: environment(), realmId: current.realmId, type, localId, remoteId: id, syncToken: String(remote.SyncToken), status: 'adopted', adoptedBy: request.auth.uid, adoptedAt: new Date() };
         tx.set(ref, data); tx.set(unique, { companyId, localId }); tx.create(db.collection('rlQbAudit').doc(), { ...data, previous: previous.data() || null });
+        for (const review of reviews.docs) if (review.get('remoteId') === id) tx.update(review.ref, { status: 'reviewed', error: null, reviewedBy: request.auth.uid, reviewedAt: new Date() });
       });
       return { adopted: true, displayName: remote.DisplayName || remote.Name || remote.DocNumber || id };
     },
@@ -366,45 +415,62 @@ function quickBooksHandlers(db, config, transport = fetch) {
     sync: async (request) => {
       const companyId = await scope(request, true); if (config.writesEnabled?.() !== true) throw new HttpsError('failed-precondition', 'Accounting writes are disabled. Review and authorize the integration before enabling them.');
       const { type, localId, fingerprint } = request.data || {};
-      await source(companyId, type, localId);
+      const sourceSnapshot = await source(companyId, type, localId);
       if (!/^[a-f0-9]{64}$/.test(fingerprint || '')) throw new HttpsError('invalid-argument', 'Preview this record first.');
       const currentConnection = await connection(companyId);
       const requestId = hash(`${companyId}:${environment()}:${currentConnection.realmId}:${type}:${localId}:${fingerprint}`).slice(0, 48), operation = db.doc(`rlQbOperations/${requestId}`), lease = randomBytes(16).toString('hex');
       const prior = await operation.get();
       if (prior.get('status') === 'synced') return { status: 'synced', remoteId: prior.get('remoteId') };
+      await requireReviewedExport(companyId, type, localId);
+      if (prior.get('status') === 'review') throw new HttpsError('failed-precondition', 'This export reached QuickBooks and needs accounting review before retrying.');
       // A lost provider response must retry the exact original body and request ID,
       // even if the provider already incremented SyncToken. Never create a new operation.
-      if (prior.exists && (prior.get('connectionId') !== currentConnection.connectionId || Date.now() - prior.get('createdAt') > 23 * 3600000)) throw new HttpsError('failed-precondition', 'An uncertain export requires accounting review before retrying.');
-      const result = prior.exists ? { body: prior.get('payload'), sourceHash: fingerprint, current: currentConnection } : await preview(companyId, type, localId);
+      if (prior.exists && (prior.get('connectionId') !== currentConnection.connectionId || Date.now() - prior.get('createdAt') > 23 * 3600000 || typeof prior.get('payloadJson') !== 'string' || !prior.get('sourceUpdateTime'))) throw new HttpsError('failed-precondition', 'An uncertain export requires accounting review before retrying.');
+      const result = prior.exists ? { body: prior.get('payload'), sourceHash: fingerprint, current: currentConnection, source: sourceSnapshot } : await preview(companyId, type, localId);
+      const payloadJson = prior.exists ? prior.get('payloadJson') : JSON.stringify(result.body);
+      const sourceUpdateTime = prior.exists ? prior.get('sourceUpdateTime') : result.source.updateTime;
       if (fingerprint !== result.sourceHash) throw new HttpsError('aborted', 'The record changed. Preview it again.');
-      const saved = await db.runTransaction(async (tx) => { const previous = await tx.get(operation); if (previous.get('status') === 'synced') return previous.data(); if (previous.get('leaseUntil') > Date.now()) throw new HttpsError('unavailable', 'This record is already syncing. Retry shortly.'); if ((previous.get('attempts') || 0) >= 5) throw new HttpsError('failed-precondition', 'Sync retry limit reached. Review the accounting record.'); tx.set(operation, { companyId, environment: environment(), type, localId, payload: result.body, connectionId: currentConnection.connectionId, createdAt: previous.get('createdAt') || Date.now(), status: 'syncing', lease, leaseUntil: Date.now() + 60000, attempts: (previous.get('attempts') || 0) + 1 }, { merge: true }); return null; });
+      const saved = await db.runTransaction(async (tx) => { const previous = await tx.get(operation); if (previous.get('status') === 'synced') return previous.data(); if (previous.get('status') === 'review') throw new HttpsError('failed-precondition', 'This export needs accounting review.'); if (previous.get('leaseUntil') > Date.now()) throw new HttpsError('unavailable', 'This record is already syncing. Retry shortly.'); if ((previous.get('attempts') || 0) >= 5) throw new HttpsError('failed-precondition', 'Sync retry limit reached. Review the accounting record.'); tx.set(operation, { companyId, environment: environment(), type, localId, payload: result.body, payloadJson, sourceUpdateTime, connectionId: currentConnection.connectionId, createdAt: previous.get('createdAt') || Date.now(), status: 'syncing', lease, leaseUntil: Date.now() + 60000, attempts: (previous.get('attempts') || 0) + 1 }, { merge: true }); return null; });
       if (saved) return { status: 'synced', remoteId: saved.remoteId };
+      let receipt = null;
       try {
-        const remote = (await api(companyId, type.toLowerCase(), result.body, requestId, result.current))[type];
+        const remote = (await api(companyId, type.toLowerCase(), payloadJson, requestId, result.current))[type];
+        if (!remote || !/^\d{1,30}$/.test(String(remote.Id || '')) || providerVersion(remote.SyncToken) === null) throw new HttpsError('unavailable', 'QuickBooks returned an incomplete export receipt. Retry the original request.');
+        receipt = { remoteId: String(remote.Id), syncToken: String(remote.SyncToken) };
         const unique = db.doc(`rlQbRemoteMappings/${hash(`${environment()}:${result.current.realmId}:${type}:${remote.Id}`)}`);
-        await db.runTransaction(async (tx) => { const [current, taken] = await Promise.all([tx.get(operation), tx.get(unique)]); await checkCurrent(tx, companyId, result.current, request.auth.uid); if (current.get('lease') !== lease) throw new HttpsError('aborted', 'Sync lease changed.'); if (taken.exists && (taken.get('companyId') !== companyId || taken.get('localId') !== localId)) throw new HttpsError('already-exists', 'Accounting record is already mapped.'); tx.set(mapRef(companyId, type, localId), { companyId, environment: environment(), realmId: result.current.realmId, type, localId, remoteId: String(remote.Id), syncToken: String(remote.SyncToken), status: 'synced', sourceHash: fingerprint, lastSyncedAt: new Date().toISOString() }); tx.set(unique, { companyId, localId }); tx.update(operation, { status: 'synced', remoteId: String(remote.Id), leaseUntil: 0 }); }); return { status: 'synced', remoteId: String(remote.Id) };
-      } catch (error) { await operation.update({ status: 'failed', leaseUntil: 0, error: safeError(error) }); throw error; }
+        const review = await db.runTransaction(async tx => {
+          const [current, taken, latestSource] = await Promise.all([tx.get(operation), tx.get(unique), tx.get(result.source.ref)]);
+          await checkCurrent(tx, companyId, result.current, request.auth.uid);
+          if (current.get('lease') !== lease) throw new HttpsError('aborted', 'Sync lease changed.');
+          if (taken.exists && (taken.get('companyId') !== companyId || taken.get('localId') !== localId)) throw new HttpsError('already-exists', 'Accounting record is already mapped.');
+          const changed = latestSource.get('companyId') !== companyId || !latestSource.updateTime?.isEqual(sourceUpdateTime);
+          tx.set(mapRef(companyId, type, localId), { companyId, environment: environment(), realmId: result.current.realmId, type, localId, ...receipt, status: changed ? 'review' : 'synced', sourceHash: fingerprint, lastSyncedAt: new Date().toISOString() });
+          tx.set(unique, { companyId, localId }); tx.update(operation, { status: changed ? 'review' : 'synced', remoteId: receipt.remoteId, leaseUntil: 0 });
+          return changed;
+        });
+        if (review) throw new HttpsError('aborted', 'The record reached QuickBooks but changed locally. Review and adopt the existing accounting record before another export.');
+        return { status: 'synced', remoteId: receipt.remoteId };
+      } catch (error) { await db.runTransaction(async tx => { const latest = await tx.get(operation); if (latest.get('lease') === lease && latest.get('status') !== 'synced') tx.update(operation, { status: receipt ? 'review' : 'failed', ...(receipt ? { remoteId: receipt.remoteId } : {}), leaseUntil: 0, error: safeError(error) }); }); throw error; }
     },
     reconcile: async (request) => { const companyId = await scope(request); const mapping = await mapRef(companyId, 'Invoice', documentId(request.data?.localId)).get(); if (!mapping.exists) throw new HttpsError('failed-precondition', 'Map the invoice first.'); await reconcileInvoice(companyId, mapping.get('remoteId')); return { reconciled: true }; },
     webhook: async (req, res) => {
       if (!enabled() || !productionApproved() || environment() !== credentialEnvironment() || !validSignature(req.rawBody, req.headers['intuit-signature'], config.webhookSecret?.())) return res.status(401).send('Invalid or disabled webhook');
       try {
-        const body = JSON.parse(req.rawBody.toString('utf8')); const notifications = body.eventNotifications; if (!Array.isArray(notifications)) return res.status(400).send('Invalid notification');
-        for (const group of notifications.slice(0, 100)) {
-          const realmId = remoteId(group.realmId), realm = await realmRef(realmId).get();
+        let notifications;
+        try { notifications = normalizeQuickBooksWebhook(JSON.parse(req.rawBody.toString('utf8'))); }
+        catch (error) { return res.status(error instanceof QuickBooksWebhookPayloadError ? error.status : 400).send('Invalid notification'); }
+        for (const entity of notifications) {
+          const realmId = entity.realmId, realm = await realmRef(realmId).get();
           if (!realm.exists || realm.get('active') === false) continue;
           const companyId = documentId(realm.get('companyId')), connection = await connectionRef(companyId).get(), current = connection.data();
           if (!current?.connected || current.companyId !== companyId || current.environment !== environment() || current.realmId !== realmId) continue;
-          for (const entity of (group.dataChangeEvent?.entities || []).slice(0, 100)) {
-            if (!['Customer', 'Item', 'Invoice', 'Payment'].includes(entity.name)) continue;
-            const id = remoteId(entity.id), ref = db.doc(`rlQbWebhookEvents/${hash(`${environment()}:${realmId}:${current.connectionId}:${entity.name}:${id}:${entity.operation}:${entity.lastUpdated}`)}`);
+            const id = entity.id, identity = entity.eventId || `${entity.type}:${id}:${entity.operation}:${entity.lastUpdated}`, ref = db.doc(`rlQbWebhookEvents/${hash(`${environment()}:${realmId}:${current.connectionId}:${identity}`)}`);
             await db.runTransaction(async tx => {
               const [seen, latestRealm] = await Promise.all([tx.get(ref), tx.get(realm.ref)]);
               const latest = await tx.get(connection.ref);
               if (seen.exists || !sameConnection(latest.data(), current) || latestRealm.get('companyId') !== companyId || latestRealm.get('active') === false) return;
-              tx.create(ref, { companyId, environment: environment(), realmId, connectionId: current.connectionId, type: entity.name, remoteId: id, status: 'pending', attempts: 0, nextAttempt: 0, createdAt: new Date() });
+              tx.create(ref, { companyId, environment: environment(), realmId, connectionId: current.connectionId, type: entity.type, remoteId: id, operation: entity.operation, providerEventTime: entity.lastUpdated, ...(entity.eventId ? { providerEventId: entity.eventId } : {}), status: 'pending', attempts: 0, nextAttempt: 0, createdAt: new Date() });
             });
-          }
         }
         return res.status(200).send('Accepted');
       } catch { return res.status(503).send('Retry notification'); }
@@ -428,10 +494,27 @@ function quickBooksHandlers(db, config, transport = fetch) {
           else if (data.type === 'Payment') {
             const id = remoteId(data.remoteId), payment = (await api(data.companyId, `payment/${id}`, undefined, undefined, current)).Payment;
             if (!payment || String(payment.Id) !== id) throw new HttpsError('failed-precondition', 'QuickBooks returned a different payment. Review the accounting record.');
-            const ids = [...new Set((payment.Line || []).flatMap(line => (line.LinkedTxn || []).filter(link => link.TxnType === 'Invoice').map(link => remoteId(link.TxnId))))].slice(0,100), invoiceIds = [];
-            for (const invoiceId of ids) invoiceIds.push(...await reconcileInvoice(data.companyId, invoiceId, current));
-            const ref = db.doc(`rlQbPaymentMappings/${hash(`${data.companyId}:${environment()}:${current.realmId}:${id}`)}`);
-            await db.runTransaction(async tx => { await checkCurrent(tx, data.companyId, current); tx.set(ref, { companyId: data.companyId, environment: environment(), realmId: current.realmId, connectionId: current.connectionId, remotePaymentId: id, remoteInvoiceIds: ids, invoiceIds: [...new Set(invoiceIds)], syncToken: String(payment.SyncToken || ''), updatedAt: new Date() }); });
+            const paymentCustomerId = remoteId(payment.CustomerRef?.value);
+            const ref = db.doc(`rlQbPaymentMappings/${hash(`${data.companyId}:${environment()}:${current.realmId}:${id}`)}`), previous = await ref.get();
+            if (olderProviderRecord(payment, previous.data())) { await finish({ status: 'superseded', completedAt: new Date(), error: null }); continue; }
+            const amount = Number(payment.TotalAmt), currency = payment.CurrencyRef?.value || 'USD', txnDate = payment.TxnDate;
+            if (!Number.isFinite(amount) || amount < 0 || currency !== 'USD' || !/^\d{4}-\d{2}-\d{2}$/.test(txnDate || '') || !Number.isFinite(Date.parse(txnDate+'T00:00:00Z')) || new Date(txnDate+'T00:00:00Z').toISOString().slice(0,10) !== txnDate || !Array.isArray(payment.Line)) throw new HttpsError('failed-precondition', 'QuickBooks payment amount, currency or date needs review.');
+            const linked = new Map();
+            for (const line of payment.Line) {
+              const invoices = (line.LinkedTxn || []).filter(link => link.TxnType === 'Invoice');
+              if (!invoices.length) continue;
+              const lineAmount = Number(line.Amount);
+              if (invoices.length !== 1 || !Number.isFinite(lineAmount) || lineAmount < 0) throw new HttpsError('failed-precondition', 'QuickBooks payment invoice allocations need review.');
+              const invoiceId = remoteId(invoices[0].TxnId); linked.set(invoiceId, Math.round(((linked.get(invoiceId)||0)+lineAmount)*100)/100);
+            }
+            if (linked.size > 100 || [...linked.values()].reduce((sum,value)=>sum+value,0) > amount+0.011) throw new HttpsError('failed-precondition', 'QuickBooks payment allocations exceed the payment amount.');
+            const ids = [...linked.keys()], invoiceIds = [];
+            for (const invoiceId of ids) invoiceIds.push(...await reconcileInvoice(data.companyId, invoiceId, current, paymentCustomerId));
+            await db.runTransaction(async tx => {
+              const latest = await tx.get(ref); await checkCurrent(tx, data.companyId, current);
+              if (olderProviderRecord(payment, latest.data())) return;
+              tx.set(ref, { companyId: data.companyId, environment: environment(), realmId: current.realmId, connectionId: current.connectionId, remotePaymentId: id, remoteCustomerId: paymentCustomerId, remoteInvoiceIds: ids, invoiceIds: [...new Set(invoiceIds)], amount, txnDate, currency, applications: ids.map(remoteInvoiceId=>({remoteInvoiceId,amount:linked.get(remoteInvoiceId)})), syncToken: String(payment.SyncToken), providerUpdatedAt: providerTime(payment.MetaData?.LastUpdatedTime), updatedAt: new Date() });
+            });
           }
           if (!(await eventConnection(data))) { await finish({ status: 'superseded', completedAt: new Date() }); continue; }
           await finish({ status: ['Invoice', 'Payment'].includes(data.type) ? 'reconciled' : 'review', completedAt: new Date(), error: null });

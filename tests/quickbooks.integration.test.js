@@ -13,9 +13,9 @@ const transport = async (url, options) => {
   calls.push({ url, options });
   if (url.includes('/tokens/bearer')) { refreshes++; return { ok: true, json: async () => ({ access_token: 'fixture-access', refresh_token: 'fixture-refresh', expires_in: 3600 }) }; }
   if (url.includes('/companyinfo/')) return { ok: true, json: async () => ({ CompanyInfo: { Id: '1', CompanyName: 'Controlled sandbox company' } }) };
-  const entity = url.includes('/invoice') ? 'Invoice' : url.includes('/item') ? 'Item' : 'Customer';
+  const entity = url.includes('/invoice') ? 'Invoice' : url.includes('/item') ? 'Item' : url.includes('/account') ? 'Account' : 'Customer';
   const posted = options.body ? JSON.parse(options.body) : {};
-  return { ok: true, json: async () => ({ [entity]: { ...posted, Id: '123', SyncToken: syncToken, DisplayName: 'Fixture', TotalAmt: 20, Balance: 0, CurrencyRef: { value: 'USD' } } }) };
+  return { ok: true, json: async () => ({ [entity]: { ...posted, Id: '123', SyncToken: syncToken, DisplayName: 'Fixture', Active: true, Type: 'Service', IncomeAccountRef: { value: '123' }, AccountType: 'Income', CustomerRef: { value: '123' }, TotalAmt: 20, Balance: 0, CurrencyRef: { value: 'USD' } } }) };
 };
 before(async () => {
   if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('Emulator required');

@@ -1,4 +1,5 @@
 import { registerRootComponent } from 'expo';
+import './services/backgroundTracking';
 
 import App from './App';
 

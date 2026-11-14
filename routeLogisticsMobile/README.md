@@ -64,7 +64,10 @@ appropriate queries. Technician Home prioritizes active/next work and today's
 assignments, with compact saved-work and explicit foreground-location controls.
 The full services catalogue lives in Settings. Route supplies ordered assigned
 stops and external navigation; an in-app route map is not implemented. Background
-polling and closed-app push delivery are not enabled.
+job polling and closed-app push delivery are not enabled. Separately, explicit
+on-duty shifts support optional background GPS sharing through TaskManager; see
+the linked tracking/rebuild guide below. Shift tracking does not depend on an
+in-progress job and stops when the technician ends the shift.
 
 Keys include Firebase project, user, company, role, membership, verification state
 and date range. A workspace change creates a fresh in-memory QueryClient and clears
@@ -279,6 +282,7 @@ The audit and implementation do not accept invitations or alter customer records
 
 ## Documentation
 
+- [On-duty tracking, visit evidence, Dispatch changes and required native rebuild](../docs/on-duty-tracking-and-dispatch.md)
 - [Current mobile reliability and UX redesign, validation, and Mac rebuild](../docs/mobile-reliability-ux-redesign.md)
 - [Mobile App Documentation](../docs/mobile-app.md)
 - [API Reference](../docs/api-reference.md)

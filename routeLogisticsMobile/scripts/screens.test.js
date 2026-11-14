@@ -153,6 +153,19 @@ test('mobile code sign-in calls the existing challenge flow and never saves code
   await unmount(tree);
 });
 
+test('Settings formats personal phone input and saves the displayed number without editing company data', async () => {
+  account(); currentAuth.user.phoneNumber = '6616025407'; let saved;
+  currentAuth.updateUserProfile = async data => { saved = data; return { success: true }; };
+  const tree = await render('screens/SettingsScreen.js');
+  const phone = () => tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Your phone number')[0];
+  assert.equal(phone().props.value, '(661) 602-5407');
+  await act(async () => phone().props.onChangeText('16615550123'));
+  assert.equal(phone().props.value, '(661) 555-0123');
+  assert.equal(phone().props.keyboardType, 'phone-pad');
+  await press(tree, 'Save profile & preferences');
+  assert.equal(saved.phoneNumber, '(661) 555-0123'); assert.equal(saved.businessName, undefined);
+});
+
 test('assigned work refreshes manually, on return and reconnect, using the selected period', async () => {
   account();
   const home = await render('screens/HomeScreen.js');

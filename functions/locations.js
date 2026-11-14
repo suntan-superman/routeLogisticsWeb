@@ -7,7 +7,7 @@ async function activeWork(db, staff, jobId) {
   const job = await db.doc(`jobs/${documentId(jobId, 'job')}`).get();
   if (!job.exists || job.get('companyId') !== staff.company.id || job.get('status') !== 'in-progress' || (staff.role === 'technician' && job.get('assignedTo') !== staff.memberId)) throw new HttpsError('failed-precondition', 'Location sharing requires an assigned job in progress.');
 }
-function locationHandlers(db) {
+function legacyLocationHandlers(db) {
   return {
     update: async (request) => {
       const { uid, token } = requireAuth(request, true), staff = await requireStaff(db, request, token.companyId);
@@ -29,8 +29,8 @@ function locationHandlers(db) {
         return { sessionId, retentionHours: hours };
       }
       const position = coordinates(request.data);
-      const accuracy = Number(request.data.accuracy);
-      if (!position || !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 5000) throw new HttpsError('invalid-argument', 'A valid location fix is required.');
+      const accuracy = request.data.accuracy;
+      if (!position || typeof request.data.latitude !== 'number' || typeof request.data.longitude !== 'number' || typeof accuracy !== 'number' || !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 5000) throw new HttpsError('invalid-argument', 'A numeric location fix and known numeric accuracy are required.');
       const existing = await ref.get();
       if (!existing.exists || !existing.get('sharing') || existing.get('sessionId') !== request.data.sessionId || existing.get('sessionExpiresAt').toMillis() < Date.now()) throw new HttpsError('failed-precondition', 'Location sharing has stopped. Start it again while working.');
       await activeWork(db, staff, existing.get('jobId'));
@@ -77,5 +77,8 @@ function locationHandlers(db) {
       return { removed };
     },
   };
+}
+function locationHandlers(db, options) {
+  return require('./workTracking').workTrackingHandlers(db, legacyLocationHandlers(db), options);
 }
 module.exports = { locationHandlers, retentionHours, activeWork };

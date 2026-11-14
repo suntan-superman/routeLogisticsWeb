@@ -40,7 +40,7 @@ function load(relative) {
   new Function('require', 'module', 'exports', result.code)(mockRequire, module, module.exports);
   return module.exports;
 }
-const Offline = load('components/OfflineStatus.js').default, Location = load('components/WorkLocation.js').default;
+const Offline = load('components/OfflineStatus.js').default;
 const jobs = () => [{ id: 'first', companyId: 'acme', assignedTo: 'member', status: 'in-progress', customerName: 'First job' }, { id: 'second', companyId: 'acme', assignedTo: 'member', status: 'in-progress', customerName: 'Second job' }];
 const text = () => JSON.stringify(tree.toJSON());
 async function settle() { for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); }
@@ -106,95 +106,4 @@ test('saved work is preserved and automatic drains wait for verified workspace a
   assert.equal(flushes, 0); assert.equal(rows[0].localUri, 'file:///kept.jpg'); assert.equal(resolutions.length, 0);
   accessStatus = 'ready'; await act(async () => tree.update(React.createElement(Offline))); await settle();
   await nativeState('background'); await nativeState('active'); assert.ok(flushes > 0); assert.equal(rows[0].state, 'pending');
-});
-
-test('location requires explicit consent, selects an active assigned job and shows only accepted fix time', async () => {
-  const all = [...jobs(), { ...jobs()[0], id: 'foreign', companyId: 'other', customerName: 'Foreign job' }, { ...jobs()[0], id: 'unassigned', assignedTo: 'other', customerName: 'Not assigned' }];
-  await render(Location, { jobs: all }); assert.equal(calls.length, 0); assert.equal(permissionCalls, 0);
-  await expandLocation(); assert.doesNotMatch(text(), /Foreign job|Not assigned/);
-  await press('Share location for Second job'); await press('Share during this job'); assert.equal(permissionCalls, 0);
-  await press('Confirm location sharing');
-  assert.equal(permissionCalls, 1); assert.equal(calls.find(row => row.action === 'start').jobId, 'second');
-  assert.match(text(), /Waiting for a GPS fix/); assert.doesNotMatch(text(), /Last shared update/);
-  await act(async () => position({ coords: { latitude: 35, longitude: -119, accuracy: 14.6 } })); await settle();
-  assert.match(text(), /Last shared update/); assert.match(text(), /15 m accuracy/); assert.match(text(), /Background sharing is off/);
-});
-
-test('location permission denial is actionable and never starts a server session', async () => {
-  permission = async () => ({ granted: false }); await render(Location, { jobs: jobs() }); await startLocation();
-  assert.match(text(), /Enable it in your device Settings/); assert.equal(calls.length, 0); assert.equal(position, null);
-});
-
-test('backgrounding stops sharing, removes the watcher and retains last accepted update', async () => {
-  await render(Location, { jobs: jobs() }); await startLocation();
-  await act(async () => position({ coords: { latitude: 35, longitude: -119, accuracy: 10 } })); await settle();
-  await nativeState('background');
-  assert.ok(calls.some(row => row.action === 'stop')); assert.equal(watchersRemoved, 1); assert.match(text(), /Sharing off/); assert.match(text(), /Last shared update/);
-});
-
-test('a rejected GPS update stops sharing and reports the actual work-session reason', async () => {
-  await render(Location, { jobs: jobs() }); await startLocation();
-  positionFailure = new Error('This job is no longer assigned to your workspace.');
-  await act(async () => position({ coords: { latitude: 35, longitude: -119, accuracy: 10 } })); await settle();
-  assert.match(text(), /no longer assigned/); assert.match(text(), /Sharing off/); assert.doesNotMatch(text(), /Last shared update/); assert.equal(watchersRemoved, 1);
-});
-
-test('filtered job absence reads current work and only confirmed completion stops sharing', async () => {
-  await render(Location, { jobs: jobs() }); await startLocation();
-  await act(async () => tree.update(React.createElement(Location, { jobs: [], jobsReady: false }))); await settle();
-  assert.match(text(), /Sharing · App open only/); assert.equal(calls.filter(row => row.action === 'stop').length, 0); assert.equal(jobReads.length, 0);
-  await act(async () => tree.update(React.createElement(Location, { jobs: [], jobsReady: true }))); await settle();
-  assert.match(text(), /Sharing · App open only/); assert.equal(calls.filter(row => row.action === 'stop').length, 0);
-  assert.deepEqual(jobReads, [{ resource: 'jobs', id: 'first' }]);
-  await act(async () => tree.update(React.createElement(Location, { jobs: [{ ...jobs()[0], status: 'completed' }], jobsReady: true }))); await settle();
-  assert.match(text(), /job finished or its assignment changed/); assert.equal(calls.filter(row => row.action === 'stop').length, 1);
-});
-
-test('confirmed single-job permission denial stops sharing without assuming company revocation', async () => {
-  await render(Location, { jobs: jobs() }); await startLocation();
-  jobRead = async () => { throw Object.assign(new Error('This job is no longer assigned to you.'), { code: 'functions/permission-denied' }); };
-  await act(async () => tree.update(React.createElement(Location, { jobs: [], jobsReady: true }))); await settle();
-  assert.match(text(), /Sharing off/); assert.match(text(), /no longer assigned to you/);
-  assert.equal(watchersRemoved, 1); assert.equal(calls.filter(row => row.action === 'stop').length, 1); assert.equal(user.companyId, 'acme');
-});
-
-test('transient single-job read failures retain sharing with a bounded refresh and actionable feedback', async () => {
-  await render(Location, { jobs: jobs() }); await startLocation();
-  const filtered = []; jobRead = async () => { throw Object.assign(new Error('Network unavailable'), { code: 'functions/unavailable' }); };
-  await act(async () => tree.update(React.createElement(Location, { jobs: filtered, jobsReady: true }))); await settle();
-  assert.match(text(), /Sharing · App open only/); assert.match(text(), /every location update checks your current assignment/);
-  assert.equal(jobReads.length, 1); assert.equal(calls.filter(row => row.action === 'stop').length, 0);
-  await expandLocation(); await expandLocation(); assert.equal(jobReads.length, 1);
-  await act(async () => position({ coords: { latitude: 35, longitude: -119, accuracy: 10 } })); await settle();
-  assert.match(text(), /Last shared update/); assert.equal(jobReads.length, 1);
-});
-
-test('a stale single-job read cannot stop a newly refreshed or closed sharing session', async () => {
-  await render(Location, { jobs: jobs() }); await startLocation();
-  let rejectRead; jobRead = () => new Promise((_resolve, reject) => { rejectRead = reject; });
-  await act(async () => tree.update(React.createElement(Location, { jobs: [], jobsReady: true }))); await settle();
-  accessStatus = 'checking'; await act(async () => tree.update(React.createElement(Location, { jobs: [], jobsReady: true }))); await settle();
-  await act(async () => rejectRead(Object.assign(new Error('Stale claims denied the read.'), { code: 'functions/permission-denied' }))); await settle();
-  assert.match(text(), /Sharing · App open only/); assert.equal(calls.filter(row => row.action === 'stop').length, 0);
-});
-
-test('native location permission inactivity waits for foreground and duplicate confirmations share one start', async () => {
-  let allow;
-  permission = () => new Promise(resolve => { allow = resolve; });
-  await render(Location, { jobs: jobs() }); await expandLocation(); await press('Share during this job');
-  let starting;
-  await act(async () => { starting = button('Confirm location sharing').props.onPress(); button('Confirm location sharing').props.onPress(); });
-  assert.equal(permissionCalls, 1); await nativeState('inactive');
-  await act(async () => allow({ granted: true })); await settle(); assert.equal(calls.length, 0);
-  await nativeState('active'); await act(async () => starting); await settle();
-  assert.equal(calls.filter(row => row.action === 'start').length, 1); assert.match(text(), /Sharing · App open only/);
-});
-
-test('late permission results after unmount cannot start location sharing', async () => {
-  let allow; permission = () => new Promise(resolve => { allow = resolve; });
-  await render(Location, { jobs: jobs() }); await expandLocation(); await press('Share during this job');
-  let starting; await act(async () => { starting = button('Confirm location sharing').props.onPress(); });
-  await act(async () => tree.unmount()); tree = null;
-  await act(async () => { allow({ granted: true }); await starting; });
-  assert.equal(calls.length, 0); assert.equal(interactions, 0);
 });

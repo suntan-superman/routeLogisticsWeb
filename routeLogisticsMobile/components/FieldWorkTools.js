@@ -1,14 +1,19 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Linking } from 'react-native';
+import { View, Text, Linking, Pressable, AppState } from 'react-native';
+import * as Crypto from 'expo-crypto';
+import * as Location from 'expo-location';
 import { JobService } from '../services/firebase';
-import { saveApplicationOffline, cachedRead, queuedWork, subscribeOffline } from '../services/offline';
-import { readWorkspace } from '../services/workspaceApi';
+import { saveApplicationOffline, cachedRead, queuedWork, subscribeOffline, isOffline } from '../services/offline';
+import { readWorkspace, callWorkspace } from '../services/workspaceApi';
 import { getClaims } from '../services/tenancy';
 import { useTheme } from '../theme/ThemeProvider';
 import { Card, SectionHeader, PrimaryButton, SecondaryButton, FormField, InlineNotice, StatusBadge } from './MobileUI';
 
 const applicationFields = { product: 'Product', targetPest: 'Target pest', amount: 'Quantity', unit: 'Unit', epaRegNo: 'EPA registration', areaTreated: 'Area treated', method: 'Method', applicatorLicense: 'Applicator license', notes: 'Application notes' };
 const emptyApplication = () => Object.fromEntries(Object.keys(applicationFields).map(key => [key, '']));
+const visitLabels = { arrived: 'Arrived', departed: 'Departed', 'access-blocked': 'Couldn’t access property' };
+const visitSources = { manual: 'Reported manually', 'manual-gps': 'Reported manually with GPS evidence', 'gps-evidence': 'Estimated from GPS evidence' };
+const visitTime = value => { const date = new Date(value); return Number.isNaN(date.getTime()) ? 'Time unavailable' : date.toLocaleString(); };
 const workNotes = job => ['pending', 'syncing'].includes(job?.syncState) && job?.syncPatch?.notes != null ? job.syncPatch.notes
   : job?.workNotes || (getClaims()?.role === 'technician' ? job?.notes : '') || '';
 
@@ -17,7 +22,10 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
   const [notes, setNotes] = useState(() => workNotes(job)), [dirty, setDirty] = useState(false), [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const [records, setRecords] = useState([]), [recordsError, setRecordsError] = useState('');
+  const [visits, setVisits] = useState([]), [visitsError, setVisitsError] = useState(''), [visitsLoading, setVisitsLoading] = useState(false), [visitsMore, setVisitsMore] = useState(false);
+  const [visitDraft, setVisitDraft] = useState(null), [visitAttempted, setVisitAttempted] = useState(false);
   const mounted = useRef(false), generation = useRef(0), lock = useRef(false), sequence = useRef(0), dirtyRef = useRef(false);
+  const visitSequence = useRef(0), visitAttempt = useRef(null), lastVisitJob = useRef(job);
   const callbacks = useRef({ onChanged, onDraftChange, onBusyChange }), target = useRef(job);
   callbacks.current = { onChanged, onDraftChange, onBusyChange }; target.current = job;
   const current = (ticket, id) => mounted.current && generation.current === ticket && target.current?.id === id;
@@ -38,14 +46,30 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
     setRecords([...saved, ...pending]);
     setRecordsError([remote.status === 'rejected' ? remote.reason.message : '', local.status === 'rejected' ? local.reason.message : ''].filter(Boolean).join('\n'));
   }, []);
+  const loadVisits = useCallback(async () => {
+    const selected = target.current, ticket = generation.current, request = ++visitSequence.current;
+    if (!selected?.id) return;
+    setVisitsLoading(true);
+    try {
+      const result = await cachedRead(`visits:${selected.id}`, () => callWorkspace('rlJobVisit', { action: 'list', jobId: selected.id }));
+      if (!current(ticket, selected.id) || request !== visitSequence.current) return;
+      setVisits(result.events || []); setVisitsMore(result.hasMore === true); setVisitsError('');
+    } catch (failure) {
+      if (!current(ticket, selected.id) || request !== visitSequence.current) return;
+      if (['permission-denied', 'unauthenticated', 'not-found'].includes(String(failure.code || '').split('/').pop())) setVisits([]);
+      setVisitsError(failure.message || 'Could not load the visit record. Retry while connected.');
+    } finally { if (current(ticket, selected.id) && request === visitSequence.current) setVisitsLoading(false); }
+  }, []);
   useEffect(() => {
     mounted.current = true; generation.current++; lock.current = false; dirtyRef.current = false;
     setNotes(workNotes(job)); setDirty(false); setForm(null); setBusy(false); setError(''); setNotice(''); setRecords([]); setRecordsError('');
-    loadRecords(); const unsubscribe = subscribeOffline(loadRecords);
-    return () => { mounted.current = false; generation.current++; sequence.current++; unsubscribe(); callbacks.current.onBusyChange?.(false); callbacks.current.onDraftChange?.(false); };
-  }, [job?.id, loadRecords]);
+    setVisits([]); setVisitsMore(false); setVisitsError(''); setVisitDraft(null); setVisitAttempted(false); visitAttempt.current = null; lastVisitJob.current = job;
+    loadRecords(); loadVisits(); const unsubscribe = subscribeOffline(loadRecords);
+    return () => { mounted.current = false; generation.current++; sequence.current++; visitSequence.current++; unsubscribe(); callbacks.current.onBusyChange?.(false); callbacks.current.onDraftChange?.(false); };
+  }, [job?.id, loadRecords, loadVisits]);
+  useEffect(() => { if (lastVisitJob.current !== job) { lastVisitJob.current = job; loadVisits(); } }, [job, loadVisits]);
   useEffect(() => { if (!dirtyRef.current) setNotes(workNotes(job)); }, [job?.workNotes, job?.notes, job?.syncPatch?.notes, job?.syncState]);
-  useEffect(() => { callbacks.current.onDraftChange?.(dirty || !!form); }, [dirty, form]);
+  useEffect(() => { callbacks.current.onDraftChange?.(dirty || !!form || !!visitDraft); }, [dirty, form, visitDraft]);
   const perform = async action => {
     if (lock.current || !allowWork) return;
     const selected = { ...target.current }, ticket = generation.current;
@@ -78,6 +102,48 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
       setForm(null); setNotice('Application saved on this device. Check synchronization status before leaving.'); await loadRecords(); await changed(ticket, selected.id);
     });
   };
+  const openVisit = type => {
+    if (lock.current || !allowWork || visitDraft) return;
+    visitAttempt.current = null; setVisitAttempted(false); setError(''); setNotice('');
+    setVisitDraft({ type, note: '', includeLocation: false, operationId: Crypto.randomUUID() });
+  };
+  const saveVisit = () => {
+    if (!visitDraft) return;
+    const note = visitDraft.note.trim();
+    if (note.length > 1000 || (visitDraft.type === 'access-blocked' && !note)) { setError(visitDraft.type === 'access-blocked' && !note ? 'Describe why the property could not be accessed before recording this visit.' : 'Visit notes must be at most 1,000 characters.'); return; }
+    return perform(async (selected, ticket) => {
+      if (await isOffline()) throw new Error('Visit events require a connection and have not been queued. Your note is retained. Reconnect and retry.');
+      if (!current(ticket, selected.id)) return;
+      let payload = visitAttempt.current;
+      if (!payload) {
+        payload = { action: 'record', jobId: selected.id, type: visitDraft.type, operationId: visitDraft.operationId, note };
+        if (visitDraft.includeLocation) {
+          if (AppState.currentState !== 'active') throw new Error('Open Route Logistics in the foreground to include fresh GPS evidence.');
+          const permission = await Location.getForegroundPermissionsAsync();
+          if (!current(ticket, selected.id)) return;
+          if (!permission.granted) throw new Error('Location permission is off. Turn off Include current GPS to record without location, or enable permission in device Settings.');
+          let timeout;
+          let position;
+          try {
+            position = await Promise.race([Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }), new Promise((_resolve, reject) => { timeout = setTimeout(() => reject(new Error('A fresh GPS fix could not be obtained. Try again outdoors, or turn off Include current GPS.')), 20000); })]);
+          } finally { clearTimeout(timeout); }
+          if (!current(ticket, selected.id)) return;
+          if (AppState.currentState !== 'active') throw new Error('GPS recording was interrupted. Keep the app open and retry, or record without GPS.');
+          const { latitude, longitude, accuracy } = position.coords || {};
+          if (![latitude, longitude, accuracy].every(Number.isFinite) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180 || accuracy < 0
+            || !Number.isFinite(position.timestamp) || Math.abs(Date.now() - position.timestamp) > 5 * 60000) throw new Error('The GPS fix is stale or invalid. Retry outdoors, or turn off Include current GPS.');
+          Object.assign(payload, { latitude, longitude, accuracy, capturedAt: new Date(position.timestamp).toISOString() });
+        }
+        visitAttempt.current = payload; setVisitAttempted(true);
+      }
+      const result = await callWorkspace('rlJobVisit', payload);
+      if (!current(ticket, selected.id)) return;
+      if (result.event) setVisits(previous => [result.event, ...previous.filter(row => row.id !== result.event.id)]);
+      setVisitDraft(null); setVisitAttempted(false); visitAttempt.current = null;
+      setNotice(result.duplicate ? 'This visit event was already recorded. No duplicate was added.' : 'Visit event recorded. This does not change the job status or verify property access.');
+      await loadVisits(); await changed(ticket, selected.id);
+    });
+  };
   if (!job?.id) return null;
   const address = [job.address, job.city, job.state, job.zipCode].filter(value => typeof value === 'string').join(', ');
   const destination = typeof job.latitude === 'number' && typeof job.longitude === 'number' ? `${job.latitude},${job.longitude}` : address;
@@ -89,6 +155,36 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
       {job.status === 'scheduled' && <PrimaryButton title="Mark en route" busy={busy} onPress={() => save({ status: 'en-route' })} />}
       <SecondaryButton title="Start work" busy={busy} onPress={() => save({ status: 'in-progress' })} />
     </Card>}
+    <Card><SectionHeader title="Visit record" subtitle="Arrival and departure reports are separate from job status. GPS evidence does not verify property access." />
+      {visitsLoading && <Text accessibilityLiveRegion="polite" style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Refreshing visit record…</Text>}
+      {!!visitsError && <InlineNotice tone="error" message={visitsError} />}
+      {!visits.length && !visitsLoading && !visitsError && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>No visit events recorded.</Text>}
+      {visits.map(visit => <View key={visit.id} style={{ gap: 5, paddingVertical: 12, borderTopWidth: 1, borderColor: palette.border }}>
+        <Text style={{ color: palette.text, fontSize: 16, lineHeight: 23, fontWeight: '600' }}>{visitLabels[visit.type] || 'Visit event'}</Text>
+        <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>{visitTime(visit.capturedAt || visit.recordedAt)} · {visitSources[visit.source] || 'Reported visit event'}</Text>
+        {Number.isFinite(visit.accuracy) && <Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 21 }}>GPS accuracy: ±{Math.round(visit.accuracy)} m{Number.isFinite(visit.distanceMeters) ? ` · approximately ${Math.round(visit.distanceMeters)} m from the service location` : ''}</Text>}
+        {!!visit.note && <Text style={{ color: palette.text, fontSize: 14, lineHeight: 22 }}>{visit.note}</Text>}
+      </View>)}
+      {visitsMore && <Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 21 }}>Showing the latest 100 visit events.</Text>}
+      <SecondaryButton title="Refresh visit record" disabled={busy || visitsLoading} onPress={loadVisits} />
+      {allowWork && (!visitDraft ? <View style={{ gap: 10 }}>
+        <SecondaryButton title="Record arrival" disabled={busy} onPress={() => openVisit('arrived')} />
+        <SecondaryButton title="Record departure" disabled={busy} onPress={() => openVisit('departed')} />
+        <SecondaryButton title="Couldn't access property" disabled={busy} onPress={() => openVisit('access-blocked')} />
+      </View> : <View style={{ gap: 12 }}>
+        <SectionHeader title={visitLabels[visitDraft.type]} subtitle={visitDraft.type === 'access-blocked' ? 'A reason is required. Describe what prevented access.' : 'Add an optional note about this visit.'} />
+        <FormField label="Visit note" value={visitDraft.note} maxLength={1000} onChangeText={value => setVisitDraft(previous => ({ ...previous, note: value }))} editable={!busy && !visitAttempted} multiline />
+        <Pressable accessibilityRole="checkbox" accessibilityLabel="Include current GPS" accessibilityState={{ checked: visitDraft.includeLocation, disabled: busy || visitAttempted }} disabled={busy || visitAttempted}
+          onPress={() => setVisitDraft(previous => ({ ...previous, includeLocation: !previous.includeLocation }))}
+          style={{ minHeight: 48, paddingVertical: 12, flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+          <Text style={{ color: palette.accent, fontSize: 18 }}>{visitDraft.includeLocation ? '☑' : '☐'}</Text><Text style={{ flex: 1, color: palette.text, fontSize: 15, lineHeight: 23 }}>Include current GPS</Text>
+        </Pressable>
+        <Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 21 }}>Optional GPS uses existing location permission while this app is open. No permission prompt or continuous sharing is started here. A connection is required; visit events are not queued offline.</Text>
+        {visitAttempted && <InlineNotice message="This attempt is retained for a safe retry. The same event ID and details will be sent again." />}
+        <PrimaryButton title={visitAttempted ? 'Retry visit record' : 'Save visit record'} busy={busy} onPress={saveVisit} />
+        <SecondaryButton title="Cancel visit record" disabled={busy} onPress={() => { setVisitDraft(null); setVisitAttempted(false); visitAttempt.current = null; setError(''); }} />
+      </View>)}
+    </Card>
     <Card><SectionHeader title="Work notes" subtitle="Document observations and work instructions for this visit." />
       {allowWork ? <><FormField label="Work notes" value={notes} onChangeText={value => { dirtyRef.current = true; setNotes(value); setDirty(true); }} editable={!busy} multiline />
         <SecondaryButton title="Save work notes" disabled={!dirty} busy={busy} onPress={() => save({ notes })} /></> : <Text style={{ color: palette.text, fontSize: 15, lineHeight: 23 }}>{notes || 'No work notes recorded.'}</Text>}

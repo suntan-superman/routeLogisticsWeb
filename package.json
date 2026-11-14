@@ -2,11 +2,11 @@
   "name": "route-logistics-root",
   "private": true,
   "scripts": {
-    "test:rules": "firebase emulators:exec --only firestore,storage --project demo-routelogistics \"node --test --test-concurrency=1 tests/firestore.rules.test.js tests/workflows.integration.test.js tests/staffLogin.integration.test.js tests/payments.integration.test.js tests/fieldwork.integration.test.js tests/quickbooks.integration.test.js tests/storage.rules.test.js tests/access.integration.test.js\"",
+    "test:rules": "firebase emulators:exec --only firestore,storage --project demo-routelogistics \"node --test --test-concurrency=1 tests/firestore.rules.test.js tests/workflows.integration.test.js tests/staffLogin.integration.test.js tests/payments.integration.test.js tests/fieldwork.integration.test.js tests/locations.integration.test.js tests/quickbooks.integration.test.js tests/storage.rules.test.js tests/access.integration.test.js\"",
     "test:e2e": "node scripts/prepare-emulators.js && firebase emulators:exec --only auth,firestore,functions --project demo-routelogistics \"node --test --test-concurrency=1 tests/syncclaims.e2e.test.js tests/staffLogin.auth.test.js\"",
     "test:functions": "cd functions && node --test",
     "test": "npm run test:functions && npm run test:web && npm run test:rules",
-    "test:web": "node --test routeLogisticsWeb/src/services/*.test.js routeLogisticsWeb/src/utils/*.test.js tests/web-customer-access.ui.test.js"
+    "test:web": "node --test routeLogisticsWeb/src/services/*.test.js routeLogisticsWeb/src/utils/*.test.js tests/web-customer-access.ui.test.js tests/team-locations.ui.test.js"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^4.0.1",

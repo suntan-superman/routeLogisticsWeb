@@ -13,6 +13,7 @@ import { companyProfile, serviceNames, workspacePermissions, parseInvitationLink
 import { requestStaffCode, signInWithStaffCode } from '../services/staffLogin';
 import { readWorkspace } from '../services/workspaceApi';
 import { isNativeInteractionActive, subscribeNativeInteraction } from '../services/nativeInteraction';
+import { stopShiftTracking } from '../services/workTracking';
 
 export const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
@@ -109,6 +110,9 @@ export function AuthProvider({ children }) {
   };
   const signOut = async () => {
     const uid = auth.currentUser?.uid;
+    // Stop native collection and clear durable tracking consent before auth ends.
+    // Work/photo queues are separate and remain on the device.
+    await stopShiftTracking({ endShift: true, reason: 'Signed out. Location sharing is off.' }).catch(() => {});
     const result = await AuthService.signOut();
     if (result.success) {
       generation.current++; hydration.current = null; currentUser.current = null; setUser(null); setSessionError(''); setAccessError(''); setAccessStatus('signed-out'); setWorkspaceValidatedAt(null); await syncTenancy(null);

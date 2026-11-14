@@ -195,11 +195,11 @@ test('work details retain durations and completion facts while quote prices requ
   assert.match(text(), /Estimated cost:.*123.45/);
 });
 
-test('work-note and application drafts protect back navigation and completion without remounting photo owner', async () => {
+test('work-note, application and visit drafts protect back navigation and completion without remounting photo owner', async () => {
   await render();
   await act(async () => workProps.onDraftChange(true));
   assert.deepEqual(interactions.at(-1), { busy: false, hasDraft: true });
-  await press('Complete'); assert.match(text(), /Save or cancel your work notes or application draft/); assert.equal(calls.length, 0);
+  await press('Complete'); assert.match(text(), /Save or cancel your work notes, product application or visit record draft/); assert.equal(calls.length, 0);
   await press('Close job details'); assert.equal(closes, 0); await press('Keep editing');
   await act(async () => workProps.onBusyChange(true));
   assert.equal(control('Close job details').props.disabled, true);

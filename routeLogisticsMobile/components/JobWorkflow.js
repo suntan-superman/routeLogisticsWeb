@@ -75,7 +75,7 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
   };
   const openCompletion = () => {
     if (explainBlockedPhoto()) return;
-    if (workDraftRef.current) { setError('Save or cancel your work notes or application draft before completing the visit.'); return; }
+    if (workDraftRef.current) { setError('Save or cancel your work notes, product application or visit record draft before completing the visit.'); return; }
     if (!canComplete) { setError(accessReason || (displayJob?.status === 'cancelled' ? 'This job was cancelled. A manager must reopen it before it can be completed.' : 'This job is already completed. Refresh the job list.')); return; }
     setError(''); setNotice(''); setCloseRequested(false); setMode('completion');
   };

@@ -289,3 +289,15 @@ test('portal sessions cannot access staff data or create companies', async () =>
   await assertFails(setDoc(doc(portal, 'users/customer'), { companyId: null }));
   await assertFails(setDoc(doc(portal, 'companies/new'), { ownerId: 'customer' }));
 });
+
+test('work shifts, raw locations and immutable visit evidence require authorized server callables', async () => {
+  for (const name of ['rlLocations','rlWorkShifts','rlWorkShiftEvents','rlJobVisits','rlJobVisitStates']) {
+    await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), `${name}/server-record`), { companyId:'c1',userId:'tech1',memberId:'t1' }));
+    for (const client of [owner(),manager(),tech()]) {
+      await assertFails(getDoc(doc(client, `${name}/server-record`)));
+      await assertFails(setDoc(doc(client, `${name}/forged`), { companyId:'c1',userId:'tech1' }));
+      await assertFails(updateDoc(doc(client, `${name}/server-record`), { status:'on-duty',verifiedAccess:true }));
+      await assertFails(deleteDoc(doc(client, `${name}/server-record`)));
+    }
+  }
+});

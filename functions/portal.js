@@ -68,7 +68,7 @@ function portalHandlers(db, auth, emailEnabled = () => true, { bucketProvider = 
       if (customers.length) {
         const batch = db.batch();
         batch.set(db.collection('rlPortalChallenges').doc(challengeId), { email, codeHash: otpHash(challengeId, code), expiresAt: new Date(at + OTP_LIFETIME), attempts: 0, consumed: false });
-        batch.create(db.collection('rlMail').doc(), { to: email, subject: 'Your Route Logistics sign-in code', text: `Your sign-in code is ${code}. It expires in 10 minutes. If you did not request this code, ignore this email.`, status: 'queued', availableAt: at, createdAt: new Date(at), expiresAt: new Date(at + OTP_LIFETIME) });
+        batch.create(db.collection('rlMail').doc(), { to: email, subject: 'Your Route Logistics customer portal code', text: `Your customer portal sign-in code is ${code}. Enter it at https://route-logistics.com/portal to view your service records. It expires in 10 minutes and can be used once. Team and platform administration use their own sign-in flow at https://route-logistics.com/login. If you did not request this code, ignore this email.`, status: 'queued', availableAt: at, createdAt: new Date(at), expiresAt: new Date(at + OTP_LIFETIME) });
         await batch.commit();
       }
       return { challengeId, message: 'If your provider has registered this email, a sign-in code will arrive shortly.' };

@@ -34,6 +34,7 @@ test('OTP generation queues a real mail-worker-shaped message with a challenge-b
   const f=await fixture(),response=await f.handlers.requestCustomerOTP({data:{email:' '+f.email.toUpperCase()+' '},rawRequest:{ip:f.id}});
   assert.match(response.challengeId,/^[a-f0-9]{48}$/);assert.equal(response.code,undefined);
   const row=await db.doc('rlPortalChallenges/'+response.challengeId).get(),mail=await db.collection('rlMail').where('to','==',f.email).get();assert.equal(mail.size,1);
+  assert.equal(mail.docs[0].get('subject'),'Your Route Logistics customer portal code');assert.match(mail.docs[0].get('text'),/https:\/\/route-logistics.com\/portal/);assert.match(mail.docs[0].get('text'),/Team and platform administration use their own sign-in flow/);
   const code=mail.docs[0].get('text').match(/\b\d{6}\b/)[0];assert.equal(row.get('codeHash'),otpHash(response.challengeId,code));assert.equal(row.get('code'),undefined);assert.equal(row.get('expiresAt').toMillis()-f.now(),600000);assert.equal(mail.docs[0].get('status'),'queued');
   const verified=await f.handlers.verifyCustomerOTP({data:{challengeId:response.challengeId,code},rawRequest:{ip:f.id}});assert.equal(verified.token,'synthetic-custom-token');assert.equal(f.minted[0].uid,customerUid(f.email));assert.deepEqual(f.minted[0].claims,{portal:true,portalEmail:f.email});
 });

@@ -106,9 +106,9 @@ export default function LoginPage() {
               </button>
             </div>
           </div>}
-          {otpMode && !challenge && <p className="text-sm text-gray-600">We’ll email a six-digit code to your verified account. Use your password if your account requires two-step verification.</p>}
+          {otpMode && <p className="text-sm text-gray-600">Team and platform-admin email codes require a verified account. Use your password to sign in and verify a new account. Customer-portal codes belong at <Link className="underline" to="/portal">the customer portal</Link>.</p>}
           {otpMode && challenge && <div>
-            <label htmlFor="login-code" className="block text-sm font-medium text-gray-700">Six-digit sign-in code</label>
+            <label htmlFor="login-code" className="block text-sm font-medium text-gray-700">Six-digit staff sign-in code</label>
             <input id="login-code" name="code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required autoFocus disabled={busy} value={code} onChange={event => setCode(event.target.value.replace(/\D/g, ''))} className={`${fieldClass} text-center text-xl tracking-[0.35em]`} placeholder="000000" />
             <p className="mt-2 text-xs text-gray-500">Use the newest code. It expires in 10 minutes. Delivery may take a minute.</p>
             <div className="mt-3 flex flex-wrap justify-between gap-3 text-sm">

@@ -3,21 +3,22 @@ import { accessError, retryWorkRead } from './workQueryPolicy';
 
 const blockedClients = new WeakSet();
 export const allowWorkReads = client => blockedClients.delete(client);
-export function createWorkQueryClient(onAccessDenied) {
+export function blockWorkReads(client) {
+  blockedClients.add(client);
+  client.cancelQueries({ queryKey: ['rl-work'] }, { revert: false });
+  for (const query of client.getQueryCache().findAll({ queryKey: ['rl-work'] })) query.setState({ data: undefined, dataUpdatedAt: 0 });
+}
+export function createWorkQueryClient(onAccessProblem, onReadSuccess) {
   const client = new QueryClient({
     queryCache: new QueryCache({ onSuccess: (_data, query) => {
       // A sibling request may finish during an authorization failure.
       if (blockedClients.has(client)) query.setState({ data: undefined, dataUpdatedAt: 0 });
-    }, onError: error => {
+      else onReadSuccess?.(query);
+    }, onError: (error, query) => {
       if (accessError(error)) {
-        blockedClients.add(client);
-        client.cancelQueries({ queryKey: ['rl-work'] }, { revert: false });
-        // Active observers keep their Query until they unsubscribe. Clear its
-        // private payload in place, including sibling reads, before blocking UI.
-        for (const query of client.getQueryCache().findAll({ queryKey: ['rl-work'] })) {
-          query.setState({ data: undefined, dataUpdatedAt: 0 });
-        }
-        onAccessDenied?.();
+        // A missing/reassigned job is not evidence of company revocation.
+        query.setState({ data: undefined, dataUpdatedAt: 0 });
+        onAccessProblem?.(error, query);
       }
     } }),
     defaultOptions: { queries: {

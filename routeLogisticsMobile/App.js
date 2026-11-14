@@ -11,8 +11,7 @@ import LoginScreen from './screens/LoginScreen';
 import SignUpScreen from './screens/SignUpScreen';
 import EmailVerificationScreen from './screens/EmailVerificationScreen';
 import WorkspaceAccessScreen from './screens/WorkspaceAccessScreen';
-import HomeScreen from './screens/HomeScreen';
-import SettingsScreen from './screens/SettingsScreen';
+import WorkspaceScreen from './screens/WorkspaceScreen';
 function AppContent() {
   const { isAuthenticated, isLoading, user, permissions, sessionError, refreshUser, signOut } = useAuth();
   const { ready, palette, isDark } = useTheme();
@@ -21,10 +20,10 @@ function AppContent() {
   const navigation = { navigate: setScreen, goBack: () => setScreen('home') };
   let content;
   if (!ready || isLoading) content = <GlassScreen><View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 }}><ActivityIndicator color={palette.accent} /><Text style={{ color: palette.text }}>Loading your workspace…</Text></View></GlassScreen>;
-  else if (sessionError) content = <GlassScreen><View style={{ flex: 1, justifyContent: 'center', padding: 24 }}><GlassCard><Text style={{ color: palette.text, lineHeight: 23 }}>{sessionError}</Text><GlassButton title="Retry" onPress={refreshUser} /><GlassButton secondary title="Sign out" onPress={signOut} /></GlassCard></View></GlassScreen>;
+  else if (sessionError && !isAuthenticated) content = <GlassScreen><View style={{ flex: 1, justifyContent: 'center', padding: 24 }}><GlassCard><Text style={{ color: palette.text, lineHeight: 23 }}>{sessionError}</Text><GlassButton title="Retry" onPress={refreshUser} /><GlassButton secondary title="Sign out" onPress={signOut} /></GlassCard></View></GlassScreen>;
   else if (isAuthenticated && !user.emailVerified) content = <EmailVerificationScreen />;
   else if (isAuthenticated && !permissions.canAccess) content = <WorkspaceAccessScreen />;
-  else if (isAuthenticated) content = screen === 'settings' ? <SettingsScreen navigation={navigation} /> : <HomeScreen key={`${user.id}:${user.companyId || 'solo'}:${user.role || 'solo'}:${user.membershipId || ''}`} navigation={navigation} />;
+  else if (isAuthenticated) content = <WorkspaceScreen key={`${user.id}:${user.companyId || 'solo'}:${user.role || 'solo'}:${user.membershipId || ''}`} />;
   else content = screen === 'signup' ? <SignUpScreen navigation={navigation} /> : <LoginScreen navigation={navigation} />;
   return <><StatusBar style={isDark ? 'light' : 'dark'} />{content}</>;
 }

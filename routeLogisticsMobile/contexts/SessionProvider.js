@@ -19,50 +19,82 @@ export const useAuth = () => useContext(AuthContext);
 const sessionKey = uid => `rl-session-v3:${uid}`;
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null), [isLoading, setIsLoading] = useState(true), [sessionError, setSessionError] = useState('');
-  const generation = useRef(0);
-  const hydrate = useCallback(async (account, reload = false) => {
+  const [accessStatus, setAccessStatus] = useState('loading'), [accessError, setAccessError] = useState('');
+  const [workspaceValidatedAt, setWorkspaceValidatedAt] = useState(null);
+  const generation = useRef(0), hydration = useRef(null), currentUser = useRef(user);
+  currentUser.current = user;
+  const hydrate = useCallback((account, reload = false) => {
+    const uid = account?.uid || null;
+    if (uid && hydration.current?.uid === uid) return hydration.current.promise;
     const ticket = ++generation.current;
-    if (!account) { await syncTenancy(null); setUser(null); setSessionError(''); setIsLoading(false); return { success: true }; }
-    const isCurrent = () => ticket === generation.current && auth.currentUser?.uid === account.uid;
-    try {
-      const offline = await isOffline();
-      if (reload && !offline) { await account.reload(); await account.getIdToken(true); }
-      if (!isCurrent()) return { success: true };
-      const claims = await syncTenancy(account);
-      if (!isCurrent()) return { success: true };
-      if (offline) {
-        const saved = JSON.parse(await AsyncStorage.getItem(sessionKey(account.uid)) || 'null');
-        if (!saved) throw new Error('Connect once to load your current workspace.');
-        restoreOfflineWorkspace(saved, account);
-        const current = { ...saved, emailVerified: account.emailVerified, offline: true };
-        if (isCurrent()) { setUser(current); setSessionError(''); }
-        return { success: true, user: current };
+    const previous = currentUser.current?.id === uid ? currentUser.current : null;
+    const isCurrent = () => ticket === generation.current && (auth.currentUser?.uid || null) === uid;
+    const task = (async () => {
+      if (!account) {
+        await syncTenancy(null);
+        if (isCurrent()) { currentUser.current = null; setUser(null); setSessionError(''); setAccessError(''); setAccessStatus('signed-out'); setWorkspaceValidatedAt(null); setIsLoading(false); }
+        return { success: true, user: null, accessStatus: 'signed-out', authoritative: true };
       }
-      await purgeOtherRoleCaches(account.uid, workspacePermissions(getWorkspace(), claims).canAccess ? offlineScope() : null);
-      const profile = await getDoc(doc(db, 'users', account.uid));
-      const data = profile.exists() ? profile.data() : {};
-      const company = claims?.companyId && account.emailVerified ? (await readWorkspace('company')).company : null;
-      if (claims?.companyId && account.emailVerified && !company) throw new Error('Your company could not be loaded. Ask the owner to check your membership.');
-      const current = {
-        ...data, services: serviceNames(data.services),
-        ...(company ? companyProfile(company) : { businessPhone: data.phoneNumber || '', businessAddress: data.address || '' }),
-        id: account.uid, email: account.email, name: account.displayName || data.name || 'User', emailVerified: account.emailVerified,
-        companyId: claims?.companyId || null, role: claims?.role || null, membershipId: claims?.membershipId || null, workspace: getWorkspace(), offline: false,
-      };
-      if (!isCurrent()) return { success: true };
-      await AsyncStorage.setItem(sessionKey(account.uid), JSON.stringify(current));
-      if (isCurrent()) { setUser(current); setSessionError(''); }
-      return { success: true, user: current };
-    } catch (error) {
-      if (isCurrent()) { setUser(null); setSessionError(error.message || 'Could not load your account.'); }
-      return { success: false, error: { message: error.message } };
-    } finally { if (ticket === generation.current) setIsLoading(false); }
+      setAccessStatus(previous ? 'checking' : 'loading'); setAccessError('');
+      try {
+        const offline = await isOffline();
+        if (reload && !offline) { await account.reload(); await account.getIdToken(true); }
+        if (!isCurrent()) return { success: false, superseded: true };
+        const claims = await syncTenancy(account);
+        if (!isCurrent()) return { success: false, superseded: true };
+        const saved = previous || JSON.parse(await AsyncStorage.getItem(sessionKey(account.uid)) || 'null');
+        if (offline) {
+          if (!saved) throw new Error('Connect once to load your current workspace.');
+          restoreOfflineWorkspace(saved, account);
+          const current = { ...saved, id: account.uid, email: account.email, emailVerified: account.emailVerified, offline: true };
+          if (isCurrent()) { currentUser.current = current; setUser(current); setSessionError(''); setAccessStatus('offline'); }
+          return { success: true, user: current, accessStatus: 'offline', authoritative: false };
+        }
+        const workspace = getWorkspace();
+        const allowed = workspacePermissions(workspace, claims).canAccess;
+        const status = allowed ? 'ready' : workspace?.status === 'unavailable' && saved?.companyId ? 'revoked' : workspace?.status || 'unavailable';
+        const minimal = { id: account.uid, email: account.email, name: account.displayName || 'User', emailVerified: account.emailVerified,
+          companyId: claims?.companyId || null, role: claims?.role || null, membershipId: claims?.membershipId || null,
+          workspace, offline: false, services: [] };
+        const scopeChanged = !previous || ['companyId','role','membershipId'].some(key => previous[key] !== minimal[key]);
+        if (scopeChanged && isCurrent()) { currentUser.current = minimal; setUser(minimal); }
+        await purgeOtherRoleCaches(account.uid, allowed ? offlineScope() : null);
+        if (!isCurrent()) return { success: false, superseded: true };
+        if (!allowed) {
+          await AsyncStorage.setItem(sessionKey(account.uid), JSON.stringify(minimal));
+          currentUser.current = minimal; setUser(minimal); setSessionError(''); setAccessStatus(status); setWorkspaceValidatedAt(Date.now());
+          return { success: true, user: minimal, accessStatus: status, authoritative: true };
+        }
+        const profile = await getDoc(doc(db, 'users', account.uid));
+        const data = profile.exists() ? profile.data() : {};
+        const company = claims?.companyId && account.emailVerified ? (await readWorkspace('company')).company : null;
+        if (claims?.companyId && account.emailVerified && !company) throw new Error('Your company could not be loaded. Try checking your connection and refreshing access.');
+        const current = { ...data, services: serviceNames(data.services),
+          ...(company ? companyProfile(company) : { businessPhone: data.phoneNumber || '', businessAddress: data.address || '' }),
+          ...minimal, services: company ? companyProfile(company).services : serviceNames(data.services), name: account.displayName || data.name || 'User' };
+        if (!isCurrent()) return { success: false, superseded: true };
+        await AsyncStorage.setItem(sessionKey(account.uid), JSON.stringify(current));
+        if (isCurrent()) { currentUser.current = current; setUser(current); setSessionError(''); setAccessStatus(status); setAccessError(''); setWorkspaceValidatedAt(Date.now()); }
+        return { success: true, user: current, accessStatus: status, authoritative: true };
+      } catch (error) {
+        if (isCurrent()) {
+          // A failed network/token refresh is not membership revocation. Retain
+          // mounted drafts; work queries remain blocked until validation succeeds.
+          setAccessStatus('unavailable'); setAccessError(error.message || 'Could not verify your workspace.');
+          if (!currentUser.current || currentUser.current.id !== account.uid) { setUser(null); setSessionError(error.message || 'Could not load your account.'); }
+        }
+        return { success: false, accessStatus: 'unavailable', authoritative: false, error: { message: error.message, code: error.code } };
+      } finally { if (ticket === generation.current) setIsLoading(false); }
+    })();
+    const promise = task.finally(() => { if (hydration.current?.promise === promise) hydration.current = null; });
+    hydration.current = { uid, promise };
+    return promise;
   }, []);
   const refreshUser = useCallback(() => hydrate(auth.currentUser, true), [hydrate]);
   useEffect(() => {
     purgeLegacyReadCaches().catch(() => {});
     Promise.all(['savedCredentials', 'tempCredentials', 'userToken', 'userData'].map(key => SecureStore.deleteItemAsync(key))).catch(() => {});
-    return onAuthStateChanged(auth, account => { setIsLoading(true); hydrate(account); });
+    return onAuthStateChanged(auth, account => { if (currentUser.current?.id !== account?.uid) setIsLoading(true); hydrate(account); });
   }, [hydrate]);
   useEffect(() => {
     const refresh = () => { if (AppState.currentState === 'active' && auth.currentUser && !isNativeInteractionActive()) refreshUser(); };
@@ -79,7 +111,7 @@ export function AuthProvider({ children }) {
     const uid = auth.currentUser?.uid;
     const result = await AuthService.signOut();
     if (result.success) {
-      generation.current++; setUser(null); setSessionError(''); await syncTenancy(null);
+      generation.current++; hydration.current = null; currentUser.current = null; setUser(null); setSessionError(''); setAccessError(''); setAccessStatus('signed-out'); setWorkspaceValidatedAt(null); await syncTenancy(null);
       if (uid) await AsyncStorage.multiRemove([sessionKey(uid), `rl-session-v2:${uid}`, `rl-session-v1:${uid}`]);
     }
     return result;
@@ -94,7 +126,7 @@ export function AuthProvider({ children }) {
     if (result.success) await hydrate(auth.currentUser);
     return result;
   };
-  const value = { user, permissions, isAuthenticated: !!user, isLoading, sessionError, refreshUser,
+  const value = { user, permissions, isAuthenticated: !!user, isLoading, sessionError, accessStatus, accessError, workspaceValidatedAt, refreshUser,
     signIn: async (email, password) => finishAuthentication(await AuthService.signIn(email.trim(), password)),
     requestStaffCode,
     signInWithCode: async (challengeId, code) => { await signInWithStaffCode(challengeId, code); return finishAuthentication({ success: true }); },

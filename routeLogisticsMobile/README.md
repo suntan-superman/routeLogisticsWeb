@@ -56,22 +56,26 @@ test procedure are documented in [mobile job workflow repair](../docs/mobile-job
 Job Details and its completion pages now share one view-based workspace and one
 photo owner, preserving drafts and showing synchronized/queued/error outcomes.
 
-My Work and the technician's daily route use TanStack Query with a 30-second
-polling interval while Home is mounted, the app is active and connectivity is
-available. Returning to the app or reconnecting refreshes current data immediately.
-Settings unmounts Home, so its work queries stop polling. Manual Refresh jobs,
-Refresh route and pull-to-refresh remain available. Existing job-action and offline
-synchronization callbacks invalidate the shared work-query prefix, refreshing both
-the schedule and route. Background polling and closed-app push delivery are not
-enabled by this integration.
+Home, Schedule, Route and Settings are retained views in the mobile workspace.
+TanStack Query polls the visible work screen every 30 seconds while foregrounded
+and online; hidden views keep their state without polling. Returning to the app,
+reconnecting, pull-to-refresh, work actions and offline synchronization refresh the
+appropriate queries. Technician Home prioritizes active/next work and today's
+assignments, with compact saved-work and explicit foreground-location controls.
+The full services catalogue lives in Settings. Route supplies ordered assigned
+stops and external navigation; an in-app route map is not implemented. Background
+polling and closed-app push delivery are not enabled.
 
 Keys include Firebase project, user, company, role, membership, verification state
 and date range. A workspace change creates a fresh in-memory QueryClient and clears
 the previous client. The current local date rolls over on foreground or within a
 minute while active. Pending/unverified sessions cannot fetch company work.
-Authorization failures hide and clear work payloads, stop polling and refresh
-membership; delayed responses cannot restore denied data. Removed assignments close
-open job dialogs. Generic query-cache persistence is not enabled.
+Atomic claims/workspace refresh preserves same-account drafts. Resource failures
+trigger bounded authoritative membership validation; only confirmed membership
+loss shows removed company access. A reassigned/missing work order shows a
+job-specific error. Its detail query is independent of filtered lists, so completion
+or list omission does not close it. Failed checks pause private work reads without
+discarding the draft. Generic query-cache persistence is not enabled.
 
 The existing role-scoped offline read caches and durable work/photo/application
 queues remain responsible for offline storage and authorized replay. The query
@@ -275,6 +279,7 @@ The audit and implementation do not accept invitations or alter customer records
 
 ## Documentation
 
+- [Current mobile reliability and UX redesign, validation, and Mac rebuild](../docs/mobile-reliability-ux-redesign.md)
 - [Mobile App Documentation](../docs/mobile-app.md)
 - [API Reference](../docs/api-reference.md)
 - [Security Documentation](../docs/security.md)

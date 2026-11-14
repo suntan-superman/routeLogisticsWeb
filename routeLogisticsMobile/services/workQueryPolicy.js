@@ -10,10 +10,12 @@ function periodRange(period, day) {
   if (period === 'month') { start.setDate(1); end.setMonth(end.getMonth() + 1, 0); }
   return { startDate: localDay(start), endDate: localDay(end) };
 }
-function accessError(error) {
-  return ['permission-denied', 'unauthenticated', 'not-found', 'workspace-changed'].includes(String(error?.code || '').replace(/^functions\//, ''))
-    || /workspace changed|Accept your company invitation|refresh your workspace before continuing|No user is currently signed in/.test(error?.message || '');
+const errorCode = error => String(error?.code || '').replace(/^functions\//, '');
+function needsWorkspaceValidation(error) {
+  return ['permission-denied', 'unauthenticated', 'workspace-changed', 'workspace-unavailable', 'claims-stale'].includes(errorCode(error))
+    || /workspace changed|Accept your company invitation|refresh your workspace before continuing|No user is currently signed in|verify your email|current claims|active company membership|active team member/i.test(error?.message || '');
 }
+function accessError(error) { return needsWorkspaceValidation(error) || errorCode(error) === 'not-found'; }
 const retryWorkRead = (failures, error) => failures < 1 && !accessError(error)
   && ['unavailable', 'deadline-exceeded', 'internal', 'resource-exhausted'].includes(String(error?.code || '').replace(/^functions\//, ''));
-module.exports = { WORK_POLL_MS, localDay, workScopeKey, periodRange, accessError, retryWorkRead };
+module.exports = { WORK_POLL_MS, localDay, workScopeKey, periodRange, errorCode, accessError, needsWorkspaceValidation, retryWorkRead };

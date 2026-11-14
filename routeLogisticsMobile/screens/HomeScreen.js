@@ -15,9 +15,8 @@ import {
   RefreshControl,
   BackHandler,
 } from 'react-native';
-import { useWorkJobs } from '../services/useWorkQueries';
+import { useWorkJobs, useWorkJob } from '../services/useWorkQueries';
 import JobWorkflow from '../components/JobWorkflow';
-import MyRoute from '../components/MyRoute';
 import WorkLocation from '../components/WorkLocation';
 import OfflineStatus from '../components/OfflineStatus';
 import { canManage, localDate } from '../services/tenancy';
@@ -40,7 +39,7 @@ function InlineJobPanel({ visible, keepMounted = false, label, priority = 10, ch
       zIndex: priority, display: visible ? 'flex' : 'none', backgroundColor: palette.background }}>{children}</View>;
 }
 
-const HomeScreen = ({ navigation }) => {
+const HomeScreen = ({ navigation, embedded = false, active = true, onInteractionChange, managementAction, onManagementActionHandled }) => {
   const { user, signOut, permissions, refreshUser } = useContext(AuthContext);
   const { colors: COLORS, palette, isDark } = useTheme();
   const styles = useMemo(() => createStyles(COLORS), [COLORS]);
@@ -72,7 +71,7 @@ const HomeScreen = ({ navigation }) => {
 
   // Job/Schedule data from Firebase
   const [activeFilter, setActiveFilter] = useState('day'); // 'day', 'week', 'month'
-  const work = useWorkJobs(activeFilter), jobs = work.jobs, loadJobs = work.refreshWork;
+  const work = useWorkJobs(activeFilter, { enabled: active }), jobs = work.jobs, loadJobs = work.refreshWork;
   const jobsError = work.error?.message || (!work.canAccess ? 'Refresh your workspace to check your current access.' : ''), isLoadingJobs = work.isLoading;
 
   // Dropdown states
@@ -81,9 +80,11 @@ const HomeScreen = ({ navigation }) => {
 
   // One selected job owns the entire details/photo/completion workflow.
   const [selectedJob, setSelectedJob] = useState(null);
+  const selectedWork = useWorkJob(selectedJob?.id, { enabled: active && !!selectedJob });
   const [jobInteraction, setJobInteraction] = useState({ busy: false, hasDraft: false });
   const jobInteractionRef = useRef(jobInteraction);
-  const onJobInteraction = useCallback(next => { jobInteractionRef.current = next; setJobInteraction(next); }, []);
+  const handledManagementAction = useRef(null);
+  const onJobInteraction = useCallback(next => { jobInteractionRef.current = next; setJobInteraction(next); onInteractionChange?.(next); }, [onInteractionChange]);
   const closeJobWorkflow = useCallback(() => {
     setSelectedJob(null); setShowJobEditModal(false); setShowScheduleModal(true);
     jobInteractionRef.current = { busy: false, hasDraft: false }; setJobInteraction(jobInteractionRef.current);
@@ -177,19 +178,21 @@ const HomeScreen = ({ navigation }) => {
   };
 
   // Temporary read errors must not tear down a native picker or discard drafts.
-  // Confirmed removal or loss of workspace permission still closes private details.
+  // Authoritatively confirmed membership loss closes private details; a resource
+  // error is shown separately without declaring the company membership revoked.
   useEffect(() => {
     if (!selectedJob) return;
-    const denied = !work.canAccess;
-    const confirmed = work.isSuccess && !jobsError && !work.isFetching;
+    const denied = selectedWork.accessStatus === 'revoked';
+    const confirmed = selectedWork.dataChecked === true;
     if (!denied && !confirmed) return;
-    const current = !denied && jobs.find(job => job.id === selectedJob.id);
+    const current = !denied && selectedWork.job;
     if (current) { if (current !== selectedJob) setSelectedJob(current); }
-    else {
-      Alert.alert('Job access changed', denied ? 'Your company access has changed. Refresh your workspace before continuing.' : 'This job is no longer in your assigned schedule. Refresh the list or contact your manager.');
+    else if (denied) {
       setSelectedJob(null); setShowJobEditModal(false); setShowScheduleModal(true);
     }
-  }, [jobs, jobsError, work.isSuccess, work.isFetching, work.canAccess, selectedJob]);
+    // Missing list entries may be completed or outside the selected period.
+    // A list snapshot is never authoritative evidence of revoked membership.
+  }, [selectedWork.job, selectedWork.dataChecked, selectedWork.accessStatus, selectedJob]);
 
   useEffect(() => {
     if (!selectedJob && !showScheduleModal && !showJobEditModal) return;
@@ -263,6 +266,7 @@ const HomeScreen = ({ navigation }) => {
   };
 
   const handleSchedulePress = () => {
+    if (embedded) { navigation.navigate('schedule'); return; }
     // Always load jobs when opening schedule modal
     loadJobs();
     setShowScheduleModal(true);
@@ -605,18 +609,36 @@ const HomeScreen = ({ navigation }) => {
   };
 
   // Schedule follow-up appointment
-  const scheduleFollowUp = () => {
+  const scheduleFollowUp = (job = selectedJob) => {
     if (!canManage()) { Alert.alert('Manager access required', 'Ask your manager to make this change.'); return; }
-    if (!selectedJob) return;
+    if (!job) return;
 
     // Pre-populate the schedule service form with customer info
-    setSelectedCustomer(selectedJob.customerName);
-    setSelectedService(selectedJob.serviceType);
+    resetScheduleForm();
+    setSelectedCustomer(job.customerName);
+    setSelectedService(job.serviceType);
     setNotes(`Follow-up for job completed on ${new Date().toLocaleDateString()}`);
 
     setSelectedJob(null);
     setShowScheduleServiceModal(true);
   };
+
+  // Schedule and Route hand management actions to these established forms.
+  // Consume each request once so polling/rerenders cannot reopen a closed form.
+  useEffect(() => {
+    if (!managementAction || handledManagementAction.current === managementAction.id) return;
+    handledManagementAction.current = managementAction.id;
+    const job = managementAction.job;
+    const sameWorkspace = job && (job.companyId ? job.companyId === user.companyId : !user.companyId && job.userId === user.id);
+    if (managing && canManage() && sameWorkspace && !jobInteractionRef.current.busy && !jobInteractionRef.current.hasDraft) {
+      setShowMenuModal(false); setShowCustomerModal(false); setShowScheduleModal(false);
+      setShowEstimatesModal(false); setShowCreateEstimateModal(false); setShowTemplateModal(false);
+      setShowDatePicker(false); setShowTimePicker(false); setShowJobEditModal(false); setShowScheduleServiceModal(false);
+      if (managementAction.kind === 'edit') handleJobEdit(job);
+      else if (managementAction.kind === 'follow-up' && job.status === 'completed') scheduleFollowUp(job);
+    }
+    onManagementActionHandled?.(managementAction.id);
+  }, [managementAction, managing, user.companyId, user.id, onManagementActionHandled]);
 
   const handleSignOut = async () => {
     try {
@@ -627,7 +649,7 @@ const HomeScreen = ({ navigation }) => {
   };
 
   return (
-    <GlassScreen><View style={{ flex: 1 }}>
+    <GlassScreen edges={embedded ? [] : undefined}><View style={{ flex: 1 }}>
       <View style={{ paddingHorizontal: 22, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
         <IconButton icon="menu-outline" label="Open menu" onPress={() => setShowMenuModal(true)} />
         <View style={{ flex: 1, gap: 3 }}>
@@ -649,17 +671,12 @@ const HomeScreen = ({ navigation }) => {
             <View style={{ width: 44, height: 44, borderRadius: 15, backgroundColor: palette.input, alignItems: 'center', justifyContent: 'center' }}><Ionicons name={job.status === 'completed' ? 'checkmark-outline' : 'briefcase-outline'} size={21} color={palette.accent} /></View>
             <View style={{ flex: 1, gap: 4 }}><Text style={{ color: palette.text, fontSize: 15, fontWeight: '600' }}>{job.customerName || job.serviceType || 'Scheduled job'}</Text><Text style={{ color: palette.secondary, fontSize: 12 }}>{[job.time, job.serviceType, job.status, job.syncState ? `sync: ${job.syncState}` : ''].filter(Boolean).join(' · ')}</Text>{!!job.syncError && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{job.syncError}</Text>}</View><Ionicons name="chevron-forward" size={17} color={palette.secondary} />
           </TouchableOpacity>)}
-          <GlassButton secondary title="Refresh jobs" icon="refresh-outline" disabled={work.isFetching} onPress={loadJobs} />
-          <GlassButton secondary title="Refresh workspace" icon="sync-outline" onPress={async () => { const result = await refreshUser(); if (result.success) loadJobs(); }} />
+          {!embedded && <GlassButton secondary title="Refresh jobs" icon="refresh-outline" disabled={work.isFetching} onPress={loadJobs} />}
+          {!!jobsError && <GlassButton secondary title="Check workspace access" icon="sync-outline" onPress={async () => { const result = await refreshUser(); if (result.success) loadJobs(); }} />}
         </GlassCard>
         {managing && <View style={{ gap: 10 }}><Text style={{ color: palette.text, fontSize: 18, fontWeight: '700' }}>Manage work</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}><GlassButton title="Schedule service" icon="add-outline" onPress={handleScheduleServicePress} style={{ flexGrow: 1 }} /><GlassButton secondary title="Customers" icon="people-outline" onPress={() => setShowCustomerModal(true)} style={{ flexGrow: 1 }} /><GlassButton secondary title="Estimates" icon="document-text-outline" onPress={handleEstimatesPress} style={{ flexGrow: 1 }} /></View></View>}
-        <WorkLocation jobs={jobs} />
+        <WorkLocation jobs={jobs} jobsReady={work.dataChecked === true && work.accessStatus === 'ready'} />
         <OfflineStatus onSynced={loadJobs} />
-        {permissions.isTechnician && <MyRoute />}
-        <GlassCard><View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}><Ionicons name="construct-outline" size={22} color={palette.accent} /><Text style={{ color: palette.text, fontSize: 18, fontWeight: '700', flex: 1 }}>{user.companyId ? 'Company services' : 'Your services'}</Text><Text style={{ color: palette.accent, fontWeight: '700' }}>{user.services?.length || 0}</Text></View>
-          {user.services?.length ? user.services.slice(0, 6).map(service => <Text key={service} style={{ color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{service}</Text>) : <Text style={{ color: palette.secondary }}>{user.companyId ? 'Your company owner manages the service catalog.' : 'Add your business services in Settings.'}</Text>}
-          <GlassButton secondary title="Business details & all services" icon="arrow-forward-outline" onPress={() => navigation.navigate('settings')} />
-        </GlassCard>
       </ScrollView>
 
       {/* Custom Menu Modal with Green Buttons */}
@@ -1192,11 +1209,18 @@ const HomeScreen = ({ navigation }) => {
         </View>
       </InlineJobPanel>
 
-      {selectedJob && <InlineJobPanel visible={!showJobEditModal} keepMounted label="Job details">
+      {selectedJob && <InlineJobPanel visible={!showJobEditModal && selectedWork.canReadWork !== false && !selectedWork.resourceDenied} keepMounted label="Job details">
         <JobWorkflow key={selectedJob.id} job={selectedJob} onClose={closeJobWorkflow}
           onChanged={loadJobs} onInteractionChange={onJobInteraction}
           onEdit={managing ? () => handleJobEdit(selectedJob) : undefined}
           onFollowUp={managing ? scheduleFollowUp : undefined} />
+      </InlineJobPanel>}
+      {selectedJob && (selectedWork.canReadWork === false || selectedWork.resourceDenied) && <InlineJobPanel visible label="Work order access check" priority={12}>
+        <View style={{ padding: 24, gap: 16 }}><Text accessibilityRole="header" style={{ color: palette.text, fontSize: 24, fontWeight: '700' }}>Work order</Text>
+          <Text accessibilityRole={selectedWork.accessStatus === 'checking' ? 'text' : 'alert'} style={{ color: palette.text, lineHeight: 24 }}>{selectedWork.accessStatus === 'checking' ? 'Checking current work order access. Your draft is retained.' : selectedWork.error?.message || selectedWork.accessError || 'This work order could not be checked. Your draft is retained.'}</Text>
+          <GlassButton title="Retry work order" onPress={() => selectedWork.refetch()} />
+          <GlassButton secondary title="Return to jobs" onPress={() => { if (jobInteractionRef.current.hasDraft || jobInteractionRef.current.busy) Alert.alert('Draft retained', 'Save or explicitly discard the draft before leaving this work order.'); else closeJobWorkflow(); }} />
+        </View>
       </InlineJobPanel>}
 
       {/* Date Picker Modal for iOS */}

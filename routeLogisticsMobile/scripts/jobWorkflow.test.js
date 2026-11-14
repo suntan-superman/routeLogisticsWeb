@@ -7,9 +7,10 @@ const { create, act } = require('react-test-renderer');
 const babel = require('@babel/core');
 const { workspacePermissions } = require('../services/workspacePolicy');
 global.IS_REACT_ACT_ENVIRONMENT = true;
-let account, tree, photoProps, photoMounts, photoUnmounts, calls, loader, savedRead, reads, changes, closes, interactions, discarded;
+let account, tree, photoProps, workProps, photoMounts, photoUnmounts, calls, loader, savedRead, reads, changes, closes, interactions, discarded, navigationCalls;
 const saved = new Map();
 const native = Object.fromEntries(['View', 'Text', 'ScrollView', 'ActivityIndicator'].map(name => [name, name]));
+native.Linking = { openURL: async url => navigationCalls.push(url) };
 const palette = { text: '#FFF', secondary: '#CCC', danger: '#F00', accent: '#0F0', background: '#000' };
 function Photos(props) {
   photoProps = props;
@@ -28,8 +29,12 @@ function load() {
     if (specifier.endsWith('/contexts/AuthContext')) return { useAuth: () => account };
     if (specifier.endsWith('/theme/ThemeProvider')) return { useTheme: () => ({ palette }) };
     if (specifier === './Glass') return { GlassButton: button, GlassInput: ({ label, ...props }) => React.createElement('TextInput', { accessibilityLabel: label, ...props }) };
+    if (specifier === './MobileUI') {
+      const panel = ({ title, message, children }) => React.createElement('View', null, title && React.createElement('Text', null, title), message && React.createElement('Text', null, message), children);
+      return { Card: panel, ScreenHeader: panel, SectionHeader: panel, InlineNotice: panel, ConfirmationPanel: panel, StatusBadge: ({ status, syncState }) => React.createElement('Text', null, status || syncState) };
+    }
     if (specifier === './JobPhotos') return Photos;
-    if (specifier === './FieldWorkTools') return () => React.createElement('WorkTools');
+    if (specifier === './FieldWorkTools') return props => { workProps = props; return React.createElement('WorkTools'); };
     if (specifier.endsWith('/services/jobCompletion')) return { completeJob: async (job, draft, options) => { calls.push({ job, draft, options }); return loader(job, draft, options); } };
     if (specifier.endsWith('/services/offline')) return { getQueuedOperation: async id => { reads.push(id); return savedRead(id); }, resolveOffline: async (id, action) => { discarded.push({ id, action }); saved.delete(id); } };
     throw new Error(`Unexpected dependency ${specifier}`);
@@ -50,7 +55,7 @@ async function draft() { await press('Complete'); await input('Work completed', 
 beforeEach(() => {
   const user = { id: 'technician', companyId: 'acme', membershipId: 'member', role: 'technician', emailVerified: true, workspace: { status: 'company' } };
   account = { user, permissions: workspacePermissions(user.workspace, user) };
-  tree = null; photoProps = null; photoMounts = photoUnmounts = changes = closes = 0; calls = []; interactions = []; discarded = []; reads = []; saved.clear(); savedRead = async id => saved.get(id);
+  tree = null; photoProps = workProps = null; navigationCalls = []; photoMounts = photoUnmounts = changes = closes = 0; calls = []; interactions = []; discarded = []; reads = []; saved.clear(); savedRead = async id => saved.get(id);
   loader = async selected => ({ status: 'synced', operationId: 'operation', jobId: selected.id, message: 'Job completed and synchronized.' });
 });
 afterEach(async () => { if (tree) await act(async () => tree.unmount()); });
@@ -188,4 +193,24 @@ test('work details retain durations and completion facts while quote prices requ
   account.user = { ...account.user, role: 'manager' }; account.permissions = workspacePermissions(account.user.workspace, account.user);
   await act(async () => tree.update(React.createElement(Workflow, props(selected))));
   assert.match(text(), /Estimated cost:.*123.45/);
+});
+
+test('work-note and application drafts protect back navigation and completion without remounting photo owner', async () => {
+  await render();
+  await act(async () => workProps.onDraftChange(true));
+  assert.deepEqual(interactions.at(-1), { busy: false, hasDraft: true });
+  await press('Complete'); assert.match(text(), /Save or cancel your work notes or application draft/); assert.equal(calls.length, 0);
+  await press('Close job details'); assert.equal(closes, 0); await press('Keep editing');
+  await act(async () => workProps.onBusyChange(true));
+  assert.equal(control('Close job details').props.disabled, true);
+  await act(async () => { workProps.onBusyChange(false); workProps.onDraftChange(false); });
+  await press('Complete'); await press('Cancel completion');
+  assert.equal(photoMounts, 1); assert.equal(photoUnmounts, 0);
+});
+
+test('structured job details expose accessible navigation and safe customer contact actions', async () => {
+  await render(job({ address: '1 Service Street', city: 'Bakersfield', state: 'CA', customerPhone: '(555) 010-2000' }));
+  assert.match(text(), /Service location/); assert.match(text(), /Visit photos/);
+  await press('Navigate to job'); await press('Call customer');
+  assert.match(navigationCalls[0], /google.com\/maps\/dir/); assert.equal(navigationCalls[1], 'tel:5550102000');
 });

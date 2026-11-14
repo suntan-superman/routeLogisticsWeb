@@ -19,6 +19,7 @@ function load(relative) {
     if (name === 'react') return React;
     if (name.startsWith('@babel/runtime/')) return require(name);
     if (name === 'react-native') return Object.fromEntries(['View', 'Text', 'Button', 'Image', 'ScrollView'].map(key => [key, key]));
+    if (name === './Glass') return { GlassButton: props => React.createElement('Button', props) };
     if (name === 'expo-image-picker') return {
       UIImagePickerPresentationStyle: { FULL_SCREEN: 'fullScreen' }, requestCameraPermissionsAsync: async () => permission,
       launchCameraAsync: options => { calls.push({ source: 'camera', options }); return picker(); },
@@ -134,6 +135,13 @@ test('a picker result after unmount does not save or update the closed job', asy
 
 test('photo read errors stay visible and denied access does not retain a prior photo list', async () => {
   remote = [{ id: 'private-photo' }]; await render(); assert.match(text(), /Uploaded photo/);
-  read = async () => { throw Object.assign(new Error('Your membership was removed.'), { code: 'functions/permission-denied' }); };
-  await press('Refresh photos'); assert.match(text(), /Your membership was removed/); assert.doesNotMatch(text(), /Uploaded photo/);
+  let attempts = 0;
+  read = async () => { attempts++; throw Object.assign(new Error('This job is no longer assigned to you.'), { code: 'functions/permission-denied' }); };
+  await act(async () => { await Promise.all([...listeners].map(listener => listener())); }); await settle();
+  assert.match(text(), /no longer assigned/); assert.doesNotMatch(text(), /Uploaded photo/);
+  await act(async () => { await Promise.all([...listeners].map(listener => listener())); }); await settle();
+  assert.equal(attempts, 1, 'queue notifications do not repeatedly retry denied photo reads');
+  await press('Retry loading photos'); assert.equal(attempts, 2);
+  read = async () => ({ photos: [{ id: 'private-photo' }] });
+  await press('Retry loading photos'); assert.match(text(), /Uploaded photo/);
 });

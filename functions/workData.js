@@ -5,8 +5,10 @@ const { documentId, rateLimit } = require('./security');
 const { accessScope, requireCapability, hasCapability, checkJob } = require('./access');
 const { version } = require('./offline');
 const { serviceAreaWorkflow, servicePropertySite, propertyAddress } = require('./serviceAreaWorkflows');
+const { schedulingHandlers } = require('./scheduling');
+const { buildInitialPlan } = require('./recurring');
 
-const JOB_FIELDS = ['userId', 'companyId', 'customerId', 'customerName', 'customerPhone', 'serviceType', 'serviceCategory', 'title', 'address', 'city', 'state', 'zipCode', 'serviceArea', 'date', 'time', 'windowStart', 'windowEnd', 'estimatedDuration', 'duration', 'priority', 'status', 'assignedTo', 'workNotes', 'actualWorkDone', 'actualHours', 'completionNotes', 'completedAt', 'createdAt', 'updatedAt'];
+const JOB_FIELDS = ['userId', 'companyId', 'customerId', 'customerName', 'customerPhone', 'serviceType', 'serviceCategory', 'title', 'address', 'city', 'state', 'zipCode', 'serviceArea', 'date', 'time', 'windowStart', 'windowEnd', 'estimatedDuration', 'duration', 'priority', 'status', 'assignedTo', 'assignedToName', 'assignmentNeedsAttention', 'assignmentReview', 'servicePlanId', 'servicePlanDate', 'workNotes', 'actualWorkDone', 'actualHours', 'completionNotes', 'completedAt', 'createdAt', 'updatedAt'];
 const PRICING_FIELDS = ['totalCost', 'estimatedCost', 'laborRate', 'laborHours', 'materialCost', 'materials', 'scopeOfWork', 'notes', 'description', 'servicePlanId'];
 const CUSTOMER_FIELDS = ['userId', 'companyId', 'name', 'firstName', 'lastName', 'email', 'emailNormalized', 'phone', 'phoneNumber', 'address', 'city', 'state', 'zipCode', 'postalCode', 'isActive', 'status', 'createdAt', 'updatedAt', 'lastServiceDate', 'totalJobs', 'emailConsent', 'notes', 'serviceInstructions'];
 const APPLICATION_FIELDS = ['product', 'epaRegNo', 'activeIngredient', 'amount', 'unit', 'targetPest', 'areaTreated', 'method', 'applicatorLicense', 'notes'];
@@ -64,6 +66,7 @@ function withCustomerLocation(data, customer) {
 }
 function workDataHandlers(db, config = {}) {
   const serviceAreas = serviceAreaWorkflow(db, config);
+  const scheduling = config.scheduling || schedulingHandlers(db);
   const customerInScope = (customer, scope) => customer?.exists && (scope.companyId ? customer.get('companyId') === scope.companyId : !customer.get('companyId') && customer.get('userId') === scope.uid);
   async function assertAddressActor(tx, scope) {
     const deleted = await tx.get(db.doc(`rlAccountDeletions/${scope.uid}`));
@@ -149,14 +152,33 @@ function workDataHandlers(db, config = {}) {
       const scope = await requireCapability(db, request, action === 'assign' ? 'jobs.assign' : 'jobs.schedule');
       await rateLimit(db, 'job-manage', scope.uid, 120);
       if (!['create', 'update', 'delete', 'assign'].includes(action)) throw new HttpsError('invalid-argument', 'Invalid job operation.');
+      const recurring = data.recurring;
+      if (recurring !== undefined && (action !== 'create' || !recurring || typeof recurring !== 'object' || Array.isArray(recurring))) throw new HttpsError('invalid-argument', 'Choose recurring appointments when creating the first visit. Existing visits are edited individually.');
+      let operationRef, operationFingerprint, planRef;
+      if (recurring) {
+        const operationId = documentId(data.operationId, 'booking operation');
+        if (!/^[A-Za-z0-9-]{16,80}$/.test(operationId)) throw new HttpsError('invalid-argument', 'A valid booking operation is required.');
+        const key = createHash('sha256').update(`${scope.uid}:${operationId}`).digest('hex');
+        operationRef = db.doc(`rlScheduleOperations/${key}`);
+        planRef = db.doc(`servicePlans/rl_booking_${key}`);
+        operationFingerprint = createHash('sha256').update(JSON.stringify({ companyId: scope.companyId, job: data.job, recurring, saveCustomerAddress: data.saveCustomerAddress || false, expectedCustomerVersion: data.expectedCustomerVersion ?? null })).digest('hex');
+      }
+      const replayBooking = snapshot => {
+        if (!snapshot?.exists) return null;
+        if (snapshot.get('actorId') !== scope.uid || (snapshot.get('companyId') || null) !== (scope.companyId || null)) throw new HttpsError('permission-denied', 'This booking belongs to a different workspace.');
+        if (snapshot.get('fingerprint') !== operationFingerprint) throw new HttpsError('already-exists', 'The original recurring appointment was already saved. Refresh your jobs before making further changes.');
+        return { ...snapshot.get('result'), replayed: true };
+      };
+      const replay = operationRef ? replayBooking(await operationRef.get()) : null;
+      if (replay) return replay;
       if (data.saveCustomerAddress !== undefined && typeof data.saveCustomerAddress !== 'boolean') throw new HttpsError('invalid-argument', 'Choose whether to update the saved customer address.');
       const saveCustomerAddress = data.saveCustomerAddress === true;
       if (saveCustomerAddress && (!['create', 'update'].includes(action) || !hasCapability(scope.role, 'customers.manage'))) throw new HttpsError('permission-denied', 'Customer-management access is required to save this address.');
       if (saveCustomerAddress && (!Object.hasOwn(data, 'expectedCustomerVersion') || data.expectedCustomerVersion !== null && (typeof data.expectedCustomerVersion !== 'string' || data.expectedCustomerVersion.length > 128))) throw new HttpsError('invalid-argument', 'Refresh the selected customer before updating its saved address.');
-      const ref = action === 'create' ? db.collection('jobs').doc() : db.doc(`jobs/${documentId(data.id)}`);
+      const ref = action === 'create' ? recurring ? db.doc(`jobs/${planRef.id}`) : db.collection('jobs').doc() : db.doc(`jobs/${documentId(data.id)}`);
       const input = data.job || {};
       const permitted = [...JOB_FIELDS, ...PRICING_FIELDS, 'latitude', 'longitude', 'workNotes', 'cancelledAt', 'cancellationReason'];
-      const patch = action === 'assign' ? { assignedTo: data.memberId || null } : pick(input, permitted.filter(key => !['userId', 'companyId', 'createdAt', 'updatedAt'].includes(key)));
+      const patch = action === 'assign' ? { assignedTo: data.memberId || null } : pick(input, permitted.filter(key => !['userId', 'companyId', 'createdAt', 'updatedAt', 'assignedToName', 'assignmentNeedsAttention', 'assignmentReview', 'servicePlanId', 'servicePlanDate'].includes(key)));
       if (patch.status && !['scheduled', 'en-route', 'in-progress', 'completed', 'cancelled'].includes(patch.status)) throw new HttpsError('invalid-argument', 'Invalid job status.');
       const initial = action === 'create' ? null : await ref.get();
       if (initial) checkJob(scope, initial.data());
@@ -171,7 +193,11 @@ function workDataHandlers(db, config = {}) {
       const area = ['create', 'update'].includes(action) ? await serviceAreas.prepare(scope, input, initial?.data() || {}, 'scheduling', action === 'create' || saveCustomerAddress) : null;
       if (area) Object.assign(patch, area.patch);
       return db.runTransaction(async tx => {
+        const previousOperation = operationRef ? replayBooking(await tx.get(operationRef)) : null;
+        if (previousOperation) return previousOperation;
         const existing = await tx.get(ref);
+        if (action === 'create' && existing.exists) throw new HttpsError('already-exists', 'This booking already exists. Refresh your jobs.');
+        if (planRef && (await tx.get(planRef)).exists) throw new HttpsError('already-exists', 'This recurring plan already exists. Refresh your service plans.');
         if (action !== 'create') {
           checkJob(scope, existing.data());
           if (data.expectedVersion !== undefined && version(existing.get('updatedAt')) !== version(data.expectedVersion)) throw new HttpsError('aborted', 'This job changed. Refresh it before saving.');
@@ -186,13 +212,22 @@ function workDataHandlers(db, config = {}) {
           await assertAddressActor(tx, scope);
           if (customerVersion(customer.get('updatedAt')) !== customerVersion(data.expectedCustomerVersion)) throw new HttpsError('aborted', 'The customer changed. Refresh it before saving the permanent address change.');
         }
-        if (patch.assignedTo && scope.companyId && patch.assignedTo !== scope.company.get('ownerId')) {
-          const member = await tx.get(db.doc(`teamMembers/${documentId(patch.assignedTo)}`));
-          if (member.get('companyId') !== scope.companyId || member.get('status') !== 'active' || !member.get('uid')) throw new HttpsError('permission-denied', 'Choose an active company member.');
-        }
         await serviceAreas.assertCurrent(tx, area);
-        const updatedAt = new Date(Math.max(Date.now(), Date.parse(version(existing.get('updatedAt'))) + 1 || 0, saveCustomerAddress ? Date.parse(customerVersion(customer.get('updatedAt'))) + 1 || 0 : 0)).toISOString();
         const before = existing.data() || {};
+        const slot = await scheduling.prepare(tx, scope, action === 'delete' ? null : { ...before, ...patch }, { before, jobId: ref.id });
+        if (action !== 'delete' && (!slot.skipped || action === 'create' || action === 'assign')) Object.assign(patch, { assignedTo: slot.assignedTo || null, assignedToName: slot.assignedToName || null, assignedToUid: slot.assignedToUid || null, assignmentNeedsAttention: !slot.assignedTo, assignmentReview: slot.assignedTo ? null : 'This visit needs a technician assignment.' });
+        let plan;
+        if (recurring) {
+          plan = buildInitialPlan(scope, { ...patch, customerName: customer?.get('name') || patch.customerName, customerPhone: customer?.get('phone') || customer?.get('phoneNumber') || patch.customerPhone }, recurring);
+          if (plan.preferredTechnicianId) {
+            const preferred = await scheduling.validateTechnician(tx, scope, plan.preferredTechnicianId);
+            if (preferred.id !== slot.assignedTo) throw new HttpsError('invalid-argument', 'The first appointment technician must match the preferred technician for this new plan.');
+            plan.preferredTechnicianId = preferred.id; plan.preferredTechnicianUid = preferred.uid;
+          } else if (slot.assignedTo) throw new HttpsError('invalid-argument', 'Use the first appointment technician as the preferred technician for this new plan.');
+          patch.servicePlanId = planRef.id; patch.servicePlanDate = patch.date;
+        }
+        const updatedAt = new Date(Math.max(Date.now(), Date.parse(version(existing.get('updatedAt'))) + 1 || 0, saveCustomerAddress ? Date.parse(customerVersion(customer.get('updatedAt'))) + 1 || 0 : 0)).toISOString();
+        scheduling.commit(tx, slot);
         if (action === 'delete') tx.delete(ref);
         else if (action === 'create') tx.create(ref, { ...patch, userId: scope.uid, ...(scope.companyId ? { companyId: scope.companyId } : {}), status: patch.status || 'scheduled', createdAt: updatedAt, updatedAt });
         else {
@@ -202,6 +237,10 @@ function workDataHandlers(db, config = {}) {
         }
         const audit = db.collection('rlAudit').doc();
         tx.create(audit, { action: `job.${action}`, companyId: scope.companyId, actorId: scope.uid, jobId: ref.id, fromMemberId: before.assignedTo || null, toMemberId: patch.assignedTo ?? before.assignedTo ?? null, createdAt: updatedAt });
+        if (plan) {
+          tx.create(planRef, { ...plan, lastJobId: ref.id, lastGeneratedFor: patch.date, createdAt: updatedAt, updatedAt });
+          tx.create(db.collection('rlAudit').doc(), { action: 'servicePlan.create', companyId: scope.companyId, actorId: scope.uid, servicePlanId: planRef.id, jobId: ref.id, createdAt: updatedAt });
+        }
         if (saveCustomerAddress) {
           const property = patch.serviceProperty;
           const validated = property?.validated === true && Number.isFinite(property.latitude) && Number.isFinite(property.longitude);
@@ -212,7 +251,9 @@ function workDataHandlers(db, config = {}) {
           tx.update(customer.ref, { ...addressPatch, updatedAt });
           tx.create(db.collection('rlAudit').doc(), { action: 'customer.address.update', companyId: scope.companyId, customerId: customer.id, jobId: ref.id, actorId: scope.uid, original, changes: addressPatch, createdAt: updatedAt });
         }
-        return { id: ref.id, updatedAt, ...(area ? { serviceArea: area.result } : {}), ...(saveCustomerAddress ? { customerAddressUpdated: true, customerUpdatedAt: updatedAt } : {}) };
+        const result = { id: ref.id, updatedAt, ...(plan ? { servicePlanId: planRef.id, nextServiceDate: plan.nextServiceDate } : {}), ...(area ? { serviceArea: area.result } : {}), ...(saveCustomerAddress ? { customerAddressUpdated: true, customerUpdatedAt: updatedAt } : {}) };
+        if (operationRef) tx.create(operationRef, { actorId: scope.uid, companyId: scope.companyId || null, fingerprint: operationFingerprint, result, createdAt: updatedAt });
+        return result;
       });
     },
     application: async request => {

@@ -13,60 +13,82 @@ function fixture(overrides = {}) {
     account: () => account, isOffline: async () => false, summary: async () => ({ pendingOperations: 0, pendingPhotos: 0 }),
     pause: async uid => { calls.push(['pause', uid]); return () => calls.push(['resume', uid]); },
     stopTracking: async () => calls.push(['tracking']), stopPush: async () => calls.push(['push']),
-    invoke: async () => { calls.push(['server']); return { success: true, deleted: true }; },
+    invoke: async (...args) => { calls.push(['server', ...args]); return { success: true, deleted: true }; },
     purge: async uid => calls.push(['purge', uid]), finishSession: async uid => calls.push(['session', uid]), ...overrides,
   };
   return { ...createAccountDeletion(deps), deps, calls, account };
 }
 test('deletion requires a verified account, typed confirmation, and network before side effects', async () => {
   for (const change of [f => { f.account.emailVerified = false; }, f => { f.deps.account = () => null; }, f => { f.deps.isOffline = async () => true; }]) {
-    const f = fixture(); change(f); const result = await f.remove({ confirmation: 'DELETE' });
+    const f = fixture(); change(f); const result = await f.remove({ confirmation: 'DELETE', emailConfirmation: 'tech@example.test' });
     assert.equal(result.success, false); assert.deepEqual(f.calls, []);
   }
   const f = fixture(); assert.equal((await f.remove({ confirmation: 'delete' })).success, false); assert.deepEqual(f.calls, []);
 });
+
+test('missing, partial and wrong full-email confirmations fail before any local or server side effect', async () => {
+  for (const emailConfirmation of [undefined, null, '', 'tech', '@example.test', 'tech@example', 'other@example.test', 'tech@example.test.extra', 'tech@example.test extra', { email: 'tech@example.test' }]) {
+    const f = fixture(), result = await f.remove({ confirmation: 'DELETE', emailConfirmation });
+    assert.equal(result.success, false); assert.match(result.error.message, /full signed-in email/); assert.deepEqual(f.calls, []);
+  }
+});
+
+test('case and surrounding whitespace can match but the exact user-entered email reaches the server', async () => {
+  const f = fixture(), entered = '  TECH@Example.Test  ';
+  assert.equal((await f.remove({ confirmation: 'DELETE', emailConfirmation: entered })).success, true);
+  assert.deepEqual(f.calls.find(row => row[0] === 'server'), ['server', 'synthetic-token', entered]);
+});
+
+test('UID, email or verification changes during native shutdown stop deletion before the server request', async () => {
+  for (const change of [f => { f.deps.account = () => ({ ...f.account, uid: 'other' }); }, f => { f.account.email = 'changed@example.test'; }, f => { f.account.emailVerified = false; }]) {
+    const f = fixture(); f.deps.stopPush = async () => { f.calls.push(['push']); change(f); };
+    const result = await f.remove({ confirmation: 'DELETE', emailConfirmation: 'tech@example.test' });
+    assert.equal(result.success, false); assert.match(result.error.message, /account or email changed/);
+    assert.ok(!f.calls.some(row => ['server', 'purge', 'session'].includes(row[0]))); assert.ok(f.calls.some(row => row[0] === 'resume'));
+  }
+});
 test('pending old-role work/photos require explicit discard permission and remain intact on refusal', async () => {
   const f = fixture({ summary: async () => ({ pendingOperations: 2, pendingPhotos: 3 }) });
   assert.deepEqual(await f.summary(), { pendingOperations: 2, pendingPhotos: 3 });
-  const result = await f.remove({ confirmation: 'DELETE', discardPendingWork: false });
+  const result = await f.remove({ confirmation: 'DELETE', emailConfirmation: 'tech@example.test', discardPendingWork: false });
   assert.equal(result.success, false); assert.match(result.error.message, /explicitly confirm/);
   assert.deepEqual(f.calls, [['pause', 'tech'], ['resume', 'tech']]);
 });
 test('deletion stops collection then waits for authoritative server success before local purge/signout', async () => {
-  const f = fixture(); const result = await f.remove({ confirmation: 'DELETE' });
+  const f = fixture(); const result = await f.remove({ confirmation: 'DELETE', emailConfirmation: 'tech@example.test' });
   assert.deepEqual(result, { success: true, deleted: true });
   assert.deepEqual(f.calls.map(row => row[0]), ['pause', 'tracking', 'push', 'server', 'purge', 'session']);
 });
 test('duplicate deletion taps share one request and do not repeat destructive work', async () => {
   let release, calls = 0;
   const f = fixture({ invoke: () => { calls++; return new Promise(resolve => { release = resolve; }); } });
-  const first = f.remove({ confirmation: 'DELETE' }), second = f.remove({ confirmation: 'DELETE' });
+  const first = f.remove({ confirmation: 'DELETE', emailConfirmation: 'tech@example.test' }), second = f.remove({ confirmation: 'DELETE', emailConfirmation: 'tech@example.test' });
   assert.equal(first, second); await new Promise(resolve => setImmediate(resolve));
   release({ success: true, deleted: true }); await first; assert.equal(calls, 1);
 });
 test('backend ownership/permission failures retain pending work and allow retry without local purge', async () => {
   const f = fixture({ invoke: async () => { throw Object.assign(new Error('Transfer company ownership before deleting your account.'), { code: 'functions/failed-precondition' }); } });
-  const result = await f.remove({ confirmation: 'DELETE' });
+  const result = await f.remove({ confirmation: 'DELETE', emailConfirmation: 'tech@example.test' });
   assert.equal(result.success, false); assert.match(result.error.message, /Transfer company ownership/);
   assert.equal(result.error.code, 'functions/failed-precondition'); assert.ok(f.calls.some(row => row[0] === 'resume'));
   assert.ok(!f.calls.some(row => ['purge', 'session'].includes(row[0])));
 });
 test('an unconfirmed response or native tracking shutdown failure never discards saved work', async () => {
   for (const overrides of [{ invoke: async () => ({ success: true }) }, { stopTracking: async () => { throw new Error('Native location could not stop.'); } }]) {
-    const f = fixture(overrides), result = await f.remove({ confirmation: 'DELETE' });
+    const f = fixture(overrides), result = await f.remove({ confirmation: 'DELETE', emailConfirmation: 'tech@example.test' });
     assert.equal(result.success, false); assert.ok(!f.calls.some(row => row[0] === 'purge'));
   }
 });
 test('accepted durable pending deletion signs out and accurately reports automatic server cleanup', async () => {
   const f = fixture({ invoke: async () => ({ success: true, deletionPending: true }) });
-  const result = await f.remove({ confirmation: 'DELETE' });
+  const result = await f.remove({ confirmation: 'DELETE', emailConfirmation: 'tech@example.test' });
   assert.equal(result.success, true); assert.equal(result.deletionPending, true); assert.equal(result.deleted, undefined);
   assert.ok(f.calls.some(row => row[0] === 'purge')); assert.ok(f.calls.some(row => row[0] === 'session'));
 });
 test('local cleanup failure retries using confirmed receipt instead of resubmitting server deletion', async () => {
   let purges = 0;
   const f = fixture({ purge: async () => { if (++purges === 1) throw new Error('Device storage unavailable. Retry cleanup.'); } });
-  const failed = await f.remove({ confirmation: 'DELETE' });
+  const failed = await f.remove({ confirmation: 'DELETE', emailConfirmation: 'tech@example.test' });
   assert.equal(failed.success, false); assert.equal(failed.deletionRecorded, true); assert.equal(failed.localCleanupPending, true);
   f.deps.account = () => null; f.deps.isOffline = async () => true;
   assert.equal((await f.remove({ confirmation: 'DELETE' })).success, true);
@@ -75,7 +97,7 @@ test('local cleanup failure retries using confirmed receipt instead of resubmitt
 test('signed-out cleanup Retry recovers an accepted receipt even when its durable storage write initially failed', async () => {
   let writes = 0;
   const f = fixture({ record: async () => { if (++writes === 1) throw new Error('Device storage unavailable.'); } });
-  const result = await f.remove({ confirmation: 'DELETE' });
+  const result = await f.remove({ confirmation: 'DELETE', emailConfirmation: 'tech@example.test' });
   assert.equal(result.deletionRecorded, true); assert.equal(result.localCleanupPending, true);
   f.deps.account = () => null; await f.resume();
   assert.equal(f.calls.filter(row => row[0] === 'server').length, 1);
@@ -148,17 +170,24 @@ test('HTTP retry keeps the same in-memory token after a lost response and accept
   const f = modulesFixture(), api = f.load('services/accountDeletion.js'), requests = [];
   const previous = global.fetch; t.after(() => { global.fetch = previous; });
   global.fetch = async (url, options) => { requests.push({ url, options }); if (requests.length === 1) throw new TypeError('Connection closed after server deletion'); return { ok: true, json: async () => ({ result: { success: true, deleted: true } }) }; };
-  assert.equal((await api.invokeAccountDeletion('synthetic-token')).deleted, true);
+  const entered = '  TECH@Example.Test  ';
+  assert.equal((await api.invokeAccountDeletion('synthetic-token', entered)).deleted, true);
   assert.equal(requests.length, 2); assert.equal(requests[0].options.headers.Authorization, requests[1].options.headers.Authorization);
-  assert.deepEqual(JSON.parse(requests[1].options.body), { data: { confirmation: 'DELETE' } });
+  assert.deepEqual(JSON.parse(requests[1].options.body), { data: { confirmation: 'DELETE', emailConfirmation: entered } });
+});
+
+test('the HTTP adapter never substitutes the Firebase account email for missing user confirmation', async t => {
+  const f = modulesFixture(), api = f.load('services/accountDeletion.js'); let requests = 0;
+  const previous = global.fetch; t.after(() => { global.fetch = previous; }); global.fetch = async () => { requests++; throw Error('Should not send an unconfirmed request.'); };
+  await assert.rejects(api.invokeAccountDeletion('synthetic-token'), /full signed-in email/); assert.equal(requests, 0);
 });
 test('HTTP ownership rejection is not retried and durable pending errors are explicit accepted receipts', async t => {
   const f = modulesFixture(), api = f.load('services/accountDeletion.js'); let requests = 0;
   const previous = global.fetch; t.after(() => { global.fetch = previous; });
   global.fetch = async () => { requests++; return { ok: false, status: 400, json: async () => ({ error: { status: 'FAILED_PRECONDITION', message: 'Transfer ownership first.' } }) }; };
-  await assert.rejects(api.invokeAccountDeletion('synthetic-token'), /Transfer ownership first/); assert.equal(requests, 1);
+  await assert.rejects(api.invokeAccountDeletion('synthetic-token', 'tech@example.test'), /Transfer ownership first/); assert.equal(requests, 1);
   global.fetch = async () => ({ ok: false, status: 503, json: async () => ({ error: { status: 'UNAVAILABLE', details: { deletionPending: true } } }) });
-  assert.deepEqual(await api.invokeAccountDeletion('synthetic-token'), { success: true, deletionPending: true });
+  assert.deepEqual(await api.invokeAccountDeletion('synthetic-token', 'tech@example.test'), { success: true, deletionPending: true });
 });
 test('a restart resumes only recorded UID cleanup without another server deletion or account data purge', async () => {
   const f = modulesFixture(), api = f.load('services/accountDeletion.js');

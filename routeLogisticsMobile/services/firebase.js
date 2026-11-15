@@ -693,7 +693,7 @@ export class JobService {
         };
       }
 
-      if (getClaims()?.companyId || hasAddressFields(jobData) || options?.saveCustomerAddress === true) { const result = await callWorkspace('rlManageJob', { action: 'update', id: jobId, job: jobData, ...(expectedVersion !== undefined ? { expectedVersion } : {}), ...(options?.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}) }); return { success: true, customerAddressUpdated: result.customerAddressUpdated === true }; }
+      if (getClaims()?.companyId || hasAddressFields(jobData) || ['date', 'time', 'estimatedDuration', 'duration', 'assignedTo'].some(field => Object.hasOwn(jobData, field)) || options?.saveCustomerAddress === true) { const result = await callWorkspace('rlManageJob', { action: 'update', id: jobId, job: jobData, ...(expectedVersion !== undefined ? { expectedVersion } : {}), ...(options?.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}) }); return { success: true, customerAddressUpdated: result.customerAddressUpdated === true }; }
       await updateDoc(doc(db, 'jobs', jobId), {
         ...jobData,
         updatedAt: new Date().toISOString(),

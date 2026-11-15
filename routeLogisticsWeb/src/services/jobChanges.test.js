@@ -13,6 +13,13 @@ test('detects changed fields', () => {
   assert.deepEqual(d.map((c) => c.field), ['date', 'totalCost']);
 });
 
+test('legacy duration is preserved without inventing a duration change during a notes edit', () => {
+  const legacy = { ...job, estimatedDuration: undefined, duration: 2 };
+  const edit = buildJobEdit(legacy, { ...legacy, estimatedDuration: 2, notes: 'Updated access instructions' }, { by: 'dispatcher' });
+  assert.deepEqual(edit.revisions[0].changes.map(change => change.field), ['notes']);
+  assert.equal(edit.originalDetails.estimatedDuration, 2);
+});
+
 test('keeps first original snapshot and appends revisions', () => {
   const first = buildJobEdit(job, { ...job, totalCost: 120 }, { by: 'a', reason: 'more rooms', now: 't1' });
   assert.equal(first.isModified, true);

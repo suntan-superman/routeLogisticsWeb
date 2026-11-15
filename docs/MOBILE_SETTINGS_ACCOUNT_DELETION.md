@@ -31,7 +31,10 @@ Implemented November 15, 2026 on the existing `main` branch for Firebase project
 ## Account deletion
 
 Open **Settings → Legal & account → Delete my account**. Review the scope and
-unsynced-work counts, continue, type `DELETE`, and confirm. Pending edits/photos
+unsynced-work counts, continue, re-enter the full signed-in email address, type
+`DELETE`, and confirm. The email field starts empty with autofill disabled.
+Deletion remains disabled until the complete email matches the current account
+(ignoring letter case and surrounding whitespace). Pending edits/photos
 require an additional explicit discard choice. Cancel does not delete anything.
 
 The app requires connectivity, a verified account, and a sign-in within the last
@@ -42,8 +45,13 @@ Company Setup. Ownership is never silently assigned to someone else. A sole
 owner may delete their account, retaining historical company records without
 assigning a new owner.
 
-`rlDeleteAccount` accepts only `{confirmation: 'DELETE'}` and derives the UID from
-the verified caller. A server-only `rlAccountDeletions/{uid}` record immediately
+`rlDeleteAccount` accepts only `{confirmation: 'DELETE', emailConfirmation}` and
+derives the UID from the verified caller. Before any deletion marker or cleanup,
+the server compares the full entered email with both the verified token and
+current Firebase Authentication account. Missing, partial and mismatched values
+are rejected. The app resets confirmation fields when the signed-in account or
+email changes, and rechecks identity before submitting. A server-only
+`rlAccountDeletions/{uid}` record immediately
 blocks old sessions in workspace authorization, Firestore, Storage, and claim
 synchronization. `rlCompleteAccountDeletion` retries interrupted cleanup. Neither
 endpoint is a general-purpose user deletion API.
@@ -69,6 +77,12 @@ If cleanup is pending after the server accepted deletion, access remains revoked
 and the server worker retries. The app reports this state explicitly. An unknown
 network outcome must not be mistaken for confirmed deletion or silently discard
 local work.
+
+Already accepted deletion receipts still permit local-cleanup retries after
+sign-out; that retry does not initiate another deletion or require access to a
+now-deleted account. The typed-email update passed the complete **229-test mobile
+suite** and requires a new native build for physical acceptance. No real account
+was deleted during development.
 
 ## Validation and release
 

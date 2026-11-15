@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import JobManagementService from '../services/jobManagementService';
 import { buildJobEdit } from '../services/jobChanges';
@@ -9,6 +9,10 @@ import ServicePropertyEligibility from './ServicePropertyEligibility';
 import ThemedSelect from './ThemedSelect';
 import TimeSelect from './TimeSelect';
 import AddressValidationNotice from './AddressValidationNotice';
+import TechnicianAvailability from './TechnicianAvailability';
+import AppointmentRepeatOptions from './AppointmentRepeatOptions';
+import { schedulingFingerprint } from '../services/schedulingService';
+import { appointmentRecurrence, isDateOnAppointmentRecurrence } from '../utils/appointmentRecurrence';
 import { customerAddress, customerView, legacyDate } from '../utils/legacyCustomer';
 
 const SERVICE_TYPES = [
@@ -42,7 +46,8 @@ const emptyForm = (defaults, job) => (job ? {
   serviceType: job.serviceType || '',
   date: job.date || todayStr(),
   time: job.time || '09:00',
-  estimatedDuration: String(job.estimatedDuration ?? '1'),
+  estimatedDuration: String(job.estimatedDuration ?? job.duration ?? '1'),
+  assignedTo: job.assignedTo || '',
   address: typeof job.address === 'string' ? job.address : customerAddress({ address: job.address }),
   totalCost: job.totalCost === undefined || job.totalCost === null ? '' : String(job.totalCost),
   priority: job.priority || 'medium',
@@ -53,6 +58,7 @@ const emptyForm = (defaults, job) => (job ? {
   date: todayStr(),
   time: '09:00',
   estimatedDuration: '1',
+  assignedTo: '',
   address: '',
   totalCost: '',
   priority: 'medium',
@@ -77,6 +83,13 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
   const [addressEditing, setAddressEditing] = useState(false), [saveCustomerAddress, setSaveCustomerAddress] = useState(false);
   const [addressValidation, setAddressValidation] = useState(null);
   const [pastAck, setPastAck] = useState(false);
+  const [repeatSelection, setRepeatSelection] = useState(null), [assignmentFallback, setAssignmentFallback] = useState('unassigned');
+  const [savedRepeat, setSavedRepeat] = useState('null'), [schedulingError, setSchedulingError] = useState(null);
+  const bookingOperation = useRef(null);
+  const recurrence = useMemo(() => appointmentRecurrence(repeatSelection, form.date), [repeatSelection, form.date]);
+  const allowedWeekdays = useMemo(() => recurrence && (recurrence.frequency === 'weekly' || recurrence.monthlyMode === 'weekday') ? [recurrence.weekday] : undefined, [recurrence]);
+  const allowAlternative = useCallback(slot => isDateOnAppointmentRecurrence(recurrence, slot.date), [recurrence]);
+  const repeatSnapshot = JSON.stringify(repeatSelection ? { ...repeatSelection, assignmentFallback } : null);
   const [savedForm,setSavedForm] = useState(()=>formSnapshot(emptyForm(defaults,job)));
   const selectedCustomer = customers.find(customer => customer.id === form.customerId);
   const selectedCustomerAddress = customerAddress(selectedCustomer);
@@ -86,7 +99,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
   const addressEditCustomer = useRef(null);
   const propertyChanged = propertySnapshot(property) !== savedProperty;
   const locationChanged = propertyChanged || isEdit && form.customerId !== job.customerId;
-  const formDirty = formSnapshot(form) !== savedForm || propertyChanged || saveCustomerAddress;
+  const formDirty = formSnapshot(form) !== savedForm || propertyChanged || saveCustomerAddress || repeatSnapshot !== savedRepeat;
   const warnDirty = formDirty || !!reason.trim();
   const {confirmDiscard} = useUnsavedChanges(warnDirty,{message:'You have unsaved job details. Leave without saving them?'});
   const requestClose = useCallback(async()=>{if(savingRef.current||closing.current)return;closing.current=true;try{if(!warnDirty||await confirmDiscard())onClose();}finally{closing.current=false;}},[warnDirty,confirmDiscard,onClose]);
@@ -117,6 +130,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
     if (field === 'address' && !addressEditing) return;
     if (field === 'address') initialCustomerPending.current = false;
     if (field === 'address') setAddressValidation(null);
+    if (['assignedTo', 'date', 'time', 'estimatedDuration'].includes(field)) setSchedulingError(null);
     if (field === 'address' && value.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false);
     setPastAck(false);
     setForm((f) => ({ ...f, [field]: value }));
@@ -150,6 +164,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
     if (!customer) return toast.error('Select a customer');
     if (!form.serviceType.trim()) return toast.error('Enter a service type');
     if (!form.date || !form.time) return toast.error('Date and time are required');
+    if (repeatSelection && !recurrence) return toast.error('Choose a valid first service date for this recurring appointment.');
     if (company?.id && (!isEdit || locationChanged) && !serviceAreaPolicy) return toast.error('Wait for the service-area settings to load, or retry the property check.');
     if (company?.id && (serviceAreaPolicy?.settings?.configured || locationChanged) && (!isEdit || locationChanged) && !property.address.trim()) return toast.error('Enter the service property address explicitly before saving this job.');
     const cost = form.totalCost === '' ? 0 : Number(form.totalCost);
@@ -169,6 +184,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
       date: form.date,
       time: form.time,
       estimatedDuration: duration,
+      assignedTo: form.assignedTo || null,
       address: isEdit && !locationChanged ? form.address.trim() || job.address || '' : (company?.id ? property.address.trim() : '') || form.address.trim() || customerAddress(customer),
       ...(company?.id && (locationChanged || !isEdit && property.address.trim()) ? { serviceProperty: { address: property.address.trim() }, serviceCategory: property.serviceCategory.trim(), serviceAreaExceptionId: property.exceptionId || null } : {}),
       totalCost: cost,
@@ -176,7 +192,10 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
       notes: form.notes.trim()
     };
 
-    const options = saveCustomerAddress ? { saveCustomerAddress: true, expectedCustomerVersion: addressEditCustomer.current?.version ?? null } : undefined;
+    if (repeatSelection && !bookingOperation.current) bookingOperation.current = globalThis.crypto.randomUUID();
+    const options = saveCustomerAddress || repeatSelection ? { ...(saveCustomerAddress ? { saveCustomerAddress: true, expectedCustomerVersion: addressEditCustomer.current?.version ?? null } : {}), ...(repeatSelection ? { operationId: bookingOperation.current, recurring: { recurrence, preferredTechnicianId: form.assignedTo || null, assignmentFallback } } : {}) } : undefined;
+    const requestedSchedule = schedulingFingerprint({ companyId: company?.id, memberId: form.assignedTo, date: form.date, time: form.time, estimatedDuration: duration, jobId: job?.id });
+    setSchedulingError(null);
     if (saveCustomerAddress && (!addressEditing || addressEditCustomer.current?.id !== customer.id || !canSaveCustomerAddress)) { savingRef.current = false; setSaving(false); return toast.error('Review the customer address before saving it permanently.'); }
     if (saveCustomerAddress) { details.serviceProperty = { address: currentAddress.trim() }; if (company?.id) { details.serviceCategory = property.serviceCategory.trim(); details.serviceAreaExceptionId = property.exceptionId || null; } }
     let saved, savedCustomer, customerAddressUpdated = false;
@@ -189,7 +208,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
       }
       const res = await JobManagementService.updateJob(job.id, edit || details, job.updatedAt ?? null, options);
       if (!alive.current)return;
-      if (!res.success) throw Object.assign(Error(res.error || 'Could not update job'), { addressValidation: res.addressValidation });
+      if (!res.success) throw Object.assign(Error(res.error || 'Could not update job'), { addressValidation: res.addressValidation, scheduling: res.scheduling });
       setSavedForm(formSnapshot(form));setSavedProperty(propertySnapshot(property));setReason('');setSaveCustomerAddress(false);
       customerAddressUpdated = res.customerAddressUpdated === true;
       savedCustomer = res.customer;
@@ -198,9 +217,9 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
     } else {
       const result = await JobManagementService.createJob(details, options);
       if (!alive.current)return;
-      if (!result.success) throw Object.assign(Error(result.error || 'Could not create job'), { addressValidation: result.addressValidation });
-      setSavedForm(formSnapshot(form));setSavedProperty(propertySnapshot(property));setReason('');setSaveCustomerAddress(false);customerAddressUpdated = result.customerAddressUpdated === true;savedCustomer=result.customer;toast.success(customerAddressUpdated ? 'Job scheduled and customer address updated.' : 'Job scheduled');saved=result.job;
-    } } catch(error) { if(alive.current) { setAddressValidation(error.addressValidation || null); toast.error(error.message || 'Unable to save this job. Your changes are available to retry.'); }return; }
+      if (!result.success) throw Object.assign(Error(result.error || 'Could not create job'), { addressValidation: result.addressValidation, scheduling: result.scheduling });
+      setSavedForm(formSnapshot(form));setSavedProperty(propertySnapshot(property));setSavedRepeat(repeatSnapshot);setReason('');setSaveCustomerAddress(false);customerAddressUpdated = result.customerAddressUpdated === true;savedCustomer=result.customer;toast.success(repeatSelection ? customerAddressUpdated ? 'Recurring appointment and customer address saved.' : 'Recurring appointment scheduled.' : customerAddressUpdated ? 'Job scheduled and customer address updated.' : 'Job scheduled');saved=result.job;
+    } } catch(error) { if(alive.current) { setAddressValidation(error.addressValidation || null); if (error.scheduling) setSchedulingError({ fingerprint: requestedSchedule, result: error.scheduling }); toast.error(error.message || 'Unable to save this job. Your changes are available to retry.'); }return; }
     finally { savingRef.current=false;if(alive.current)setSaving(false); }
     try { await onCreated(saved, { customerAddressUpdated, ...(savedCustomer ? { customer: customerView(savedCustomer.id, savedCustomer) } : {}) }); } catch { if(alive.current)toast.error('The job was saved, but the job list could not refresh. Refresh the page to see it.'); }
   };
@@ -250,6 +269,10 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
               />
             </div>
           </div>
+
+          <TechnicianAvailability companyId={company?.id} memberId={form.assignedTo} memberName={job?.assignedToName} date={form.date} time={form.time} estimatedDuration={form.estimatedDuration} jobId={job?.id} disabled={saving} allowedWeekdays={allowedWeekdays} isAlternativeAllowed={allowAlternative} schedulingError={schedulingError} onMemberChange={id => set('assignedTo', id)} onSelectAlternative={slot => { if (savingRef.current) return; setSchedulingError(null); setPastAck(false); setForm(previous => ({ ...previous, date: slot.date, time: slot.time })); }} />
+          {!isEdit && <AppointmentRepeatOptions value={repeatSelection} onChange={value => { if (!savingRef.current) { setRepeatSelection(value); setSchedulingError(null); } }} date={form.date} assignmentFallback={assignmentFallback} onFallbackChange={setAssignmentFallback} disabled={saving} company={!!company?.id} />}
+          {isEdit && job.servicePlanId && <p className="text-sm text-gray-600">This is a recurring visit. Changes here apply to this visit only; the service plan controls later visits.</p>}
 
           {!company?.id && <div>
             <label className={label}>Service address</label>

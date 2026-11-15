@@ -4,7 +4,7 @@ const { createRequire } = require('node:module');
 const mobile = createRequire(path.resolve(__dirname, '../routeLogisticsMobile/package.json')), web = createRequire(path.resolve(__dirname, '../routeLogisticsWeb/package.json'));
 const React = mobile('react'), {create,act} = mobile('react-test-renderer'), {transformSync} = web('esbuild');
 global.IS_REACT_ACT_ENVIRONMENT = true;
-let tree,env, Notice;
+let tree,env, Notice, Recurrence;
 const settle = () => new Promise(resolve=>setImmediate(resolve));
 const deferred = () => {let resolve;const promise=new Promise(done=>{resolve=done;});return{promise,resolve};};
 function reset(){env={calls:[],toasts:[],dirty:false,confirm:true,confirmCalls:0,manage:true,response:{success:true},pending:null,company:'company-1'};}
@@ -13,6 +13,9 @@ const dependencies=name=>{
   if(name==='react')return React;
   if(name==='react-hot-toast')return{__esModule:true,default:toast};
   if(name.endsWith('/components/AddressValidationNotice'))return{__esModule:true,default:Notice};
+  if(name.endsWith('/components/TechnicianAvailability'))return{__esModule:true,default:()=>null};
+  if(name.endsWith('/services/schedulingService'))return{schedulingFingerprint:value=>JSON.stringify(value)};
+  if(name.endsWith('/utils/appointmentRecurrence'))return Recurrence;
   if(name.endsWith('/components/TimeSelect'))return{__esModule:true,default:props=>React.createElement('label',null,props.label,React.createElement('input',{type:'time','aria-label':props.label,value:props.value,disabled:props.disabled,onChange:event=>props.onChange(event.target.value)}))};
   if(name.endsWith('/services/customerService'))return{__esModule:true,default:{getCustomers:async()=>({success:true,customers:[{id:'customer-1',name:'Authorized customer'}]})}};
   if(name.endsWith('/services/servicePlanService'))return{FREQUENCIES:[{days:30,label:'Monthly'},{days:90,label:'Quarterly'}],listServicePlans:async()=>({success:true,plans:[]}),createServicePlan:async data=>{env.calls.push(data);if(env.pending)await env.pending.promise;if(env.thrown)throw env.thrown;return env.response;},updateServicePlan:async()=>({success:true}),deleteServicePlan:async()=>({success:true}),generateNextJob:async()=>({success:true})};
@@ -25,6 +28,7 @@ const dependencies=name=>{
   throw Error('Unexpected dependency: '+name);
 };
 const noticeModule={exports:{}};new Function('React','require','module','exports',transformSync(fs.readFileSync(path.resolve(__dirname,'../routeLogisticsWeb/src/components/AddressValidationNotice.jsx'),'utf8'),{loader:'jsx',format:'cjs'}).code)(React,dependencies,noticeModule,noticeModule.exports);Notice=noticeModule.exports.default;
+const recurrenceModule={exports:{}};new Function('require','module','exports',transformSync(fs.readFileSync(path.resolve(__dirname,'../routeLogisticsWeb/src/utils/appointmentRecurrence.js'),'utf8'),{loader:'js',format:'cjs'}).code)(dependencies,recurrenceModule,recurrenceModule.exports);Recurrence=recurrenceModule.exports;
 const moduleValue={exports:{}};
 new Function('React','require','module','exports',transformSync(fs.readFileSync(path.resolve(__dirname,'../routeLogisticsWeb/src/pages/ServicePlansPage.jsx'),'utf8'),{loader:'jsx',format:'cjs'}).code)(React,dependencies,moduleValue,moduleValue.exports);
 const Page=moduleValue.exports.default;

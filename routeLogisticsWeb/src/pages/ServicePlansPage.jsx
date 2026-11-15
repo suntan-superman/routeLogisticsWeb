@@ -10,32 +10,48 @@ import { useAuth } from '../contexts/AuthContext';
 import ServicePropertyEligibility from '../components/ServicePropertyEligibility';
 import TimeSelect from '../components/TimeSelect';
 import AddressValidationNotice from '../components/AddressValidationNotice';
+import TechnicianAvailability from '../components/TechnicianAvailability';
+import { schedulingFingerprint } from '../services/schedulingService';
+import { appointmentRecurrence, describeAppointmentRecurrence, isDateOnAppointmentRecurrence } from '../utils/appointmentRecurrence';
 
 const input = 'mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm';
-const todayIso = () => new Date().toISOString().slice(0, 10);
-const blank = { customerId: '', serviceType: 'General Pest Control', frequencyDays: 90, nextServiceDate: todayIso(), time: '09:00', price: '', notes: '' };
-const freqLabel = (d) => FREQUENCIES.find((f) => f.days === d)?.label || `Every ${d} days`;
+const todayIso = (timeZone = 'America/Los_Angeles') => {
+  let formatter;
+  try { formatter = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }); }
+  catch { formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }); }
+  const parts = Object.fromEntries(formatter.formatToParts(new Date()).map(part => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+};
+const blank = { customerId: '', serviceType: 'General Pest Control', frequencyDays: 90, nextServiceDate: '', time: '09:00', estimatedDuration: '1', preferredTechnicianId: '', assignmentFallback: 'unassigned', monthlyMode: 'dayOfMonth', price: '', notes: '' };
+const frequencyRule = days => ({ 7: { frequency: 'weekly', interval: 1 }, 14: { frequency: 'weekly', interval: 2 }, 30: { frequency: 'monthly', interval: 1 }, 60: { frequency: 'monthly', interval: 2 }, 90: { frequency: 'quarterly', interval: 1 }, 180: { frequency: 'monthly', interval: 6 }, 365: { frequency: 'monthly', interval: 12 } })[Number(days)];
+const planVersion = value => value?.toDate ? value.toDate().toISOString() : typeof value === 'string' ? value : value?.seconds !== undefined ? new Date(value.seconds * 1000 + (value.nanoseconds || 0) / 1e6).toISOString() : null;
 const emptyProperty = () => ({ address: '', serviceCategory: '', exceptionId: null, confirmed: false });
 const customerAddress = customer => [typeof customer?.address === 'string' ? customer.address : customer?.address?.street || customer?.address?.line1, customer?.city || customer?.address?.city, customer?.state || customer?.address?.state, customer?.zipCode || customer?.address?.zipCode].filter(Boolean).join(', ');
 
 const ServicePlansPage = () => {
   const { company } = useAuth();
+  const initialForm = useRef({ ...blank, nextServiceDate: todayIso(company?.timeZone) });
   const [plans, setPlans] = useState([]);
   const [customers, setCustomers] = useState([]);
-  const [form, setForm] = useState(blank);
+  const [form, setForm] = useState(initialForm.current);
   const [serviceProperty, setServiceProperty] = useState(emptyProperty), [serviceAreaPolicy, setServiceAreaPolicy] = useState(null);
   const [addressValidation, setAddressValidation] = useState(null);
+  const [schedulingError, setSchedulingError] = useState(null), [preference, setPreference] = useState(null), [preferenceSaving, setPreferenceSaving] = useState(false);
+  const preferenceSavingRef = useRef(false), preferenceClosingRef = useRef(false);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false), savingRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState({ start: '', end: '' });
   const manage = canManage();
   const confirm = useConfirm();
-  const formChanged = Object.keys(blank).some(key => key === 'frequencyDays' ? Number(form[key]) !== Number(blank[key]) : form[key] !== blank[key]) || !!serviceProperty.address.trim() || !!serviceProperty.serviceCategory || !!serviceProperty.exceptionId;
-  const { confirmDiscard } = useUnsavedChanges(manage && showForm && formChanged, { message: 'You have an unsaved service plan. Leave without saving it?' });
+  const recurrence = appointmentRecurrence({ ...frequencyRule(form.frequencyDays), monthlyMode: form.monthlyMode }, form.nextServiceDate);
+  const formChanged = Object.keys(blank).some(key => key === 'frequencyDays' ? Number(form[key]) !== Number(initialForm.current[key]) : form[key] !== initialForm.current[key]) || !!serviceProperty.address.trim() || !!serviceProperty.serviceCategory || !!serviceProperty.exceptionId;
+  const preferenceChanged = !!preference && (preference.memberId !== (preference.plan.preferredTechnicianId || '') || preference.fallback !== (preference.plan.assignmentFallback || 'unassigned'));
+  const { confirmDiscard } = useUnsavedChanges(manage && (showForm && formChanged || preferenceChanged), { message: 'You have unsaved service plan changes. Leave without saving them?' });
+  const resetForm = () => { initialForm.current = { ...blank, nextServiceDate: todayIso(company?.timeZone) }; setForm(initialForm.current); setServiceProperty(emptyProperty()); setServiceAreaPolicy(null); setAddressValidation(null); setSchedulingError(null); };
   const toggleForm = async () => {
     if (savingRef.current || (showForm && formChanged && !(await confirmDiscard()))) return;
-    setForm(blank); setServiceProperty(emptyProperty()); setServiceAreaPolicy(null); setAddressValidation(null); setShowForm(value => !value);
+    resetForm(); setShowForm(value => !value);
   };
 
   const load = useCallback(async () => {
@@ -54,31 +70,33 @@ const ServicePlansPage = () => {
   }, [load]);
   useEffect(() => { setAddressValidation(null); }, [company?.id]);
 
-  const set = (k) => (e) => { setAddressValidation(null); setForm((f) => ({ ...f, [k]: e.target.value })); };
+  const set = (k) => (e) => { setAddressValidation(null); setSchedulingError(null); setForm((f) => ({ ...f, [k]: e.target.value })); };
   const changeProperty = value => { if (savingRef.current) return; setAddressValidation(null); setServiceProperty(value); };
 
   const submit = async (e) => {
     e.preventDefault();
     if (!manage || !canManage() || savingRef.current || !formChanged) return;
+    if (!recurrence) return toast.error('Choose a valid recurrence and first service date.');
+    if (form.nextServiceDate < todayIso(company?.timeZone)) return toast.error('Choose today or a future date for a new recurring appointment.');
     if (company?.id && !serviceAreaPolicy) return toast.error('Wait for service-area settings to load, or retry the property check.');
     if (company?.id && serviceAreaPolicy.settings?.configured && !serviceProperty.address.trim()) return toast.error('Enter the service property address explicitly before creating this plan.');
-    savingRef.current = true; setSaving(true); setAddressValidation(null);
+    savingRef.current = true; setSaving(true); setAddressValidation(null); setSchedulingError(null);
     try {
       const customer = customers.find((c) => c.id === form.customerId);
       const res = await createServicePlan({
         ...form,
+        recurrence, estimatedDuration: Number(form.estimatedDuration), preferredTechnicianId: form.preferredTechnicianId || null,
         customerName: customer?.name || '',
         customerPhone: customer?.phone || '',
         address: serviceProperty.address.trim() || customerAddress(customer),
         ...(serviceProperty.address.trim() ? { serviceProperty: { address: serviceProperty.address.trim() }, serviceCategory: serviceProperty.serviceCategory.trim(), serviceAreaExceptionId: serviceProperty.exceptionId || null } : {}),
       });
-      if (!res.success) { setAddressValidation(res.details?.addressValidation || null); return toast.error(res.error); }
+      if (!res.success) { setAddressValidation(res.details?.addressValidation || null); if (res.details?.scheduling) setSchedulingError({ fingerprint: schedulingFingerprint({ companyId: company?.id, memberId: form.preferredTechnicianId, date: form.nextServiceDate, time: form.time, estimatedDuration: form.estimatedDuration }), result: res.details.scheduling }); return toast.error(res.error); }
       toast.success('Service plan created');
-      setForm(blank);
-      setServiceProperty(emptyProperty()); setServiceAreaPolicy(null); setAddressValidation(null);
+      resetForm();
       setShowForm(false);
       load();
-    } catch (failure) { setAddressValidation(failure.details?.addressValidation || null); toast.error(failure.message || 'The service plan could not be saved. Please try again.'); }
+    } catch (failure) { setAddressValidation(failure.details?.addressValidation || null); if (failure.details?.scheduling) setSchedulingError({ fingerprint: schedulingFingerprint({ companyId: company?.id, memberId: form.preferredTechnicianId, date: form.nextServiceDate, time: form.time, estimatedDuration: form.estimatedDuration }), result: failure.details.scheduling }); toast.error(failure.message || 'The service plan could not be saved. Please try again.'); }
     finally { savingRef.current = false; setSaving(false); }
   };
 
@@ -98,9 +116,46 @@ const ServicePlansPage = () => {
   };
 
   const toggle = async (plan) => {
-    const res = await updateServicePlan(plan.id, { active: !plan.active });
+    const res = await updateServicePlan(plan.id, { active: !plan.active }, planVersion(plan.updatedAt));
     if (!res.success) return toast.error(res.error);
+    toast.success(plan.active ? 'Service plan paused' : 'Service plan resumed');
     load();
+  };
+
+  const openPreference = async plan => {
+    if (!manage || savingRef.current || preferenceSavingRef.current) return;
+    if (showForm && formChanged && !(await confirmDiscard())) return;
+    resetForm(); setShowForm(false);
+    setPreference({ plan: { ...plan }, memberId: plan.preferredTechnicianId || '', fallback: plan.assignmentFallback || 'unassigned', version: planVersion(plan.updatedAt), error: '', schedulingError: null });
+  };
+  const closePreference = useCallback(async () => {
+    if (preferenceSavingRef.current || preferenceClosingRef.current) return;
+    preferenceClosingRef.current = true;
+    try { if (preferenceChanged && !(await confirmDiscard())) return; setPreference(null); }
+    finally { preferenceClosingRef.current = false; }
+  }, [preferenceChanged, confirmDiscard]);
+  useEffect(() => {
+    if (!preference) return;
+    const keydown = event => { if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); closePreference(); } };
+    window.addEventListener('keydown', keydown);
+    return () => window.removeEventListener('keydown', keydown);
+  }, [preference, closePreference]);
+  const preferenceSlot = preference ? { companyId: company?.id, memberId: preference.memberId, date: preference.plan.nextServiceDate, time: preference.plan.time || '09:00', estimatedDuration: preference.plan.estimatedDuration ?? preference.plan.duration ?? 1, servicePlanId: preference.plan.id } : null;
+  const savePreference = async event => {
+    event.preventDefault();
+    if (!manage || !canManage() || !preference || !preferenceChanged || preferenceSavingRef.current) return;
+    preferenceSavingRef.current = true; setPreferenceSaving(true);
+    try {
+      const result = await updateServicePlan(preference.plan.id, { preferredTechnicianId: preference.memberId || null, assignmentFallback: preference.fallback }, preference.version);
+      if (!result.success) {
+        setPreference(previous => previous ? { ...previous, error: result.error || 'The technician preference could not be saved.', schedulingError: result.details?.scheduling ? { fingerprint: schedulingFingerprint(preferenceSlot), result: result.details.scheduling } : null } : previous);
+        return toast.error(result.error || 'The technician preference could not be saved.');
+      }
+      setPreference(null); toast.success('Technician preference saved'); load();
+    } catch (error) {
+      setPreference(previous => previous ? { ...previous, error: error.message || 'The technician preference could not be saved. Please try again.' } : previous);
+      toast.error(error.message || 'The technician preference could not be saved.');
+    } finally { preferenceSavingRef.current = false; setPreferenceSaving(false); }
   };
 
   const exportLogs = async () => {
@@ -115,14 +170,14 @@ const ServicePlansPage = () => {
     URL.revokeObjectURL(url);
   };
 
-  const due = (p) => p.active && p.nextServiceDate <= todayIso();
+  const due = (p) => p.active && p.nextServiceDate <= todayIso(company?.timeZone);
 
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Service Plans</h1>
-          <p className="text-sm text-gray-500">Recurring pest-control routes. Generate each visit as a scheduled job.</p>
+          <p className="text-sm text-gray-500">Calendar plans generate upcoming visits automatically. You can also schedule the next visit here.</p>
         </div>
         {manage && <button disabled={saving} onClick={toggleForm} className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700">{showForm ? 'Cancel' : 'New plan'}</button>}
       </div>
@@ -138,12 +193,17 @@ const ServicePlansPage = () => {
           </label>
           <label className="text-sm text-gray-700">Service<input className={input} value={form.serviceType} onChange={set('serviceType')} /></label>
           <label className="text-sm text-gray-700">Frequency
-            <select className={input} value={form.frequencyDays} onChange={set('frequencyDays')}>{FREQUENCIES.map((f) => <option key={f.days} value={f.days}>{f.label}</option>)}</select>
+            <select aria-label="Service plan frequency" className={input} value={form.frequencyDays} onChange={set('frequencyDays')}>{FREQUENCIES.map((f) => <option key={f.days} value={f.days}>{f.label}</option>)}</select>
           </label>
-          <label className="text-sm text-gray-700">First service date<input required type="date" className={input} value={form.nextServiceDate} onChange={set('nextServiceDate')} /></label>
-          <TimeSelect label="Time" className={input} value={form.time} disabled={saving} onChange={time => setForm(previous => ({ ...previous, time }))} />
+          <label className="text-sm text-gray-700">First service date<input required type="date" min={todayIso(company?.timeZone)} className={input} value={form.nextServiceDate} onChange={set('nextServiceDate')} /></label>
+          <TimeSelect label="Time" className={input} value={form.time} disabled={saving} onChange={time => { setSchedulingError(null); setForm(previous => ({ ...previous, time })); }} />
+          {Number(form.frequencyDays) > 14 && <label className="text-sm text-gray-700">Repeat by<select aria-label="Service plan monthly pattern" className={input} value={form.monthlyMode} onChange={set('monthlyMode')}><option value="dayOfMonth">Same day of the month</option><option value="weekday">Same weekday of the month</option></select></label>}
+          {recurrence && <p role="status" className="sm:col-span-2 text-sm text-gray-600">{describeAppointmentRecurrence(recurrence)}. The first service date sets the recurring pattern.</p>}
+          <label className="text-sm text-gray-700">Duration (hours)<input aria-label="Service plan duration" type="number" min="0.25" max="24" step="0.25" className={input} value={form.estimatedDuration} onChange={set('estimatedDuration')} /></label>
           <label className="text-sm text-gray-700">Price per visit ($)<input type="number" min="0" step="0.01" className={input} value={form.price} onChange={set('price')} /></label>
           <label className="text-sm text-gray-700">Notes<input className={input} value={form.notes} onChange={set('notes')} /></label>
+          <div className="sm:col-span-2"><TechnicianAvailability companyId={company?.id} memberId={form.preferredTechnicianId} date={form.nextServiceDate} time={form.time} estimatedDuration={form.estimatedDuration} disabled={saving} allowedWeekdays={recurrence?.frequency === 'weekly' ? [recurrence.weekday] : undefined} isAlternativeAllowed={slot => isDateOnAppointmentRecurrence(recurrence, slot.date)} schedulingError={schedulingError} onMemberChange={memberId => { setSchedulingError(null); setForm(previous => ({ ...previous, preferredTechnicianId: memberId })); }} onSelectAlternative={slot => { setSchedulingError(null); setForm(previous => ({ ...previous, nextServiceDate: slot.date, time: slot.time })); }} /></div>
+          <label className="text-sm text-gray-700 sm:col-span-2">When the preferred technician is unavailable<select aria-label="Service plan technician fallback" className={input} value={form.assignmentFallback} onChange={set('assignmentFallback')}><option value="unassigned">Leave unassigned for dispatcher review</option><option value="auto">Automatically assign another available technician</option></select><span className="mt-1 block text-xs text-gray-500">The same technician is preferred for each visit. Replacements are automatic only when you choose that option.</span></label>
           {company?.id ? <div className="sm:col-span-2"><ServicePropertyEligibility companyId={company.id} serviceCategories={company.serviceCategories || []} value={serviceProperty} validation={addressValidation} onChange={changeProperty} onPolicyLoaded={setServiceAreaPolicy} purpose="scheduling" disabled={saving} billingAddress={customerAddress(customers.find(customer => customer.id === form.customerId))} /></div> : <div className="sm:col-span-2 space-y-3"><label className="text-sm text-gray-700">Service property address<input aria-label="Service property address" className={input} value={serviceProperty.address} maxLength={278} onChange={event => changeProperty({ ...serviceProperty, address: event.target.value, exceptionId: null, confirmed: false })} /></label><AddressValidationNotice validation={addressValidation} disabled={saving} onAccept={address => changeProperty({ ...serviceProperty, address, exceptionId: null, confirmed: false })} /></div>}
           <div className="sm:col-span-2 flex justify-end"><button disabled={!formChanged || !form.customerId || !form.serviceType.trim() || !!company?.id && !serviceAreaPolicy} className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700">{saving ? 'Saving…' : 'Create plan'}</button></div>
           </fieldset>
@@ -160,13 +220,14 @@ const ServicePlansPage = () => {
               {plans.map((p) => (
                 <tr key={p.id} className={p.active ? '' : 'opacity-50'}>
                   <td className="px-4 py-3 font-medium">{p.customerName}</td>
-                  <td className="px-4 py-3">{p.serviceType}</td>
-                  <td className="px-4 py-3">{freqLabel(p.frequencyDays)}</td>
+                  <td className="px-4 py-3">{p.serviceType}{(p.assignmentNeedsAttention || p.preferredTechnicianNeedsReview) && <p role="status" className="mt-1 max-w-xs text-xs text-amber-800">{p.preferredTechnicianReview || p.assignmentReview || 'Technician assignment needs review.'}</p>}</td>
+                  <td className="px-4 py-3">{p.recurrence?.version === 1 ? describeAppointmentRecurrence(p.recurrence) : `Every ${p.frequencyDays} days (fixed interval)`}</td>
                   <td className="px-4 py-3">{p.nextServiceDate}{due(p) && <span className="ml-2 px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-800">Due</span>}</td>
                   <td className="px-4 py-3 text-right">${Number(p.price || 0).toFixed(2)}</td>
                   <td className="px-4 py-3 space-x-2 whitespace-nowrap">
                     {manage && p.active && <button className="text-primary-600 hover:underline" onClick={() => generate(p)}>Schedule visit</button>}
                     {manage && <button className="text-gray-600 hover:underline" onClick={() => toggle(p)}>{p.active ? 'Pause' : 'Resume'}</button>}
+                    {manage && <button className="text-primary-700 hover:underline" onClick={() => openPreference(p)}>Technician preference</button>}
                     {manage && <button className="text-red-600 hover:underline" onClick={() => remove(p)}>Delete</button>}
                   </td>
                 </tr>
@@ -175,6 +236,15 @@ const ServicePlansPage = () => {
           </table>
         )}
       </div>
+
+      {preference && <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-gray-900/50 p-4 sm:py-12"><form role="dialog" aria-modal="true" aria-label="Technician preference" tabIndex={-1} onSubmit={savePreference} onKeyDown={event => { if (event.key !== 'Tab') return; const controls = [...event.currentTarget.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]')].filter(node => node.offsetParent !== null); if (!controls.length) { event.preventDefault(); return; } if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1).focus(); } else if (!event.shiftKey && document.activeElement === controls.at(-1)) { event.preventDefault(); controls[0].focus(); } }} className="w-full max-w-xl space-y-4 rounded-xl bg-white p-5 shadow-xl">
+        <div className="flex items-center justify-between"><h2 className="text-lg font-semibold">Technician preference</h2><button type="button" aria-label="Close technician preference" autoFocus disabled={preferenceSaving} onClick={closePreference} className="rounded px-2 py-1 text-gray-600 hover:bg-gray-100">Close</button></div>
+        <p className="text-sm text-gray-600">{preference.plan.customerName} · {preference.plan.serviceType}. This preference applies to future generated visits. Already assigned visits are managed from dispatch. If a technician leaves, the saved replacement policy applies to their upcoming scheduled work.</p>
+        <TechnicianAvailability {...preferenceSlot} memberName={preference.plan.preferredTechnicianName || ''} disabled={preferenceSaving} schedulingError={preference.schedulingError} onMemberChange={memberId => setPreference(previous => ({ ...previous, memberId, error: '', schedulingError: null }))} />
+        <label className="block text-sm text-gray-700">When the preferred technician is unavailable<select aria-label="Technician preference fallback" className={input} disabled={preferenceSaving} value={preference.fallback} onChange={event => setPreference(previous => ({ ...previous, fallback: event.target.value, error: '', schedulingError: null }))}><option value="unassigned">Leave unassigned for dispatcher review</option><option value="auto">Automatically assign another available technician</option></select></label>
+        {preference.error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{preference.error}</p>}
+        <div className="flex justify-end gap-3"><button type="button" disabled={preferenceSaving} onClick={closePreference} className="rounded border px-4 py-2">Cancel</button><button type="submit" disabled={!preferenceChanged || preferenceSaving} className="rounded bg-primary-700 px-4 py-2 font-medium text-white disabled:opacity-50">{preferenceSaving ? 'Saving preference…' : 'Save technician preference'}</button></div>
+      </form></div>}
 
       <div className="bg-white border rounded-lg p-4">
         <h2 className="font-semibold text-gray-900">Chemical application records</h2>

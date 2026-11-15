@@ -17,6 +17,8 @@ function load(relative){const file=path.resolve(__dirname,'../routeLogisticsWeb/
  if(name==='react')return React;if(name==='react-hot-toast')return{__esModule:true,default:toast};
  if(name.endsWith('/AuthContext'))return{useAuth:()=>({company,currentUser:{uid:'owner'},role:'owner',can:capability=>capability!=='customers.manage'||allowCustomerManage})};
  if(name.endsWith('/ServicePropertyEligibility'))return{__esModule:true,default:PropertyMock};
+ if(name.endsWith('/TechnicianAvailability')||name.endsWith('/AppointmentRepeatOptions'))return{__esModule:true,default:()=>null};
+ if(name.endsWith('/workspaceApi'))return{callWorkspace:async()=>{throw Error('Scheduling RPC belongs to its dedicated UI suite.');}};
  if(name.endsWith('/ThemedSelect'))return{__esModule:true,default:props=>React.createElement('select',{'aria-label':props.label,value:props.value,disabled:props.disabled,onChange:event=>props.onChange(event.target.value)},(props.options||[]).map(option=>React.createElement('option',{key:option.value,value:option.value,disabled:option.disabled},option.label)))};
  if(name.endsWith('/TimeSelect'))return{__esModule:true,default:props=>React.createElement('input',{type:'time','aria-label':props.label,value:props.value,disabled:props.disabled,onChange:event=>props.onChange(event.target.value)})};
  if(name.endsWith('/useUnsavedChanges'))return{useUnsavedChanges:value=>{dirty=value;return{confirmDiscard:async()=>true};}};

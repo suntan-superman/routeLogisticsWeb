@@ -45,7 +45,8 @@ export async function resumeDeletedAccountCleanup(finishSession, onRecorded = ()
 // Use the documented callable HTTP protocol with a token held only in memory.
 // A lost response is retried once using that same token, never by refreshing a
 // deleted Auth user or interpreting "user not found" as a successful deletion.
-export async function invokeAccountDeletion(token) {
+export async function invokeAccountDeletion(token, emailConfirmation) {
+  if (typeof emailConfirmation !== 'string' || !emailConfirmation.trim()) throw new Error('Type your full signed-in email address to confirm account deletion.');
   const project = auth.app.options.projectId;
   const endpoint = functions.emulatorOrigin
     ? `${functions.emulatorOrigin}/${project}/us-central1/rlDeleteAccount`
@@ -54,7 +55,7 @@ export async function invokeAccountDeletion(token) {
   for (let attempt = 0; attempt < 2; attempt++) {
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 60_000);
     try {
-      const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ data: { confirmation: 'DELETE' } }), signal: controller.signal });
+      const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ data: { confirmation: 'DELETE', emailConfirmation } }), signal: controller.signal });
       const payload = await response.json();
       if (response.ok && !payload.error) return payload.result ?? payload.data;
       if (payload.error?.details?.deletionPending === true) return { success: true, deletionPending: true };

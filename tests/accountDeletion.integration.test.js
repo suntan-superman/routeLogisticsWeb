@@ -15,7 +15,7 @@ const { staffLoginHandlers } = require('../functions/staffLogin');
 let app, db, accounts, calls, failure, api;
 const fixturePaths = new Set();
 const now = Date.UTC(2026, 10, 15, 17), email = 'delete-staff@example.test';
-const request = (uid = 'delete-staff', extra = {}) => ({ auth: { uid, token: { email: uid === 'delete-staff' ? email : `${uid}@example.test`, email_verified: true, auth_time: now / 1000, ...extra } }, data: { confirmation: 'DELETE' } });
+const request = (uid = 'delete-staff', extra = {}) => ({ auth: { uid, token: { email: uid === 'delete-staff' ? email : `${uid}@example.test`, email_verified: true, auth_time: now / 1000, ...extra } }, data: { confirmation: 'DELETE', emailConfirmation: uid === 'delete-staff' ? email : `${uid}@example.test` } });
 const account = uid => ({ uid, email: uid === 'delete-staff' ? email : `${uid}@example.test`, emailVerified: true, disabled: false, customClaims: {} });
 const auth = {
   async getUser(uid) { if (!accounts.has(uid)) throw Object.assign(new Error('missing'), { code: 'auth/user-not-found' }); return accounts.get(uid); },
@@ -65,6 +65,34 @@ test('deletion requires the verified recent caller and explicit confirmation; no
   ];
   for (const [input, code] of invalid) await assert.rejects(api.request(input), { code });
   assert.equal(await get('rlAccountDeletions/delete-staff'), undefined); assert.deepEqual(calls, []);
+});
+
+test('missing, partial and wrong email confirmations cannot create markers, limits or account changes', async () => {
+  for (const emailConfirmation of [undefined, null, '', 'delete-staff', '@example.test', 'delete-staff@example', 'delete-staff@example.test.extra', 'other@example.test', { email }]) {
+    await assert.rejects(api.request({ ...request(), data: { confirmation: 'DELETE', ...(emailConfirmation !== undefined ? { emailConfirmation } : {}) } }), { code: 'invalid-argument' });
+  }
+  assert.equal(await get('rlAccountDeletions/delete-staff'), undefined); assert.equal(await get(`rlRateLimits/${hash('account-deletion:delete-staff')}`), undefined);
+  assert.deepEqual(calls, []); assert.equal(accounts.get('delete-staff').email, email); assert.equal((await get('teamMembers/delete-member')).status, 'active');
+  assert.equal((await db.collection('rlMembershipAudit').where('actorId', '==', 'delete-staff').get()).size, 0);
+});
+
+test('full typed email is normalized for comparison with both verified token and current Auth account', async () => {
+  const input = request(); input.data.emailConfirmation = '  DELETE-STAFF@Example.Test  ';
+  assert.equal((await api.request(input)).deleted, true); assert.equal(accounts.has('delete-staff'), false);
+});
+
+test('a changed live Auth email cannot be deleted with an old token and old typed email', async () => {
+  accounts.get('delete-staff').email = 'changed@example.test';
+  await assert.rejects(api.request(request()), { code: 'permission-denied' });
+  assert.equal(await get('rlAccountDeletions/delete-staff'), undefined); assert.equal(await get(`rlRateLimits/${hash('account-deletion:delete-staff')}`), undefined);
+  assert.deepEqual(calls, []); assert.ok(accounts.has('delete-staff')); assert.equal((await get('teamMembers/delete-member')).status, 'active');
+});
+
+test('a pending deletion request cannot bypass the live email confirmation check', async () => {
+  const pending = { status: 'pending', emailHash: hash(email), invitationIds: [], requestedAt: 'accepted-fixture' };
+  await set('rlAccountDeletions/delete-staff', pending); accounts.get('delete-staff').email = 'changed@example.test';
+  await assert.rejects(api.request(request()), { code: 'permission-denied' });
+  assert.deepEqual(await get('rlAccountDeletions/delete-staff'), pending); assert.deepEqual(calls, []); assert.ok(accounts.has('delete-staff'));
 });
 
 test('legacy extra claims do not block self-deletion or authorize another UID deletion', async () => {

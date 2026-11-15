@@ -96,6 +96,11 @@ afterEach(async () => {
   assert.equal(appListeners.size, 0); assert.equal(networkListeners.size, 0); assert.equal(backListeners.size, 0); native.Platform.OS = 'ios';
 });
 const textOf = tree => JSON.stringify(tree.toJSON());
+async function typeDeletionEmail(tree, value = currentAuth.user.email) {
+  const field = tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Type your full email address')[0];
+  assert.ok(field, 'The full email confirmation input must exist');
+  await act(async () => field.props.onChangeText(value));
+}
 async function press(tree, label) {
   const button = tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === label)[0];
   assert.ok(button, `Button '${label}' must exist`);
@@ -293,14 +298,20 @@ test('account deletion requires review, typed confirmation, and explicit unsynce
   await press(tree, 'Continue to confirmation');
   const final = () => tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === 'Permanently delete my account')[0];
   assert.equal(final().props.disabled, true);
+  const email = () => tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Type your full email address')[0];
+  assert.equal(email().props.value, ''); assert.equal(email().props.autoComplete, 'off'); assert.equal(email().props.textContentType, 'none');
   const confirmation = tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Type DELETE to confirm')[0];
   await act(async () => confirmation.props.onChangeText('DELETE'));
   assert.equal(final().props.disabled, true);
   const discard = tree.root.findAll(node => node.type === 'Switch' && node.props.accessibilityLabel === 'Discard unsynced work on this device')[0];
   await act(async () => discard.props.onValueChange(true));
+  assert.equal(final().props.disabled, true);
+  await typeDeletionEmail(tree, currentAuth.user.email.split('@')[0]); assert.equal(final().props.disabled, true);
+  await typeDeletionEmail(tree, 'other@example.test'); assert.equal(final().props.disabled, true);
+  const entered = `  ${currentAuth.user.email.toUpperCase()}  `; await typeDeletionEmail(tree, entered);
   assert.equal(final().props.disabled, false);
   await act(async () => { final().props.onPress(); final().props.onPress(); });
-  assert.equal(requests.length, 1); assert.deepEqual(requests[0], { confirmation: 'DELETE', discardPendingWork: true });
+  assert.equal(requests.length, 1); assert.deepEqual(requests[0], { confirmation: 'DELETE', emailConfirmation: entered, discardPendingWork: true });
   assert.equal(final().props.accessibilityState.busy, true);
   await act(async () => resolveDeletion({ success: true }));
   assert.match(textOf(tree), /Your Route Logistics account was deleted/);
@@ -315,11 +326,29 @@ test('deletion failures retain confirmation context, owner restrictions, and a r
   await press(tree, 'Continue to confirmation');
   const confirmation = () => tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Type DELETE to confirm')[0];
   await act(async () => confirmation().props.onChangeText('DELETE'));
+  await typeDeletionEmail(tree);
   await press(tree, 'Permanently delete my account');
   assert.match(textOf(tree), /Transfer ownership before deleting your account because other staff remain/);
   assert.equal(confirmation().props.value, 'DELETE');
   await press(tree, 'Permanently delete my account');
   assert.equal(attempts, 2); assert.match(textOf(tree), /Your Route Logistics account was deleted/);
+});
+
+test('full email and DELETE confirmations reset after cancel or an account identity change', async () => {
+  account(); const tree = await render('components/DeleteAccountSettings.js');
+  const open = async () => { await press(tree, 'Delete my account'); await press(tree, 'Continue to confirmation'); };
+  const typed = label => tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === label)[0];
+  await open(); await typeDeletionEmail(tree); await act(async () => typed('Type DELETE to confirm').props.onChangeText('DELETE'));
+  await press(tree, 'Cancel account deletion'); await open();
+  assert.equal(typed('Type your full email address').props.value, ''); assert.equal(typed('Type DELETE to confirm').props.value, '');
+  await typeDeletionEmail(tree); await act(async () => typed('Type DELETE to confirm').props.onChangeText('DELETE'));
+  currentAuth.user = { ...currentAuth.user, email: 'changed@example.test' };
+  await act(async () => tree.update(React.createElement(load('components/DeleteAccountSettings.js').default))); await settle();
+  assert.equal(tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Type your full email address').length, 0);
+  await open(); assert.equal(typed('Type your full email address').props.value, ''); assert.equal(typed('Type DELETE to confirm').props.value, '');
+  currentAuth.user = { ...currentAuth.user, id: 'another-user', email: 'changed@example.test' };
+  await act(async () => tree.update(React.createElement(load('components/DeleteAccountSettings.js').default))); await settle();
+  assert.equal(tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Type your full email address').length, 0);
 });
 
 test('account deletion review errors and recent-login failures are actionable without deleting automatically', async () => {
@@ -333,6 +362,7 @@ test('account deletion review errors and recent-login failures are actionable wi
   await press(tree, 'Retry account deletion review'); await press(tree, 'Continue to confirmation');
   const confirmation = tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Type DELETE to confirm')[0];
   await act(async () => confirmation.props.onChangeText('DELETE'));
+  await typeDeletionEmail(tree);
   await press(tree, 'Permanently delete my account');
   assert.match(textOf(tree), /sign out and sign back in/); assert.equal(deletions, 1);
   assert.equal(signouts, 0);
@@ -360,6 +390,7 @@ test('durably accepted deletion reports pending cleanup without claiming it alre
   await press(tree, 'Delete my account'); await press(tree, 'Continue to confirmation');
   const confirmation = tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Type DELETE to confirm')[0];
   await act(async () => confirmation.props.onChangeText('DELETE'));
+  await typeDeletionEmail(tree);
   await press(tree, 'Permanently delete my account');
   assert.equal(alerts.length, 1); assert.equal(alerts[0][0], 'Deletion requested');
   assert.match(alerts[0][1], /access is revoked.*cleanup will retry automatically/);
@@ -386,9 +417,11 @@ test('confirmed server deletion with failed local cleanup offers cleanup only an
   await press(tree, 'Delete my account'); await press(tree, 'Continue to confirmation');
   const confirmation = tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Type DELETE to confirm')[0];
   await act(async () => confirmation.props.onChangeText('DELETE'));
+  await typeDeletionEmail(tree);
   await press(tree, 'Permanently delete my account');
   assert.match(textOf(tree), /Your deletion request is already accepted and account access is revoked/);
   assert.doesNotMatch(textOf(tree), /Your account has not been deleted|Sign out to verify|Cancel account deletion|Type DELETE to confirm/);
+  assert.equal(tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Type your full email address').length, 0);
   await press(tree, 'Retry device cleanup');
   assert.equal(attempts, 2); assert.equal(reviews, 1);
   assert.match(textOf(tree), /Your Route Logistics account was deleted/);

@@ -3,12 +3,9 @@ import {
   collection, 
   doc, 
   getDoc, 
-  runTransaction,
-  updateDoc, 
   getDocs, 
   query, 
   where,
-  addDoc,
   deleteDoc,
   orderBy,
   limit,
@@ -16,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { auth } from './firebase';
-import { scopeWhere, isInScope, tenantFields, getClaims, can, requireCapability } from './tenancy';
+import { scopeWhere, isInScope, getClaims, can, requireCapability } from './tenancy';
 
 class JobManagementService {
   // Get current user ID
@@ -32,20 +29,12 @@ class JobManagementService {
     try {
       requireCapability('jobs.schedule');
       if (options.saveCustomerAddress === true) requireCapability('customers.manage');
-      if (getClaims()?.companyId || options.saveCustomerAddress === true || jobData.address || jobData.serviceProperty || jobData.propertyAddress) { const result = await callWorkspace('rlManageJob', { action: 'create', job: jobData, ...(options.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}) }); return { success: true, jobId: result.id, ...(await readWorkspace('jobs', { id: result.id })), customerAddressUpdated: result.customerAddressUpdated === true }; }
-      const now = new Date().toISOString();
-      const job = {
-        ...jobData,
-        ...tenantFields(),
-        status: 'scheduled',
-        createdAt: now,
-        updatedAt: now
-      };
-      const docRef = await addDoc(collection(db, 'jobs'), job);
-      return { success: true, jobId: docRef.id, job: { id: docRef.id, ...job } };
+      this.getCurrentUserId();
+      const result = await callWorkspace('rlManageJob', { action: 'create', job: jobData, ...(options.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}), ...(options.recurring ? { recurring: options.recurring, operationId: options.operationId } : {}) });
+      return { success: true, jobId: result.id, ...(await readWorkspace('jobs', { id: result.id })), customerAddressUpdated: result.customerAddressUpdated === true, ...(result.servicePlanId ? { servicePlanId: result.servicePlanId, nextServiceDate: result.nextServiceDate } : {}) };
     } catch (error) {
       console.error('Error creating job:', error);
-      return { success: false, error: error.message, addressValidation: error.details?.addressValidation };
+      return { success: false, error: error.message, code: error.code, addressValidation: error.details?.addressValidation, scheduling: error.details?.scheduling };
     }
   }
 
@@ -146,41 +135,17 @@ class JobManagementService {
     try {
       requireCapability('jobs.schedule');
       if (options.saveCustomerAddress === true) requireCapability('customers.manage');
-      if (getClaims()?.companyId || options.saveCustomerAddress === true || ['address','city','state','zipCode','serviceProperty','propertyAddress'].some(field => Object.hasOwn(updates, field))) { const result = await callWorkspace('rlManageJob', { action: 'update', id: jobId, job: updates, ...(expectedUpdatedAt !== undefined ? { expectedVersion: expectedUpdatedAt } : {}), ...(options.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}) }); return { success: true, ...(await readWorkspace('jobs', { id: jobId })), customerAddressUpdated: result.customerAddressUpdated === true }; }
       this.getCurrentUserId();
-      
-      // Verify user owns the job
-      const jobResult = await this.getJob(jobId);
-      if (!jobResult.success) {
-        return jobResult;
-      }
-
-      const updatedData = {
-        ...updates,
-        updatedAt: new Date().toISOString()
-      };
-
-      if (expectedUpdatedAt !== undefined) {
-        await runTransaction(db, async (transaction) => {
-          const ref = doc(db, 'jobs', jobId);
-          const latest = await transaction.get(ref);
-          if (!latest.exists()) throw new Error('This job no longer exists.');
-          const version = (value) => value?.toMillis?.() ?? value ?? null;
-          if (version(latest.data().updatedAt) !== version(expectedUpdatedAt)) throw new Error('This job changed while you were editing. Close the form, refresh, and review the latest version before saving.');
-          transaction.update(ref, updatedData);
-        });
-      } else await updateDoc(doc(db, 'jobs', jobId), updatedData);
-
-      return {
-        success: true,
-        job: { ...jobResult.job, ...updatedData }
-      };
+      const result = await callWorkspace('rlManageJob', { action: 'update', id: jobId, job: updates, ...(expectedUpdatedAt !== undefined ? { expectedVersion: expectedUpdatedAt } : {}), ...(options.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}) });
+      return { success: true, ...(await readWorkspace('jobs', { id: jobId })), customerAddressUpdated: result.customerAddressUpdated === true };
     } catch (error) {
       console.error('Error updating job:', error);
       return {
         success: false,
         error: error.message,
-        addressValidation: error.details?.addressValidation
+        addressValidation: error.details?.addressValidation,
+        scheduling: error.details?.scheduling,
+        code: error.code
       };
     }
   }

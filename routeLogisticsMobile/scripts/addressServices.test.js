@@ -43,7 +43,8 @@ test('solo job creation and physical address changes cannot bypass server valida
   assert.equal((await JobService.updateJob('job', { address: '2 Service St', serviceProperty: { address: '2 Service St' } }, 'job-original')).success, true);
   assert.equal(calls.length, 2); assert.ok(calls.every(call => call.call === 'rlManageJob')); assert.equal(directWrites.length, 0);
   assert.equal(calls[1].payload.expectedVersion, 'job-original');
-  await JobService.updateJob('job', { date: '2026-11-16' }); assert.equal(directWrites.length, 1);
+  await JobService.updateJob('job', { date: '2026-11-16' }); assert.equal(directWrites.length, 0);
+  assert.equal(calls[2].call, 'rlManageJob'); assert.equal(calls[2].payload.job.date, '2026-11-16');
 });
 
 test('permanent job-address options are explicit top-level fields and authoritative update status is preserved', async () => {

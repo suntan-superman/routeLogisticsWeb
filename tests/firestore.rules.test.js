@@ -169,7 +169,7 @@ test('solo users keep access to their own legacy docs', async () => {
 test('cannot create docs attributed to another user or tenant', async () => {
   await assertFails(setDoc(doc(owner(), 'jobs/n1'), { userId: 'someone', companyId: 'c1', status: 'scheduled' }));
   await assertFails(setDoc(doc(owner(), 'jobs/n2'), { userId: 'owner1', companyId: 'c2', status: 'scheduled' }));
-  await assertSucceeds(setDoc(doc(owner(), 'jobs/n3'), { userId: 'owner1', companyId: 'c1', status: 'scheduled' }));
+  await assertFails(setDoc(doc(owner(), 'jobs/n3'), { userId: 'owner1', companyId: 'c1', status: 'scheduled' }));
 });
 
 test('technicians cannot create customers, jobs or raw photo metadata', async () => {
@@ -277,9 +277,9 @@ test('serviceLogs: technicians use the assigned-work callable; no client deletio
   await assertSucceeds(updateDoc(doc(owner(), 'serviceLogs/l1'), { notes: 'ok' }));
 });
 
-test('servicePlans: frequency must be positive; technicians cannot write', async () => {
+test('servicePlans: client creation is denied; the callable validates frequency and reservations', async () => {
   await assertFails(setDoc(doc(owner(), 'servicePlans/p0'), { userId: 'owner1', companyId: 'c1', frequencyDays: 0 }));
-  await assertSucceeds(setDoc(doc(owner(), 'servicePlans/p1'), { userId: 'owner1', companyId: 'c1', frequencyDays: 90 }));
+  await assertFails(setDoc(doc(owner(), 'servicePlans/p1'), { userId: 'owner1', companyId: 'c1', frequencyDays: 90 }));
   await assertFails(setDoc(doc(tech(), 'servicePlans/p2'), { userId: 'tech1', companyId: 'c1', frequencyDays: 30 }));
 });
 

@@ -1,6 +1,6 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { FieldValue } = require('firebase-admin/firestore');
-const { requireAuth, normalizeEmail, hash, rateLimit } = require('./security');
+const { requireAuth, normalizeEmail, validEmail, hash, rateLimit } = require('./security');
 
 const RECENT_SIGN_IN_SECONDS = 300;
 const result = () => ({ success: true, deleted: true, businessRecordsRetained: true });
@@ -91,14 +91,21 @@ function accountDeletionHandlers(db, auth, { now = () => Date.now() } = {}) {
     if (!Number.isFinite(token.auth_time) || time - token.auth_time > RECENT_SIGN_IN_SECONDS || token.auth_time > time + 30) {
       throw new HttpsError('failed-precondition', 'Sign out and sign back in, then delete your account within five minutes.');
     }
-    if (uid.startsWith('rl_customer_') || request.data?.confirmation !== 'DELETE' || Object.keys(request.data || {}).some(key => key !== 'confirmation')) {
+    if (uid.startsWith('rl_customer_') || request.data?.confirmation !== 'DELETE' || Object.keys(request.data || {}).some(key => !['confirmation', 'emailConfirmation'].includes(key))) {
       throw new HttpsError('invalid-argument', 'Confirm deletion of your own Route Logistics account by entering DELETE.');
     }
+    const emailConfirmation = typeof request.data.emailConfirmation === 'string' ? normalizeEmail(request.data.emailConfirmation) : '';
+    if (!validEmail(emailConfirmation) || emailConfirmation !== normalizeEmail(token.email)) throw new HttpsError('invalid-argument', 'Enter the full email address of your signed-in account to confirm deletion.');
     const ref = marker(uid), previous = await ref.get();
     if (previous.get('status') === 'deleted') return result();
+    const account = await optionalUser(auth, uid);
+    if (account) {
+      checkAccount(account);
+      if (account.disabled || !account.emailVerified || normalizeEmail(account.email) !== normalizeEmail(token.email) || emailConfirmation !== normalizeEmail(account.email)) throw new HttpsError('permission-denied', 'Sign in to your verified current account and enter its full email before deleting it.');
+    } else if (!previous.exists || previous.get('status') !== 'pending' || previous.get('emailHash') !== hash(emailConfirmation)) {
+      throw new HttpsError('permission-denied', 'Sign in to your verified current account before deleting it.');
+    }
     if (!previous.exists) {
-      const account = await optionalUser(auth, uid); checkAccount(account);
-      if (account.disabled || !account.emailVerified || normalizeEmail(account.email) !== normalizeEmail(token.email)) throw new HttpsError('permission-denied', 'Sign in to your verified current account before deleting it.');
       await rateLimit(db, 'account-deletion', uid, 5, 60 * 60_000, now());
       const email = normalizeEmail(account.email);
       await db.runTransaction(async tx => {

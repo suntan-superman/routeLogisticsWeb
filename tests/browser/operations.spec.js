@@ -27,6 +27,14 @@ async function chooseTime(scope, label, value) {
   await scope.getByRole('listbox').getByRole('option', { name: timeOptionLabel(value), exact: true }).click();
 }
 
+async function chooseTechnician(scope, name = 'Synthetic technician') {
+  const picker = scope.getByRole('combobox', { name: 'Assigned technician', exact: true });
+  await expect(picker).toBeEnabled();
+  await picker.click();
+  await picker.fill(name);
+  await scope.getByRole('listbox').getByRole('option', { name, exact: true }).click();
+}
+
 async function openSeedEstimate(page, scenario) {
   await page.goto('/estimates');
   await expect(page.getByRole('heading', { name: 'Photo estimates', exact: true })).toBeVisible();
@@ -475,4 +483,93 @@ test('PW-OPS-14 permanent address opt-in updates the selected customer and refre
   await expect(next.getByLabel('Service property address', { exact: true })).toHaveValue(insideAddress(scenario));
   await expect(next.getByLabel('Service property address', { exact: true })).toBeDisabled();
   expect((await scenario.list('jobs')).filter(job => job.serviceType === service)).toHaveLength(1);
+});
+
+test('PW-OPS-15 scheduling assigns a technician and a conflicting visit offers quarter-hour alternatives without saving automatically', async ({ page, scenario }) => {
+  annotate('DSP-002', 'DSP-003', 'DSP-004', 'DSP-009');
+  await signIn(page, scenario.accounts.owner);
+  const firstService = `Assigned browser visit ${scenario.ids.companyId}`, secondService = `Alternate browser visit ${scenario.ids.companyId}`;
+  const date = laterDate();
+  const first = await openAddressJob(page, scenario, firstService);
+  await first.locator('input[type="date"]').fill(date);
+  await chooseTime(first, 'Start time', '09:00');
+  await first.locator('input[type="number"]').first().fill('1.25');
+  await checkProperty(first, insideAddress(scenario), 'Property is inside coverage');
+  await chooseTechnician(first);
+  await expect(first.getByText('Available for this appointment', { exact: true })).toBeVisible();
+  await first.getByRole('button', { name: 'Schedule Job', exact: true }).click();
+  await expect(page.getByText('Job scheduled', { exact: true })).toBeVisible();
+  await expect(first).toHaveCount(0);
+  const savedFirst = (await scenario.list('jobs')).filter(job => job.serviceType === firstService);
+  expect(savedFirst).toHaveLength(1);
+  expect(savedFirst[0]).toMatchObject({ companyId: scenario.ids.companyId, date, time: '09:00', estimatedDuration: 1.25, assignedTo: scenario.accounts.technician.membershipId, assignedToUid: scenario.accounts.technician.uid, assignedToName: 'Synthetic technician' });
+
+  const second = await openAddressJob(page, scenario, secondService);
+  await second.locator('input[type="date"]').fill(date);
+  await chooseTime(second, 'Start time', '09:45');
+  await checkProperty(second, insideAddress(scenario), 'Property is inside coverage');
+  await chooseTechnician(second);
+  const availability = second.getByRole('region', { name: 'Technician availability', exact: true });
+  await expect(availability.getByText('This appointment needs another time or technician', { exact: true })).toBeVisible();
+  await second.getByRole('button', { name: 'Schedule Job', exact: true }).click();
+  await expect(second.getByRole('button', { name: 'Schedule Job', exact: true })).toBeEnabled();
+  await expect(second).toBeVisible();
+  expect((await scenario.list('jobs')).filter(job => job.serviceType === secondService)).toHaveLength(0);
+  const alternative = availability.getByRole('group', { name: 'Available alternative times', exact: true }).getByRole('button').first();
+  await expect(alternative).toContainText('10:15 AM');
+  await alternative.click();
+  await expect(second.getByRole('combobox', { name: 'Start time', exact: true })).toHaveValue('10:15 AM');
+  await expect(second.locator('input[type="date"]')).toHaveValue(date);
+  expect((await scenario.list('jobs')).filter(job => job.serviceType === secondService)).toHaveLength(0);
+  await expect(availability.getByText('Available for this appointment', { exact: true })).toBeVisible();
+  await second.getByRole('button', { name: 'Schedule Job', exact: true }).click();
+  await expect(page.getByText('Job scheduled', { exact: true })).toBeVisible();
+  await expect(second).toHaveCount(0);
+  const savedSecond = (await scenario.list('jobs')).filter(job => job.serviceType === secondService);
+  expect(savedSecond).toHaveLength(1);
+  expect(savedSecond[0]).toMatchObject({ date, time: '10:15', assignedTo: scenario.accounts.technician.membershipId, assignedToUid: scenario.accounts.technician.uid, assignedToName: 'Synthetic technician' });
+  expect((await scenario.read('jobs', savedFirst[0].id)).time).toBe('09:00');
+  expect((await scenario.list('jobs')).filter(job => [firstService, secondService].includes(job.serviceType) && job.time === '09:45')).toHaveLength(0);
+});
+
+test('PW-OPS-16 weekly scheduling creates the first assigned visit and plan together and reserves future Thursdays', async ({ page, scenario }) => {
+  annotate('DSP-002', 'DSP-003', 'DSP-005', 'DSP-009');
+  await signIn(page, scenario.accounts.owner);
+  const firstDateValue = new Date(`${laterDate()}T12:00:00Z`);
+  while (firstDateValue.getUTCDay() !== 4) firstDateValue.setUTCDate(firstDateValue.getUTCDate() + 1);
+  const firstDate = firstDateValue.toISOString().slice(0, 10);
+  firstDateValue.setUTCDate(firstDateValue.getUTCDate() + 7);
+  const nextDate = firstDateValue.toISOString().slice(0, 10), service = `Weekly browser visit ${scenario.ids.companyId}`;
+  const customerBefore = await scenario.read('customers', scenario.ids.customerId);
+  const form = await openAddressJob(page, scenario, service);
+  await form.locator('input[type="date"]').fill(firstDate);
+  await chooseTime(form, 'Start time', '09:00');
+  await checkProperty(form, insideAddress(scenario), 'Property is inside coverage');
+  await chooseTechnician(form);
+  await form.getByRole('combobox', { name: 'Appointment type', exact: true }).selectOption('recurring');
+  await form.getByRole('combobox', { name: 'Repeat frequency', exact: true }).selectOption('weekly');
+  await expect(form.getByText('Every Thursday', { exact: true })).toBeVisible();
+  await form.getByRole('combobox', { name: 'Recurring technician fallback', exact: true }).selectOption('auto');
+  await expect(form.getByText('Available for this appointment', { exact: true })).toBeVisible();
+  await form.getByRole('button', { name: 'Schedule Job', exact: true }).click();
+  await expect(page.getByText('Recurring appointment scheduled.', { exact: true })).toBeVisible();
+  await expect(form).toHaveCount(0);
+  const visits = (await scenario.list('jobs')).filter(job => job.serviceType === service);
+  const plans = (await scenario.list('servicePlans')).filter(plan => plan.serviceType === service);
+  expect(visits).toHaveLength(1); expect(plans).toHaveLength(1);
+  expect(visits[0]).toMatchObject({ date: firstDate, time: '09:00', servicePlanId: plans[0].id, servicePlanDate: firstDate, assignedTo: scenario.accounts.technician.membershipId, assignedToUid: scenario.accounts.technician.uid, assignedToName: 'Synthetic technician' });
+  expect(plans[0]).toMatchObject({ companyId: scenario.ids.companyId, customerId: scenario.ids.customerId, active: true, preferredTechnicianId: scenario.accounts.technician.membershipId, preferredTechnicianUid: scenario.accounts.technician.uid, assignmentFallback: 'auto', nextServiceDate: nextDate, lastJobId: visits[0].id, lastGeneratedFor: firstDate, recurrence: { version: 1, frequency: 'weekly', interval: 1, anchorDate: firstDate, weekday: 4 } });
+  expect(await scenario.read('customers', scenario.ids.customerId)).toEqual(customerBefore);
+  expect((await scenario.list('jobs')).filter(job => job.servicePlanId === plans[0].id && job.date === nextDate)).toHaveLength(0);
+
+  const futureService = `Conflicting future browser visit ${scenario.ids.companyId}`;
+  const future = await openAddressJob(page, scenario, futureService);
+  await future.locator('input[type="date"]').fill(nextDate);
+  await chooseTime(future, 'Start time', '09:00');
+  await chooseTechnician(future);
+  const availability = future.getByRole('region', { name: 'Technician availability', exact: true });
+  await expect(availability.getByText('This appointment needs another time or technician', { exact: true })).toBeVisible();
+  await expect(availability.getByRole('listitem').filter({ hasText: 'Recurring appointment' })).toBeVisible();
+  await expect(availability.getByRole('group', { name: 'Available alternative times', exact: true }).getByRole('button').first()).toContainText('10:00 AM');
+  expect((await scenario.list('jobs')).filter(job => job.serviceType === futureService)).toHaveLength(0);
 });

@@ -42,9 +42,9 @@ export async function createServicePlan(plan) {
   }
 }
 
-export async function updateServicePlan(id, patch) {
+export async function updateServicePlan(id, patch, expectedVersion = undefined) {
   try {
-    const result = await httpsCallable(functions, 'rlManageServicePlan')({ action: 'update', id, plan: patch });
+    const result = await httpsCallable(functions, 'rlManageServicePlan')({ action: 'update', id, plan: patch, ...(expectedVersion !== undefined ? { expectedVersion } : {}) });
     return ok(result.data);
   } catch (error) {
     return fail(error);

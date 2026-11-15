@@ -213,6 +213,7 @@ async function createEstimatePdf(estimate, company, photos = []) {
 }
 function estimateHandlers(db, config = {}) {
   const serviceAreas = serviceAreaWorkflow(db, config);
+  const scheduling = config.scheduling || require('./scheduling').schedulingHandlers(db);
   const addressValidator = config.serviceAreas || serviceAreaHandlers(db, config);
   const enabled = config.enabled || (() => false),
     emailEnabled = config.emailEnabled || (() => false),
@@ -630,14 +631,7 @@ function estimateHandlers(db, config = {}) {
             newCustomer = {userId:current.get('userId'),...(scope.companyId ? {companyId:scope.companyId} : {}),name:source.recipient.name,email:source.recipient.email,emailNormalized:source.recipient.email,phone:source.recipient.phone,address:source.recipient.address,city:'',state:'',zipCode:'',...(newCustomerAddress || {}),isActive:true,totalSpent:0,totalJobs:0,lastServiceDate:null,source:'rl-approved-estimate',createdFromEstimateId:id,createdAt:new Date(now()).toISOString(),updatedAt:new Date(now()).toISOString()};
             customer = {id:newId,ref:destination,get:key=>newCustomer[key]};
           } else fail('failed-precondition', 'Select a matching company customer or explicitly create one from this approved prospect.');
-          let assignedTo = schedule.assignedTo || null;
-          if (assignedTo && scope.companyId) {
-            const company = await tx.get(ref('companies', scope.companyId));
-            if (assignedTo !== company.get('ownerId')) {
-              const member = await tx.get(ref('teamMembers', documentId(assignedTo, 'technician')));
-              if (member.get('companyId') !== scope.companyId || member.get('status') !== 'active' || !member.get('uid')) fail('permission-denied', 'Choose an active technician from this company.');
-            }
-          } else if (assignedTo && assignedTo !== scope.uid) fail('permission-denied', 'Solo jobs cannot be assigned to another workspace.');
+          const assignedTo = schedule.assignedTo || null;
           await serviceAreas.assertCurrent(tx, area);
           const job = {
             userId: current.get('userId'),
@@ -656,6 +650,7 @@ function estimateHandlers(db, config = {}) {
             notes: String(schedule.notes || source.notes || '').slice(0, 3000),
             date: schedule.date,
             time: schedule.time,
+            estimatedDuration: Number(schedule.estimatedDuration ?? 1),
             assignedTo,
             status: 'scheduled',
             estimatedCost: source.total,
@@ -665,6 +660,9 @@ function estimateHandlers(db, config = {}) {
             createdAt: new Date(now()).toISOString(),
             updatedAt: new Date(now()).toISOString()
           };
+          const reserved = await scheduling.prepare(tx, scope, job, { jobId: jobRef.id });
+          Object.assign(job, { assignedTo: reserved.assignedTo || null, assignedToName: reserved.assignedToName || null, assignedToUid: reserved.assignedToUid || null });
+          scheduling.commit(tx, reserved);
           if (newCustomer) tx.create(customer.ref, newCustomer);
           tx.create(jobRef, job);
           tx.update(target, {

@@ -11,6 +11,8 @@ const templateService={getTemplates:async()=>({success:true,templates:[template]
 const jobService={updateJob:async(id,data)=>{writes.push(data);if(pending)await pending;if(failure)throw failure;return {success:true};},createJob:async data=>{writes.push(data);if(failure)throw failure;return {success:true,job:{id:'new-job',...data}};}};
 const cache=new Map();
 const themedControls=name=>{
+ if(name.endsWith('/TechnicianAvailability')||name.endsWith('/AppointmentRepeatOptions'))return{__esModule:true,default:()=>null};
+ if(name.endsWith('/workspaceApi'))return{callWorkspace:async()=>{throw Error('Scheduling RPC belongs to its dedicated UI suite.');}};
  if(name.endsWith('/ThemedSelect'))return{__esModule:true,default:props=>React.createElement('select',{'aria-label':props.label,value:props.value,disabled:props.disabled,onChange:event=>props.onChange(event.target.value)},(props.options||[]).map(option=>React.createElement('option',{key:option.value,value:option.value},option.label)))};
  if(name.endsWith('/TimeSelect'))return{__esModule:true,default:props=>React.createElement('input',{type:'time','aria-label':props.label,value:props.value,disabled:props.disabled,onChange:event=>props.onChange(event.target.value)})};
 };

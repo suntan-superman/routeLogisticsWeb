@@ -30,6 +30,7 @@ function offlineHandler(db) {
       const currentVersion = version(job.get('updatedAt'));
       if (currentVersion !== expectedVersion) return { status: 'conflict', version: currentVersion, server: Object.fromEntries(fields.map((key) => [key, job.get(key === 'notes' ? 'workNotes' : key) ?? null])) };
       if (staff?.role === 'technician' && (job.get('status') === 'cancelled' || (job.get('status') === 'completed' && patch.status && patch.status !== 'completed'))) throw new HttpsError('failed-precondition', 'A manager must reopen this job.');
+      if (['completed', 'cancelled'].includes(job.get('status')) && patch.status && !['completed', 'cancelled'].includes(patch.status)) throw new HttpsError('failed-precondition', 'Reopen this appointment from scheduling so technician availability can be checked.');
       // A strictly increasing timestamp also distinguishes operations in the same millisecond.
       const updatedAt = new Date(Math.max(Date.now(), (Date.parse(currentVersion) || 0) + 1)).toISOString();
       const result = { status: 'synced', version: updatedAt };

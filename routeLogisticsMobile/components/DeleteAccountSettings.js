@@ -3,6 +3,7 @@ import { Alert, Switch, Text, View } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../theme/ThemeProvider';
 import { GlassButton, GlassCard, GlassInput } from './Glass';
+import { emailConfirmationMatches } from '../services/accountDeletionCore';
 
 export default function DeleteAccountSettings() {
   const { user, permissions, getAccountDeletionSummary, deleteAccount, signOut } = useAuth();
@@ -10,23 +11,31 @@ export default function DeleteAccountSettings() {
   const [step, setStep] = useState('closed'), [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false);
   const [confirmation, setConfirmation] = useState(''), [discard, setDiscard] = useState(false);
+  const [emailConfirmation, setEmailConfirmation] = useState('');
   const [completionMessage, setCompletionMessage] = useState('');
   const [cleanupPending, setCleanupPending] = useState(false);
   const [error, setError] = useState(''), [recentLogin, setRecentLogin] = useState(false);
   const mounted = useRef(true), request = useRef(0), deleting = useRef(false);
+  const identity = `${user?.uid || user?.id || ''}:${user?.email || ''}`, previousIdentity = useRef(identity);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; request.current++; }; }, []);
+  useEffect(() => {
+    if (previousIdentity.current === identity) return;
+    previousIdentity.current = identity; request.current++;
+    setConfirmation(''); setEmailConfirmation(''); setDiscard(false); setSummary(null); setLoading(false); setRecentLogin(false);
+    if (!cleanupPending) { setStep('closed'); setError(''); }
+  }, [identity, cleanupPending]);
   const pendingOperations = Number(summary?.pendingOperations) || 0, pendingPhotos = Number(summary?.pendingPhotos) || 0;
   const pendingWork = pendingOperations + pendingPhotos;
   const blockers = (summary?.blockers || []).map(blocker => typeof blocker === 'string' ? blocker : blocker.message).filter(Boolean);
   if (summary?.requiresOwnershipTransfer && !blockers.length) blockers.push('Transfer company ownership on the web before deleting your account while other staff remain.');
-  const canDelete = !busy && !loading && (cleanupPending || confirmation === 'DELETE' && (!pendingWork || discard) && !blockers.length);
+  const canDelete = !busy && !loading && (cleanupPending || confirmation === 'DELETE' && emailConfirmationMatches(emailConfirmation, user?.email) && (!pendingWork || discard) && !blockers.length);
   const close = () => {
     if (deleting.current) return;
-    request.current++; setStep('closed'); setSummary(null); setLoading(false); setConfirmation(''); setDiscard(false); setError(''); setRecentLogin(false);
+    request.current++; setStep('closed'); setSummary(null); setLoading(false); setConfirmation(''); setEmailConfirmation(''); setDiscard(false); setError(''); setRecentLogin(false);
   };
   const review = async () => {
     const current = ++request.current;
-    setStep('review'); setLoading(true); setSummary(null); setError(''); setRecentLogin(false); setConfirmation(''); setDiscard(false);
+    setStep('review'); setLoading(true); setSummary(null); setError(''); setRecentLogin(false); setConfirmation(''); setEmailConfirmation(''); setDiscard(false);
     try {
       const result = await getAccountDeletionSummary();
       if (mounted.current && current === request.current) setSummary(result);
@@ -38,7 +47,7 @@ export default function DeleteAccountSettings() {
     if (!canDelete || deleting.current) return;
     deleting.current = true; setBusy(true); setError(''); setRecentLogin(false);
     try {
-      const result = await deleteAccount({ confirmation: 'DELETE', discardPendingWork: discard });
+      const result = await deleteAccount({ confirmation: 'DELETE', ...(cleanupPending ? {} : { emailConfirmation }), discardPendingWork: discard });
       if (!result?.success && result?.deletionRecorded && result?.localCleanupPending) {
         const message = result.error?.message || 'Your account deletion is confirmed, but this device could not remove its saved data. Retry device cleanup, or remove the app and its data before using another account.';
         if (mounted.current) { setCleanupPending(true); setError(message); }
@@ -65,9 +74,9 @@ export default function DeleteAccountSettings() {
       <Text style={{ color: palette.secondary, lineHeight: 21 }}>Permanently delete your personal Route Logistics account and sign-in access on web and mobile.</Text>
       {step === 'closed' ? <GlassButton secondary title="Delete my account" icon="trash-outline" onPress={review} /> : <View style={{ gap: 12 }}>
         <Text style={{ color: palette.text, fontWeight: '700' }}>{cleanupPending ? 'Finish clearing this device' : step === 'review' ? 'Review account deletion' : 'Confirm permanent deletion'}</Text>
-        <Text style={{ color: palette.secondary, lineHeight: 21 }}>Account: {user.email}</Text>
+        <Text style={{ color: palette.secondary, lineHeight: 21 }}>Account: {user?.email}</Text>
         <Text style={{ color: palette.secondary, lineHeight: 21 }}>Your personal profile, device registrations, location-sharing access, and Route Logistics login will be removed. Company-owned customers, jobs, invoices, photos, and service history remain with the company.</Text>
-        {!cleanupPending && (user.role === 'owner' || permissions.canEditCompany) && <Text style={{ color: palette.secondary, lineHeight: 21 }}>If other staff remain in your company, transfer ownership in company settings on the web before deleting your account. The server checks ownership before deletion.</Text>}
+        {!cleanupPending && (user?.role === 'owner' || permissions.canEditCompany) && <Text style={{ color: palette.secondary, lineHeight: 21 }}>If other staff remain in your company, transfer ownership in company settings on the web before deleting your account. The server checks ownership before deletion.</Text>}
         {loading && <Text accessibilityLiveRegion="polite" style={{ color: palette.secondary }}>Checking unsynced work on this device…</Text>}
         {summary && <Text accessibilityLiveRegion="polite" style={{ color: pendingWork ? palette.danger : palette.secondary, lineHeight: 21 }}>{pendingWork ? `${pendingOperations} unsynced edit${pendingOperations === 1 ? '' : 's'} and ${pendingPhotos} unsynced photo${pendingPhotos === 1 ? '' : 's'} on this device.` : 'No unsynced edits or photos found on this device.'}</Text>}
         {blockers.map(blocker => <Text key={blocker} accessibilityRole="alert" style={{ color: palette.danger, lineHeight: 21 }}>{blocker}</Text>)}
@@ -75,6 +84,7 @@ export default function DeleteAccountSettings() {
         {step === 'review' && !loading && !summary && <GlassButton secondary title="Retry account deletion review" onPress={review} />}
         {step === 'confirm' && !cleanupPending && <>
           <Text style={{ color: palette.danger, lineHeight: 21 }}>This is permanent. Your remaining unsynced work on this device will be removed and cannot be recovered.</Text>
+          <GlassInput label="Type your full email address" value={emailConfirmation} onChangeText={setEmailConfirmation} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} autoComplete="off" textContentType="none" importantForAutofill="no" maxLength={254} editable={!busy} />
           <GlassInput label="Type DELETE to confirm" value={confirmation} onChangeText={setConfirmation} autoCapitalize="characters" autoCorrect={false} editable={!busy} />
           {!!pendingWork && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}><Text style={{ color: palette.text, lineHeight: 21, flex: 1 }}>I agree to permanently discard the unsynced edits and photos on this device.</Text><Switch accessibilityLabel="Discard unsynced work on this device" value={discard} disabled={busy} onValueChange={setDiscard} trackColor={{ false: palette.border, true: palette.button }} thumbColor="#FFFFFF" /></View>}
           <GlassButton title="Permanently delete my account" icon="trash-outline" busy={busy} disabled={!canDelete} onPress={submit} />

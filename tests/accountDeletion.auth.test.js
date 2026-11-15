@@ -24,7 +24,9 @@ test('real emulator Auth account is deleted, refresh access revoked, and a lost-
   const response = await fetch(`http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=emulator-only`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password: 'Synthetic-deletion-only-123', returnSecureToken: true }) });
   assert.equal(response.status, 200); const session = await response.json();
   const token = await auth.verifyIdToken(session.idToken);
-  const request = { auth: { uid, token }, data: { confirmation: 'DELETE' } }, api = accountDeletionHandlers(db, auth);
+  const request = { auth: { uid, token }, data: { confirmation: 'DELETE', emailConfirmation: email } }, api = accountDeletionHandlers(db, auth);
+  await assert.rejects(api.request({ ...request, data: { confirmation: 'DELETE', emailConfirmation: 'account-deletion-native' } }), { code: 'invalid-argument' });
+  assert.equal((await auth.getUser(uid)).email, email); assert.equal((await db.doc(`rlAccountDeletions/${uid}`).get()).exists, false);
   assert.equal((await api.request(request)).deleted, true);
   await assert.rejects(auth.getUser(uid), { code: 'auth/user-not-found' });
   await assert.rejects(auth.verifyIdToken(session.idToken, true));

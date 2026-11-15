@@ -19,6 +19,9 @@ before(async () => {
     batch.set(doc(db, `rlServiceAreas/${configured}`), { configured: true, revision: 1, operatingAddress: 'Private operating location', zipCodes: ['93312'] });
     for (const name of privateCollections.slice(1)) batch.set(doc(db, `${name}/geo-rules-private`), { companyId: configured, address: 'Private service property', eligible: true });
     for (const name of records) { batch.set(doc(db, `${name}/geo-rules-${name}-history`), data(configured)); batch.set(doc(db, `${name}/geo-rules-${name}-other`), data(other, 'other-owner')); }
+    // Scheduling records are seeded by the server; clients can no longer create
+    // them merely because coverage has not been configured.
+    for (const name of ['jobs', 'appointments', 'servicePlans']) batch.set(doc(db, `${name}/geo-rules-legacy-${name}`), { ...data(legacy), address: '' });
     for (const companyId of [configured, legacy]) batch.set(doc(db, `customers/geo-rules-customer-${companyId}`), { userId: ownerUid, companyId, name: 'Historical address customer', address: '100 Unverified Historical Street', totalSpent: 0 });
     batch.set(doc(db, 'users/geo-rules-solo'), { name: 'Synthetic solo owner' });
     batch.set(doc(db, 'customers/geo-rules-solo-customer'), { userId: 'geo-rules-solo', name: 'Solo historical customer', address: '100 Historical Solo Street' });
@@ -31,19 +34,26 @@ after(async () => { if (env) await env.cleanup(); });
 test('configured providers cannot bypass geographic enforcement by writing jobs, appointments, plans or legacy estimates directly', async () => {
   for (const role of ['owner', 'admin', 'manager']) for (const name of records) await assertFails(setDoc(doc(actor(role), `${name}/geo-rules-direct-${role}-${name}`), data(configured, role === 'owner' ? ownerUid : 'geo-rules-' + role)));
 });
-test('configured historical records permit ordinary non-geographic edits but never geographic mutation or eligibility forgery', async () => {
+test('historical job and appointment notes remain editable while scheduling, plans and geographic proof stay server owned', async () => {
   for (const name of records) {
-    const target = doc(actor(), `${name}/geo-rules-${name}-history`); await assertSucceeds(updateDoc(target, { notes: 'Historical record remains editable', date: '2026-12-01' }));
+    const target = doc(actor(), `${name}/geo-rules-${name}-history`);
+    if (name === 'servicePlans') await assertFails(updateDoc(target, { notes: 'Use the service-plan callable' }));
+    else await assertSucceeds(updateDoc(target, { notes: 'Historical record remains editable' }));
+    if (name === 'estimates') await assertSucceeds(updateDoc(target, { date: '2026-12-01' }));
+    else await assertFails(updateDoc(target, { date: '2026-12-01' }));
     for (const patch of [{ address: '200 Outside Street' }, { latitude: 35.4, longitude: -119 }, { customerId: 'other-customer' }, { serviceCategory: 'Changed' }, { serviceProperty: { address: 'Fake', latitude: 0, longitude: 0, validated: true } }, { serviceAreaEligibility: { eligible: true, settingsRevision: 999 } }, { serviceAreaManaged: true }]) await assertFails(updateDoc(target, patch));
   }
-  await assertSucceeds(updateDoc(doc(actor(), 'jobs/geo-rules-managed-job'), { date: '2026-12-02', notes: 'No retroactive invalidation' }));
+  await assertSucceeds(updateDoc(doc(actor(), 'jobs/geo-rules-managed-job'), { notes: 'No retroactive invalidation' }));
+  await assertFails(updateDoc(doc(actor(), 'jobs/geo-rules-managed-job'), { date: '2026-12-02' }));
   await assertFails(updateDoc(doc(actor(), 'jobs/geo-rules-managed-job'), { serviceAreaEligibility: { eligible: false } }));
 });
-test('unconfigured coverage cannot bypass Google verification; addressless records and non-address edits remain available', async () => {
+test('unconfigured coverage cannot bypass server scheduling or verification while legacy estimate and job-note edits remain available', async () => {
   for (const name of records) {
     const db = actor('owner', legacy); await assertFails(setDoc(doc(db, `${name}/geo-rules-unverified-${name}`), data(legacy)));
-    await assertSucceeds(setDoc(doc(db, `${name}/geo-rules-legacy-${name}`), { ...data(legacy), address: '' }));
-    await assertSucceeds(updateDoc(doc(db, `${name}/geo-rules-legacy-${name}`), { notes: 'Historical edits preserved' }));
+    if (name === 'estimates') await assertSucceeds(setDoc(doc(db, `${name}/geo-rules-legacy-${name}`), { ...data(legacy), address: '' }));
+    else await assertFails(setDoc(doc(db, `${name}/geo-rules-addressless-forged-${name}`), { ...data(legacy), address: '' }));
+    if (name === 'servicePlans') await assertFails(updateDoc(doc(db, `${name}/geo-rules-legacy-${name}`), { notes: 'Use the service-plan callable' }));
+    else await assertSucceeds(updateDoc(doc(db, `${name}/geo-rules-legacy-${name}`), { notes: 'Historical edits preserved' }));
     await assertFails(updateDoc(doc(db, `${name}/geo-rules-legacy-${name}`), { address: '200 Unverified Street, Example, CA 93312' }));
     await assertFails(setDoc(doc(db, `${name}/geo-rules-forged-${name}`), { ...data(legacy), serviceAreaEligibility: { eligible: true } }));
     await assertFails(updateDoc(doc(db, `${name}/geo-rules-legacy-${name}`), { serviceAreaManaged: true }));

@@ -1,4 +1,9 @@
 // Dependency-injected orchestration keeps destructive effects testable offline.
+const normalizeEmail = value => typeof value === 'string' ? value.trim().toLowerCase() : '';
+function emailConfirmationMatches(entered, expected) {
+  const normalized = normalizeEmail(entered);
+  return typeof entered === 'string' && normalized.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) && normalized === normalizeEmail(expected);
+}
 function createAccountDeletion(deps) {
   let active = null;
   const confirmed = new Map();
@@ -18,6 +23,8 @@ function createAccountDeletion(deps) {
       const account = live || previous;
       if (!previous && (!account?.uid || !account.emailVerified)) throw Object.assign(new Error('Sign in with your verified email before deleting your account.'), { code: 'auth/unverified' });
       if (options?.confirmation !== 'DELETE') throw new Error('Type DELETE to confirm account deletion.');
+      const emailConfirmation = options?.emailConfirmation, confirmedEmail = account?.email;
+      if (!previous && !emailConfirmationMatches(emailConfirmation, confirmedEmail)) throw new Error('Type your full signed-in email address to confirm account deletion.');
       if (!previous && await deps.isOffline()) throw new Error('Connect to the internet to delete your account.');
       const uid = account.uid;
       const release = await deps.pause(uid);
@@ -29,17 +36,22 @@ function createAccountDeletion(deps) {
           if ((pending.pendingOperations || pending.pendingPhotos) && !options.discardPendingWork) throw new Error('Synchronize your saved work first, or explicitly confirm discarding the pending edits and photos.');
           // Capture a recent token before shutdown. An interrupted response can
           // then be retried with the same proof even after Auth is deleted.
+          const stillConfirmed = () => {
+            const current = deps.account();
+            return current?.uid === uid && current.emailVerified === true && normalizeEmail(current.email) === normalizeEmail(confirmedEmail) && emailConfirmationMatches(emailConfirmation, current.email);
+          };
+          if (!stillConfirmed()) throw new Error('Your signed-in account or email changed. Review account deletion again before deleting it.');
           const token = await account.getIdToken();
           await deps.stopTracking();
           await deps.stopPush();
-          if (deps.account()?.uid !== uid) throw new Error('Your signed-in account changed. Sign in again before deleting it.');
-          const result = await deps.invoke(token);
+          if (!stillConfirmed()) throw new Error('Your signed-in account or email changed. Review account deletion again before deleting it.');
+          const result = await deps.invoke(token, emailConfirmation);
           if (result?.success !== true || (result.deleted !== true && result.deletionPending !== true)) throw new Error('The server did not confirm deletion. Your saved work has been retained; retry to confirm the result.');
-          receipt = result; recorded = { uid, email: account.email, receipt };
+          receipt = result; recorded = { uid, email: confirmedEmail, receipt };
           confirmed.set(uid, recorded); serverConfirmed = true;
         }
         await deps.record?.(recorded);
-        await deps.purge(uid, account.email);
+        await deps.purge(uid, recorded?.email || confirmedEmail);
         await deps.finishSession(uid);
         await deps.clearRecord?.(uid);
         confirmed.delete(uid);
@@ -74,4 +86,4 @@ function createAccountDeletion(deps) {
   };
   return { summary, remove, resume };
 }
-module.exports = { createAccountDeletion };
+module.exports = { createAccountDeletion, emailConfirmationMatches };

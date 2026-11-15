@@ -6,9 +6,39 @@ Use the existing production site, Firebase project and corporate TestFlight app 
 
 ## A. Executive summary
 
-Route Logistics has a deployed, tested field-work foundation suitable for a **controlled pilot after the short physical core workflow passes**. It is not yet certified across every browser, device, optional commercial feature or integration delivery path. All 100 current source Cloud Functions are ACTIVE. Current server/rules/web/auth regressions pass. The initial mobile test-harness failure was repaired with test-only changes; the full corrected mobile rerun passed 168/168.
+Route Logistics has a tested field-work foundation suitable for a **controlled pilot after the short physical core workflow passes**. It is not yet certified across every browser, device, optional commercial feature or integration delivery path. Current automated results are recorded below; the original source/function inventory remains a dated acceptance baseline. Physical-device and genuine provider delivery acceptance remain separate.
 
-Current browser coverage is **27 scenarios** (81 configured executions across Chromium, Firefox and WebKit). See the November 15 address/time addendum below for the latest execution evidence. Earlier evidence for the original 25 scenarios is retained below, including the later clean 75/75 Jobs-date run. Physical iPhone/Android and genuine provider acceptance remain separate.
+Current browser coverage is **29 scenarios** (87 configured executions across Chromium, Firefox and WebKit). See the November 15 addenda below for execution evidence. Earlier evidence for the original 25 scenarios is retained, including the later clean 75/75 Jobs-date run. Physical iPhone/Android and genuine provider acceptance remain separate.
+
+### November 15 — unified scheduling and typed-email deletion
+
+Jobs/Calendar scheduling now includes technician selection, server-checked
+conflicts and explicit quarter-hour alternatives. New recurring appointments
+support weekly/monthly/quarterly calendar and weekday rules. The first visit and
+plan are saved atomically with retry protection. Future reservations participate
+in availability checks; generated visits recheck active staff and use the chosen
+replacement/review policy. Offboarding reviews upcoming scheduled visits with
+idempotent audits and resumable checkpoints. Existing history and legacy fixed-day
+plans are preserved. Details: `docs/SCHEDULING_AND_RECURRENCE.md`.
+
+PW-OPS-15 covers assignment during creation and a conflicting second visit with
+an explicitly selected alternative. PW-OPS-16 covers weekly Thursday first-visit
+creation, preferred technician/fallback and a future reservation before a job is
+materialized. These extend the web portions of DSP-002/003/004/005; they do not
+certify physical mobile delivery. The full Chromium run passed **29/29**; the two
+new journeys also passed **6/6 across Chromium, Firefox and WebKit**. DSP-009 is
+now an executed automated Pass instead of a source-gap Blocked case. No physical
+or unexecuted operator case was marked Pass.
+
+Mobile deletion now requires the full, initially empty signed-in email plus the
+existing DELETE confirmation. Client and server check the current identity;
+incorrect/partial/missing values have no deletion side effects. Accepted cleanup
+receipts can still resume after sign-out. The full mobile suite passed **229/229**;
+physical confirmation/cancellation requires a rebuilt native app. No real account
+was deleted. Current evidence: **167 Functions passes/one existing skip**, **326
+web**, **427 rules/integration** and **one real Auth-emulator deletion/retry**.
+Web lint/build, Expo Doctor **18/18** and iOS export pass. Details are recorded in
+`docs/SCHEDULING_AND_RECURRENCE.md`.
 
 ### November 15 — address validation and scheduling controls
 
@@ -49,19 +79,19 @@ versus explicitly permanent changes. No physical/manual case is newly marked Pas
 
 | Cases | Pass | Fail | Blocked | Not Run | Dated historical live/provider Pass |
 | --- | --- | --- | --- | --- | --- |
-| 155 | 44 | 0 | 8 | 103 | 9 |
+| 155 | 45 | 0 | 7 | 103 | 9 |
 
-The 44 Pass results include current automated/read-only checks and **nine dated historical provider/live checks**. A historical Pass proves only the named prior scenario. The 103 Not Run cases still require manual/operator execution; eight Blocked entries are scoped feature/prerequisite gaps, including overlapping Android readiness entries. Case counts are acceptance scenarios, not the underlying individual automated test case counts.
+The 45 Pass results include current automated/read-only checks (including newly automated DSP-009) and **nine dated historical provider/live checks**. A historical Pass proves only the named prior scenario. The 103 Not Run cases still require manual/operator execution; seven Blocked entries are scoped feature/prerequisite gaps, including overlapping Android readiness entries. Case counts are acceptance scenarios, not individual automated test counts.
 
 | Classification | Current evidence | Acceptance limit |
 | --- | --- | --- |
-| Implemented and deployed | 100/100 source exports ACTIVE; current Netlify routes reachable; web source inventory below | Active metadata/HTTP 200 does not prove every business action |
-| Current automated regression | Functions 138 pass/1 skip; final full web 232 pass including five emulator guards; rules/integration 330 pass; Auth E2E 6 pass | Emulators/test transports are not provider or physical-device delivery |
-| Mobile regression | 168/168 pass after test-only workspaceApi/React harness correction | Initial stale-loader failure retained as resolved history; physical camera acceptance remains separate |
-| Browser regression | 27 distinct Chromium scenarios passed across full/focused runs; PW-OPS-10–14 passed15/15 across all three engines; earlier cross-engine evidence retained below | Other Firefox/WebKit cases not rerun in this batch; physical/manual cases unchanged |
+| Deployment evidence | Original function inventory and dated provider/deployment receipts below; current release checks in the scheduling note | Active metadata/HTTP 200 does not prove every business action |
+| Current automated regression | Functions167 pass/1 existing skip; web326; rules/integration427; typed-email Auth-emulator1 | Emulators/test transports are not provider or physical-device delivery |
+| Mobile regression | 229/229 pass including full-email deletion confirmation and identity-change safeguards | Physical camera/deletion acceptance remains separate and requires a rebuilt app |
+| Browser regression | Chromium29/29; new PW-OPS-15/16 passed6/6 across all three engines; earlier cross-engine evidence retained below | Other Firefox/WebKit cases not rerun in this batch; physical/manual cases unchanged |
 | Historically provider-verified | Stripe test settlement; QuickBooks sandbox writes/tax/payments; Twilio delivered/STOP/START; iOS push/tap; portal OTP and review email/submission | Dates and exact scenarios in Section G; no new provider transaction/message in this run |
 | Physical acceptance outstanding | Current installed build, camera/gallery/reopen, assigned-job completion, offline restart/sync, background GPS, push app states | Execute Section F with synthetic work before using real pilot visits |
-| Source gaps / intentionally off | Native manager geography forms, industry selector, overlap guard, discounts, full native CRM; live Stripe/QB production/broad SMS/review automation off | Use supported web workflows and scoped pilot limits; do not weaken backend authorization |
+| Source gaps / intentionally off | Native manager geography forms, industry selector, discounts, full native CRM; live Stripe/QB production/broad SMS/review automation off | Use supported web workflows and scoped pilot limits; do not weaken backend authorization |
 | External accounting acceptance outstanding | Genuine Intuit-origin sandbox-change webhook has not been correlated at RL | Blocks genuine webhook acceptance only; does not block unrelated pest/pool field operations |
 
 Highest practical risks are losing confidence in untested native camera/offline behavior, accepting an unknown installed TestFlight build, and expecting native manager scheduling/estimate forms to work under configured service territories. Use web scheduling/estimates for the pilot. There is no confirmed current S1 data-loss or cross-tenant defect in this run; unperformed physical tests remain acceptance gates rather than invented defects.
@@ -1125,7 +1155,7 @@ Exact paths below are relative to https://route-logistics.com unless a native or
 - **Feature/module:** Dispatch
 - **Preconditions:** Dedicated synthetic pest or pool fixture set, saved baseline and permitted test identities. Never edit Acme’s legitimate customers, active memberships, jobs or coverage. Any email/push recipient and message count must be explicitly authorized before this case; otherwise leave the sending step Not Run. No customer SMS campaigns. Current corporate TestFlight app available for the authorized test technician.
 - **User role:** Synthetic owner or manager; two authorized test technicians
-- **Exact navigation path:** /dispatch → service date → Assigned to
+- **Exact navigation path:** /jobs → New Job → Assigned technician; or /dispatch → service date → Assigned to
 - **Execution / evidence class:** manual; Operator/manual acceptance — not executed
 - **Hands-on estimate:** 10 minutes
 - **Test steps:**
@@ -1169,13 +1199,13 @@ Exact paths below are relative to https://route-logistics.com unless a native or
 - **Feature/module:** Recurring service
 - **Preconditions:** Dedicated synthetic pest or pool fixture set, saved baseline and permitted test identities. Never edit Acme’s legitimate customers, active memberships, jobs or coverage. Any email/push recipient and message count must be explicitly authorized before this case; otherwise leave the sending step Not Run. No customer SMS campaigns.
 - **User role:** Synthetic owner/admin/manager
-- **Exact navigation path:** /service-plans → New plan; plan row → Schedule visit
+- **Exact navigation path:** /jobs → New Job → Recurring appointment; or /service-plans → New plan; plan row → Schedule visit
 - **Execution / evidence class:** manual; Operator/manual acceptance — not executed
 - **Hands-on estimate:** 8 minutes
 - **Test steps:**
 
-1. Create one clearly synthetic plan with explicit service property, frequency, first date, price and notes.
-2. Save, refresh and choose Schedule visit once.
+1. Create a clearly synthetic recurring appointment from New Job, or create a plan from Service Plans, with explicit property, repeat pattern, first date and technician policy.
+2. For New Job, verify the first visit already exists once. For plan-only creation, choose Schedule visit once.
 3. Repeat the same generation action using the same expected date only in the emulator; in live UI confirm the date advances and the original visit exists once.
 4. Pause the plan before it could schedule unattended future work.
 
@@ -1251,25 +1281,26 @@ Exact paths below are relative to https://route-logistics.com unless a native or
 - **Evidence reference:** `routeLogisticsWeb/src/pages/DispatchPage.jsx:158`; `tests/locations.integration.test.js:43`; `tests/locations.integration.test.js:84`
 - **Cleanup instructions:** Retain evidence with secrets redacted. Restore only this case’s synthetic settings/fixtures to their recorded baseline; deactivate/archive test data through supported UI. Do not delete or change legitimate records.
 
-#### DSP-009 — Automatic schedule-conflict protection gap
+#### DSP-009 — Automatic schedule-conflict protection
 
 - **Test ID:** DSP-009
 - **Feature/module:** Scheduling
-- **Preconditions:** Dedicated synthetic pest or pool fixture set, saved baseline and permitted test identities. Never edit Acme’s legitimate customers, active memberships, jobs or coverage.
-- **User role:** Synthetic dispatcher
-- **Exact navigation path:** /calendar; /dispatch
-- **Execution / evidence class:** manual; Source/configuration gap or missing external acceptance
+- **Preconditions:** Disposable local Auth/Firestore/Functions browser fixtures. No production mutations or provider calls.
+- **User role:** Synthetic owner/manager
+- **Exact navigation path:** /jobs → New Job → Assigned technician
+- **Execution / evidence class:** automated browser plus emulator integration/rules
 - **Hands-on estimate:** 0 minutes
 - **Test steps:**
 
-1. Inspect documented scheduling behavior before expecting overlap prevention.
-2. If the operator authorizes the exercise, create two zero-value synthetic overlapping visits for the same technician and inspect Calendar/Dispatch.
-3. Use the manual calendar conflict check before any real pilot assignment.
+1. Save an assigned visit, then attempt an overlapping visit for the same technician.
+2. Verify the server rejects the conflict, retains the draft and offers quarter-hour alternatives.
+3. Choose an alternative without an automatic save, then explicitly save and verify the assignment.
+4. Exercise concurrent saves, future recurring reservations, midnight boundaries and authorization in emulators.
 
-- **Expected result:** The absence of an implemented automatic overlap guard is recorded; manual dispatcher conflict review is required for a controlled pilot.
-- **Actual result:** Source inspection found no automatic same-technician overlap prevention. Calendar movement is disabled and route arrival warnings are a different feature. No conflicting production jobs created.
-- **Status:** **Blocked**
-- **Evidence reference:** `routeLogisticsWeb/src/pages/CalendarPage.jsx:255`; `functions/workData.js:121`
+- **Expected result:** Assigned appointments cannot overlap; alternatives require explicit selection and Save. Tenant and role boundaries remain enforced.
+- **Actual result:** PW-OPS-15/16 passed across Chromium, Firefox and WebKit; the full427-case rules/integration run passed. No production conflicting jobs were created. This does not certify travel time, PTO or physical mobile delivery.
+- **Status:** **Pass**
+- **Evidence reference:** `tests/browser/operations.spec.js`; `tests/scheduling.integration.test.js`; `tests/booking.integration.test.js`; `tests/scheduling.rules.test.js`
 - **Cleanup instructions:** Retain evidence with secrets redacted. Restore only this case’s synthetic settings/fixtures to their recorded baseline; deactivate/archive test data through supported UI. Do not delete or change legitimate records.
 
 #### DSP-010 — Status transitions, completion and preserved history
@@ -3825,7 +3856,7 @@ Severity: **S1** data loss, cross-tenant exposure or unusable core operation; **
 | GAP-WEB-01 / S3 explicit industry selection | CompanySetupPage.jsx has categories but no industry selector; ONB-003 | Product/development | Use pest/pool category and pinned service checklist; no selector certification |
 | GAP-WEB-02 / S3 company template summary | Company Setup → Templates is Coming Soon; estimate template CRUD is separate | Development | Use /estimate-templates; do not claim automatic photo-estimate template application |
 | GAP-WEB-03 / S3 discounts | Estimate form/backend has no discount field and rejects negative unit prices; EST-005 | Product/development | Use supported fixed line pricing; not required for zero-value field pilot |
-| GAP-WEB-04 / S2 if automatic conflict blocking required | No same-technician overlap guard found; calendar drag/resize disabled; DSP-009 | Dispatcher/product | Manual calendar/dispatch overlap review before each pilot assignment; record conflicts rather than assume automatic protection |
+| GAP-WEB-04 / resolved by scheduling release | Server conflict prevention and future recurring reservations implemented; DSP-009 automated Pass | Development | Retain physical mobile delivery acceptance; travel/PTO remain separate from calendar availability |
 | GAP-MOB-CRM / S3 native parity | Native customer search/edit rendered without handlers; HomeScreen.js:741/776 | Development | Use web CRM search/update; native full CRM not certified |
 | GAP-WEB-CRM / S3 scope limits | Customer detail has no full timeline/attachment tab; search filters loaded rows only | Product/documentation | Load more; use Jobs for service history/photos and Portal for published documents |
 | QB-DELIVERY / accounting acceptance | Customer59 update Nov14 9:21:44AM and portal sampleSUCCESS uncorrelated with RL genuine delivery; QBO-08 | Operator/Intuit with Codex sanitized log support | Externally unresolved; preserve existing connection; no redeploy without actual defect |

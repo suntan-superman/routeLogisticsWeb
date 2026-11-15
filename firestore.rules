@@ -114,6 +114,11 @@ service cloud.firestore {
           || !request.resource.data.diff(resource.data).affectedKeys().hasAny(geographicFields()));
     }
 
+    function schedulingFields() {
+      return ['date', 'time', 'estimatedDuration', 'duration', 'assignedTo', 'assignedToName', 'assignedToUid',
+        'servicePlanId', 'servicePlanDate', 'assignmentNeedsAttention', 'assignmentReview'];
+    }
+
     // ---------- users ----------
     match /users/{userId} {
       allow read: if signedIn() && uid() == userId;
@@ -188,11 +193,12 @@ service cloud.firestore {
       }
 
       allow read: if financeAccess(resource.data);
-      allow create: if validCreate(false) && (claimCompany() == null || isFinance())
-        && geographicCreate()
-        && validStatus(request.resource.data.get('status', 'scheduled'));
+      allow create: if false; // rlManageJob serializes assignment and schedule-conflict checks.
       allow update: if tenancyUnchanged() && statusOk()
+        && !(resource.data.get('status', 'scheduled') in ['completed', 'cancelled']
+          && !(request.resource.data.get('status', resource.data.get('status', 'scheduled')) in ['completed', 'cancelled']))
         && geographicUpdate()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(schedulingFields())
         && financeAccess(resource.data);
       allow delete: if financeAccess(resource.data); // Managers use rlManageJob; technicians use rlApplyJobOperation.
     }
@@ -200,8 +206,9 @@ service cloud.firestore {
     // ---------- appointments ----------
     match /appointments/{id} {
       allow read: if financeAccess(resource.data);
-      allow create: if validCreate(false) && geographicCreate();
-      allow update: if manageable(resource.data) && tenancyUnchanged() && geographicUpdate();
+      allow create: if false; // Active Route Logistics scheduling uses validated jobs.
+      allow update: if manageable(resource.data) && tenancyUnchanged() && geographicUpdate()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(schedulingFields());
       allow delete: if manageable(resource.data);
     }
 
@@ -262,11 +269,7 @@ service cloud.firestore {
     // ---------- recurring service plans ----------
     match /servicePlans/{id} {
       allow read: if readable(resource.data);
-      allow create: if validCreate(false)
-        && geographicCreate()
-        && request.resource.data.get('frequencyDays', 0) is number
-        && request.resource.data.get('frequencyDays', 0) > 0;
-      allow update: if manageable(resource.data) && tenancyUnchanged() && geographicUpdate();
+      allow create, update: if false; // rlManageServicePlan owns recurrence, reservations and technician choices.
       allow delete: if manageable(resource.data);
     }
 

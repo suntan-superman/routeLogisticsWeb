@@ -7,6 +7,8 @@ const { getMessaging } = require('firebase-admin/messaging');
 const { resolveClaims } = require('./claims');
 const { workspaceStatus } = require('./workspace');
 const { workDataHandlers } = require('./workData');
+const { schedulingHandlers } = require('./scheduling');
+const { scheduleMembershipHandlers } = require('./scheduleMembership');
 const { jobPhotoHandler } = require('./jobPhotos');
 const { assignmentTarget, buildAssignmentMessage, DEAD_TOKEN_CODES } = require('./notify');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
@@ -134,7 +136,9 @@ exports.syncClaims = onCall(async (request) => {
   return { claims, workspace };
 });
 
-const workData = workDataHandlers(db, { serviceAreas });
+const scheduling = schedulingHandlers(db);
+const workData = workDataHandlers(db, { serviceAreas, scheduling });
+exports.rlCheckAvailability = onCall({ timeoutSeconds: 60 }, scheduling.handle);
 exports.rlReadWorkspace = onCall(workData.read);
 exports.rlManageJob = onCall(workData.manageJob);
 exports.rlRecordApplication = onCall(workData.application);
@@ -168,10 +172,13 @@ exports.rlDeliverEmail = onSchedule({ schedule: 'every 1 minutes', secrets: emai
 const invoiceEmails = invoiceEmailHandlers(db, () => appUrl.value(), emailEnabled);
 exports.emailInvoice = onCall(invoiceEmails.emailInvoice);
 exports.rlQueueInvoiceReminders = onSchedule({ schedule: 'every day 09:00', timeZone: 'Etc/UTC', timeoutSeconds: 540 }, invoiceEmails.reminders);
-const recurring = recurringHandlers(db, { serviceAreas });
+const recurring = recurringHandlers(db, { serviceAreas, scheduling });
 exports.rlManageServicePlan = onCall({ timeoutSeconds: 60 }, recurring.manageServicePlan);
 exports.generateServicePlanJob = onCall(recurring.generateServicePlanJob);
 exports.rlGenerateRecurringJobs = onSchedule({ schedule: 'every day 04:00', timeZone: 'Etc/UTC', timeoutSeconds: 540 }, recurring.generateRecurringJobs);
+const scheduleMembership = scheduleMembershipHandlers(db, { scheduling });
+exports.rlScheduleMemberUpdated = onDocumentUpdated({ document: 'teamMembers/{memberId}', timeoutSeconds: 540, retry: true }, scheduleMembership.updated);
+exports.rlScheduleMemberDeleted = onDocumentDeleted({ document: 'teamMembers/{memberId}', timeoutSeconds: 540, retry: true }, scheduleMembership.deleted);
 
 const stripeEnabled = () => process.env.RL_STRIPE_ENABLED === 'true';
 const stripeMode = () => process.env.RL_STRIPE_MODE || 'test';

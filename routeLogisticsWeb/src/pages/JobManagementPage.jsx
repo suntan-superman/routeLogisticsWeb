@@ -653,7 +653,8 @@ const JobManagementPage = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{job.assignedToName || 'Unassigned'}</div>
+                      <div className="text-sm text-gray-900">{job.assignedToName || (job.assignedTo ? 'Assigned technician' : 'Unassigned')}</div>
+                      {job.assignmentNeedsAttention && <div className="text-xs text-amber-800">Dispatcher review needed</div>}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {formatCurrency(job.totalCost)}
@@ -740,7 +741,8 @@ const JobManagementPage = () => {
                   </div>
                   <div>
                     <h5 className="text-sm font-medium text-gray-700">Assigned To</h5>
-                    <p className="text-sm text-gray-900">{selectedJob.assignedToName || 'Unassigned'}</p>
+                    <p className="text-sm text-gray-900">{selectedJob.assignedToName || (selectedJob.assignedTo ? 'Assigned technician' : 'Unassigned')}</p>
+                    {selectedJob.assignmentNeedsAttention && <p className="text-sm text-amber-800">{selectedJob.assignmentReview || 'Dispatcher review needed'}</p>}
                   </div>
                 </div>
                 

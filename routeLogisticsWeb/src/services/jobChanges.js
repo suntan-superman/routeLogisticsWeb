@@ -6,6 +6,7 @@ export const TRACKED_FIELDS = [
   ['date', 'Date'],
   ['time', 'Start time'],
   ['estimatedDuration', 'Duration (hrs)'],
+  ['assignedTo', 'Technician'],
   ['address', 'Address'],
   ['serviceProperty', 'Service property'],
   ['serviceCategory', 'Service category'],
@@ -20,16 +21,18 @@ const geographyFields = new Set(['serviceProperty', 'serviceCategory', 'serviceA
 const propertyAddress = value => norm(typeof value === 'object' && value ? value.address || value.formattedAddress : value);
 
 export const snapshotJob = (job) =>
-  Object.fromEntries(TRACKED_FIELDS.map(([key]) => [key, job[key] ?? '']));
+  Object.fromEntries(TRACKED_FIELDS.map(([key]) => [key, (key === 'estimatedDuration' ? job.estimatedDuration ?? job.duration : job[key]) ?? '']));
 
 export function diffJob(before, after) {
   return TRACKED_FIELDS.reduce((acc, [key, label]) => {
     // An ordinary legacy edit does not remove or recertify a stored geography
     // snapshot simply because those optional fields were omitted by the form.
     if (geographyFields.has(key) && !Object.hasOwn(after, key)) return acc;
-    const from = key === 'serviceProperty' ? propertyAddress(before[key]) : key === 'totalCost' || key === 'estimatedDuration' ? Number(before[key] || 0) : norm(before[key]);
-    const to = key === 'serviceProperty' ? propertyAddress(after[key]) : key === 'totalCost' || key === 'estimatedDuration' ? Number(after[key] || 0) : norm(after[key]);
-    if (from !== to) acc.push({ field: key, label, from: before[key] ?? '', to: after[key] ?? '' });
+    const beforeValue = key === 'estimatedDuration' ? before.estimatedDuration ?? before.duration : before[key];
+    const afterValue = key === 'estimatedDuration' ? after.estimatedDuration ?? after.duration : after[key];
+    const from = key === 'serviceProperty' ? propertyAddress(beforeValue) : key === 'totalCost' || key === 'estimatedDuration' ? Number(beforeValue || 0) : norm(beforeValue);
+    const to = key === 'serviceProperty' ? propertyAddress(afterValue) : key === 'totalCost' || key === 'estimatedDuration' ? Number(afterValue || 0) : norm(afterValue);
+    if (from !== to) acc.push({ field: key, label, from: beforeValue ?? '', to: afterValue ?? '' });
     return acc;
   }, []);
 }

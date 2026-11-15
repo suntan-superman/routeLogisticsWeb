@@ -13,3 +13,12 @@ lint-review.log
 routeLogisticsMobile/.expo/
 routeLogisticsMobile/dist/
 .migration/
+# Browser reports may contain synthetic credentials, OTPs and authenticated traces.
+test-results/
+playwright-report/
+playwright/.auth/
+tests/browser/.auth/
+.auth/
+**/storage-state*.json
+**/auth-state*.json
+.browser-dist/

@@ -50,13 +50,16 @@ function fixture(role = 'manager') {
       if (name.endsWith('/nativeInteraction')) return { beginNativeInteraction: () => { env.interactions++; return () => env.interactions--; } };
       if (name.endsWith('/services/firebase')) return { CustomerService: { getCustomers: async () => ({ success: true, customers: env.customers }) } };
       if (name.endsWith('/customerService')) return { getCustomers: async () => ({ success: true, customers: env.customers, hasMore: false }) };
+      // This estimate/photo test does not exercise geographic policy. Keep its
+      // newly composed child on the existing workspace API boundary.
+      if (name.endsWith('/workspaceApi')) return { callWorkspace: async () => ({ settings: { configured: false }, availableCategories: [] }) };
       if (name.endsWith('/estimateService')) return { callEstimate, prepareEstimatePhoto: async () => { if (env.compressionFailure) throw new Error('Photo preparation failed. Selection retained.'); return { base64: 'AAAA', uri: 'file:///compressed.jpg', dataUri: 'data:image/jpeg;base64,AAAA' }; }, shareEstimatePdf: async () => {}, downloadEstimatePdf: async () => {}, callEstimateApproval: async values => { if (values.action === 'get') { env.approvalGets.push(values); return { estimate: env.record || savedEstimate('sent'), photos: [], branding: { name: 'Acme' } }; } env.approvals++; return { approved: true }; } };
       if (name.includes('functions/shared/estimateClient')) return helpers;
       if (name.startsWith('.')) { const next = path.resolve(path.dirname(filename), name); return load(path.extname(next) ? next : fs.existsSync(`${next}.jsx`) ? `${next}.jsx` : `${next}.js`); }
       throw new Error(`Unexpected dependency ${name}`);
     };
     const result = babel.transformSync(fs.readFileSync(filename, 'utf8'), { filename, configFile: false, babelrc: false, presets: [[require.resolve('babel-preset-expo'), { jsxRuntime: 'classic' }]], plugins: [require.resolve('@babel/plugin-transform-modules-commonjs')] });
-    new Function('require', 'module', 'exports', 'window', 'document', 'crypto', 'URL', result.code)(mockRequire, module, module.exports, env.window, env.document, { randomUUID: () => `11111111-1111-4111-8111-${String(++sequence).padStart(12, '0')}` }, env.url); return module.exports;
+    new Function('require', 'module', 'exports', 'window', 'document', 'crypto', 'URL', 'React', result.code)(mockRequire, module, module.exports, env.window, env.document, { randomUUID: () => `11111111-1111-4111-8111-${String(++sequence).padStart(12, '0')}` }, env.url, React); return module.exports;
   }
   env.load = load; return env;
 }

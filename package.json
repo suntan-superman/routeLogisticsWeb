@@ -6,10 +6,15 @@
     "test:e2e": "node scripts/prepare-emulators.js && firebase emulators:exec --only auth,firestore,functions --project demo-routelogistics \"node --test --test-concurrency=1 tests/syncclaims.e2e.test.js tests/staffLogin.auth.test.js\"",
     "test:functions": "node --test tests/serviceAreaWorkflows.unit.test.js tests/quickbooks.sandboxGuard.test.js tests/quickbooks.operatorRunner.test.js && cd functions && node --test",
     "test": "npm run test:functions && npm run test:web && npm run test:rules",
-    "test:web": "node --test routeLogisticsWeb/src/services/*.test.js routeLogisticsWeb/src/utils/*.test.js tests/*.ui.test.js"
+    "test:web": "node --test routeLogisticsWeb/src/services/*.test.js routeLogisticsWeb/src/utils/*.test.js tests/*.ui.test.js",
+    "test:browser": "node scripts/run-browser-tests.js",
+    "test:browser:smoke": "node scripts/run-browser-tests.js --grep @smoke",
+    "test:browser:all": "node scripts/run-browser-tests.js --all-browsers",
+    "test:browser:report": "playwright show-report"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^4.0.1",
+    "@playwright/test": "1.65.1",
     "firebase": "^11.10.0",
     "firebase-tools": "^15.36.0"
   },

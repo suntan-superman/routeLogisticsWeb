@@ -4,6 +4,7 @@ import { initializeFirestore, memoryLocalCache } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getFunctions } from 'firebase/functions';
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
+import { connectLocalEmulators, localFirestoreTransport } from './emulators';
 
 // Config comes from Vite env vars (see .env.example). Web API keys are not secrets, but keeping them
 // out of source lets dev/prod point at different Firebase projects.
@@ -37,11 +38,12 @@ if (import.meta.env.VITE_APPCHECK_SITE_KEY) {
 // Full financial documents must not persist across browser sessions. Assigned
 // field-work projections and queued work have their own identity/role-scoped cache.
 // Do not clear the old IndexedDB database: it may contain unsynchronized writes.
-const createDb = () => initializeFirestore(app, { localCache: memoryLocalCache() });
+const createDb = () => initializeFirestore(app, { localCache: memoryLocalCache(), ...localFirestoreTransport() });
 
 export const auth = getAuth(app);
 export const db = createDb();
 export const storage = getStorage(app);
 export const functions = getFunctions(app);
+connectLocalEmulators({ auth, db, functions, storage }, firebaseConfig.projectId);
 
 export default app;

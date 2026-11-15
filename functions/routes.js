@@ -2,6 +2,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { hash, documentId, requireAuth, requireStaff, rateLimit } = require('./security');
 const { hasCapability } = require('./access');
 const { servicePropertySite } = require('./serviceAreaWorkflows');
+const { availabilityRef, availabilityView } = require('./staffAvailability');
 function routeDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw new HttpsError('invalid-argument', 'Choose a valid service date.');
   return value;
@@ -16,29 +17,43 @@ async function routingScope(db, request) {
   const staff = await requireStaff(db, request, token.companyId);
   const memberId = documentId(request.data?.memberId, 'technician');
   if (staff.role === 'technician' && memberId !== staff.memberId) throw new HttpsError('permission-denied', 'You can view only your own daily route.');
+  let memberUid = memberId;
+  const memberAliases = new Set([memberId]);
   if (memberId !== staff.company.get('ownerId')) {
     const member = await db.doc(`teamMembers/${memberId}`).get();
     if (member.get('companyId') !== token.companyId || member.get('status') !== 'active' || !member.get('uid')) throw new HttpsError('failed-precondition', 'Select an active team member.');
+    memberUid = member.get('uid');
+    if (staff.role !== 'technician') memberAliases.add(memberUid);
+  } else {
+    const aliases = await db.collection('teamMembers').where('companyId', '==', token.companyId).where('uid', '==', memberId).limit(21).get();
+    if (aliases.size > 20) throw new HttpsError('failed-precondition', 'The owner staff identities need review before loading a route.');
+    aliases.docs.forEach(row => memberAliases.add(row.id));
   }
-  return { ...staff, companyId: token.companyId, memberId, date: routeDate(request.data?.date) };
+  if ((await db.doc(`rlAccountDeletions/${documentId(memberUid)}`).get()).exists) throw new HttpsError('failed-precondition', 'This staff account is no longer available.');
+  return { ...staff, companyId: token.companyId, memberId, memberUid, memberAliases: [...memberAliases], date: routeDate(request.data?.date) };
 }
 function routeHandlers(db) {
   return {
     team: async (request) => {
       const { token } = requireAuth(request, true), staff = await requireStaff(db, request, token.companyId);
       const members = await db.collection('teamMembers').where('companyId', '==', token.companyId).where('status', '==', 'active').get();
-      const team = members.docs.filter((d) => d.get('uid') && (staff.role !== 'technician' || d.id === staff.memberId)).map((d) => ({ id: d.id, name: d.get('name') || d.get('email'), role: d.get('role') }));
-      if (staff.role !== 'technician') team.unshift({ id: staff.company.get('ownerId'), name: 'Company owner', role: 'owner' });
+      const candidates = members.docs.filter((d) => d.get('uid') && (staff.role !== 'technician' || d.id === staff.memberId) && d.get('uid') !== staff.company.get('ownerId')).map((d) => ({ id: d.id, uid: d.get('uid'), name: d.get('name') || d.get('email'), role: d.get('role') }));
+      if (staff.role !== 'technician') candidates.unshift({ id: staff.company.get('ownerId'), uid: staff.company.get('ownerId'), name: 'Company owner', role: 'owner' });
+      const team = [];
+      for (const person of candidates) {
+        const [deleted, availability] = await Promise.all([db.doc(`rlAccountDeletions/${documentId(person.uid)}`).get(), availabilityRef(db, token.companyId, person.uid).get()]);
+        if (!deleted.exists) team.push({ id: person.id, name: person.name, role: person.role, availability: availabilityView(availability.data()) });
+      }
       const data = staff.company.data();
       return { team, companyId: token.companyId, startAddress: [data.address, data.city, data.state, data.zipCode].filter((v) => typeof v === 'string' && v.trim()).join(', ') };
     },
     get: async (request) => {
       const scope = await routingScope(db, request);
       await rateLimit(db, 'route-read', request.auth.uid, 30);
-      const snap = await db.collection('jobs').where('companyId', '==', scope.companyId).where('assignedTo', '==', scope.memberId).where('date', '==', scope.date).limit(101).get();
+      const snap = await db.collection('jobs').where('companyId', '==', scope.companyId).where('assignedTo', 'in', scope.memberAliases).where('date', '==', scope.date).limit(101).get();
       const stops = [];
       for (const job of snap.docs.slice(0, 100)) {
-        const data = job.data(); if (['completed', 'cancelled'].includes(data.status)) continue;
+        const data = job.data(); if (['completed', 'cancelled'].includes(data.status) || data.assignedToUid && data.assignedToUid !== scope.memberUid) continue;
         const customer = data.customerId ? await db.doc(`customers/${documentId(data.customerId)}`).get() : null;
         const customerData = customer?.get('companyId') === scope.companyId ? customer.data() : {};
         const property = servicePropertySite(data);
@@ -61,7 +76,7 @@ function routeHandlers(db) {
       return db.runTransaction(async (tx) => {
         const [previous, ...jobs] = await Promise.all([tx.get(ref), ...refs.map((job) => tx.get(job))]);
         if ((previous.get('revision') || 0) !== (request.data.revision || 0)) throw new HttpsError('aborted', 'The saved route changed. Reload before saving.');
-        if (jobs.some((job) => !job.exists || job.get('companyId') !== scope.companyId || job.get('assignedTo') !== scope.memberId || job.get('date') !== scope.date || ['completed', 'cancelled'].includes(job.get('status')))) throw new HttpsError('permission-denied', 'A job is no longer eligible for this technician and date. Reload the route.');
+        if (jobs.some((job) => !job.exists || job.get('companyId') !== scope.companyId || !scope.memberAliases.includes(job.get('assignedTo')) || job.get('assignedToUid') && job.get('assignedToUid') !== scope.memberUid || job.get('date') !== scope.date || ['completed', 'cancelled'].includes(job.get('status')))) throw new HttpsError('permission-denied', 'A job is no longer eligible for this technician and date. Reload the route.');
         const revision = (previous.get('revision') || 0) + 1;
         tx.set(ref, { companyId: scope.companyId, memberId: scope.memberId, date: scope.date, jobIds: ids, startAddress: String(request.data.startAddress || '').slice(0, 500), returnToStart: request.data.returnToStart === true, updatedBy: request.auth.uid, updatedAt: new Date().toISOString(), revision });
         return { revision };

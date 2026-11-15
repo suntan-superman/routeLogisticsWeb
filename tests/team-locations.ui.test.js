@@ -15,6 +15,7 @@ function load(relative) {
   const module = { exports: {} };
   const mockRequire = name => {
     if (name === 'react') return React;
+    if (name.endsWith('/StaffAvailabilityEditor')) return { __esModule: true, default: () => null };
     if (name === 'react-hot-toast') return { __esModule: true, default: { success: message => toasts.push({type:'success',message}), error: message => toasts.push({type:'error',message}) } };
     if (name.endsWith('/useUnsavedChanges')) return { useUnsavedChanges: dirty => { unsaved=dirty; return {confirmDiscard:async()=>true}; } };
     if (name.endsWith('/AuthContext')) return { useAuth: () => ({ company: { id: 'acme', ownerId: 'owner' }, currentUser: { uid: owner ? 'owner' : 'manager' } }) };

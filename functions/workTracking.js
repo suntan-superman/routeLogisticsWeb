@@ -16,6 +16,7 @@ const {
   coordinates
 } = require('./routes');
 const { FieldValue } = require('firebase-admin/firestore');
+const { availabilityRef, availabilityView, assertAvailable } = require('./staffAvailability');
 const ms = value => value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : typeof value === 'string' ? Date.parse(value) : NaN;
 const iso = value => Number.isFinite(ms(value)) ? new Date(ms(value)).toISOString() : null;
 function policyFor(company) {
@@ -121,6 +122,16 @@ function workTrackingHandlers(db, legacy, {
     } = requireAuth(request, true);
     return requireStaff(db, request, token.companyId);
   };
+  async function currentStaff(tx, staff) {
+    const [company, deleted] = await Promise.all([tx.get(staff.company.ref), tx.get(db.doc(`rlAccountDeletions/${staff.uid}`))]);
+    if (!company.exists || company.get('isActive') === false || company.get('deletedAt') || deleted.exists) throw new HttpsError('permission-denied', 'Your work access changed. Refresh your workspace.');
+    if (staff.role === 'owner') {
+      if (company.get('ownerId') !== staff.uid) throw new HttpsError('permission-denied', 'Company ownership changed. Refresh your workspace.');
+    } else {
+      const member = await tx.get(db.doc(`teamMembers/${documentId(staff.memberId)}`));
+      if (member.get('status') !== 'active' || member.get('companyId') !== company.id || member.get('uid') !== staff.uid || member.get('role') !== staff.role) throw new HttpsError('permission-denied', 'Your work access changed. Refresh your workspace.');
+    }
+  }
   async function evidence(staff, shift, point, accuracy, at, jobId) {
     const policy = policyFor(staff.company),
       time = now();
@@ -220,17 +231,20 @@ function workTrackingHandlers(db, legacy, {
       const target = refs(staff),
         newId = randomBytes(24).toString('hex');
       const shift = await db.runTransaction(async tx => {
-        const [saved, location] = await Promise.all([tx.get(target.shift), tx.get(target.location)]);
+        await currentStaff(tx, staff);
+        const [saved, location, availability] = await Promise.all([tx.get(target.shift), tx.get(target.location), tx.get(availabilityRef(db, staff.company.id, staff.uid))]);
+        const unavailable = availabilityView(availability.data(), time).state === 'unavailable';
+        if (action === 'start') assertAvailable(availability.data(), time);
         let data = saved.exists ? saved.data() : null;
         if (action === 'end' && request.data.shiftId && data?.id !== request.data.shiftId) fail('shift-mismatch', 'This is a different work shift. Refresh before ending it.');
         const membershipChanged = data && data.memberId !== (staff.memberId || staff.uid);
-        if (data?.status === 'on-duty' && (!active(data, time) || action === 'end' || membershipChanged)) {
+        if (data?.status === 'on-duty' && (!active(data, time) || action === 'end' || membershipChanged || unavailable)) {
           const expired = !active(data, time);
           data = {
             ...data,
             status: 'off-duty',
             endedAt: expired ? new Date(ms(data.expiresAt)) : new Date(time),
-            endReason: expired ? 'expired' : membershipChanged ? 'membership-changed' : 'user-ended'
+            endReason: expired ? 'expired' : membershipChanged ? 'membership-changed' : unavailable ? 'supervisor-unavailable' : 'user-ended'
           };
           tx.set(target.shift, data);
           tx.set(db.doc(`rlWorkShiftEvents/${data.id}-end`), {
@@ -267,6 +281,7 @@ function workTrackingHandlers(db, legacy, {
       });
       return {
         shift,
+        availability: availabilityView((await availabilityRef(db, staff.company.id, staff.uid).get()).data(), time),
         policy
       };
     },
@@ -298,8 +313,10 @@ function workTrackingHandlers(db, legacy, {
         };
       }
       if (action === 'start') return db.runTransaction(async tx => {
-        const [saved, location] = await Promise.all([tx.get(target.shift), tx.get(target.location)]),
+        await currentStaff(tx, staff);
+        const [saved, location, availability] = await Promise.all([tx.get(target.shift), tx.get(target.location), tx.get(availabilityRef(db, staff.company.id, staff.uid))]),
           shift = saved.data();
+        assertAvailable(availability.data(), time);
         ownShift(shift, staff, request.data.shiftId, time);
         const sessionId = location.get('sharing') && location.get('shiftId') === shift.id ? location.get('sessionId') : randomBytes(24).toString('hex');
         tx.set(target.location, {
@@ -329,7 +346,9 @@ function workTrackingHandlers(db, legacy, {
       if (!point) throw new HttpsError('invalid-argument', 'A numeric location fix and known numeric accuracy are required.');
       let shift, at;
       const result = await db.runTransaction(async tx => {
-        const [saved, current] = await Promise.all([tx.get(target.shift), tx.get(target.location)]);
+        await currentStaff(tx, staff);
+        const [saved, current, availability] = await Promise.all([tx.get(target.shift), tx.get(target.location), tx.get(availabilityRef(db, staff.company.id, staff.uid))]);
+        assertAvailable(availability.data(), time);
         if (!current.exists || !current.get('sharing')) fail('session-ended', 'Location sharing has stopped. Start it again during your shift.');
         if (!request.data.sessionId || current.get('sessionId') !== request.data.sessionId) fail('session-mismatch', 'This location session has been replaced. Refresh your shift.');
         shift = saved.data();
@@ -382,7 +401,7 @@ function workTrackingHandlers(db, legacy, {
       const staff = await staffFor(request);
       if (staff.role === 'technician') throw new HttpsError('permission-denied', 'Manager access is required to view team locations.');
       await rateLimit(db, 'location-read', staff.uid, 30);
-      const [rows, members, shifts] = await Promise.all(['rlLocations', 'teamMembers', 'rlWorkShifts'].map(name => db.collection(name).where('companyId', '==', staff.company.id).limit(501).get()));
+      const [rows, members, shifts, availabilityRows] = await Promise.all(['rlLocations', 'teamMembers', 'rlWorkShifts', 'rlStaffAvailability'].map(name => db.collection(name).where('companyId', '==', staff.company.id).limit(501).get()));
       const policy = policyFor(staff.company),
         time = now(),
         ownerId = staff.company.get('ownerId'),
@@ -398,16 +417,18 @@ function workTrackingHandlers(db, legacy, {
         name: row.get('name') || row.get('email') || 'Team member',
         role: row.get('role')
       }))];
-      const roster = team.map(member => {
+      const deleted = new Set((await db.getAll(...team.map(member => db.doc(`rlAccountDeletions/${documentId(member.userId)}`)))).filter(row => row.exists).map(row => row.id));
+      const roster = team.filter(member => !deleted.has(member.userId)).map(member => {
+        const availability = availabilityView(availabilityRows.docs.find(row => row.get('userId') === member.userId)?.data(), time);
         const shift = shifts.docs.find(row => row.get('userId') === member.userId && row.get('memberId') === member.memberId)?.data(),
-          onDuty = active(shift, time);
+          onDuty = active(shift, time) && availability.state !== 'unavailable';
         const row = rows.docs.find(row => row.get('userId') === member.userId && row.get('memberId') === member.memberId),
           data = row?.data(),
           at = ms(data?.capturedAt || data?.updatedAt);
         const retained = data && ms(data.expiresAt) > time && at + policy.retentionHours * 3600000 > time && Number.isFinite(data.lat) && Number.isFinite(data.lng);
         const matching = data?.shiftId ? onDuty && data.shiftId === shift.id && data.positionShiftId === shift.id : !!data;
         const stale = !matching || !Number.isFinite(at) || time - at > (data?.shiftId ? policy.freshAfterSeconds : 180) * 1000 || ms(data?.sessionExpiresAt) <= time;
-        const trackingState = !onDuty && data?.shiftId ? 'off-duty' : !data?.sharing ? 'sharing-disabled' : !retained || onDuty && data.positionShiftId !== shift.id ? 'waiting-for-fix' : stale ? 'stale' : 'live';
+        const trackingState = availability.state === 'unavailable' || !onDuty && data?.shiftId ? 'off-duty' : !data?.sharing ? 'sharing-disabled' : !retained || onDuty && data.positionShiftId !== shift.id ? 'waiting-for-fix' : stale ? 'stale' : 'live';
         const location = retained ? {
           id: row.id,
           ...member,
@@ -417,15 +438,16 @@ function workTrackingHandlers(db, legacy, {
           updatedAt: new Date(at).toISOString(),
           capturedAt: new Date(at).toISOString(),
           receivedAt: iso(data.receivedAt),
-          sharing: data.sharing === true && matching && !stale,
+          sharing: data.sharing === true && matching && !stale && availability.state !== 'unavailable',
           stale,
-          state: !data.sharing || data.shiftId && !onDuty ? 'sharing-disabled' : stale ? 'stale' : 'live',
+          state: !data.sharing || data.shiftId && !onDuty || availability.state === 'unavailable' ? 'sharing-disabled' : stale ? 'stale' : 'live',
           dutyStatus: onDuty ? 'on-duty' : 'off-duty',
           freshAfterSeconds: policy.freshAfterSeconds
         } : null;
         if (location) locations.push(location);
         return {
           ...member,
+          availability,
           dutyStatus: onDuty ? 'on-duty' : 'off-duty',
           onDuty,
           shiftStartedAt: iso(shift?.startedAt),
@@ -441,7 +463,7 @@ function workTrackingHandlers(db, legacy, {
         policy,
         retentionHours: policy.retentionHours,
         freshAfterSeconds: policy.freshAfterSeconds,
-        truncated: rows.size > 500 || members.size > 500 || shifts.size > 500
+        truncated: rows.size > 500 || members.size > 500 || shifts.size > 500 || availabilityRows.size > 500
       };
     },
     policy: async request => {

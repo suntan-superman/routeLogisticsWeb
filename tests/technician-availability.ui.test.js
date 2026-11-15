@@ -6,7 +6,7 @@ const React = mobile('react'), { create, act } = mobile('react-test-renderer'), 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 const settle = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
-const roster = { technicians: [{ id: 'owner', name: 'Company owner', role: 'owner' }, { id: 'tech-1', name: 'Technician One', role: 'technician' }, { id: 'tech-2', name: 'Technician Two', role: 'technician' }, { id: 'manager', name: 'Manager excluded', role: 'manager' }, { id: 'inactive', name: 'Inactive excluded', role: 'technician', status: 'inactive' }], timeZone: 'America/Los_Angeles', workWindow: { start: '08:00', end: '18:00', days: [0, 1, 2, 3, 4, 5, 6], source: 'default' } };
+const roster = { technicians: [{ id: 'owner', name: 'Company owner', role: 'owner' }, { id: 'tech-1', name: 'Technician One', role: 'technician' }, { id: 'tech-2', name: 'Technician Two', role: 'technician' }, { id: 'manager', name: 'Active manager', role: 'manager' }, { id: 'inactive', name: 'Inactive excluded', role: 'technician', status: 'inactive' }], timeZone: 'America/Los_Angeles', workWindow: { start: '08:00', end: '18:00', days: [0, 1, 2, 3, 4, 5, 6], source: 'default' } };
 const available = { available: true, reason: 'No scheduled work overlaps this appointment.', conflicts: [], alternatives: [] };
 const conflict = { available: false, reason: 'Scheduled work overlaps this appointment.', conflicts: [{ jobId: 'private-job-id', date: '2030-01-07', time: '09:00', endTime: '10:00', customerName: 'PRIVATE CUSTOMER', price: 12345 }], alternatives: [{ date: '2030-01-07', time: '10:00' }] };
 let tree, props, env;
@@ -41,12 +41,12 @@ async function render(overrides = {}) {
 async function update(changes) { props = { ...props, ...changes }; await act(async () => tree.update(React.createElement(Panel, props))); await act(settle); }
 afterEach(async () => { if (tree) await act(async () => tree.unmount()); tree = null; });
 
-test('roster and automatic preflight use authorized endpoint payloads and only show active technicians plus owner', async () => {
+test('roster and automatic preflight use authorized endpoint payloads and only show active technicians, managers and owner', async () => {
   reset(); await render({ estimatedDuration: '1.5' });
   assert.deepEqual(env.calls.map(call => call.name), ['rlCheckAvailability', 'rlCheckAvailability']);
   assert.deepEqual(env.calls[0].data, { action: 'roster', companyId: 'company-a' });
   assert.deepEqual(env.calls[1].data, { action: 'check', companyId: 'company-a', memberId: 'tech-1', date: base.date, time: base.time, estimatedDuration: 1.5, jobId: base.jobId });
-  assert.deepEqual(tree.root.findAllByType('option').map(option => option.children.join('')), ['Unassigned', 'Company owner', 'Technician One', 'Technician Two']);
+  assert.deepEqual(tree.root.findAllByType('option').map(option => option.children.join('')), ['Unassigned', 'Company owner', 'Technician One', 'Technician Two', 'Active manager']);
   assert.match(text(), /Available for this appointment/); assert.match(text(), /Checks scheduled work; travel time is not included/); assert.doesNotMatch(text(), /on-duty|GPS|unavailable because/i);
   assert.match(text(), /8:00 AM–6:00 PM/); assert.match(text(), /America\/Los_Angeles/);
   await act(async () => select().props.onChange({ target: { value: 'tech-2' } })); assert.deepEqual(env.members, ['tech-2']);

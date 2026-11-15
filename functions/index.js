@@ -9,6 +9,7 @@ const { workspaceStatus } = require('./workspace');
 const { workDataHandlers } = require('./workData');
 const { schedulingHandlers } = require('./scheduling');
 const { scheduleMembershipHandlers } = require('./scheduleMembership');
+const { staffAvailabilityHandlers } = require('./staffAvailability');
 const { jobPhotoHandler } = require('./jobPhotos');
 const { assignmentTarget, buildAssignmentMessage, DEAD_TOKEN_CODES } = require('./notify');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
@@ -139,6 +140,7 @@ exports.syncClaims = onCall(async (request) => {
 const scheduling = schedulingHandlers(db);
 const workData = workDataHandlers(db, { serviceAreas, scheduling });
 exports.rlCheckAvailability = onCall({ timeoutSeconds: 60 }, scheduling.handle);
+exports.rlManageStaffAvailability = onCall({ timeoutSeconds: 60 }, staffAvailabilityHandlers(db));
 exports.rlReadWorkspace = onCall(workData.read);
 exports.rlManageJob = onCall(workData.manageJob);
 exports.rlRecordApplication = onCall(workData.application);

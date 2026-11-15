@@ -41,6 +41,7 @@ function load(relative) {
     if (specifier === 'expo-blur') return { BlurView: 'BlurView' };
     if (specifier === 'expo-linear-gradient') return { LinearGradient: 'LinearGradient' };
     if (specifier === '@expo/vector-icons') return { Ionicons: 'Icon', MaterialIcons: 'Icon', AntDesign: 'Icon', MaterialCommunityIcons: 'Icon' };
+    if (specifier === 'react-native-maps') return { __esModule: true, default: React.forwardRef((props, ref) => React.createElement('NativeMap', { ...props, ref })), Marker: 'NativeMapMarker' };
     if (specifier === '@react-native-community/datetimepicker') return 'NativeDatePicker';
     if (specifier === '@react-native-community/netinfo') return { addEventListener: listener => { networkListeners.add(listener); listener({ isConnected: true, isInternetReachable: true }); return () => networkListeners.delete(listener); } };
     if (specifier === '@react-native-async-storage/async-storage') return { getItem: async key => stored.get(key) || null, setItem: async (key, value) => stored.set(key, value), removeItem: async key => stored.delete(key) };

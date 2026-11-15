@@ -57,10 +57,10 @@ async function fixture({ solo = false } = {}) {
   return f;
 }
 
-test('roster offers only active technicians and owner, omitting managers, deleted and ambiguous accounts', async () => {
+test('roster offers active technicians, working managers and owner, omitting deleted and ambiguous accounts', async () => {
   const f = await fixture(); await set(`rlAccountDeletions/${f.tech2}-uid`, { status: 'deleted' });
   const result = await f.api.handle(f.request({ action: 'roster', companyId: f.id }));
-  assert.deepEqual(new Set(result.technicians.map(person => person.id)), new Set([f.tech, f.uid]));
+  assert.deepEqual(new Set(result.technicians.map(person => person.id)), new Set([f.tech, f.uid, f.manager]));
   assert.equal(result.timeZone, 'America/Los_Angeles'); assert.deepEqual(result.workWindow.days, [0, 1, 2, 3, 4, 5, 6]);
   assert.equal(result.technicians.some(person => Object.hasOwn(person, 'uid')), false);
 });
@@ -98,10 +98,10 @@ test('edited job exclusion is tenant checked and does not conceal another overla
   assert.equal((await f.api.handle(f.request({ memberId: f.tech, date: '2030-01-03', time: '09:00', jobId }))).available, false);
 });
 
-test('inactive, cross-tenant and newly selected managers cannot be assigned; existing active manager work is retained', async () => {
+test('inactive and cross-tenant staff cannot be assigned; working managers can receive their own field assignments', async () => {
   const f = await fixture(); await db.doc(`teamMembers/${f.tech}`).update({ status: 'inactive' });
   const inactive = await f.api.handle(f.request({ memberId: f.tech, date: '2030-01-03', time: '09:00' })); assert.equal(inactive.available, false); assert.match(inactive.reason, /no longer active/);
-  await assert.rejects(f.book(`${f.id}-new-manager`, { assignedTo: f.manager }), { code: 'failed-precondition' });
+  assert.equal((await f.book(`${f.id}-new-manager`, { assignedTo: f.manager })).assignedToUid, `${f.manager}-uid`);
   const old = `${f.id}-old-manager`; await set(`jobs/${old}`, f.job({ assignedTo: f.manager }));
   assert.equal((await f.book(old, { time: '10:00' })).assignedTo, f.manager);
   await set(`teamMembers/${f.id}-foreign-tech`, { uid: 'other-account', companyId: 'other-company', status: 'active', role: 'technician' });

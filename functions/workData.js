@@ -8,7 +8,7 @@ const { serviceAreaWorkflow, servicePropertySite, propertyAddress } = require('.
 const { schedulingHandlers } = require('./scheduling');
 const { buildInitialPlan } = require('./recurring');
 
-const JOB_FIELDS = ['userId', 'companyId', 'customerId', 'customerName', 'customerPhone', 'serviceType', 'serviceCategory', 'title', 'address', 'city', 'state', 'zipCode', 'serviceArea', 'date', 'time', 'windowStart', 'windowEnd', 'estimatedDuration', 'duration', 'priority', 'status', 'assignedTo', 'assignedToName', 'assignmentNeedsAttention', 'assignmentReview', 'servicePlanId', 'servicePlanDate', 'workNotes', 'actualWorkDone', 'actualHours', 'completionNotes', 'completedAt', 'createdAt', 'updatedAt'];
+const JOB_FIELDS = ['userId', 'companyId', 'customerId', 'customerName', 'customerPhone', 'serviceType', 'serviceCategory', 'title', 'address', 'city', 'state', 'zipCode', 'serviceArea', 'date', 'time', 'windowStart', 'windowEnd', 'estimatedDuration', 'duration', 'priority', 'status', 'assignedTo', 'assignedToUid', 'assignedToName', 'assignmentNeedsAttention', 'assignmentReview', 'servicePlanId', 'servicePlanDate', 'workNotes', 'actualWorkDone', 'actualHours', 'completionNotes', 'completedAt', 'createdAt', 'updatedAt'];
 const PRICING_FIELDS = ['totalCost', 'estimatedCost', 'laborRate', 'laborHours', 'materialCost', 'materials', 'scopeOfWork', 'notes', 'description', 'servicePlanId'];
 const CUSTOMER_FIELDS = ['userId', 'companyId', 'name', 'firstName', 'lastName', 'email', 'emailNormalized', 'phone', 'phoneNumber', 'address', 'city', 'state', 'zipCode', 'postalCode', 'isActive', 'status', 'createdAt', 'updatedAt', 'lastServiceDate', 'totalJobs', 'emailConsent', 'notes', 'serviceInstructions'];
 const APPLICATION_FIELDS = ['product', 'epaRegNo', 'activeIngredient', 'amount', 'unit', 'targetPest', 'areaTreated', 'method', 'applicatorLicense', 'notes'];
@@ -93,14 +93,26 @@ function workDataHandlers(db, config = {}) {
       }
       if (!['jobs', 'customers', 'photos', 'serviceLogs'].includes(resource)) throw new HttpsError('invalid-argument', 'Unknown workspace resource.');
       if (resource === 'jobs') {
+        if (data.assignedTo !== undefined && data.assignedTo !== 'self') throw new HttpsError('invalid-argument', 'Choose your personal assignments or the company schedule.');
+        const personal = data.assignedTo === 'self' && !!scope.companyId;
+        const ownIds = new Set([scope.uid, scope.memberId].filter(Boolean));
+        if (personal && scope.role === 'owner') {
+          const aliases = await db.collection('teamMembers').where('companyId', '==', scope.companyId).where('uid', '==', scope.uid).limit(21).get();
+          if (aliases.size > 20) throw new HttpsError('resource-exhausted', 'Your staff identities need review before loading personal work.');
+          aliases.docs.forEach(row => ownIds.add(row.id));
+        }
+        const ownJob = job => !personal || ownIds.has(job.assignedTo) && (!job.assignedToUid || job.assignedToUid === scope.uid);
+        const personalIdentity = job => personal ? { ...job, assignedToUid: scope.uid } : job;
         if (data.id) {
           const job = await jobFor(db, scope, data.id);
+          if (!ownJob(job.data())) throw new HttpsError('permission-denied', 'This job is not assigned to you.');
           const customer = job.get('customerId') ? await db.doc(`customers/${documentId(job.get('customerId'))}`).get() : null;
           const sameCustomer = customer?.exists && (scope.companyId ? customer.get('companyId') === scope.companyId : !customer.get('companyId') && customer.get('userId') === scope.uid);
-          return { job: projectJob(job.id, withCustomerLocation(job.data(), sameCustomer ? customer.data() : null), scope.role), customer: sameCustomer ? projectCustomer(customer.id, customer.data(), scope.role) : null };
+          return { job: projectJob(job.id, personalIdentity(withCustomerLocation(job.data(), sameCustomer ? customer.data() : null)), scope.role), customer: sameCustomer ? projectCustomer(customer.id, customer.data(), scope.role) : null };
         }
         let query = scoped(db, resource, scope);
         if (scope.role === 'technician') query = query.where('assignedTo', '==', scope.memberId);
+        else if (personal) query = query.where('assignedTo', 'in', [...ownIds]);
         if (data.date) { if (!/^\d{4}-\d{2}-\d{2}$/.test(data.date)) throw new HttpsError('invalid-argument', 'Choose a service date.'); query = query.where('date', '==', data.date); }
         const range = !data.date && (data.startDate || data.endDate);
         if (range) {
@@ -116,13 +128,13 @@ function workDataHandlers(db, config = {}) {
           else query = query.startAfter(documentId(data.after));
         }
         const rows = await query.limit(maximum + 1).get();
-        const page = rows.docs.slice(0, maximum), customerIds = [...new Set(page.filter(row => !row.get('address') && typeof row.get('customerId') === 'string').map(row => row.get('customerId')))];
+        const scanned = rows.docs.slice(0, maximum), page = scanned.filter(row => ownJob(row.data())), customerIds = [...new Set(page.filter(row => !row.get('address') && typeof row.get('customerId') === 'string').map(row => row.get('customerId')))];
         const customers = new Map();
         for (let offset = 0; offset < customerIds.length; offset += 100) {
           const records = await db.getAll(...customerIds.slice(offset, offset + 100).map(id => db.doc(`customers/${documentId(id)}`)));
           records.filter(row => row.exists && (scope.companyId ? row.get('companyId') === scope.companyId : !row.get('companyId') && row.get('userId') === scope.uid)).forEach(row => customers.set(row.id, row.data()));
         }
-        return { jobs: page.map(row => projectJob(row.id, withCustomerLocation(row.data(), customers.get(row.get('customerId'))), scope.role)), hasMore: rows.size > maximum, lastDoc: page.at(-1)?.id || null };
+        return { jobs: page.map(row => projectJob(row.id, personalIdentity(withCustomerLocation(row.data(), customers.get(row.get('customerId')))), scope.role)), hasMore: rows.size > maximum, lastDoc: scanned.at(-1)?.id || null };
       }
       if (resource === 'customers') {
         if (scope.role === 'technician') {
@@ -178,7 +190,7 @@ function workDataHandlers(db, config = {}) {
       const ref = action === 'create' ? recurring ? db.doc(`jobs/${planRef.id}`) : db.collection('jobs').doc() : db.doc(`jobs/${documentId(data.id)}`);
       const input = data.job || {};
       const permitted = [...JOB_FIELDS, ...PRICING_FIELDS, 'latitude', 'longitude', 'workNotes', 'cancelledAt', 'cancellationReason'];
-      const patch = action === 'assign' ? { assignedTo: data.memberId || null } : pick(input, permitted.filter(key => !['userId', 'companyId', 'createdAt', 'updatedAt', 'assignedToName', 'assignmentNeedsAttention', 'assignmentReview', 'servicePlanId', 'servicePlanDate'].includes(key)));
+      const patch = action === 'assign' ? { assignedTo: data.memberId || null } : pick(input, permitted.filter(key => !['userId', 'companyId', 'createdAt', 'updatedAt', 'assignedToName', 'assignedToUid', 'assignmentNeedsAttention', 'assignmentReview', 'servicePlanId', 'servicePlanDate'].includes(key)));
       if (patch.status && !['scheduled', 'en-route', 'in-progress', 'completed', 'cancelled'].includes(patch.status)) throw new HttpsError('invalid-argument', 'Invalid job status.');
       const initial = action === 'create' ? null : await ref.get();
       if (initial) checkJob(scope, initial.data());

@@ -6,6 +6,7 @@ import { cachedRead, readCache, overlayJobs } from './offline';
 import { callWorkspace, readWorkspace } from './workspaceApi';
 import { WORK_POLL_MS, periodRange, accessError, workScopeKey } from './workQueryPolicy';
 import { normalizeJobLocation } from './workPresentation';
+import { personalJobs, personalRouteMember } from './mobileMode';
 
 function options(context, enabled) {
   return { enabled: !!enabled && context.canReadWork && context.active,
@@ -38,16 +39,16 @@ function useWorkRefresh(context, query) {
   const refetch = useCallback(async () => { if (await validate()) return query.refetch(); }, [validate, query.refetch]);
   return { refreshWork, refetch };
 }
-export function useWorkJobs(period, { enabled = true } = {}) {
+export function useWorkJobs(period, { enabled = true, personal = false } = {}) {
   const context = useWorkQueryScope();
   const { startDate, endDate } = periodRange(period, context.day);
-  const queryKey = [...context.scope, 'jobs', startDate, endDate];
+  const queryKey = [...context.scope, 'jobs', startDate, endDate, ...(personal ? ['self'] : [])];
   useVisibleWorkQuery(context, queryKey, enabled);
   const query = useQuery({ ...options(context, enabled), queryKey, meta: { resource: 'jobs' },
     queryFn: async ({ signal }) => {
-      const result = await JobService.getJobsByDateRange(startDate, endDate); aborted(signal);
+      const result = await JobService.getJobsByDateRange(startDate, endDate, { personal }); aborted(signal);
       if (!result.success) throw Object.assign(new Error(result.error?.message || result.error || 'Could not load your schedule.'), { code: result.error?.code || result.code });
-      return result.jobs;
+      return personal ? personalJobs(result.jobs, context.user) : result.jobs;
     },
   });
   const refresh = useWorkRefresh(context, query);
@@ -55,7 +56,7 @@ export function useWorkJobs(period, { enabled = true } = {}) {
   return { ...query, ...accessInfo(context, query), ...refresh, jobs, startDate, endDate };
 }
 export function useMyDailyRoute({ enabled = true } = {}) {
-  const context = useWorkQueryScope(), memberId = context.user?.membershipId || context.user?.id;
+  const context = useWorkQueryScope(), memberId = personalRouteMember(context.user);
   const queryKey = [...context.scope, 'route', context.day, memberId], visible = enabled && !!context.user?.companyId;
   useVisibleWorkQuery(context, queryKey, visible);
   const query = useQuery({ ...options(context, visible), queryKey, meta: { resource: 'route' },

@@ -2,13 +2,44 @@
 
 Acceptance baseline: **November 14, 2026 (America/Los_Angeles)**. Inspected application source: **332aa77** on existing **main**. This is the single operator acceptance procedure; it records current automated/read-only results separately from historical provider evidence and unperformed device/manual tests.
 
-Use the existing production site, Firebase project and corporate TestFlight app for operator acceptance. Current acceptance development leaves production records unchanged: synthetic fixture writes occur **only in local emulators**, with no customer email/SMS/push, provider financial/accounting operation or infrastructure deployment. Follow the case-specific permission and fixture prerequisites before later operator execution.
+Use the existing production site, Firebase project and corporate TestFlight app for operator acceptance. Acceptance fixture writes occur **only in local emulators**, with no real customer email/SMS/push or financial/accounting transactions. Later implementation deployments and native configuration are recorded in dated addenda; customer records are preserved. Follow the case-specific permission and fixture prerequisites before later operator execution.
 
 ## A. Executive summary
 
 Route Logistics has a tested field-work foundation suitable for a **controlled pilot after the short physical core workflow passes**. It is not yet certified across every browser, device, optional commercial feature or integration delivery path. Current automated results are recorded below; the original source/function inventory remains a dated acceptance baseline. Physical-device and genuine provider delivery acceptance remain separate.
 
-Current browser coverage is **29 scenarios** (87 configured executions across Chromium, Firefox and WebKit). See the November 15 addenda below for execution evidence. Earlier evidence for the original 25 scenarios is retained, including the later clean 75/75 Jobs-date run. Physical iPhone/Android and genuine provider acceptance remain separate.
+Current browser coverage is **31 scenarios** (93 configured executions across Chromium, Firefox and WebKit). See the November 15 addenda below for execution evidence. Earlier evidence for the original 25 scenarios is retained, including the later clean 75/75 Jobs-date run. Physical iPhone/Android and genuine provider acceptance remain separate.
+
+### November 15 — dual-mode mobile operations and temporary availability
+
+Owners/managers now use one account for personal Field Mode and company
+Management Mode. Admin operations follow their unchanged capability policy;
+technicians have Field Mode only. Personal jobs/routes, the existing work-order
+and offline workflow, per-user/company mode preference, shift consent and safe
+draft navigation are retained. Management adds team overview/detail, selected-day
+agenda, authorized native locations, routes and confirmed reassignment.
+
+Owner/manager temporary availability supports sick/vacation/off-duty periods and
+bounded emergency call-outs. Scheduling and alternatives enforce these periods
+server-side; emergency availability never restores revoked company access or
+starts GPS. Existing appointments remain for dispatcher review. See
+[mobile operations](mobile-dual-mode-operations.md) for architecture, endpoint,
+build and physical acceptance details. Native creation/full editing continue on
+the geographically validated web workflow.
+
+PW-OPS-17/18 add synthetic browser coverage for unavailable-period assignment
+rejection and a bounded emergency override. These are emulator/browser checks,
+not physical-device acceptance. New MOB-DM-01 through MOB-DM-06 remain Not Run
+until executed on actual rebuilt iOS/Android devices. Results: **174 Functions passes/one existing skip; 335 web; 267 mobile**.
+The broad Firestore/Storage run passed **440/440** and final targeted run
+**38/38**, covering **447 distinct cases** including field parity and the last
+three regressions. Chromium smoke passed **9/9**. The full three-engine browser
+run passed **92/93**; Firefox PW-OPS-18 exposed a save/refresh reopening race.
+The editor now remains disabled until its roster revision is current.
+Corrected three-engine availability result: **6/6 passed after the fix (Chromium, Firefox, WebKit)**.
+The initial failure is retained; this is not described as a clean 93/93 run.
+Expo Doctor **18/18**, iOS export, local Android ARM64 release/signature check,
+web lint/build passed (two existing lint warnings). No physical case is passed.
 
 ### November 15 — unified scheduling and typed-email deletion
 
@@ -79,16 +110,16 @@ versus explicitly permanent changes. No physical/manual case is newly marked Pas
 
 | Cases | Pass | Fail | Blocked | Not Run | Dated historical live/provider Pass |
 | --- | --- | --- | --- | --- | --- |
-| 155 | 45 | 0 | 7 | 103 | 9 |
+| 161 | 45 | 0 | 7 | 109 | 9 |
 
-The 45 Pass results include current automated/read-only checks (including newly automated DSP-009) and **nine dated historical provider/live checks**. A historical Pass proves only the named prior scenario. The 103 Not Run cases still require manual/operator execution; seven Blocked entries are scoped feature/prerequisite gaps, including overlapping Android readiness entries. Case counts are acceptance scenarios, not individual automated test counts.
+The 45 Pass results include current automated/read-only checks (including newly automated DSP-009) and **nine dated historical provider/live checks**. A historical Pass proves only the named prior scenario. The 109 Not Run cases still require manual/operator execution; seven Blocked entries are scoped feature/prerequisite gaps, including overlapping Android readiness entries. Case counts are acceptance scenarios, not individual automated test counts.
 
 | Classification | Current evidence | Acceptance limit |
 | --- | --- | --- |
 | Deployment evidence | Original function inventory and dated provider/deployment receipts below; current release checks in the scheduling note | Active metadata/HTTP 200 does not prove every business action |
-| Current automated regression | Functions167 pass/1 existing skip; web326; rules/integration427; typed-email Auth-emulator1 | Emulators/test transports are not provider or physical-device delivery |
-| Mobile regression | 229/229 pass including full-email deletion confirmation and identity-change safeguards | Physical camera/deletion acceptance remains separate and requires a rebuilt app |
-| Browser regression | Chromium29/29; new PW-OPS-15/16 passed6/6 across all three engines; earlier cross-engine evidence retained below | Other Firefox/WebKit cases not rerun in this batch; physical/manual cases unchanged |
+| Current automated regression | Functions174 pass/1 existing skip; web335; rules/integration440 broad +38 focused (447 distinct); earlier typed-email Auth-emulator1 | Emulators/test transports are not provider or physical-device delivery |
+| Mobile regression | 267/267 pass including dual-mode, availability and existing deletion/workflow guards; Android ARM64 build and iOS export pass | Physical camera/deletion acceptance remains separate and requires a rebuilt app |
+| Browser regression | Smoke9/9; full matrix92/93; corrected availability 6/6 passed after the fix (Chromium, Firefox, WebKit) | Initial Firefox save/refresh race retained in evidence; physical/manual cases unchanged |
 | Historically provider-verified | Stripe test settlement; QuickBooks sandbox writes/tax/payments; Twilio delivered/STOP/START; iOS push/tap; portal OTP and review email/submission | Dates and exact scenarios in Section G; no new provider transaction/message in this run |
 | Physical acceptance outstanding | Current installed build, camera/gallery/reopen, assigned-job completion, offline restart/sync, background GPS, push app states | Execute Section F with synthetic work before using real pilot visits |
 | Source gaps / intentionally off | Native manager geography forms, industry selector, discounts, full native CRM; live Stripe/QB production/broad SMS/review automation off | Use supported web workflows and scoped pilot limits; do not weaken backend authorization |
@@ -3656,6 +3687,92 @@ Exact paths below are relative to https://route-logistics.com unless a native or
 - **Status:** **Not Run**
 - **Evidence reference:** `routeLogisticsMobile/components/MobileUI.js`; `routeLogisticsMobile/components/WorkspaceTabs.js`; `routeLogisticsMobile/components/JobWorkflow.js`; `routeLogisticsMobile/scripts/workspaceNavigation.test.js`
 - **Cleanup instructions:** Restore only this case’s synthetic fixtures and own preferences; retain evidence. Do not delete legitimate records or uninstall an app with pending work.
+
+### Phase 18 — Dual-mode native operations
+
+#### MOB-DM-01 — Working owner
+
+- **User role:** Owner
+- **Preconditions:** Rebuilt native binary; independently authorized disposable tenant/staff/work fixtures.
+- **Exact navigation path:** Field → Home → assigned job → Management → Team/Map → Field
+- **Steps:**
+1. Confirm this rebuilt app uses the corporate bundle and existing owner account.
+2. Complete a synthetic personally assigned visit with checklist, photo, notes and evidence.
+3. Switch to Management, inspect schedules/authorized locations, then return to Field.
+- **Expected result:** One identity; only personal work in Field; company operations in Management; no lost work or permission changes.
+- **Actual result:** Not executed on a physical device. Automated coverage is supporting evidence only.
+- **Status:** **Not Run**
+- **Evidence reference:** docs/mobile-dual-mode-operations.md; scripts/mobileMode/workspaceNavigation/managementScreens tests; tests/mobileDualMode.integration.test.js; tests/staffAvailability.integration.test.js.
+
+#### MOB-DM-02 — Working manager and reassignment
+
+- **User role:** Manager
+- **Preconditions:** Rebuilt native binary; independently authorized disposable tenant/staff/work fixtures.
+- **Exact navigation path:** Field → Work shift → Route; Management → Team → details → Schedule
+- **Steps:**
+1. Explicitly start a shift and its permitted sharing mode.
+2. Inspect another staff schedule and authorized last-known position.
+3. Reassign a synthetic job, check availability, confirm and return to the personal route.
+- **Expected result:** Saved assignment and audit persist; field queue remains intact; no owner-only or financial privilege appears.
+- **Actual result:** Not executed on a physical device. Automated coverage is supporting evidence only.
+- **Status:** **Not Run**
+- **Evidence reference:** docs/mobile-dual-mode-operations.md; scripts/mobileMode/workspaceNavigation/managementScreens tests; tests/mobileDualMode.integration.test.js; tests/staffAvailability.integration.test.js.
+
+#### MOB-DM-03 — Technician mode and scoped preference
+
+- **User role:** Technician, owner/manager
+- **Preconditions:** Rebuilt native binary; independently authorized disposable tenant/staff/work fixtures.
+- **Exact navigation path:** App header and account/company switching
+- **Steps:**
+1. Verify technicians cannot select Management.
+2. Use a disposable test preference to attempt management restoration under a technician.
+3. Switch authorized users/companies, then revoke the fixture membership and refresh.
+- **Expected result:** No management data, preference leakage or stale company access. Current capabilities remain authoritative.
+- **Actual result:** Not executed on a physical device. Automated coverage is supporting evidence only.
+- **Status:** **Not Run**
+- **Evidence reference:** docs/mobile-dual-mode-operations.md; scripts/mobileMode/workspaceNavigation/managementScreens tests; tests/mobileDualMode.integration.test.js; tests/staffAvailability.integration.test.js.
+
+#### MOB-DM-04 — Offline work preservation across modes
+
+- **User role:** Owner/manager
+- **Preconditions:** Rebuilt native binary; independently authorized disposable tenant/staff/work fixtures.
+- **Exact navigation path:** Field → assigned work order; airplane mode → restart → reconnect
+- **Steps:**
+1. Open the synthetic work order online, then disconnect.
+2. Queue a photo and note; attempt switching with a draft or camera operation active.
+3. Save/close through the guard, restart, reconnect and synchronize once.
+- **Expected result:** Durable file copies and operation IDs survive; no duplicate completion, dropped draft or cross-company queue.
+- **Actual result:** Not executed on a physical device. Automated coverage is supporting evidence only.
+- **Status:** **Not Run**
+- **Evidence reference:** docs/mobile-dual-mode-operations.md; scripts/mobileMode/workspaceNavigation/managementScreens tests; tests/mobileDualMode.integration.test.js; tests/staffAvailability.integration.test.js.
+
+#### MOB-DM-05 — Team map and shift privacy
+
+- **User role:** Owner/manager plus technician
+- **Preconditions:** Rebuilt native binary; independently authorized disposable tenant/staff/work fixtures.
+- **Exact navigation path:** Field → Start/End Shift; Management → Map → marker → schedule
+- **Steps:**
+1. Start a fixture shift with explicit device location consent.
+2. Inspect marker identity, update time, accuracy, next visit, fit behavior and stale state.
+3. End the shift; check marker removal/stopped state and another-company access denial.
+- **Expected result:** No GPS activation by opening Management; no off-duty/expired position displayed as live; retention and tenant isolation hold.
+- **Actual result:** Not executed on a physical device. Automated coverage is supporting evidence only.
+- **Status:** **Not Run**
+- **Evidence reference:** docs/mobile-dual-mode-operations.md; scripts/mobileMode/workspaceNavigation/managementScreens tests; tests/mobileDualMode.integration.test.js; tests/staffAvailability.integration.test.js.
+
+#### MOB-DM-06 — Sick leave, vacation and emergency call-out
+
+- **User role:** Owner/manager
+- **Preconditions:** Rebuilt native binary; independently authorized disposable tenant/staff/work fixtures.
+- **Exact navigation path:** Management → Team → details → Change staff availability; web Dispatch/Team Locations
+- **Steps:**
+1. Record a bounded unavailable period for an active disposable staff fixture.
+2. Verify new assignment is rejected while original appointments remain visible.
+3. Overlay a bounded emergency period; verify it expires back into leave, then restore normal availability.
+- **Expected result:** Unavailable windows block scheduling; no role/access elevation or automatic shift/GPS start; existing jobs and audits preserved.
+- **Actual result:** Not executed on a physical device. Automated coverage is supporting evidence only.
+- **Status:** **Not Run**
+- **Evidence reference:** docs/mobile-dual-mode-operations.md; scripts/mobileMode/workspaceNavigation/managementScreens tests; tests/mobileDualMode.integration.test.js; tests/staffAvailability.integration.test.js.
 
 ## E. Automated test evidence
 

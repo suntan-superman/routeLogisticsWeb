@@ -8,10 +8,16 @@ export const WORK_TABS = [
   { id: 'route', label: 'Route', icon: 'navigate-outline' },
   { id: 'settings', label: 'Settings', icon: 'settings-outline' },
 ];
-export default function WorkspaceTabs({ active, onSelect, busy = false }) {
+export const MANAGEMENT_TABS = [
+  { id: 'overview', label: 'Overview', icon: 'grid-outline' },
+  { id: 'team', label: 'Team', icon: 'people-outline' },
+  { id: 'map', label: 'Map', icon: 'map-outline' },
+  { id: 'schedule', label: 'Schedule', icon: 'calendar-outline' },
+];
+export default function WorkspaceTabs({ active, onSelect, busy = false, mode = 'field' }) {
   const { palette } = useTheme();
   return <View accessibilityRole="tablist" style={{ flexDirection: 'row', borderTopWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, paddingTop: 6 }}>
-    {WORK_TABS.map(tab => <Pressable key={tab.id} accessibilityRole="tab" accessibilityLabel={`${tab.label} tab`}
+    {(mode === 'management' ? MANAGEMENT_TABS : WORK_TABS).map(tab => <Pressable key={tab.id} accessibilityRole="tab" accessibilityLabel={`${tab.label} tab`}
       accessibilityState={{ selected: active === tab.id, disabled: busy }} disabled={busy} onPress={() => onSelect(tab.id)}
       style={({ pressed }) => ({ flex: 1, minHeight: 60, paddingHorizontal: 3, paddingVertical: 8, gap: 5, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.7 : 1 })}>
       <Ionicons accessible={false} name={tab.icon} size={23} color={active === tab.id ? palette.accent : palette.secondary} />

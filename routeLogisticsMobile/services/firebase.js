@@ -13,6 +13,7 @@ import { auth, db } from '../constants/firebase';
 import { scopeWhere, tenantFields, localDate, getClaims, requireWorkspace }  from './tenancy';
 import { cachedRead, overlayJobs, readCache, writeCache, saveJobOffline, isOffline } from './offline';
 import { addressMutationError, hasAddressFields } from './addressValidation';
+import { personalJobs } from './mobileMode';
 
 export class AuthService {
   // Check if Firebase Auth is available
@@ -607,7 +608,7 @@ export class JobService {
   }
 
   // Get jobs for a specific date range
-  static async getJobsByDateRange(startDate, endDate) {
+  static async getJobsByDateRange(startDate, endDate, { personal = false } = {}) {
     try {
       const userId = this.getCurrentUserId();
       if (!userId) {
@@ -627,11 +628,11 @@ export class JobService {
         orderBy('time', 'asc')
       );
 
-      const loaded = await cachedRead(`jobs:${startDate}:${endDate}`, async (scope) => {
+      const loaded = await cachedRead(`jobs:${startDate}:${endDate}${personal ? ':self' : ''}`, async (scope) => {
         let data;
         if (getClaims()?.companyId) {
           data = []; let after = null, page;
-          do { page = await readWorkspace('jobs', { startDate, endDate, after, limit: 500 }); data.push(...page.jobs); after = page.lastDoc; } while (page.hasMore && data.length < 10000);
+          do { page = await readWorkspace('jobs', { startDate, endDate, after, limit: 500, ...(personal ? { assignedTo: 'self' } : {}) }); data.push(...page.jobs); after = page.lastDoc; } while (page.hasMore && data.length < 10000);
           if (page.hasMore) throw new Error('Too many jobs for this date range. Select a shorter period.');
         }
         else { const snapshot = await getDocs(q); data = snapshot.docs.map((row) => ({ id: row.id, ...row.data() })); }
@@ -642,7 +643,7 @@ export class JobService {
       });
       const jobs = await overlayJobs(loaded);
 
-      return { success: true, jobs };
+      return { success: true, jobs: personal ? personalJobs(jobs, { ...getClaims(), id: userId }) : jobs };
     } catch (error) {
       return { success: false, error: error.message, code: error.code, jobs: [] };
     }

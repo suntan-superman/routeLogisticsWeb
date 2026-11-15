@@ -1,6 +1,7 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { documentId, hash, rateLimit } = require('./security');
 const { requireCapability, checkJob, hasCapability } = require('./access');
+const { availabilityRef, availabilityView, unavailableIntervals } = require('./staffAvailability');
 
 const DAY = 1440, MAX_ROWS = 5000, MAX_PLANS = 5000;
 const TERMINAL = new Set(['completed', 'cancelled', 'canceled', 'deleted', 'archived']);
@@ -51,7 +52,7 @@ function conflictRows(rows, assignee, candidate, excludeJobId) {
     return [{ jobId: row.id, date: row.date, time: typeof row.time === 'string' ? row.time : '', endTime: clock(occupied.end), endDate: dayDate(Math.floor(occupied.end / DAY)), ...(row.kind ? { kind: row.kind } : {}), ...(unknown ? { unknown: true } : {}) }];
   }).slice(0, 20);
 }
-function alternatives(rows, assignee, candidate, { searchDays = 14, window = DEFAULT_WINDOW, allowedWeekdays, excludeJobId, limit = 6 } = {}) {
+function alternatives(rows, assignee, candidate, { searchDays = 14, window = DEFAULT_WINDOW, allowedWeekdays, excludeJobId, limit = 6, unavailable = [] } = {}) {
   const startDay = Math.floor(candidate.start / DAY), startMinute = clockMinutes(window.start), endMinute = clockMinutes(window.end), permitted = new Set(allowedWeekdays || window.days);
   const result = [];
   for (let day = startDay; day < startDay + searchDays && result.length < limit; day++) {
@@ -59,7 +60,7 @@ function alternatives(rows, assignee, candidate, { searchDays = 14, window = DEF
     const first = Math.ceil(Math.max(startMinute, day === startDay ? candidate.start - day * DAY : 0) / 15) * 15;
     for (let minute = first; minute + candidate.durationMinutes <= endMinute && result.length < limit; minute += 15) {
       const possible = { start: day * DAY + minute, end: day * DAY + minute + candidate.durationMinutes };
-      if (possible.start === candidate.start || conflictRows(rows, assignee, possible, excludeJobId).length) continue;
+      if (possible.start === candidate.start || conflictRows(rows, assignee, possible, excludeJobId).length || unavailable.some(span => overlaps(possible, span))) continue;
       result.push({ date: dayDate(day), time: clock(minute) });
     }
   }
@@ -114,13 +115,13 @@ function schedulingHandlers(db) {
     let chosen = member.exists && member.get('companyId') === scope.companyId ? member : null;
     if (!member.exists) {
       const rows = await read(tx, scoped('teamMembers', scope).where('uid', '==', id).limit(21));
-      const active = rows.docs.filter(row => row.get('status') === 'active' && (row.get('role') === 'technician' || allowLegacy && ['admin', 'manager'].includes(row.get('role'))));
+      const active = rows.docs.filter(row => row.get('status') === 'active' && (['technician', 'manager'].includes(row.get('role')) || allowLegacy && row.get('role') === 'admin'));
       if (active.length === 1) chosen = active[0];
       else if (relaxed && rows.docs.length) chosen = rows.docs[0];
     }
     const uid = chosen?.get('uid');
     if (chosen && uid === ownerId) return resolve(tx, scope, ownerId, { company, allowLegacy, relaxed });
-    if (!chosen || typeof uid !== 'string' || !uid || !relaxed && (chosen.get('status') !== 'active' || chosen.get('role') !== 'technician' && !(allowLegacy && ['admin', 'manager'].includes(chosen.get('role'))))) throw failure('This technician is no longer active or available in this company. Choose another technician.');
+    if (!chosen || typeof uid !== 'string' || !uid || !relaxed && (chosen.get('status') !== 'active' || !['technician', 'manager'].includes(chosen.get('role')) && !(allowLegacy && chosen.get('role') === 'admin'))) throw failure('This technician is no longer active or available in this company. Choose another technician.');
     documentId(uid, 'technician account');
     const [deleted, aliases] = await Promise.all([read(tx, db.doc(`rlAccountDeletions/${uid}`)), read(tx, scoped('teamMembers', scope).where('uid', '==', uid).limit(21))]);
     if (!relaxed && (deleted.exists || aliases.size > 20 || aliases.docs.filter(row => row.get('status') === 'active').length > 1)) throw failure('This technician is no longer active or has memberships that need review. Choose another technician.');
@@ -135,7 +136,7 @@ function schedulingHandlers(db) {
     const result = [];
     try { result.push(await resolve(tx, scope, context.company.get('ownerId'), context)); } catch (error) { if (error.code !== 'failed-precondition') throw error; }
     for (const row of rows.docs) {
-      if (row.get('status') !== 'active' || row.get('role') !== 'technician' || !row.get('uid') || row.get('uid') === context.company.get('ownerId') || counts.get(row.get('uid')) !== 1) continue;
+      if (row.get('status') !== 'active' || !['technician', 'manager'].includes(row.get('role')) || !row.get('uid') || row.get('uid') === context.company.get('ownerId') || counts.get(row.get('uid')) !== 1) continue;
       try { result.push(await resolve(tx, scope, row.id, context)); } catch (error) { if (error.code !== 'failed-precondition') throw error; }
     }
     return result.sort((a, b) => a.name.localeCompare(b.name));
@@ -148,7 +149,7 @@ function schedulingHandlers(db) {
     if (configured && typeof configured === 'object') try {
       if (clockMinutes(configured.start) < clockMinutes(configured.end) && Array.isArray(configured.days) && configured.days.length && configured.days.every(day => Number.isInteger(day) && day >= 0 && day <= 6)) workWindow = { start: clock(clockMinutes(configured.start)), end: clock(clockMinutes(configured.end)), days: [...new Set(configured.days)], source: 'company' };
     } catch { /* An invalid optional preference cannot silently remove all choices. */ }
-    return { timeZone, workWindow, message: 'Availability is based on scheduled work. Suggested times use the displayed work window; travel time and duty status are not included.' };
+    return { timeZone, workWindow, message: 'Availability checks scheduled work and supervisor availability periods. Travel time and duty status are separate.' };
   }
   async function loadRows(tx, scope, candidate, options = {}) {
     const days = options.searchDays || 7, startDay = Math.floor(candidate.start / DAY) - 7, endDay = Math.floor(candidate.start / DAY) + days + 1;
@@ -185,8 +186,14 @@ function schedulingHandlers(db) {
   }
   const reservationOptions = (job, before, options) => ({ ...options, servicePlanId: options.servicePlanId || job?.servicePlanId || before?.servicePlanId, occurrenceDate: options.occurrenceDate || job?.servicePlanDate || before?.servicePlanDate || before?.date || job?.date });
   function resultFor(loaded, person, candidate, context, options = {}) {
-    const rows = withReservations(loaded, person, options), conflicts = conflictRows(rows, person, candidate, options.jobId);
-    return { memberId: person?.id || null, available: !conflicts.length, reason: conflicts.some(row => row.unknown) ? 'An existing appointment has incomplete time or duration. Review it before assigning this technician.' : conflicts.length ? 'The technician already has scheduled work at that time.' : 'The technician has no overlapping scheduled work.', conflicts, alternatives: conflicts.length ? alternatives(rows, person, candidate, { ...options, window: environment(context).workWindow, excludeJobId: options.jobId }) : [], ...environment(context) };
+    const rows = withReservations(loaded, person, options), unavailable = unavailableIntervals(person?.availability, environment(context).timeZone);
+    const periods = unavailable.filter(span => overlaps(candidate, span));
+    const conflicts = [...periods.map(span => ({ kind: 'availability', date: dayDate(Math.floor(span.start / DAY)), time: clock(span.start), endTime: clock(span.end), endDate: dayDate(Math.floor(span.end / DAY)), reason: span.reason })), ...conflictRows(rows, person, candidate, options.jobId)].slice(0, 20);
+    return { memberId: person?.id || null, available: !conflicts.length, reason: periods.length ? `This staff member is marked unavailable (${periods[0].reason}) during this appointment.` : conflicts.some(row => row.unknown) ? 'An existing appointment has incomplete time or duration. Review it before assigning this technician.' : conflicts.length ? 'The technician already has scheduled work at that time.' : 'The technician has no overlapping scheduled work or unavailable periods.', conflicts, alternatives: conflicts.length ? alternatives(rows, person, candidate, { ...options, unavailable, window: environment(context).workWindow, excludeJobId: options.jobId }) : [], ...environment(context) };
+  }
+  async function withAvailability(tx, scope, person) {
+    if (!person || !scope.companyId) return person;
+    return { ...person, availability: (await read(tx, availabilityRef(db, scope.companyId, person.uid))).data() };
   }
   async function prepare(tx, scope, next, options = {}) {
     const before = options.before || {}, context = await actor(tx, scope), changed = options.force === true || changedSchedule(before, next);
@@ -197,7 +204,7 @@ function schedulingHandlers(db) {
       const target = next?.assignedTo && next.assignedTo !== before.assignedTo ? await resolve(tx, scope, next.assignedTo, context) : null;
       return { assignedTo: target?.id || next?.assignedTo || null, assignedToUid: next?.assignedTo ? target?.uid || before.assignedToUid || old?.uid || null : null, assignedToName: target?.name || (next?.assignedTo ? before.assignedToName || old?.name || '' : ''), available: true, locks: await locks(tx, scope, [old]), scope };
     }
-    const person = await resolve(tx, scope, next.assignedTo, { ...context, allowLegacy: before.assignedTo === next.assignedTo });
+    const person = await withAvailability(tx, scope, await resolve(tx, scope, next.assignedTo, { ...context, allowLegacy: before.assignedTo === next.assignedTo }));
     const candidate = interval(next), lockRows = await locks(tx, scope, [old, person]);
     const settings = reservationOptions(next, before, { ...searchOptions(options), ...options });
     const loaded = await loadRows(tx, scope, candidate, settings), result = resultFor(loaded, person, candidate, context, settings);
@@ -218,7 +225,8 @@ function schedulingHandlers(db) {
     const candidate = interval(job), settings = reservationOptions(job, options.before, { ...searchOptions(options), ...options }), loaded = await loadRows(tx, scope, candidate, settings);
     let last;
     for (const person of candidates) {
-      const result = resultFor(loaded, person, candidate, context, settings); last = result;
+      const current = await withAvailability(tx, scope, person);
+      const result = resultFor(loaded, current, candidate, context, settings); last = result;
       if (result.available) return { ...result, assignedTo: person.id, assignedToUid: person.uid, assignedToName: person.name, memberUnavailable: unavailable, assignmentReview: null, assignmentNeedsAttention: false, assignmentFallbackUsed: !preferred || person.uid !== preferred.uid, locks: allLocks.filter(row => [old?.uid, person.uid].includes(row.uid)), scope };
     }
     return { ...(last || {}), assignedTo: null, assignedToUid: null, assignedToName: '', available: false, memberUnavailable: unavailable, assignmentReview: 'No eligible technician is available at this time. Dispatcher assignment is needed.', assignmentNeedsAttention: true, locks: allLocks.filter(row => row.uid === old?.uid), scope };
@@ -234,7 +242,7 @@ function schedulingHandlers(db) {
       await rateLimit(db, 'schedule-check', scope.uid, 90);
       if (data.companyId !== undefined && (data.companyId || null) !== (scope.companyId || null)) throw new HttpsError('permission-denied', 'Choose this workspace’s schedule.');
       const context = await actor(null, scope), action = data.action || 'check';
-      if (action === 'roster') return { technicians: (await roster(null, scope, context)).map(({ id, name, role }) => ({ id, name, role })), ...environment(context) };
+      if (action === 'roster') return { technicians: await Promise.all((await roster(null, scope, context)).map(async person => ({ id: person.id, name: person.name, role: person.role, availability: availabilityView((await withAvailability(null, scope, person))?.availability) }))), ...environment(context) };
       if (action !== 'check') throw new HttpsError('invalid-argument', 'Choose an availability check or technician roster.');
       const options = searchOptions(data), job = { date: data.date, time: data.time, estimatedDuration: data.estimatedDuration, assignedTo: data.memberId || null };
       const candidate = interval(job); let before;
@@ -249,7 +257,7 @@ function schedulingHandlers(db) {
       try { person = await resolve(null, scope, job.assignedTo, { ...context, allowLegacy: before?.assignedTo === job.assignedTo }); }
       catch (error) { if (error.code !== 'failed-precondition') throw error; return { memberId: job.assignedTo, ...error.details.scheduling, ...environment(context) }; }
       const loaded = await loadRows(null, scope, candidate, options);
-      return resultFor(loaded, person, candidate, context, reservationOptions(job, before, options));
+      return resultFor(loaded, await withAvailability(null, scope, person), candidate, context, reservationOptions(job, before, options));
     },
   };
 }

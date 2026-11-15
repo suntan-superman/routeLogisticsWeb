@@ -11,6 +11,7 @@ const { workspacePermissions } = require('../services/workspacePolicy');
 global.IS_REACT_ACT_ENVIRONMENT = true;
 const root = path.resolve(__dirname, '..'), modules = new Map(), backListeners = new Set();
 let tree, currentAuth, day, week, month, detail, route, hookCalls, refreshes, navigationCalls, alertCalls, workflowProps, workflowMounts, workflowUnmounts, managementProps;
+const modeStorage = new Map();
 const palette = { background: '#07120F', surface: '#14241F', text: '#EFFAF5', secondary: '#B0C8BE', border: '#405D4E', input: '#14241F', accent: '#62E3B3', button: '#087B55', danger: '#FFAAA3', glow: '#164D38' };
 const primitive = Object.fromEntries(['View','Text','Pressable','ActivityIndicator','RefreshControl'].map(name => [name, name]));
 const native = { ...primitive,
@@ -45,6 +46,7 @@ function load(relative) {
   const mockRequire = name => {
     if (name === 'react-native') return native;
     if (name === '@expo/vector-icons') return { Ionicons: 'Icon' };
+    if (name === '@react-native-async-storage/async-storage') return { getItem: async key => modeStorage.get(key) || null, setItem: async (key, value) => modeStorage.set(key, value) };
     if (name.endsWith('/AuthContext')) return { useAuth: () => currentAuth };
     if (name.endsWith('/ThemeProvider')) return { useTheme: () => ({ palette, isDark: true }) };
     if (name === './Glass' || name.endsWith('/components/Glass')) return {
@@ -66,6 +68,7 @@ function load(relative) {
     if (name === './SettingsScreen') return () => React.createElement('Text', null, 'Settings and company services catalogue');
     if (name === './EstimatesScreen') return () => React.createElement('Text', null, 'Authorized estimate management');
     if (name === './HomeScreen') return props => { managementProps = props; return React.createElement('View', { testID: 'management-home' }, React.createElement('Text', null, 'Legacy management workspace'), buttonElement({ title: 'Management schedule', onPress: () => props.navigation.navigate('schedule') })); };
+    if (name === './ManagementScreen') return props => { managementProps = props; return React.createElement('View', { testID: 'management-dashboard' }, React.createElement('Text', null, `Management dashboard ${props.view}`), buttonElement({ title: 'Open management job', onPress: () => props.onOpenJob(job('team-job')) })); };
     if (name.startsWith('.')) { const next = path.resolve(path.dirname(filename), name); return load(next.endsWith('.js') ? next : next + '.js'); }
     return localRequire(name);
   };
@@ -103,6 +106,7 @@ async function press(label) { const node = button(label); assert.ok(node, `Visib
 async function openCard(id) { const card = visibleNodes(node => node.type === 'Pressable' && node.props.testID === `job-card-${id}`)[0]; assert.ok(card); await act(async () => card.props.onPress()); await settle(); }
 beforeEach(() => {
   tree = null; refreshes = []; hookCalls = []; navigationCalls = []; alertCalls = []; workflowProps = managementProps = null; workflowMounts = workflowUnmounts = 0;
+  modeStorage.clear();
   setRole('technician');
   day = query('day', [job('later', { time: '16:00', estimatedCost: 999 }), currentJob, job('early', { time: '08:00' }), job('completed', { status: 'completed', time: '07:00' })]);
   week = query('week', [job('friday', { date: '2026-11-13', time: '11:00' }), job('monday', { date: '2026-11-09', time: '10:00' }), job('early-friday', { date: '2026-11-13', time: '08:00' })]);
@@ -146,7 +150,7 @@ test('completion/list disappearance and transient detail errors do not close or 
   await rerender(); await rerender();
   assert.match(visibleText(), /Connection interrupted|Your current draft is retained/);
   assert.equal(visibleNodes(node => node.props.testID === 'test-workflow').length, 1); assert.equal(workflowMounts, 1); assert.equal(alertCalls.length, 0);
-  await press('Refresh after saved work'); assert.deepEqual(refreshes.sort(), ['day','day','detail']);
+  await press('Refresh after saved work'); assert.deepEqual(refreshes, ['day']);
 });
 
 test('a work-order permission error is shown as item access loss and does not claim company revocation', async () => {
@@ -191,29 +195,37 @@ test('Route uses saved stop order, provides maps handoff and opens the correct w
   await press('Close job details'); assert.equal(button('Route tab').props.accessibilityState.selected, true);
 });
 
-test('manager navigation retains the existing management Home path', async () => {
+test('manager defaults to personal Field Mode and can switch to scoped Management tabs without changing identity', async () => {
   setRole('manager'); await render();
-  assert.match(visibleText(), /Legacy management workspace/); assert.doesNotMatch(visibleText(), /Hello, Luis|Active work order/);
-  assert.equal(visibleNodes(node => node.props.testID === 'management-home').length, 1);
-  await press('Management schedule'); assert.equal(button('Schedule tab').props.accessibilityState.selected, true);
+  const originalIdentity = JSON.stringify(currentAuth.user);
+  assert.match(visibleText(), /Hello, Luis|Active work order/); assert.doesNotMatch(visibleText(), /Legacy management workspace|Management dashboard/);
+  assert.equal(button('Field mode').props.accessibilityState.selected, true);
+  assert.equal(hookCalls.filter(call => call.type === 'jobs' && call.enabled).every(call => call.personal === true), true);
+  await press('Management mode'); assert.match(visibleText(), /Management dashboard overview/);
+  for (const label of ['Overview', 'Team', 'Map', 'Schedule']) assert.ok(button(`${label} tab`));
+  assert.equal(button('Route tab'), undefined);
+  assert.equal(managementProps.active, true);
+  assert.equal(hookCalls.filter(call => call.type === 'jobs').slice(-3).every(call => !call.enabled), true);
+  await press('Team tab'); assert.equal(managementProps.view, 'team');
+  await press('Field mode'); assert.equal(button('Home tab').props.accessibilityState.selected, true);
   await press('Settings tab'); assert.match(visibleText(), /Settings and company services catalogue/);
+  assert.equal(JSON.stringify(currentAuth.user), originalIdentity);
+  assert.equal(modeStorage.size, 1);
 });
 
-test('manager Schedule edit and Route follow-up hand the selected job to the existing Home forms', async () => {
+test('manager work-order editing and follow-up use the web workflow while retaining the current work order', async () => {
   setRole('manager'); await render(); await press('Schedule tab'); await openCard('active');
   assert.equal(typeof workflowProps.onEdit, 'function');
   await act(async () => workflowProps.onEdit(workflowProps.job)); await settle();
-  assert.equal(button('Home tab').props.accessibilityState.selected, true);
-  assert.equal(managementProps.managementAction.kind, 'edit'); assert.equal(managementProps.managementAction.job.id, 'active');
-  const firstRequest = managementProps.managementAction.id;
-  await act(async () => managementProps.onManagementActionHandled(firstRequest)); await settle();
-  assert.equal(managementProps.managementAction, null);
+  assert.equal(workflowProps.job.id, 'active'); assert.equal(workflowMounts, 1);
+  assert.match(visibleText(), /full job editing.*continue on the web|work order remains open here/);
+  assert.equal(navigationCalls[0], 'https://route-logistics.com/jobs');
+  await press('Close job details');
   await press('Route tab'); detail.job = { ...route.stops[0], status: 'completed' };
   await press('Open work order for stop 1');
   await act(async () => workflowProps.onFollowUp(workflowProps.job)); await settle();
-  assert.equal(button('Home tab').props.accessibilityState.selected, true);
-  assert.equal(managementProps.managementAction.kind, 'follow-up'); assert.equal(managementProps.managementAction.job.id, 'second-stop');
-  assert.notEqual(managementProps.managementAction.id, firstRequest);
+  assert.equal(workflowProps.job.id, 'second-stop');
+  assert.deepEqual(navigationCalls, ['https://route-logistics.com/jobs', 'https://route-logistics.com/jobs']);
 });
 
 test('technicians never receive management callbacks and manager handoff cannot discard a draft', async () => {
@@ -222,5 +234,56 @@ test('technicians never receive management callbacks and manager handoff cannot 
   await press('Close job details'); setRole('manager'); await rerender(); await press('Schedule tab'); await openCard('active');
   await press('Create photo draft');
   await act(async () => workflowProps.onEdit(workflowProps.job)); await settle();
-  assert.equal(managementProps.managementAction, null); assert.match(visibleText(), /Retained selected photo/);
+  assert.equal(navigationCalls.length, 0); assert.match(visibleText(), /Retained selected photo/);
+});
+
+test('owner and manager retain a work draft and prevent mode switching during photo capture', async () => {
+  for (const role of ['owner', 'manager']) {
+    if (tree) { await act(async () => tree.unmount()); tree = null; }
+    setRole(role); await render(); await openCard('active'); await press('Create photo draft');
+    const previousMounts = workflowMounts;
+    await press('Management mode');
+    assert.match(visibleText(), /draft is still here.*switching modes/);
+    assert.match(visibleText(), /Retained selected photo/);
+    assert.equal(workflowMounts, previousMounts); assert.equal(button('Field mode').props.accessibilityState.selected, true);
+    await press('Discard draft and close'); await openCard('active'); await press('Begin photo picker');
+    assert.equal(button('Management mode').props.disabled, true);
+    await act(async () => button('Management mode').props.onPress()); await settle();
+    assert.match(visibleText(), /Finish or cancel.*before switching modes/);
+    await press('Finish photo picker'); await press('Close job details'); await press('Management mode');
+    assert.match(visibleText(), /Management dashboard/);
+    await press('Field mode'); assert.match(visibleText(), /Hello, Luis/);
+  }
+});
+
+test('management job details return to their original team view and refreshes invalidate the shared work scope', async () => {
+  setRole('owner'); await render(); await press('Management mode'); await press('Team tab');
+  detail.job = job('team-job'); await press('Open management job');
+  assert.equal(workflowProps.job.id, 'team-job'); assert.equal(managementProps.active, false);
+  await press('Refresh after saved work'); assert.deepEqual(refreshes, ['day']);
+  await press('Close job details'); assert.equal(managementProps.view, 'team'); assert.equal(managementProps.active, true);
+  assert.equal(button('Team tab').props.accessibilityState.selected, true);
+});
+
+test('remembered mode restores only for the same authorized identity and disappears on role revocation', async () => {
+  setRole('manager'); await render(); await press('Management mode');
+  await act(async () => tree.unmount()); tree = null; await render();
+  assert.equal(button('Management mode').props.accessibilityState.selected, true);
+  currentAuth = { ...currentAuth, user: { ...currentAuth.user, companyId: 'other' } };
+  await rerender(); assert.equal(button('Field mode').props.accessibilityState.selected, true);
+  assert.doesNotMatch(visibleText(), /Management dashboard/);
+  setRole('technician'); await rerender();
+  assert.equal(button('Management mode'), undefined); assert.equal(button('Field mode'), undefined);
+  assert.equal(visibleNodes(node => node.props.testID === 'management-dashboard').length, 0);
+});
+
+test('technicians never mount management data and one shift/sync surface survives mode changes', async () => {
+  await render(); assert.equal(managementProps, null); assert.equal(button('Management mode'), undefined);
+  setRole('manager'); await rerender();
+  const shift = tree.root.findAll(node => node.type === 'Text' && node.children.includes('Explicit foreground location controls'))[0];
+  const sync = tree.root.findAll(node => node.type === 'Text' && node.children.includes('Compact sync summary'))[0];
+  await press('Management mode'); await press('Field mode');
+  assert.equal(tree.root.findAll(node => node.type === 'Text' && node.children.includes('Explicit foreground location controls')).length, 1);
+  assert.equal(tree.root.findAll(node => node.type === 'Text' && node.children.includes('Explicit foreground location controls'))[0], shift);
+  assert.equal(tree.root.findAll(node => node.type === 'Text' && node.children.includes('Compact sync summary'))[0], sync);
 });

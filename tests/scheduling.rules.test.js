@@ -5,7 +5,7 @@ const path = require('node:path');
 const { initializeTestEnvironment, assertFails, assertSucceeds } = require('@firebase/rules-unit-testing');
 const { doc, setDoc, updateDoc, getDoc, getDocs, deleteDoc, collection, query, where, writeBatch, setLogLevel } = require('firebase/firestore');
 const prefix = `scheduling-rules-${process.pid}`, company = `${prefix}-company`, owner = `${prefix}-owner`, solo = `${prefix}-solo`;
-const privateCollections = ['rlScheduleLocks', 'rlScheduleOperations', 'rlScheduleReconciliations'];
+const privateCollections = ['rlScheduleLocks', 'rlScheduleOperations', 'rlScheduleReconciliations', 'rlStaffAvailability'];
 const paths = new Set();
 let env;
 const ref = (db, documentPath) => { paths.add(documentPath); return doc(db, documentPath); };

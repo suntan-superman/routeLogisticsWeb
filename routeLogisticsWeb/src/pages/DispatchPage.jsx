@@ -8,6 +8,7 @@ import RoutesPage from './RoutesPage';
 import JobPhotos from '../components/JobPhotos';
 import ServiceChecklist from '../components/ServiceChecklist';
 import TeamLocationStatus from '../components/TeamLocationStatus';
+import StaffAvailabilityEditor from '../components/StaffAvailabilityEditor';
 import { LOCATION_LABELS, locationState, nearestOnDuty } from '../utils/workLocations';
 import { addressKey, createDispatchAddressResolver, mapPoint } from '../utils/dispatchMap';
 import { useConfirmUnsavedChanges } from '../hooks/useUnsavedChanges';
@@ -15,7 +16,7 @@ import { useConfirmUnsavedChanges } from '../hooks/useUnsavedChanges';
 const today = () => new Date().toLocaleDateString('en-CA');
 const locationLabels = LOCATION_LABELS;
 export default function DispatchPage() {
-  const { company, can } = useAuth();
+  const { company, can, role } = useAuth();
   const confirmDiscard = useConfirmUnsavedChanges();
   const [date, setDate] = useState(today), [jobs, setJobs] = useState([]), [team, setTeam] = useState([]), [locations, setLocations] = useState([]);
   const [roster, setRoster] = useState([]), [policy, setPolicy] = useState({ intervalMinutes: 3, freshAfterSeconds: 300 }), [nearbyJob, setNearbyJob] = useState(null);
@@ -143,7 +144,7 @@ export default function DispatchPage() {
       {filtered.map(job => <article key={job.id} className="rounded border bg-white p-4 space-y-2" style={{ borderLeft: `5px solid ${STATUS_COLORS[job.status] || '#6b7280'}` }}>
         <button className="font-semibold underline" onClick={event => openDetails(job, event.currentTarget)}>{job.customerName || 'Customer'} · {job.serviceType}</button><p>{job.time || 'Time not set'} · {job.status} · {jobAddress(job) || 'Service address not set'}</p>
         {scheduleWarning(job, now, company?.timeZone) && <p className="text-amber-800">{scheduleWarning(job, now, company?.timeZone)} · schedule-based, not a traffic prediction</p>}
-        <label>Assigned to <select aria-label={`Assign ${job.customerName || job.id}`} className="rounded border-gray-300" value={job.assignedTo || ''} disabled={busy} onChange={e => assign(job, e.target.value)}><option value="">Unassigned</option>{job.assignedTo && !team.some(row => row.id === job.assignedTo && ['owner', 'technician'].includes(row.role)) && <option value={job.assignedTo} disabled>{job.assignedToName || team.find(row => row.id === job.assignedTo)?.name || 'Previously assigned technician'} (review assignment)</option>}{team.filter(row => ['owner', 'technician'].includes(row.role)).map(row => <option value={row.id} key={row.id}>{row.name}</option>)}</select></label>
+        <label>Assigned to <select aria-label={`Assign ${job.customerName || job.id}`} className="rounded border-gray-300" value={job.assignedTo || ''} disabled={busy} onChange={e => assign(job, e.target.value)}><option value="">Unassigned</option>{job.assignedTo && !team.some(row => row.id === job.assignedTo && ['owner', 'manager', 'technician'].includes(row.role)) && <option value={job.assignedTo} disabled>{job.assignedToName || team.find(row => row.id === job.assignedTo)?.name || 'Previously assigned technician'} (review assignment)</option>}{team.filter(row => ['owner', 'manager', 'technician'].includes(row.role)).map(row => <option value={row.id} key={row.id}>{row.name}</option>)}</select></label>
         {job.assignmentNeedsAttention && <p role="status" className="text-sm font-medium text-amber-800">{job.assignmentReview || 'A dispatcher needs to assign this visit.'}</p>}
         {(jobAddress(job) || position(job)) && <a className="ml-3 underline" href={googleNavigation([{ ...job, address: jobAddress(job), location: position(job) }])} target="_blank" rel="noreferrer">Navigate</a>}
         <button className="ml-3 underline" onClick={() => setNearbyJob(job)}>Find nearby on-duty staff</button>
@@ -156,7 +157,7 @@ export default function DispatchPage() {
         </section>}
       </article>)}
     </div><aside className="space-y-3"><h2 className="font-semibold">Team shifts, locations and routes</h2><p className="text-sm text-gray-600">Staff start and end their shift in the mobile app. GPS updates target every {policy.intervalMinutes} minutes while on duty, including between jobs. Shift status and GPS freshness are separate. This board refreshes every 30 seconds.</p>
-      {team.map(row => { const staff = roster.find(item => item.memberId === row.id) || { memberId: row.id, name: row.name, dutyStatus: 'unknown', location: locations.find(item => item.memberId === row.id) }; return <div key={row.id} className="space-y-1 rounded border bg-white p-3"><strong>{row.name}</strong><TeamLocationStatus member={staff} now={now} freshAfterSeconds={policy.freshAfterSeconds} /><button className="underline" onClick={() => changeRoute(row.id)}>Open daily route</button></div>; })}
+      {team.map(row => { const staff = roster.find(item => item.memberId === row.id) || { memberId: row.id, name: row.name, dutyStatus: 'unknown', location: locations.find(item => item.memberId === row.id) }; return <div key={row.id} className="space-y-2 rounded border bg-white p-3"><strong>{row.name}</strong><TeamLocationStatus member={staff} now={now} freshAfterSeconds={policy.freshAfterSeconds} /><button className="underline" onClick={() => changeRoute(row.id)}>Open daily route</button><StaffAvailabilityEditor companyId={company?.id} member={staff} allowed={['owner', 'manager'].includes(role)} onChanged={load} /></div>; })}
     </aside></div>
     {routeMember && <section className="rounded border bg-white p-5"><button className="mb-4 underline" onClick={() => changeRoute('')}>Close route planner</button><RoutesPage key={`${date}:${routeMember}`} initialDate={date} initialMemberId={routeMember} /></section>}
   </div>{currentSelection && <DispatchJobDetails job={currentSelection} onClose={closeDetails} returnFocus={opener.current} fallbackFocus={heading.current} destination={position(currentSelection)} />}</>;

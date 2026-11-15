@@ -2,8 +2,10 @@ const { randomBytes } = require('node:crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { hash, documentId, requireAuth, requireStaff, requireCompanyOwner, rateLimit } = require('./security');
 const { coordinates } = require('./routes');
+const { availabilityRef, assertAvailable } = require('./staffAvailability');
 const retentionHours = (value) => Number.isInteger(value) && value >= 1 && value <= 168 ? value : 24;
 async function activeWork(db, staff, jobId) {
+  assertAvailable((await availabilityRef(db, staff.company.id, staff.uid).get()).data());
   const job = await db.doc(`jobs/${documentId(jobId, 'job')}`).get();
   if (!job.exists || job.get('companyId') !== staff.company.id || job.get('status') !== 'in-progress' || (staff.role === 'technician' && job.get('assignedTo') !== staff.memberId)) throw new HttpsError('failed-precondition', 'Location sharing requires an assigned job in progress.');
 }
@@ -25,7 +27,10 @@ function legacyLocationHandlers(db) {
       if (action === 'start') {
         await activeWork(db, staff, request.data.jobId);
         const sessionId = randomBytes(24).toString('hex');
-        await ref.set({ companyId: token.companyId, userId: uid, memberId: staff.memberId || uid, jobId: request.data.jobId, sessionId, sharing: true, startedAt: new Date(), updatedAt: new Date(), sessionExpiresAt: new Date(Date.now() + 300000), expiresAt: new Date(Date.now() + hours * 3600_000) });
+        await db.runTransaction(async tx => {
+          assertAvailable((await tx.get(availabilityRef(db, staff.company.id, uid))).data());
+          tx.set(ref, { companyId: token.companyId, userId: uid, memberId: staff.memberId || uid, jobId: request.data.jobId, sessionId, sharing: true, startedAt: new Date(), updatedAt: new Date(), sessionExpiresAt: new Date(Date.now() + 300000), expiresAt: new Date(Date.now() + hours * 3600_000) });
+        });
         return { sessionId, retentionHours: hours };
       }
       const position = coordinates(request.data);
@@ -35,7 +40,8 @@ function legacyLocationHandlers(db) {
       if (!existing.exists || !existing.get('sharing') || existing.get('sessionId') !== request.data.sessionId || existing.get('sessionExpiresAt').toMillis() < Date.now()) throw new HttpsError('failed-precondition', 'Location sharing has stopped. Start it again while working.');
       await activeWork(db, staff, existing.get('jobId'));
       await db.runTransaction(async (tx) => {
-        const current = await tx.get(ref);
+        const [current, availability] = await Promise.all([tx.get(ref), tx.get(availabilityRef(db, staff.company.id, uid))]);
+        assertAvailable(availability.data());
         if (!current.get('sharing') || current.get('sessionId') !== request.data.sessionId) throw new HttpsError('failed-precondition', 'Location sharing has stopped.');
         tx.update(ref, { ...position, accuracy, updatedAt: new Date(), sessionExpiresAt: new Date(Date.now() + 300000), expiresAt: new Date(Date.now() + hours * 3600_000) });
       });

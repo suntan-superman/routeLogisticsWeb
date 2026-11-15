@@ -20,7 +20,7 @@ export default function ScheduleScreen({ user, query, period, onPeriodChange, on
       {groupJobs(query.jobs).map(group => <View key={group.date} style={{ gap: 12 }}><SectionHeader title={dayLabel(group.date)} subtitle={`${group.jobs.length} ${group.jobs.length === 1 ? 'visit' : 'visits'}`} />
         {group.jobs.map(job => <JobCard key={job.id} job={job} onPress={() => onOpenJob(job)} />)}
       </View>)}
-      {!query.isLoading && query.canReadWork !== false && !query.error && !query.jobs.length && <EmptyState title="No work scheduled" message={user.role === 'technician' ? 'Your assigned visits for this period will appear here.' : 'Jobs for this period will appear here. Schedule new visits from Home.'} />}
+      {!query.isLoading && query.canReadWork !== false && !query.error && !query.jobs.length && <EmptyState title="No work scheduled" message="Your assigned visits for this period will appear here. Company-wide schedules are available to authorized staff in Management Mode." />}
     </ScrollView>
   </View>;
 }

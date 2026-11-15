@@ -3,6 +3,7 @@ import { callWorkspace } from '../services/workspaceApi';
 import { useAuth } from '../contexts/AuthContext';
 import { loadMaps } from '../services/maps';
 import TeamLocationStatus from '../components/TeamLocationStatus';
+import StaffAvailabilityEditor from '../components/StaffAvailabilityEditor';
 import { locationState, LOCATION_LABELS } from '../utils/workLocations';
 import toast from 'react-hot-toast';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
@@ -13,7 +14,7 @@ export default function TeamLocationsPage() {
 }
 
 function TeamLocationsWorkspace() {
-  const { company, currentUser } = useAuth();
+  const { company, currentUser, role } = useAuth();
   const [locations, setLocations] = useState([]), [roster, setRoster] = useState([]);
   const [policy, setPolicy] = useState({ intervalMinutes: 3, retentionHours: 24, freshAfterSeconds: 300, maxShiftHours: 12 });
   const [intervalMinutes, setIntervalMinutes] = useState(3), [hours, setHours] = useState(24);
@@ -96,7 +97,7 @@ function TeamLocationsWorkspace() {
     <div className="flex flex-wrap items-center gap-4"><button onClick={load} className="underline">Refresh list</button>{!mapReady && <button onClick={showMap} disabled={busy || !locations.length} className="underline disabled:opacity-50">Show team locations on map</button>}</div>
     {message && <p role="status" className="text-emerald-800">{message}</p>}
     {error && <p role="alert" className="text-red-700">{error}</p>}
-    <ul className="divide-y rounded border bg-white">{roster.map(member => <li className="space-y-2 p-4" key={member.memberId}><strong>{member.name}</strong><TeamLocationStatus member={member} now={now} freshAfterSeconds={policy.freshAfterSeconds} /></li>)}</ul>
+    <ul className="divide-y rounded border bg-white">{roster.map(member => <li className="space-y-2 p-4" key={member.memberId}><strong>{member.name}</strong><TeamLocationStatus member={member} now={now} freshAfterSeconds={policy.freshAfterSeconds} /><StaffAvailabilityEditor companyId={company?.id} member={member} allowed={['owner', 'manager'].includes(role)} onChanged={load} /></li>)}</ul>
     {!roster.length && !error && <p>No active team members are available to display.</p>}
     <div ref={element} className={mapReady ? 'h-96 rounded border bg-gray-100' : 'h-0'} aria-label="Team location map" />
   </div>;

@@ -2,7 +2,7 @@ const { test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), babel = require('@babel/core');
 const helpers = require('../services/addressValidation');
-let calls, directWrites, claims, failure, offline, queued, response, customerRows;
+let calls, directWrites, claims, failure, offline, queued, response, customerRows, workspaceReads, cacheKeys, jobRows;
 const auth = { currentUser: { uid: 'operator' } };
 const file = path.resolve(__dirname, '../services/firebase.js'), result = { exports: {} };
 const fire = Object.fromEntries(['doc','collection','query','where','orderBy'].map(name => [name, (...args) => ({ name, args })]));
@@ -16,13 +16,32 @@ new Function('require','module','exports',transformed)(name => {
   if (name === 'firebase/firestore') return fire;
   if (name === '../constants/firebase') return { auth, db: {} };
   if (name === './addressValidation') return helpers;
+  if (name === './mobileMode') return require('../services/mobileMode');
   if (name === './tenancy') return { requireWorkspace() {}, getClaims: () => claims, scopeWhere: () => ({}), tenantFields: () => claims?.companyId ? { companyId: claims.companyId, userId: 'operator' } : { userId: 'operator' }, localDate: () => '2026-11-15' };
-  if (name === './offline') return { cachedRead: (_key, loader) => loader(), overlayJobs: async rows => rows, readCache: async () => null, writeCache: async () => {}, isOffline: async () => offline, saveJobOffline: async (id, patch) => { queued.push({ id, patch }); return { success: true, queued: true }; } };
-  if (name === './workspaceApi') return { callWorkspace: async (call, payload) => { calls.push({ call, payload }); if (failure) throw failure; return response; }, readWorkspace: async () => ({ customers: customerRows, hasMore: false }) };
+  if (name === './offline') return { cachedRead: (key, loader) => { cacheKeys.push(key); return loader(); }, overlayJobs: async rows => rows, readCache: async () => null, writeCache: async () => {}, isOffline: async () => offline, saveJobOffline: async (id, patch) => { queued.push({ id, patch }); return { success: true, queued: true }; } };
+  if (name === './workspaceApi') return { callWorkspace: async (call, payload) => { calls.push({ call, payload }); if (failure) throw failure; return response; }, readWorkspace: async (resource, payload) => { workspaceReads.push({ resource, payload }); return resource === 'jobs' ? { jobs: jobRows, hasMore: false } : { customers: customerRows, hasMore: false }; } };
   throw Error('Unexpected mobile service dependency ' + name);
 }, result, result.exports);
 const { CustomerService, JobService } = result.exports;
-beforeEach(() => { calls = []; directWrites = []; queued = []; claims = { companyId: 'acme', role: 'owner' }; failure = null; offline = false; customerRows = []; response = { id: 'saved', customer: { name: 'Synthetic' }, updatedAt: '2026-11-15T10:00:00.000Z' }; auth.currentUser = { uid: 'operator' }; });
+beforeEach(() => { calls = []; directWrites = []; queued = []; workspaceReads = []; cacheKeys = []; jobRows = []; claims = { companyId: 'acme', role: 'owner' }; failure = null; offline = false; customerRows = []; response = { id: 'saved', customer: { name: 'Synthetic' }, updatedAt: '2026-11-15T10:00:00.000Z' }; auth.currentUser = { uid: 'operator' }; });
+
+test('personal field reads request the server self scope and never share the broad company list cache', async () => {
+  claims = { companyId: 'acme', role: 'manager', membershipId: 'manager-member' };
+  jobRows = [
+    { id: 'self', companyId: 'acme', assignedTo: 'manager-member', assignedToUid: 'operator' },
+    { id: 'other', companyId: 'acme', assignedTo: 'tech-member', assignedToUid: 'other' },
+    { id: 'reused', companyId: 'acme', assignedTo: 'manager-member', assignedToUid: 'other' },
+    { id: 'foreign', companyId: 'other', assignedTo: 'manager-member', assignedToUid: 'operator' },
+  ];
+  const personal = await JobService.getJobsByDateRange('2026-11-15', '2026-11-15', { personal: true });
+  assert.equal(personal.success, true); assert.deepEqual(personal.jobs.map(job => job.id), ['self']);
+  assert.equal(workspaceReads[0].payload.assignedTo, 'self');
+  assert.equal(cacheKeys[0], 'jobs:2026-11-15:2026-11-15:self');
+  const company = await JobService.getJobsByDateRange('2026-11-15', '2026-11-15');
+  assert.equal(company.success, true); assert.equal(company.jobs.length, 4);
+  assert.equal(workspaceReads[1].payload.assignedTo, undefined);
+  assert.equal(cacheKeys[1], 'jobs:2026-11-15:2026-11-15');
+});
 
 test('customer create and address updates use authorized callables in both company and solo workspaces', async () => {
   for (const company of [true, false]) {

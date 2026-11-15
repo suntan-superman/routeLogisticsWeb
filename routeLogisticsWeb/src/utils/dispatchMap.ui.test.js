@@ -49,6 +49,7 @@ function load(filename) {
     if (name.endsWith('/components/JobPhotos')) return () => React.createElement('aside', null, 'Job photos remain available');
     if (name.endsWith('/components/ServiceChecklist')) return () => React.createElement('aside', null, 'Job service checklist');
     if (name.endsWith('/components/TeamLocationStatus')) return () => React.createElement('span', null, 'On duty with current GPS');
+    if (name.endsWith('/components/StaffAvailabilityEditor')) return () => null;
     if (name.startsWith('.')) { const next = path.resolve(path.dirname(filename), name); return load(path.extname(next) ? next : `${next}.js`); }
     throw new Error(`Unexpected import: ${name}`);
   };

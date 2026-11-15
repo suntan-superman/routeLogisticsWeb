@@ -573,3 +573,103 @@ test('PW-OPS-16 weekly scheduling creates the first assigned visit and plan toge
   await expect(availability.getByRole('group', { name: 'Available alternative times', exact: true }).getByRole('button').first()).toContainText('10:00 AM');
   expect((await scenario.list('jobs')).filter(job => job.serviceType === futureService)).toHaveLength(0);
 });
+
+test.describe('Temporary staff availability', () => {
+  test.use({ timezoneId: 'America/Los_Angeles' });
+
+  const technicianRow = page => page.getByRole('listitem').filter({ has: page.getByText('Synthetic technician', { exact: true }) });
+  const savedAvailability = async scenario => (await scenario.list('rlStaffAvailability')).find(row => row.companyId === scenario.ids.companyId && row.userId === scenario.accounts.technician.uid);
+  const operationalRows = async (scenario, collection) => (await scenario.list(collection)).filter(row => row.companyId === scenario.ids.companyId && (row.userId === scenario.accounts.technician.uid || row.uid === scenario.accounts.technician.uid || row.memberId === scenario.accounts.technician.membershipId));
+
+  async function savePeriod(page, scenario, { date, reason, start, end, revision }) {
+    const row = technicianRow(page);
+    await expect(row).toBeVisible();
+    await row.getByRole('button', { name: 'Change availability', exact: true }).click();
+    await row.getByRole('combobox', { name: 'Temporary staff status', exact: true }).selectOption(reason);
+    await row.getByLabel('Availability from date', { exact: true }).fill(date);
+    await chooseTime(row, 'From time', start);
+    await row.getByLabel('Availability until date', { exact: true }).fill(date);
+    await chooseTime(row, 'Until time', end);
+    await row.getByRole('button', { name: 'Save availability', exact: true }).click();
+    await expect(row.getByText('Staff availability saved.', { exact: true })).toBeVisible();
+    await expect.poll(async () => (await savedAvailability(scenario))?.revision).toBe(revision);
+    await expect(row.getByRole('button', { name: 'Change availability', exact: true })).toBeVisible();
+    await expect(row.getByRole('button', { name: 'Change availability', exact: true })).toBeEnabled();
+    await expect(row.getByRole('button', { name: 'Change availability', exact: true })).toHaveAttribute('data-availability-revision', String(revision));
+  }
+
+  test('PW-OPS-17 manager sick-leave override blocks scheduling without altering membership or existing appointments', async ({ page, scenario }) => {
+    annotate('DSP-009', 'SEC-003', 'MOB-DUAL-AVAIL');
+    const membershipBefore = await scenario.read('teamMembers', scenario.accounts.technician.membershipId);
+    const originalJob = await scenario.read('jobs', scenario.ids.jobId);
+    const locationBefore = await operationalRows(scenario, 'rlLocations');
+    const shiftBefore = await operationalRows(scenario, 'rlWorkShifts');
+    const date = laterDate();
+    await signIn(page, scenario.accounts.manager);
+    await page.goto('/team-locations');
+    await expect(page.getByRole('heading', { name: 'Team shifts and locations', exact: true })).toBeVisible();
+    await savePeriod(page, scenario, { date, reason: 'sick', start: '09:00', end: '17:00', revision: 1 });
+    expect((await savedAvailability(scenario)).periods).toEqual([expect.objectContaining({ status: 'unavailable', reason: 'sick' })]);
+
+    const service = `Sick-leave blocked browser visit ${scenario.ids.companyId}`;
+    const form = await openAddressJob(page, scenario, service);
+    await form.locator('input[type="date"]').fill(date);
+    await checkProperty(form, insideAddress(scenario), 'Property is inside coverage');
+    await chooseTechnician(form);
+    const availability = form.getByRole('region', { name: 'Technician availability', exact: true });
+    await expect(availability.getByText('This appointment needs another time or technician', { exact: true })).toBeVisible();
+    await expect(availability.getByRole('listitem').filter({ hasText: 'Staff unavailable' })).toBeVisible();
+    const rejectedSave = page.waitForResponse(response => response.url().includes('/rlManageJob') && response.request().method() === 'POST');
+    await form.getByRole('button', { name: 'Schedule Job', exact: true }).click();
+    const rejected = await rejectedSave;
+    expect(rejected.ok()).toBe(false);
+    expect((await rejected.json()).error).toMatchObject({ status: 'FAILED_PRECONDITION', details: { scheduling: { available: false } } });
+    await expect(form).toBeVisible();
+    expect((await scenario.list('jobs')).filter(job => job.serviceType === service)).toHaveLength(0);
+    expect(await scenario.read('jobs', scenario.ids.jobId)).toEqual(originalJob);
+    expect(await scenario.read('teamMembers', scenario.accounts.technician.membershipId)).toEqual(membershipBefore);
+    expect(await operationalRows(scenario, 'rlLocations')).toEqual(locationBefore);
+    expect(await operationalRows(scenario, 'rlWorkShifts')).toEqual(shiftBefore);
+  });
+
+  test('PW-OPS-18 owner emergency window permits a free appointment while the surrounding vacation remains blocked', async ({ page, scenario }) => {
+    annotate('DSP-003', 'DSP-009', 'SEC-003', 'MOB-DUAL-AVAIL');
+    const membershipBefore = await scenario.read('teamMembers', scenario.accounts.technician.membershipId);
+    const originalJob = await scenario.read('jobs', scenario.ids.jobId);
+    const locationBefore = await operationalRows(scenario, 'rlLocations');
+    const shiftBefore = await operationalRows(scenario, 'rlWorkShifts');
+    const date = laterDate();
+    await signIn(page, scenario.accounts.owner);
+    await page.goto('/team-locations');
+    await savePeriod(page, scenario, { date, reason: 'vacation', start: '09:00', end: '17:00', revision: 1 });
+    await savePeriod(page, scenario, { date, reason: 'emergency', start: '10:00', end: '12:00', revision: 2 });
+    const periods = (await savedAvailability(scenario)).periods;
+    expect(periods.map(({ status, reason }) => ({ status, reason }))).toEqual([{ status: 'unavailable', reason: 'vacation' }, { status: 'available', reason: 'emergency' }]);
+    expect(periods[1].endsAt).not.toBe(periods[0].endsAt);
+
+    const service = `Emergency-window browser visit ${scenario.ids.companyId}`;
+    const form = await openAddressJob(page, scenario, service);
+    await form.locator('input[type="date"]').fill(date);
+    await checkProperty(form, insideAddress(scenario), 'Property is inside coverage');
+    await chooseTechnician(form);
+    await expect(form.getByText('Available for this appointment', { exact: true })).toBeVisible();
+    await form.getByRole('button', { name: 'Schedule Job', exact: true }).click();
+    await expect(page.getByText('Job scheduled', { exact: true })).toBeVisible();
+    const visits = (await scenario.list('jobs')).filter(job => job.serviceType === service);
+    expect(visits).toHaveLength(1);
+    expect(visits[0]).toMatchObject({ date, time: '10:45', assignedTo: scenario.accounts.technician.membershipId, assignedToUid: scenario.accounts.technician.uid });
+
+    const outside = await openAddressJob(page, scenario, `Outside emergency window ${scenario.ids.companyId}`);
+    await outside.locator('input[type="date"]').fill(date);
+    await chooseTime(outside, 'Start time', '12:15');
+    await chooseTechnician(outside);
+    const unavailable = outside.getByRole('region', { name: 'Technician availability', exact: true });
+    await expect(unavailable.getByText('This appointment needs another time or technician', { exact: true })).toBeVisible();
+    await expect(unavailable.getByRole('listitem').filter({ hasText: 'Staff unavailable' })).toBeVisible();
+    expect((await scenario.list('jobs')).filter(job => job.serviceType === `Outside emergency window ${scenario.ids.companyId}`)).toHaveLength(0);
+    expect(await scenario.read('teamMembers', scenario.accounts.technician.membershipId)).toEqual(membershipBefore);
+    expect(await scenario.read('jobs', scenario.ids.jobId)).toEqual(originalJob);
+    expect(await operationalRows(scenario, 'rlLocations')).toEqual(locationBefore);
+    expect(await operationalRows(scenario, 'rlWorkShifts')).toEqual(shiftBefore);
+  });
+});

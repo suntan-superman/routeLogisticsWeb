@@ -17,3 +17,9 @@ test('nearest recommendations exclude off-duty, stale, inaccurate and missing fi
   assert.deepEqual(nearestOnDuty(roster,{lat:35,lng:-119},now).map(row=>row.memberId),['near','far']);
   assert.equal(distanceMeters({lat:35,lng:-119},{lat:35,lng:-119}),0); assert.equal(distanceMeters({lat:100,lng:0},{lat:0,lng:0}),null);
 });
+
+test('a manual unavailable period excludes a still-fresh on-duty location from dispatch suggestions', () => {
+  const row = { memberId: 'sick', onDuty: true, location: fix(), availability: { active: true, state: 'unavailable' } };
+  assert.deepEqual(nearestOnDuty([row], { lat: 35, lng: -119 }, now), []);
+  assert.equal(nearestOnDuty([{ ...row, availability: { active: false, state: 'normal' } }], { lat: 35, lng: -119 }, now).length, 1);
+});

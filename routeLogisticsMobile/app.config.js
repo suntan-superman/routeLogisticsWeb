@@ -6,7 +6,7 @@ export default ({ config }) => ({
   owner: "sjroy5",
   name: "Route Logistics",
   slug: "route-logistics",
-  version: "1.0.0",
+  version: "1.0.1",
   orientation: "portrait",
   icon: "./assets/brand/app-icon-ios.png",
   userInterfaceStyle: "automatic",

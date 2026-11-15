@@ -286,6 +286,10 @@ and device testing still run on the Mac. The production audit found Acme's 15
 services and all 507 customers already present; Luis's invitation was pending.
 The audit and implementation do not accept invitations or alter customer records.
 
+# To build and submit to TestFlight
+
+npx --yes eas-cli@27.10.0 build --platform ios --profile production --auto-submit
+
 ## Documentation
 
 - [On-duty tracking, visit evidence, Dispatch changes and required native rebuild](../docs/on-duty-tracking-and-dispatch.md)

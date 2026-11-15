@@ -43,6 +43,119 @@ This report records the autonomous implementation run against the two existing p
 
 Checked items in the plans mean implementation is present and locally verified. They do not imply every feature is enabled in production. Deployment results are recorded below. The complete roadmap is not finished.
 
+## Acme staff reconciliation — November 13, 2026
+
+**Status: approved staff repair applied; migration remains incomplete pending
+member acceptance and access verification.** The owner approved all five proposed
+`technician` assignments and preservation of the existing `manager` assignment.
+The production verification at **9:50 AM Pacific on November 13** used the existing
+`main` branch and project `mi-factotum-field-service`. No deployment, additional
+branch, or staging environment was needed. This supersedes the older role-approval
+statements below.
+
+The original six-person candidate list and subsequent reconciliation agree with
+production before repair. Seven legacy invitation records remain unchanged: the
+six candidates and the accepted company-owner invitation. Before repair there were
+only two pending team rows. After repair there are **six unique pending RL
+memberships: five technicians and one manager**, with zero duplicate normalized
+company/email groups and zero active staff memberships.
+
+The owner retained the same company ownership and `owner` claims. The manager's
+membership, role, invitation secret, and expiry were preserved exactly. That
+existing invitation is valid through **November 19 at 10:53 PM Pacific**. It was
+not reissued or emailed again. If the original link is unavailable, reissue it
+through the owner's Company Settings instead of creating another member.
+
+All five approved technician invitations were issued using the existing
+`createInvitation` mechanism. Four new pending memberships were created; the
+existing legacy membership ID was reused for the fifth. Its complete original is
+backed up under both the migration run and the atomic membership audit. The five
+new invitation identities point to their canonical team rows. Existing active
+memberships are rejected by this mechanism rather than overwritten.
+
+The production email worker was confirmed active, enabled, and bound to the
+existing SMTP secret without accessing its payload. Exactly **five** invitation
+emails were queued and recorded as **sent on their first SMTP attempt at 9:50 AM**.
+This verifies SMTP acceptance, not recipient inbox arrival. New technician links
+expire **November 20 at approximately 9:49 AM Pacific**. No bulk reminder, invoice,
+or additional manager email was sent.
+
+All six Firebase accounts exist, are enabled, and have verified email addresses.
+None has accepted an RL invitation or has RL membership claims. Production
+authorization checks deny staff access while pending and deny owner operations to
+all six. No invitation was accepted on behalf of a user, email verification was not
+bypassed, and no staff claims were manually assigned. Account holders must accept
+using their own invited email addresses, then refresh their session. Accepted
+production claims and access remain to be verified.
+
+All **507 customers** exactly match the original migration backups plus the
+previously approved normalization, with no missing records or additional changes.
+All 507 pre-repair per-record fingerprints match after the repair. **62 existing
+tests passed:** 11 claims/migration unit tests, 47 invitation/authorization
+Firestore emulator tests, and four Auth/Functions end-to-end tests. These cover
+duplicate reissue, invalidated links, verified-email acceptance, refreshed Firebase
+membership claims, owner access, role limits, and tenant isolation.
+
+The production audit is `rlMigrationRuns/acme-staff-approved-20261113`, with status
+`awaiting-member-acceptance` and `migrationComplete: false`. Legacy MF invitations
+and source/functions were preserved. Private evidence is in ignored `.migration/`:
+
+- `acme-staff-applied-20261113.md`: current six-person table and acceptance steps.
+- `acme-staff-owner-approval-20261113.json`: the approved mapping and owner response.
+- `acme-staff-apply-result-20261113.json`: applied changes and preservation checks.
+- `acme-staff-verification-1794592245627.json`: production delivery, authorization,
+  backup, uniqueness, and customer verification.
+- `acme-customers-before-staff-20261113.json`: unchanged 507-customer baseline.
+- Earlier reconciliation and proposal files remain historical pre-approval evidence.
+
+Remaining user steps: the five technician accounts accept their emailed invitations;
+the manager accepts the preserved existing invitation. The read-only verifier
+`.migration/acme-staff-verify.cjs` can check accepted membership IDs, roles, claims,
+and authorized access afterward. Do not mark migration complete until every intended
+account has accepted and its access is verified.
+
+### Manager invitation delivery follow-up — November 13, 2026
+
+The owner reported that `acme-manager@route-logistics.com` never received its
+invitation. A production check at 2:32 PM Pacific confirmed one pending manager
+membership, an enabled verified Firebase account, and no invitation email record.
+The earlier migration had preserved this invitation without queuing an email.
+
+Using the existing audited `createInvitation` mechanism, exactly one invitation
+was reissued with the same membership ID and approved `manager` role. The original
+membership was backed up; the old invitation link was invalidated. The email worker
+recorded the new invitation as **sent on its first SMTP attempt at 2:33 PM Pacific**
+(`2026-11-13T22:33:03.988Z`). SMTP acceptance is verified; inbox arrival is not.
+The new link expires November 20 at 2:32 PM Pacific.
+
+All 507 customers, other memberships and legacy MF invitation records were
+fingerprint-checked and remain unchanged; there are still six RL membership rows.
+No account was automatically accepted or granted claims. The manager must open the
+new email link while signed in as the invited account and explicitly accept it.
+Migration remains incomplete pending acceptance and access verification. Private
+evidence is in ignored `.migration/acme-manager-reissue-*.json`.
+
+### Sign-in follow-up
+
+The operator confirmed receiving the invitation emails and reported that the first
+owner sign-in showed an error while the second succeeded. Production Auth metadata
+showed successful authentication with an enabled, verified password account and
+unchanged owner claims. The browser console identified a Firestore permissions
+error in the sign-in handler's redundant profile read, after authentication had
+already succeeded.
+
+Web commit `57ecd55` removes that early read and leaves profile loading to the
+existing claims/session initialization. Login redirects from current auth state
+so router remounts cannot leave a signed-in user on the login form. It also adds
+the missing password-reset option and explains existing-account passwords on
+invitation pages. No password, Auth account, or authorization rule was changed.
+An isolated browser test reproduced the original permission error and verified
+first-attempt navigation, invitation return paths, and generic password recovery
+responses. The 20 web tests, changed-file lint, and production build passed.
+Netlify production assets were verified at **9:59 AM Pacific** with the new login,
+password recovery, and invitation guidance published. The existing Firebase and
+Maps browser keys were unchanged. No real reset emails were sent during testing.
+
 ## Batch 1: tenancy and migration
 
 | Phase | Result |
@@ -130,7 +243,7 @@ Implementation commits `a77ab38` and `3f3c843` were pushed to the existing `main
 
 ## Remaining prioritized work
 
-1. Assign the six migration roles, accept RL invitations with the intended accounts, and verify Acme visibility. Enable and exercise SMTP/portal delivery only when requested and configured.
+1. Complete acceptance of Acme's six pending staff invitations and verify the intended accounts' refreshed claims and access. The five technician roles are approved, their invitations were issued, and the existing manager invitation was preserved; see the November 13 reconciliation above.
 2. Complete staff TOTP MFA enrollment/recovery and native compatibility. Existing MFA-related web code is not sufficient to claim the roadmap's full MFA/backup-code requirement is complete.
 3. Implement RL-owned Stripe payment intents/webhooks and reconciliation, then QuickBooks OAuth/sync. Existing MF endpoints/credentials were not reused as the RL implementation.
 4. Complete native push delivery, photo retry/orphan cleanup, background offline queues, and conflict resolution across all editable records.

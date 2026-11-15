@@ -1,10 +1,15 @@
-const { test, afterEach } = require('node:test');
+const { test, before, afterEach } = require('node:test');
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
 const { createRequire } = require('node:module');
+const { pathToFileURL } = require('node:url');
 const mobile = createRequire(path.resolve(__dirname,'../routeLogisticsMobile/package.json')), web = createRequire(path.resolve(__dirname,'../routeLogisticsWeb/package.json'));
 const React = mobile('react'), { create, act } = mobile('react-test-renderer'), { transformSync } = web('esbuild');
 global.IS_REACT_ACT_ENVIRONMENT = true;
 let tree, env;
+let calendarDate;
+before(async () => {
+  calendarDate = await import(pathToFileURL(path.resolve(__dirname, '../routeLogisticsWeb/src/utils/calendarDate.js')).href);
+});
 const settle = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return {promise,resolve}; };
 const hasDirty = scope => [...env.dirty.values()].some(entry=>entry.dirty&&(scope===undefined||entry.scope===scope));
@@ -39,6 +44,7 @@ const mock = name => {
   if(name.endsWith('/services/workspaceApi'))return{readWorkspace:async()=>({jobs:env.jobs,hasMore:false}),callWorkspace:async(name,data)=>{env.calls.push({name,data});if(name==='rlGetRoutingTeam')return{team:[{id:'tech-1',name:'First tech'},{id:'tech-2',name:'Second tech'}]};if(name==='rlGetTeamLocations')return{locations:[],roster:[],policy:{intervalMinutes:3,freshAfterSeconds:300}};if(name==='rlJobVisit')return{events:[]};if(name==='rlManageJob')return{};throw Error('Unexpected workspace operation');}};
   if(name.endsWith('/services/maps'))return{loadMaps:async()=>{throw Error('Maps should not be requested in these tests');}};
   if(name.endsWith('/utils/dispatch'))return{STATUS_COLORS:{scheduled:'blue',completed:'green'},scheduleWarning:()=>'',jobPosition:job=>job.location||null,jobAddress:job=>job.address||''};
+  if(name.endsWith('/utils/calendarDate'))return calendarDate;
   if(name.endsWith('/utils/routePlanning'))return{googleNavigation:()=> 'https://example.invalid'};
   if(name.endsWith('/utils/workLocations'))return{LOCATION_LABELS:{},locationState:()=>'',nearestOnDuty:()=>[]};
   if(name.endsWith('/utils/dispatchMap'))return{addressKey:value=>String(value),mapPoint:()=>null,createDispatchAddressResolver:()=>({snapshot:()=>({pending:0,failed:0})})};

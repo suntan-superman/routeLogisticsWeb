@@ -30,6 +30,7 @@ import JobApplicationLog from '../components/JobApplicationLog';
 import { createInvoiceFromJob } from '../services/invoiceService';
 import { canManage, can } from '../services/tenancy';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { formatCalendarDate } from '../utils/calendarDate';
 
 const statusInput = job => ({ status: job?.status || '', actualWorkDone: job?.actualWorkDone || '', actualHours: String(job?.actualHours ?? ''), completionNotes: job?.completionNotes || '', cancellationReason: job?.cancellationReason || '' });
 
@@ -328,14 +329,6 @@ const JobManagementPage = () => {
       style: 'currency',
       currency: 'USD'
     }).format(amount || 0);
-  };
-
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
   };
 
   const formatTime = (timeString) => {
@@ -638,7 +631,7 @@ const JobManagementPage = () => {
                       <div className="text-sm text-gray-500">{job.customerPhone || ''}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{formatDate(job.date)}</div>
+                      <div className="text-sm text-gray-900">{formatCalendarDate(job.date)}</div>
                       <div className="text-sm text-gray-500 flex items-center">
                         <ClockIcon className="h-3 w-3 mr-1" />
                         {formatTime(job.time)}
@@ -726,7 +719,7 @@ const JobManagementPage = () => {
                       {getStatusIcon(selectedJob.status)}
                       <span className="ml-1 capitalize">{selectedJob.status?.replace('-', ' ')}</span>
                     </span>
-                    <span>Created {formatDate(selectedJob.createdAt)}</span>
+                    <span>Created {formatCalendarDate(selectedJob.createdAt)}</span>
                   </div>
                 </div>
                 
@@ -750,7 +743,7 @@ const JobManagementPage = () => {
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <h5 className="text-sm font-medium text-gray-700">Date & Time</h5>
-                    <p className="text-sm text-gray-900">{formatDate(selectedJob.date)} at {formatTime(selectedJob.time)}</p>
+                    <p className="text-sm text-gray-900">{formatCalendarDate(selectedJob.date)} at {formatTime(selectedJob.time)}</p>
                   </div>
                   <div>
                     <h5 className="text-sm font-medium text-gray-700">Duration</h5>

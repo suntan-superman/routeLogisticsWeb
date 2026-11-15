@@ -91,6 +91,9 @@ test('PW-OPS-05 @smoke owner creates and edits a customer with persisted success
   annotate('CRM-001', 'CRM-002');
   await signIn(page, scenario.accounts.owner);
   await page.goto('/customers');
+  // Fetching the seeded rows removes the initial empty-state Add Customer CTA.
+  // Wait for real data rather than racing two identically named buttons.
+  await expect(customerRow(page, scenario.customerName)).toBeVisible();
   await page.getByRole('button', { name: 'Add Customer', exact: true }).click();
   const editor = page.getByRole('heading', { name: 'Add New Customer', exact: true }).locator('../..');
   const name = `Browser customer ${scenario.ids.companyId}`;
@@ -123,30 +126,64 @@ test('PW-OPS-05 @smoke owner creates and edits a customer with persisted success
   expect(saved[0]).toMatchObject({ companyId: scenario.ids.companyId, notes: 'Updated synthetic browser note.', isActive: true });
 });
 
+test.describe('Pacific Jobs calendar-date regression', () => {
+  // Only this synthetic browser journey changes timezone; application and
+  // scheduling timezone configuration remain untouched.
+  test.use({ timezoneId: 'America/Los_Angeles' });
+
 test('PW-OPS-06 manager schedules an eligible property and the job appears on dispatch', async ({ page, scenario }) => {
-  annotate('DSP-002', 'DSP-003');
+  annotate('DSP-002', 'DSP-003', 'DEF-JOBS-DATE');
+  expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('America/Los_Angeles');
   await signIn(page, scenario.accounts.manager);
   await page.goto('/jobs');
   await page.getByRole('button', { name: 'New Job', exact: true }).click();
   const form = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Schedule New Job', exact: true }) });
   const service = `Browser scheduled service ${scenario.ids.companyId}`;
-  const date = laterDate();
+  const date = '2026-11-14';
+  const displayedDate = 'Nov 14, 2026';
   await form.locator('select').first().selectOption(scenario.ids.customerId);
   await form.getByPlaceholder('e.g. General Pest Control', { exact: true }).fill(service);
   await form.locator('input[type="date"]').fill(date);
   await form.locator('input[type="time"]').fill('14:30');
   await checkProperty(form, insideAddress(scenario), 'Property is inside coverage');
   await form.getByRole('button', { name: 'Schedule Job', exact: true }).click();
-  await expect(page.getByText('Job scheduled', { exact: true })).toBeVisible();
+  const savedMessage = page.getByText('Job scheduled', { exact: true });
+  const pastDateConfirmation = form.getByRole('button', { name: 'Schedule anyway', exact: true });
+  let submissionState;
+  await expect.poll(async () => {
+    submissionState = await pastDateConfirmation.isVisible() ? 'confirm-past-date'
+      : await savedMessage.isVisible() ? 'saved' : 'waiting';
+    return submissionState;
+  }).toMatch(/^(confirm-past-date|saved)$/);
+  // The fixed regression date becomes historical. Acknowledge it through the
+  // existing form rather than bypassing the application's past-date guard.
+  if (submissionState === 'confirm-past-date') {
+    await expect(form.getByText('This date and time is in the past.', { exact: true })).toBeVisible();
+    await pastDateConfirmation.click();
+  }
+  await expect(savedMessage).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Schedule New Job', exact: true })).toHaveCount(0);
+  const row = page.getByRole('row').filter({ has: page.getByText(service, { exact: true }) });
+  await expect(row.getByText(displayedDate, { exact: true })).toBeVisible();
+  const jobs = (await scenario.list('jobs')).filter(job => job.serviceType === service);
+  expect(jobs).toHaveLength(1);
+  expect(jobs[0]).toMatchObject({ companyId: scenario.ids.companyId, customerId: scenario.ids.customerId, date, time: '14:30', status: 'scheduled' });
+  await row.getByRole('button', { name: 'View Job', exact: true }).click();
+  const details = page.getByRole('dialog', { name: 'Job Details', exact: true });
+  await expect(details.getByRole('heading', { name: 'Date & Time', exact: true }).locator('..').locator('p')).toHaveText(`${displayedDate} at 2:30 PM`);
+  await details.getByRole('button', { name: 'Close', exact: true }).last().click();
+  await expect(details).toHaveCount(0);
+  const afterDisplay = await scenario.read('jobs', jobs[0].id);
+  for (const field of ['date', 'time', 'startTime', 'endTime', 'scheduledStartTime', 'scheduledEndTime', 'estimatedDuration', 'assignedTo', 'customerId', 'companyId', 'serviceProperty', 'createdAt']) {
+    expect(afterDisplay[field], `Viewing the date changed stored ${field}`).toEqual(jobs[0][field]);
+  }
   await page.goto('/dispatch');
   await page.getByLabel('Service date', { exact: true }).fill(date);
   const card = page.locator('article').filter({ has: page.getByRole('button', { name: `${scenario.customerName} · ${service}`, exact: true }) });
   await expect(card).toBeVisible();
   await expect(card.getByLabel(`Assign ${scenario.customerName}`, { exact: true })).toHaveValue('');
-  const jobs = (await scenario.list('jobs')).filter(job => job.serviceType === service);
-  expect(jobs).toHaveLength(1);
-  expect(jobs[0]).toMatchObject({ companyId: scenario.ids.companyId, customerId: scenario.ids.customerId, date, time: '14:30', status: 'scheduled' });
+  expect((await scenario.read('jobs', jobs[0].id)).date).toBe(date);
+});
 });
 
 test('PW-OPS-07 dispatch assignment persists and details reopen without changing another tenant', async ({ page, scenario }) => {

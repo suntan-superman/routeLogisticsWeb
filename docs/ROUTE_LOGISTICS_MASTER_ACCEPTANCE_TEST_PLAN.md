@@ -17,8 +17,9 @@ service-plan and route-departure controls, plus native scheduling/edit/conversio
 controls, offer quarter-hour choices. Existing odd-minute records are preserved.
 
 New or changed customer/service addresses require server Google validation,
-including unconfigured service territories and independent workspaces. Corrections
-require explicit acceptance into the draft and a separate Save. Invalid/unavailable
+including unconfigured service territories and independent workspaces. Confirmed
+postal-format and ZIP enrichment is accepted automatically without blocking Save.
+Physical street/unit corrections require explicit review. Invalid/unavailable
 results retain drafts; unchanged historical appointments are preserved. Direct
 Firestore writes cannot forge physical addresses, coordinates or Google proof.
 Atomic permanent updates replace old validation metadata and retain audit history.

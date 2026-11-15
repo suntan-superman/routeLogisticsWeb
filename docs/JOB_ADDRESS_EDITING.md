@@ -38,8 +38,11 @@ unchanged historical addresses do not trigger revalidation or alter past jobs.
 Server-private, tenant-scoped verified results are cached to avoid redundant
 paid requests; client coordinates and eligibility flags are never proof.
 
-If Google returns a precise, confirmed correction, the form displays **Use
-suggested address**. This changes only the draft; the user must save again.
+Google's confirmed formatting, locality and ZIP/ZIP+4 enrichment is accepted
+automatically when the physical street/property is confirmed. It does not block
+Save or require the user to apply a suggested postal-format change.
+If Google changes the physical street or unit, the form displays **Use
+suggested address** for review. This changes only the draft; the user must save again.
 Unconfirmed/approximate results are rejected. Invalid or unavailable checks
 retain the draft and show retry/correction guidance. Approved estimate
 addresses remain immutable and require a new draft/reapproval to change.
@@ -76,6 +79,14 @@ guidance instead of an unusable correction button. Company save errors and
 preflight checks use one correction notice, without a duplicate eligibility error.
 The follow-up web suite passed **293/293**, including six new lock/correction
 regressions; lint/build passed with the two existing hook warnings.
+
+The subsequent postal-normalization repair passed **147 Functions tests / one
+existing skip** and **56 focused integration cases**. Its regression proves
+that a complete, confirmed Google property with inferred ZIP/ZIP+4 saves in one
+request for company and independent accounts, without changing the customer's
+saved address or historical jobs. A read-only provider check of the reported
+address returned Google's **ACCEPT** verdict with only the postal components
+inferred; no customer record was modified during that check.
 
 November 15 validation: web unit/UI **287/287**, mobile **224/224**, Functions
 **144 passed / one existing skip**, focused emulator **125/125**, and the final

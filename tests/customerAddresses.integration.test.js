@@ -7,7 +7,7 @@ const { getFirestore } = req('firebase-admin/firestore');
 const { HttpsError } = req('firebase-functions/v2/https');
 const { customerAddressHandlers } = require('../functions/customerAddresses');
 const { customerHandlers } = require('../functions/customers');
-const { serviceAreaHandlers } = require('../functions/serviceAreas');
+const { serviceAreaHandlers, createGoogleGeocoder } = require('../functions/serviceAreas');
 const { workDataHandlers } = require('../functions/workData');
 const { hash } = require('../functions/security');
 const VERSION = '2026-11-15T00:00:00.000Z';
@@ -35,7 +35,7 @@ after(async () => {
   for (const path of paths) await db.doc(path).delete();
   await deleteApp(app);
 });
-async function fixture({ solo = false } = {}) {
+async function fixture({ solo = false, geocode } = {}) {
   const id = `customer-address-${process.pid}-${++sequence}`, uid = `${id}-owner`, customerId = `${id}-customer`, actors = [uid, `${id}-manager`, `${id}-technician`];
   fixtures.push({ id, uid, actors, solo });
   await set(`users/${uid}`, solo ? { name: 'Synthetic solo owner' } : { rlCompanyId: id });
@@ -49,6 +49,7 @@ async function fixture({ solo = false } = {}) {
   const areas = serviceAreaHandlers(db, { geocode: async address => {
     calls++;
     if (hook) { const callback = hook; hook = null; await callback(); }
+    if (geocode) return geocode(address);
     if (address === CORRECTION) throw new HttpsError('failed-precondition', 'Review correction.', { addressValidation: { status: 'confirmation-required', suggestedAddress: VALID } });
     if (address.includes('Unavailable')) throw new HttpsError('unavailable', 'PRIVATE PROVIDER ERROR');
     if (address.includes('Invalid')) throw new HttpsError('failed-precondition', 'PRIVATE PROVIDER ERROR');
@@ -135,6 +136,36 @@ test('job scheduling forwards Google suggestion details without overwriting eith
   await assert.rejects(f.work.manageJob(f.request({ action: 'create', job: { customerId: f.customerId, serviceProperty: { address: CORRECTION }, date: '2030-01-02', time: '09:00' } })), error => error.details.addressValidation.suggestedAddress === VALID);
   assert.equal((await db.collection('jobs').where('companyId', '==', f.id).get()).size, 0);
   assert.deepEqual((await db.doc(`customers/${f.customerId}`).get()).data(), f.original);
+});
+
+test('one job Save accepts a Google-confirmed property with inferred ZIP details without changing customer or historical records', async () => {
+  const entered = '200 Synthetic Service St, Example, CA', formatted = `${VALID}-1234, USA`;
+  for (const solo of [false, true]) {
+    let requests = 0;
+    const geocode = createGoogleGeocoder({ getAccessToken: async () => 'synthetic-only', fetchImpl: async (url, options) => {
+      requests++; assert.equal(url, 'https://addressvalidation.googleapis.com/v1:validateAddress');
+      assert.deepEqual(JSON.parse(options.body).address.addressLines, [entered]);
+      return { ok: true, json: async () => ({ result: {
+        verdict: { addressComplete: true, inputGranularity: 'PREMISE', validationGranularity: 'PREMISE', geocodeGranularity: 'PREMISE', hasInferredComponents: true, possibleNextAction: 'ACCEPT' },
+        address: { formattedAddress: formatted, postalAddress: { regionCode: 'US', postalCode: '93312-1234' }, addressComponents: [
+          { componentType: 'street_number', confirmationLevel: 'CONFIRMED' }, { componentType: 'route', confirmationLevel: 'CONFIRMED' },
+          { componentType: 'locality', confirmationLevel: 'CONFIRMED' }, { componentType: 'administrative_area_level_1', confirmationLevel: 'CONFIRMED' },
+          { componentType: 'postal_code', confirmationLevel: 'CONFIRMED', inferred: true }, { componentType: 'postal_code_suffix', confirmationLevel: 'CONFIRMED', inferred: true },
+        ] }, geocode: { location: { latitude: 35, longitude: -119 }, placeId: 'synthetic-confirmed-premise' },
+      } }) };
+    } });
+    const f = await fixture({ solo, geocode }), historical = { customerId: f.customerId, userId: f.uid, ...(solo ? {} : { companyId: f.id }), address: ORIGINAL, date: '2026-11-01', time: '09:07', status: 'completed', notes: 'Preserve this recorded visit' };
+    await set(`jobs/${f.id}-historical`, historical);
+    const saved = await f.work.manageJob(f.request({ action: 'create', job: { customerId: f.customerId, serviceProperty: { address: entered }, date: '2030-01-02', time: '09:15' } }));
+    const job = (await db.doc(`jobs/${saved.id}`).get()).data();
+    assert.equal(requests, 1); assert.equal(f.calls(), 1); assert.equal(saved.customerAddressUpdated, undefined);
+    assert.equal(saved.serviceArea.eligible, true); assert.equal(saved.serviceArea.addressValidation, undefined);
+    assert.equal(job.address, formatted); assert.equal(job.serviceProperty.validated, true); assert.equal(job.serviceProperty.source, 'google-address-validation');
+    assert.equal(job.serviceProperty.postalCode, '93312'); assert.equal(job.serviceProperty.latitude, 35); assert.equal(job.serviceProperty.longitude, -119);
+    assert.deepEqual((await db.doc(`customers/${f.customerId}`).get()).data(), f.original);
+    assert.deepEqual((await db.doc(`jobs/${f.id}-historical`).get()).data(), historical);
+    const jobs = await db.collection('jobs').where(solo ? 'userId' : 'companyId', '==', solo ? f.uid : f.id).get(); assert.equal(jobs.size, 2);
+  }
 });
 test('CSV creation uses the same verifier while replay and duplicate identities skip another paid lookup', async () => {
   const f = await fixture(), importer = customerHandlers(db, { serviceAreas: f.areas }).bulkImportCustomers;

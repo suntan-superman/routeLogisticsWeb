@@ -56,7 +56,7 @@ test('noncritical ZIP suffix inference is allowed but invalid provider responses
   await assert.rejects(createGoogleGeocoder()(point.formattedAddress), { code: 'unavailable' });
   assert.throws(() => trustedProperty({ ...point, longitude: Infinity }, Date.now()), { code: 'failed-precondition' });
 });
-test('Google corrections are offered for explicit review and only a separately verified resubmission succeeds', async () => {
+test('physical street corrections require explicit review and a separately verified resubmission', async () => {
   const corrected = response(), entered = '100 Main Stret, Bakersfield, CA 93312'; corrected.address.addressComponents[1].replaced = true;
   let calls = 0;
   const validate = createGoogleGeocoder({ getAccessToken: async () => 'synthetic', fetchImpl: async (_url, options) => {
@@ -67,10 +67,41 @@ test('Google corrections are offered for explicit review and only a separately v
   });
   assert.equal((await validate(point.formattedAddress)).formattedAddress, point.formattedAddress); assert.equal(calls, 2);
 });
-test('inferred locality/postal changes need review and malformed or approximate results never invent a suggestion', async () => {
-  const corrected = response(); corrected.address.addressComponents.push({ componentType: 'postal_code', confirmationLevel: 'CONFIRMED', replaced: true });
+test('confirmed locality and postal formatting normalizes automatically without a confirmation round trip', async () => {
+  const formatted = '100 Main Street, Bakersfield, CA 93312-1234, USA';
+  for (const type of ['locality', 'administrative_area_level_1', 'postal_code', 'postal_code_suffix']) for (const flag of ['inferred', 'replaced']) {
+    const corrected = response(); corrected.address.formattedAddress = formatted;
+    corrected.verdict.hasInferredComponents = true; corrected.verdict.hasReplacedComponents = true;
+    corrected.address.addressComponents.push({ componentType: type, confirmationLevel: 'CONFIRMED', [flag]: true });
+    let calls = 0;
+    const validate = createGoogleGeocoder({ getAccessToken: async () => 'synthetic', fetchImpl: async () => { calls++; return { ok: true, json: async () => ({ result: corrected }) }; } });
+    const result = await validate('100 Main St, Bakersfield, CA');
+    assert.equal(calls, 1); assert.equal(result.formattedAddress, formatted); assert.equal(result.postalCode, '93312');
+    assert.equal(result.streetAddressVerified, true); assert.equal(result.source, 'google-address-validation');
+    assert.equal(result.latitude, point.latitude); assert.equal(result.longitude, point.longitude);
+  }
+});
+
+test('inferred or replaced physical street and unit components still require review', async () => {
+  for (const type of ['street_number', 'route', 'premise', 'subpremise']) for (const flag of ['inferred', 'replaced']) {
+    const corrected = response();
+    const component = corrected.address.addressComponents.find(row => row.componentType === type);
+    if (component) component[flag] = true;
+    else corrected.address.addressComponents.push({ componentType: type, confirmationLevel: 'CONFIRMED', [flag]: true });
+    const validate = createGoogleGeocoder({ getAccessToken: async () => 'synthetic', fetchImpl: async () => ({ ok: true, json: async () => ({ result: corrected }) }) });
+    await assert.rejects(validate('101 Main Street, Bakersfield, CA 93312'), error => error.code === 'failed-precondition' && error.details?.addressValidation?.status === 'confirmation-required' && error.details.addressValidation.suggestedAddress === point.formattedAddress);
+  }
+});
+
+test('unconfirmed locality and postal components are not accepted as harmless normalization', async () => {
+  for (const type of ['locality', 'administrative_area_level_1', 'postal_code']) {
+    const row = response(); row.address.addressComponents.push({ componentType: type, confirmationLevel: 'UNCONFIRMED_BUT_PLAUSIBLE', inferred: true });
+    await assert.rejects(createGoogleGeocoder({ getAccessToken: async () => 'synthetic', fetchImpl: async () => ({ ok: true, json: async () => ({ result: row }) }) })('100 Main St, Bakersfield, CA'), error => error.code === 'failed-precondition' && !addressValidationDetails(error).suggestedAddress);
+  }
+});
+
+test('malformed or approximate results never invent a suggestion and provider errors remain sanitized', async () => {
   const validate = result => createGoogleGeocoder({ getAccessToken: async () => 'synthetic', fetchImpl: async () => ({ ok: true, json: async () => ({ result }) }) })('100 Main Street, Bakersfield, CA 93301');
-  await assert.rejects(validate(corrected), error => error.details.addressValidation.suggestedAddress === point.formattedAddress);
   for (const row of [response({ geocode: { location: { latitude: 999, longitude: -119 } } }), response({ verdict: { addressComplete: false, validationGranularity: 'LOCALITY', geocodeGranularity: 'LOCALITY' } })]) {
     await assert.rejects(validate(row), error => !addressValidationDetails(error).suggestedAddress);
   }

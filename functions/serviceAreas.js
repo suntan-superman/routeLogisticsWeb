@@ -109,9 +109,12 @@ function createGoogleGeocoder({ getAccessToken, projectId = 'mi-factotum-field-s
     // Explicitly resubmitting Google's precise, confirmed canonical address is
     // sufficient review even when Google retains normalization flags.
     const canonicalInput = typeof checked?.formattedAddress === 'string' && addressKey(checked.formattedAddress) === addressKey(validatedInput);
+    // A confirmed ZIP/locality or postal-format enrichment does not change the
+    // identified property. Only changes to the physical street/unit need review.
+    const physicalCorrection = !canonicalInput && critical.some(row => ['street_number', 'route', 'premise', 'subpremise'].includes(row.componentType) && (row.inferred === true || row.replaced === true));
     if (verdict?.addressComplete !== true || !precise.includes(verdict.validationGranularity) || !precise.includes(verdict.geocodeGranularity) || verdict.hasUnconfirmedComponents === true
       || checked?.missingComponentTypes?.length || checked?.unconfirmedComponentTypes?.length || checked?.unresolvedTokens?.length || postal?.regionCode !== 'US'
-      || !street('street_number') || !street('route') || critical.some(row => row.confirmationLevel !== 'CONFIRMED' || !canonicalInput && (row.inferred === true || row.replaced === true))) {
+      || !street('street_number') || !street('route') || physicalCorrection || critical.some(row => row.confirmationLevel !== 'CONFIRMED')) {
       const suggested = preciseCandidate && typeof checked.formattedAddress === 'string' && checked.formattedAddress.length <= 278 && !/[<>\u0000-\u001f]/.test(checked.formattedAddress) && addressKey(checked.formattedAddress) !== addressKey(validatedInput) ? checked.formattedAddress : null;
       throw addressValidationError(suggested ? 'confirmation-required' : 'invalid', suggested ? 'Google found a possible corrected address. Review it before saving.' : INVALID_ADDRESS, suggested);
     }

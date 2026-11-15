@@ -8,7 +8,7 @@ November 13, 2026. Existing `main`, Firebase project `mi-factotum-field-service`
 
 The company owner opens **Team Locations → Location policy**, selects **1, 3 or 5 minutes**, and saves the interval. The default is three minutes. Existing active shifts receive a changed interval on their next successful update. Last-location retention remains a separate owner setting; this release does not change Acme's stored policy automatically.
 
-On mobile, open **Home → Work shift → Manage → Start shift** and confirm sharing. Select background sharing and grant the device's Always/background location permission to continue while the app is backgrounded or the phone is locked. App-open sharing is available without background consent. No job has to be in progress. **End shift** remains accessible while offline or while access is being checked, stops local collection first and removes only unsent optional GPS samples. Saved work, application and photo queues are untouched. If the server cannot be reached, its duty status needs a reconnect/End shift confirmation; the device does not resume tracking automatically.
+On mobile, tap **Off Duty** at the top right of the Home header, then **Start shift** in its dialog. That action explicitly confirms work-location sharing. A green **On Duty** or red **Off Duty** button stays above the scrolling job list; explanatory text, GPS details and shift controls are shown only in the dialog. Select background sharing and grant the device's Always/background location permission to continue while the app is backgrounded or the phone is locked. App-open sharing is available without background consent. No job has to be in progress. **End shift** remains accessible while offline or while access is being checked, stops local collection first and removes only unsent optional GPS samples. Saved work, application and photo queues are untouched. If the server cannot be reached, its duty status needs a reconnect/End shift confirmation; the device does not resume tracking automatically.
 
 The shift controls are an explicit on-duty tracking boundary, not payroll timekeeping. Shifts expire after twelve hours to bound forgotten sessions. Starting or resuming collection requires confirmation; signing in or installing an update does not start a shift. Sign-out, an account/company/role/membership change, revoked permission, confirmed authorization failure, expiry or End shift stops collection. Existing older clients retain their original job-only behavior until rebuilt.
 
@@ -79,3 +79,26 @@ Validation completed: **132 mobile tests**, **50 web tests**, **27 Functions uni
 Local evidence is retained in ignored `.migration/shift-*-final.log` / `.migration/shift-functions-tests.log` / `.migration/shift-expo-*.log` files. The new production visit-history index `CICAgLjIzo8K` is **READY**; it was created individually and no other index was modified/deleted. The new `rlWorkShift`, `rlSetLocationPolicy`, and `rlJobVisit` endpoints are active in `us-central1`; controlled unauthenticated requests returned **401 UNAUTHENTICATED** for all three without creating shifts or records. Deployment uses only `functions:routelogistics` in `mi-factotum-field-service`.
 
 Production deployment completed: 61 Route Logistics functions, zero errors. Public production assets were checked after the main push and include the automatic Dispatch lookup, fixed side panel, duty roster and owner interval form. A CI dependency mismatch was also corrected: backend/rules/E2E checks stay in their own job, and web UI tests run only after their existing web/mobile test dependencies are installed. No application dependency was added for that CI repair.
+
+## November 15 — compact duty header
+
+The Home header now hosts one retained shift controller for technicians and
+working owners/managers. Tap the current duty button to inspect sharing, choose
+optional background permission, start/resume sharing or end the shift. The
+dialog is an in-app overlay, with Android Back/close and no native Modal stack.
+Navigation, notification handoffs and camera transitions are guarded while it
+is open. Closing it leaves an authorized active shift running.
+
+Unknown/failed initial checks use a neutral Checking/Check Status button rather
+than falsely showing Off Duty. An on-duty shift with paused sharing or a delayed
+GPS fix has a compact warning; the dialog provides the actionable explanation.
+An offline End stops GPS locally first and retains its unconfirmed server-end
+warning. Late status/end responses cannot replace another account/workspace or
+a newer shift. No new polling loop or automatic consent is introduced.
+
+Validation: **284/284 mobile tests**, including **35 tracking/scope** and **53
+screen/navigation** checks. iOS export and local Android ARM64 release build
+passed. The operator previously confirmed Android compilation/launch and
+cross-device duty reporting; physical acceptance of this new header/dialog is
+still required. Backend/web/provider configuration is unchanged. Rebuild the
+installed native apps to receive the interface update.

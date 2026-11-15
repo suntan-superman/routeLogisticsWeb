@@ -18,7 +18,6 @@ import {
 } from 'react-native';
 import { useWorkJobs, useWorkJob } from '../services/useWorkQueries';
 import JobWorkflow from '../components/JobWorkflow';
-import WorkLocation from '../components/WorkLocation';
 import OfflineStatus from '../components/OfflineStatus';
 import { canManage, localDate } from '../services/tenancy';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -766,7 +765,6 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
           {!!jobsError && <GlassButton secondary title="Check workspace access" icon="sync-outline" onPress={async () => { const result = await refreshUser(); if (result.success) loadJobs(); }} />}
         </GlassCard>
         {managing && <View style={{ gap: 10 }}><Text style={{ color: palette.text, fontSize: 18, fontWeight: '700' }}>Manage work</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}><GlassButton title="Schedule service" icon="add-outline" onPress={handleScheduleServicePress} style={{ flexGrow: 1 }} /><GlassButton secondary title="Customers" icon="people-outline" onPress={() => setShowCustomerModal(true)} style={{ flexGrow: 1 }} /><GlassButton secondary title="Estimates" icon="document-text-outline" onPress={handleEstimatesPress} style={{ flexGrow: 1 }} /></View></View>}
-        <WorkLocation jobs={jobs} jobsReady={work.dataChecked === true && work.accessStatus === 'ready'} />
         <OfflineStatus onSynced={loadJobs} />
       </ScrollView>
 

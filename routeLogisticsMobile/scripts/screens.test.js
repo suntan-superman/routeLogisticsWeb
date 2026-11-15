@@ -50,7 +50,11 @@ function load(relative) {
     if (specifier.endsWith('/theme/ThemeProvider')) return { ThemeProvider: pass, useTheme: () => ({ palette, colors: load('constants/colors.js').COLORS, isDark: true, ready: true, mode: 'dark', changeMode: async value => changes.push(value), reduceTransparency: false }) };
     if (specifier.endsWith('/constants/responsiveSizes')) return { FONT_SIZES: new Proxy({}, { get: () => 16 }), SPACING: new Proxy({}, { get: () => 12 }), BORDER_RADIUS: new Proxy({}, { get: () => 12 }), ICON_SIZES: new Proxy({}, { get: () => 20 }), hp: () => 20, wp: () => 20, rf: () => 16 };
     if (specifier.endsWith('/components/NativePushSettings')) return NativePushSettingsMock;
-    if (/\/components\/(JobPhotos|WorkLocation|OfflineStatus|FieldWorkTools|MyRoute|NativePushBridge)$/.test(specifier)) return () => null;
+    if (specifier.endsWith('/components/WorkLocation')) return props => {
+      const button = React.createElement('Pressable', { testID: 'mock-header-duty-chip', accessibilityLabel: 'Duty status', active: props.active }, React.createElement('Text', null, 'Off Duty'));
+      return typeof props.children === 'function' ? props.children({ button, dialog: null }) : button;
+    };
+    if (/\/components\/(JobPhotos|OfflineStatus|FieldWorkTools|MyRoute|NativePushBridge)$/.test(specifier)) return () => null;
     if (specifier === './EstimatesScreen') return () => null;
     if (specifier.endsWith('/components/JobWorkflow')) return ({ job, onClose }) => React.createElement('View', null,
       React.createElement('Text', null, job.customerName), React.createElement('Pressable', { accessibilityLabel: 'Close job details', onPress: onClose }, 'Close'));
@@ -114,6 +118,21 @@ test('pending staff see an explicit acceptance screen rather than the personal d
   assert.match(textOf(tree), /Join your company/); assert.match(textOf(tree), /Acceptance pending/);
   assert.doesNotMatch(textOf(tree), /Manage work|Your schedule/);
   await unmount(tree);
+});
+
+test('authenticated company field Home exposes duty status in the header before the scrolling work list', async () => {
+  for (const role of ['owner', 'manager', 'technician']) {
+    account(role);
+    const tree = await render('App.js');
+    const controls = tree.root.findAll(node => node.type === 'Pressable' && node.props.testID === 'mock-header-duty-chip');
+    assert.equal(controls.length, 1, `${role} has one duty control`);
+    assert.equal(controls[0].props.active, true);
+    const ancestors = []; for (let parent = controls[0].parent; parent; parent = parent.parent) ancestors.push(parent);
+    assert.ok(ancestors.some(parent => parent.type?.name === 'ScreenHeader'), `${role} duty control is inside the Home header`);
+    assert.ok(!ancestors.some(parent => parent.type === 'ScrollView'), `${role} duty control stays above the scrolling job list`);
+    assert.ok(tree.root.findAll(node => node.props.testID === 'technician-home-scroll').length);
+    await unmount(tree);
+  }
 });
 
 test('only authoritative revocation says access was removed; pending and unavailable states keep their distinct guidance', async () => {

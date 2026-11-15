@@ -32,10 +32,11 @@ Camera/save activity blocks switching. An unsaved work-order draft must be saved
 or closed through its existing discard guard before changing modes. Work details
 opened from Management Mode return to that management view when closed.
 
-One WorkLocation and one OfflineStatus instance stay mounted in the retained
-field Home. Start/End Shift and app-open/background permission remain explicit.
-Opening Management Mode or its map never activates GPS. End Shift remains in
-Field Mode → Home → Work shift. Personal notifications/settings remain in the
+One WorkLocation controller stays mounted in the workspace; its compact duty
+button sits at the right of the field Home header. OfflineStatus remains in the
+retained field Home. Start/End Shift and app-open/background permission remain explicit.
+Opening Management Mode or its map never activates GPS. Tap the header duty button for
+Start/End Shift, location details and optional background sharing. Personal notifications/settings remain in the
 Field Mode Settings tab.
 
 ## Management Mode
@@ -217,3 +218,8 @@ emulators or a successful binary build.
 | Backend | `staffAvailability.js`, `scheduling.js`, `workData.js`, `routes.js`, `workTracking.js`, `locations.js`, `index.js` |
 | Web availability | `StaffAvailabilityEditor.jsx`, `TeamLocationStatus.jsx`, `TechnicianAvailability.jsx`, `DispatchPage.jsx`, `TeamLocationsPage.jsx`, `workLocations.js` |
 | Tests/docs | Mobile mode/management/config/renderer suites; availability and owner/manager integration suites; scheduler/rules/browser/UI regressions; master acceptance plan and this document |
+
+Duty-header follow-up: mobile regression **284/284**, iOS export and local Android
+ARM64 build passed. The new dialog is a JS overlay and leaves camera/work-order
+navigation guards intact. No backend or web redeployment is needed. Details and
+physical acceptance caveats are in [on-duty tracking](on-duty-tracking-and-dispatch.md).

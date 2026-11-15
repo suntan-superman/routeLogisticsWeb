@@ -10,6 +10,21 @@ Route Logistics has a tested field-work foundation suitable for a **controlled p
 
 Current browser coverage is **31 scenarios** (93 configured executions across Chromium, Firefox and WebKit). See the November 15 addenda below for execution evidence. Earlier evidence for the original 25 scenarios is retained, including the later clean 75/75 Jobs-date run. Physical iPhone/Android and genuine provider acceptance remain separate.
 
+### November 15 — Home duty button and shift dialog
+
+The current duty status is now fixed at the right of the Home header: green
+On Duty/red Off Duty after verification. A neutral Checking/Check Status handles
+unknown reads. The explanation, permission choices, GPS freshness, and Start/End
+controls are in an in-app dialog. No native modal is introduced; navigation,
+camera/work-order drafts and permission operations retain their guards. Late
+shift responses are fenced by account/company/role/request sequence.
+
+Mobile **284/284**, iOS export and Android ARM64 release build passed. This is a
+mobile-only follow-up; backend/web/provider suites below are earlier unchanged
+coverage, not rerun claims. Operator-reported Android launch and cross-device
+duty reporting preceded this UI revision. Its physical dialog/header acceptance
+remains Not Run; no broader manual case has been marked Pass.
+
 ### November 15 — dual-mode mobile operations and temporary availability
 
 Owners/managers now use one account for personal Field Mode and company
@@ -118,7 +133,7 @@ The 45 Pass results include current automated/read-only checks (including newly 
 | --- | --- | --- |
 | Deployment evidence | Original function inventory and dated provider/deployment receipts below; current release checks in the scheduling note | Active metadata/HTTP 200 does not prove every business action |
 | Current automated regression | Functions174 pass/1 existing skip; web335; rules/integration440 broad +38 focused (447 distinct); earlier typed-email Auth-emulator1 | Emulators/test transports are not provider or physical-device delivery |
-| Mobile regression | 267/267 pass including dual-mode, availability and existing deletion/workflow guards; Android ARM64 build and iOS export pass | Physical camera/deletion acceptance remains separate and requires a rebuilt app |
+| Mobile regression | 284/284 pass including duty header/dialog, dual-mode and existing deletion/workflow guards; Android ARM64 build and iOS export pass | Physical camera/deletion acceptance remains separate and requires a rebuilt app |
 | Browser regression | Smoke9/9; full matrix92/93; corrected availability 6/6 passed after the fix (Chromium, Firefox, WebKit) | Initial Firefox save/refresh race retained in evidence; physical/manual cases unchanged |
 | Historically provider-verified | Stripe test settlement; QuickBooks sandbox writes/tax/payments; Twilio delivered/STOP/START; iOS push/tap; portal OTP and review email/submission | Dates and exact scenarios in Section G; no new provider transaction/message in this run |
 | Physical acceptance outstanding | Current installed build, camera/gallery/reopen, assigned-job completion, offline restart/sync, background GPS, push app states | Execute Section F with synthetic work before using real pilot visits |

@@ -11,16 +11,18 @@ const storageKey = `rl-work-tracking-v1:${auth.app.options.projectId}`;
 const maximumSamples = 60, listeners = new Set();
 const defaultPolicy = { intervalMinutes: 3, retentionHours: 24, maxShiftHours: 12, freshAfterSeconds: 300 };
 let metadata = null, samples = [], loaded = false, loading, persistence = Promise.resolve();
-let generation = 0, timer, expiryTimer, capturing = null, sending = null, starting = false, initialized = false, pendingActive = null;
+let generation = 0, shiftReadSequence = 0, timer, expiryTimer, capturing = null, sending = null, starting = false, initialized = false, pendingActive = null;
 const emptyView = () => ({ scopeKey: null, shift: null, policy: defaultPolicy, tracking: false, background: false, pendingCount: 0, lastCapturedAt: null, lastAcceptedAt: null, lastAccuracy: null, error: '', message: '' });
 let view = emptyView();
+let boundScope = null;
 const update = patch => { view = { ...view, ...patch }; listeners.forEach(listener => listener({ ...view })); };
 const sameScope = (first, second) => !!first && !!second && ['uid', 'companyId', 'membershipId', 'role'].every(key => (first[key] || '') === (second[key] || ''));
 const userScope = user => ({ uid: user?.id, companyId: user?.companyId, membershipId: user?.membershipId || null, role: user?.role || null });
 const scopeKey = scope => [scope?.uid, scope?.companyId, scope?.role, scope?.membershipId].join(':');
 export const workTrackingSnapshot = user => user && view.scopeKey !== scopeKey(userScope(user)) ? emptyView() : ({ ...view });
 export const subscribeWorkTracking = (listener, user) => { const scoped = () => listener(workTrackingSnapshot(user)); listeners.add(scoped); scoped(); return () => listeners.delete(scoped); };
-function bindView(scope) { const key = scopeKey(scope); if (view.scopeKey !== key) update({ ...emptyView(), scopeKey: key }); }
+function bindView(scope) { const key = scopeKey(scope); boundScope = { ...scope }; if (view.scopeKey !== key) update({ ...emptyView(), scopeKey: key }); }
+const currentRequest = (ticket, key, account) => ticket === generation && view.scopeKey === key && auth.currentUser === account;
 const code = failure => String(failure?.code || '').split('/').pop();
 const denied = failure => ['permission-denied', 'unauthenticated', 'failed-precondition', 'not-found'].includes(code(failure));
 const expired = value => !value?.expiresAt || !Number.isFinite(Date.parse(value.expiresAt)) || Date.parse(value.expiresAt) <= Date.now();
@@ -71,7 +73,8 @@ async function stopNative() {
 export async function stopShiftTracking({ endShift = false, reason = 'Location sharing stopped on this device.' } = {}) {
   await load();
   const previous = metadata, shiftId = previous?.shiftId || view.shift?.id;
-  generation++; pendingActive?.(); metadata = null; samples = [];
+  const expected = previous || boundScope, key = view.scopeKey, account = auth.currentUser;
+  const ticket = ++generation; pendingActive?.(); metadata = null; samples = [];
   update({ tracking: false, background: false, pendingCount: 0, message: reason });
   const clearing = persist();
   let nativeFailure;
@@ -79,14 +82,27 @@ export async function stopShiftTracking({ endShift = false, reason = 'Location s
   await clearing;
   if (endShift && shiftId) {
     try {
+      if (!currentRequest(ticket, key, account)) return;
+      if (expected) await verifiedAccount(expected);
+      if (!currentRequest(ticket, key, account)) return;
       const result = await callWorkspace('rlWorkShift', { action: 'end', shiftId }, { timeout: 8000 });
+      if (!currentRequest(ticket, key, account)) return;
+      // A response authenticated before a company/role change cannot overwrite
+      // the newly bound workspace, even when the Firebase UID stays the same.
+      if (expected) await verifiedAccount(expected);
+      if (!currentRequest(ticket, key, account)) return;
       update({ shift: result.shift, policy: policyFor(result.policy), error: '', message: 'Shift ended. Location sharing is off. Unsent GPS samples were removed from this device.' });
     } catch (failure) {
+      if (!currentRequest(ticket, key, account)) return;
+      if (expected && denied(failure)) {
+        try { await verifiedAccount(expected); } catch { return; }
+        if (!currentRequest(ticket, key, account)) return;
+      }
       update({ error: `Sharing stopped on this device. The server shift end is not confirmed. Reconnect and select End shift again. ${failure.message || ''}`.trim() });
       throw failure;
     }
   }
-  if (nativeFailure) { update({ error: 'Unable to confirm native location shutdown. Turn off location permission in device Settings and reopen the app.' }); throw nativeFailure; }
+  if (nativeFailure && currentRequest(ticket, key, account)) { update({ error: 'Unable to confirm native location shutdown. Turn off location permission in device Settings and reopen the app.' }); throw nativeFailure; }
 }
 async function failClosed(failure) {
   await stopShiftTracking({ reason: 'Location sharing stopped. Resume only after checking your shift and workspace access.' });
@@ -220,24 +236,31 @@ export async function refreshWorkShift(user) {
   const scope = userScope(user);
   if (metadata && !sameScope(metadata, scope)) await stopShiftTracking({ reason: 'Work account changed. Location sharing is off.' });
   bindView(scope);
-  const ticket = generation;
+  const ticket = generation, key = scopeKey(scope), account = auth.currentUser, readSequence = ++shiftReadSequence;
+  const current = () => currentRequest(ticket, key, account) && readSequence === shiftReadSequence;
   let result;
-  try { await verifiedAccount(scope); result = await callWorkspace('rlWorkShift', { action: 'status' }); }
-  catch (failure) { if (ticket === generation && metadata && denied(failure)) await failClosed(failure); throw failure; }
-  if (ticket !== generation) return workTrackingSnapshot();
+  try {
+    await verifiedAccount(scope);
+    if (!current()) return workTrackingSnapshot(user);
+    result = await callWorkspace('rlWorkShift', { action: 'status' });
+    if (!current()) return workTrackingSnapshot(user);
+    await verifiedAccount(scope);
+  }
+  catch (failure) { if (!current()) return workTrackingSnapshot(user); if (metadata && denied(failure)) await failClosed(failure); throw failure; }
+  if (!current()) return workTrackingSnapshot(user);
   update({ shift: result.shift, policy: policyFor(result.policy), error: '' });
   if (metadata) {
     if (expired(metadata) || result.shift?.id !== metadata.shiftId || result.shift?.status !== 'on-duty' || result.shift?.trackingConsent !== true) await stopShiftTracking({ reason: 'Your shift is no longer active. Location sharing is off.' });
     else {
       const current = metadata, foreground = await Location.getForegroundPermissionsAsync();
-      if (ticket !== generation || metadata !== current) return workTrackingSnapshot();
+      if (!currentRequest(ticket, key, account) || readSequence !== shiftReadSequence || metadata !== current) return workTrackingSnapshot(user);
       const background = current.backgroundConsent ? await Location.getBackgroundPermissionsAsync() : null;
-      if (ticket !== generation || metadata !== current) return workTrackingSnapshot();
+      if (!currentRequest(ticket, key, account) || readSequence !== shiftReadSequence || metadata !== current) return workTrackingSnapshot(user);
       if (!foreground.granted || (current.backgroundConsent && !background?.granted)) await stopShiftTracking({ reason: 'Location permission changed. Confirm permissions to resume sharing.' });
       else { current.intervalMinutes = policyFor(result.policy).intervalMinutes; await persist(); await configureTracking(); }
     }
   }
-  return workTrackingSnapshot();
+  return workTrackingSnapshot(user);
 }
 export async function handleBackgroundWorkLocations({ data, error }) {
   const ticket = generation;

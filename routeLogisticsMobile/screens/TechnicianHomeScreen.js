@@ -3,14 +3,14 @@ import { View, Text, ScrollView, RefreshControl, Linking } from 'react-native';
 import { useTheme } from '../theme/ThemeProvider';
 import { ScreenHeader, SectionHeader, JobCard, Card, EmptyState, InlineNotice, LoadingState, PrimaryButton, SecondaryButton } from '../components/MobileUI';
 import { nextJob, sortJobs, dayLabel, jobDestination, navigationUrl } from '../services/workPresentation';
-export default function TechnicianHomeScreen({ user, query, onOpenJob, onSchedule, children }) {
+export default function TechnicianHomeScreen({ user, query, onOpenJob, onSchedule, headerAction, children }) {
   const { palette } = useTheme(), [navigationError, setNavigationError] = useState('');
   const jobs = sortJobs(query.jobs), next = nextJob(jobs), completed = jobs.filter(job => job.status === 'completed').length;
   const readable = query.canReadWork !== false && !query.resourceDenied;
   const remaining = jobs.filter(job => !['completed','cancelled','canceled'].includes(job.status));
   const openNavigation = async job => { try { setNavigationError(''); await Linking.openURL(navigationUrl(job)); } catch { setNavigationError('Could not open navigation. Check that a maps application or browser is available.'); } };
   return <View style={{ flex: 1 }}>
-    <ScreenHeader title={`Hello, ${user.name?.trim().split(/\s+/)[0] || 'there'}`} subtitle={user.companyName || user.businessName || 'Your workspace'} />
+    <ScreenHeader title={`Hello, ${user.name?.trim().split(/\s+/)[0] || 'there'}`} subtitle={user.companyName || user.businessName || 'Your workspace'}>{headerAction}</ScreenHeader>
     <ScrollView testID="technician-home-scroll" refreshControl={<RefreshControl refreshing={query.isFetching && !query.isLoading} onRefresh={query.refreshWork} tintColor={palette.accent} />}
       contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 24, gap: 20, width: '100%', maxWidth: 760, alignSelf: 'center' }}>
       <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{dayLabel(new Date().toLocaleDateString('en-CA'))} · My Work</Text>

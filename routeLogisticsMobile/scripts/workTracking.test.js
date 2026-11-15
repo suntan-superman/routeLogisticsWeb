@@ -20,10 +20,10 @@ function harness(seed = []) {
     const mockRequire = name => {
       if (name === 'react') return React;
       if (name.startsWith('@babel/runtime/')) return require(name);
-      if (name === 'react-native') return { View: 'View', Text: 'Text', Pressable: 'Pressable', AppState: env.app };
+      if (name === 'react-native') return { View: 'View', Text: 'Text', Pressable: 'Pressable', ScrollView: 'ScrollView', ActivityIndicator: 'ActivityIndicator', AppState: env.app, BackHandler: { addEventListener: (_event, callback) => { env.back = callback; return { remove: () => { if (env.back === callback) env.back = null; } }; } } };
       if (name.endsWith('/AuthContext')) return { useAuth: () => ({ user: env.user, accessStatus: env.accessStatus }) };
       if (name.endsWith('/ThemeProvider')) return { useTheme: () => ({ palette }) };
-      if (name === './Glass') return { GlassCard: ({ children }) => React.createElement('View', null, children), GlassButton: ({ title, onPress, disabled, busy }) => React.createElement('Pressable', { accessibilityLabel: title, disabled: disabled || busy, onPress }, React.createElement('Text', null, title)) };
+      if (name === './Glass') return { GlassCard: ({ children }) => React.createElement('View', null, children), GlassButton: ({ title, onPress, disabled, busy }) => React.createElement('Pressable', { accessibilityLabel: title, disabled: disabled || busy, onPress }, React.createElement('Text', null, title)), IconButton: ({ label, onPress, disabled }) => React.createElement('Pressable', { accessibilityLabel: label, onPress, disabled }) };
       if (name === '@react-native-async-storage/async-storage') return { getItem: async key => store.get(key) || null, setItem: async (key, value) => store.set(key, value), removeItem: async key => store.delete(key) };
       if (name === 'firebase/auth') return { onIdTokenChanged: (_auth, listener) => { env.tokenListener = listener; return () => {}; } };
       if (name.endsWith('/constants/firebase')) return { auth: env.auth };
@@ -42,6 +42,7 @@ function harness(seed = []) {
       if (name.endsWith('/workspaceApi')) return { callWorkspace: async (name, data, options) => {
         calls.push({ name, ...data, ...(options ? { options } : {}) });
         if (name === 'rlWorkShift') {
+          if (data.action === 'status') { if (env.statusWait) await env.statusWait; if (env.statusFailure) throw env.statusFailure; }
           if (data.action === 'start') env.shift = { id: 'shift', status: 'on-duty', startedAt: new Date(Date.now() - (env.shiftStartOffset || 120000)).toISOString(), expiresAt: new Date(Date.now() + 12 * 3600000 - (env.shiftStartOffset || 120000)).toISOString(), trackingConsent: true };
           if (data.action === 'end') { if (env.endFailure) throw env.endFailure; env.shift = { ...env.shift, status: 'off-duty', endedAt: new Date().toISOString() }; }
           return { shift: env.shift, policy: env.policy };
@@ -178,27 +179,28 @@ test('a new shift can capture while the ended shift still has a pending native G
   assert.equal(positions(env).length, 1); assert.equal(positions(env)[0].latitude, 36);
   resolvePrevious({ timestamp: Date.now(), coords: { latitude: 35, longitude: -119, accuracy: 10 } }); await settle(); assert.equal(positions(env).length, 1); assert.equal(env.service.workTrackingSnapshot().tracking, true);
 });
-test('shift UI requires confirmation, keeps background optional and confirms End shift', async () => {
+test('header shift dialog requires explicit consent, keeps background optional and prevents duplicate End shift', async () => {
   const env = harness(), Component = env.load('components/WorkLocation.js').default; let tree;
   const button = label => tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === label)[0];
   const press = async label => { const target = button(label); assert.ok(target, label); await act(async () => target.props.onPress()); await act(settle); };
   await act(async () => { tree = create(React.createElement(Component)); }); await act(settle);
-  const summary = tree.root.findAll(node => node.type === 'Pressable' && String(node.props.accessibilityLabel).startsWith('Work shift:'))[0]; await act(async () => summary.props.onPress());
-  await press('Start shift'); assert.equal(env.foregroundRequests, 0); assert.equal(env.calls.filter(call => call.action === 'start').length, 0);
-  await press('Confirm start shift'); assert.equal(env.backgroundRequests, 0); assert.match(JSON.stringify(tree.toJSON()), /On duty/);
-  await press('End shift'); assert.equal(env.calls.filter(call => call.action === 'end').length, 0);
-  const end = button('Confirm end shift'); await act(async () => { await Promise.all([end.props.onPress(), end.props.onPress()]); }); await act(settle);
+  assert.equal(tree.root.findAllByProps({ testID: 'work-shift-dialog' }).length, 0);
+  const summary = tree.root.findByProps({ testID: 'duty-status-button' }); await act(async () => summary.props.onPress()); await act(settle);
+  assert.equal(env.foregroundRequests, 0); assert.equal(env.calls.filter(call => call.action === 'start').length, 0);
+  await press('Start shift'); assert.equal(env.backgroundRequests, 0); assert.match(JSON.stringify(tree.toJSON()), /On Duty/);
+  assert.equal(env.calls.filter(call => call.action === 'end').length, 0);
+  const end = button('End shift'); await act(async () => { await Promise.all([end.props.onPress(), end.props.onPress()]); }); await act(settle);
   assert.equal(env.calls.filter(call => call.action === 'end').length, 1); assert.equal(env.service.workTrackingSnapshot().tracking, false);
   await act(async () => tree.unmount());
 });
-test('compact End shift remains enabled offline and stops locally before reporting an unconfirmed server end', async () => {
+test('header dialog End shift remains enabled offline and stops locally before reporting an unconfirmed server end', async () => {
   const env = harness(); await start(env, true); env.accessStatus = 'offline'; env.endFailure = new Error('Network offline');
   const Component = env.load('components/WorkLocation.js').default; let tree;
   const button = label => tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === label)[0];
   await act(async () => { tree = create(React.createElement(Component)); }); await act(settle);
+  await act(async () => tree.root.findByProps({ testID: 'duty-status-button' }).props.onPress()); await act(settle);
   assert.ok(button('End shift')); assert.notEqual(button('End shift').props.disabled, true);
-  await act(async () => button('End shift').props.onPress()); assert.notEqual(button('Confirm end shift').props.disabled, true);
-  await act(async () => button('Confirm end shift').props.onPress()); await act(settle);
+  await act(async () => button('End shift').props.onPress()); await act(settle);
   assert.equal(env.native, false); assert.equal(env.store.size, 0); assert.match(JSON.stringify(tree.toJSON()), /Sharing stopped on this device/); assert.match(JSON.stringify(tree.toJSON()), /not confirmed/);
   assert.equal(env.calls.find(call => call.action === 'end').options.timeout, 8000); await act(async () => tree.unmount());
 });
@@ -207,9 +209,83 @@ test('switching accounts cannot display the previous member shift or GPS history
   assert.ok(previous); assert.equal(env.service.workTrackingSnapshot({ ...env.user, id: 'another' }).shift, null);
   const Component = env.load('components/WorkLocation.js').default; let tree;
   await act(async () => { tree = create(React.createElement(Component)); }); await act(settle);
+  await act(async () => tree.root.findByProps({ testID: 'duty-status-button' }).props.onPress()); await act(settle);
   env.user = { ...env.user, id: 'another', membershipId: 'new-member' }; env.claims = { ...env.claims, membershipId: 'new-member' }; env.auth.currentUser = { ...env.auth.currentUser, uid: 'another' }; env.shift = null;
   await act(async () => tree.update(React.createElement(Component))); await act(settle);
   assert.equal(env.service.workTrackingSnapshot(env.user).lastAcceptedAt, null); assert.equal(env.service.workTrackingSnapshot(env.user).shift, null);
-  assert.doesNotMatch(JSON.stringify(tree.toJSON()), /Last shared GPS fix|Older shared GPS fix|On duty/); assert.equal(env.native, false);
+  assert.doesNotMatch(JSON.stringify(tree.toJSON()), /Last shared GPS fix|Older shared GPS fix|On Duty/); assert.equal(tree.root.findAllByProps({ testID: 'work-shift-dialog' }).length, 0); assert.equal(env.native, false);
   env.auth.currentUser = null; await act(async () => env.tokenListener(null)); await act(settle); assert.equal(env.service.workTrackingSnapshot().lastAcceptedAt, null); await act(async () => tree.unmount());
+});
+
+test('confirmed duty uses the requested green/red header chip and keeps all explanation inside its dialog', async () => {
+  const env = harness(), Component = env.load('components/WorkLocation.js').default; let tree;
+  const chip = () => tree.root.findByProps({ testID: 'duty-status-button' });
+  const button = label => tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === label)[0];
+  await act(async () => { tree = create(React.createElement(Component)); }); await act(settle);
+  assert.match(chip().props.accessibilityLabel, /^Off Duty/); assert.equal(chip().props.style({ pressed: false }).backgroundColor, '#B91C1C');
+  assert.doesNotMatch(JSON.stringify(tree.toJSON()), /Going on duty|Updates target|Last shared GPS fix/);
+  await act(async () => chip().props.onPress()); await act(settle);
+  assert.match(JSON.stringify(tree.toJSON()), /Going on duty shares your work location/); assert.equal(env.foregroundRequests, 0);
+  await act(async () => button('Start shift').props.onPress()); await act(settle);
+  assert.match(chip().props.accessibilityLabel, /^On Duty/); assert.equal(chip().props.style({ pressed: false }).backgroundColor, '#047857');
+  await act(async () => button('Close shift controls').props.onPress());
+  assert.equal(tree.root.findAllByProps({ testID: 'work-shift-dialog' }).length, 0); assert.equal(env.service.workTrackingSnapshot().tracking, true);
+  assert.doesNotMatch(JSON.stringify(tree.toJSON()), /Going on duty|Updates target|Last shared GPS fix/);
+  await act(async () => tree.unmount());
+});
+
+test('pending or failed initial status stays unverified rather than displaying a false Off Duty state', async () => {
+  const env = harness(); let release; env.statusWait = new Promise(resolve => { release = resolve; });
+  const Component = env.load('components/WorkLocation.js').default; let tree;
+  await act(async () => { tree = create(React.createElement(Component)); }); await act(settle);
+  const chip = () => tree.root.findByProps({ testID: 'duty-status-button' });
+  assert.match(chip().props.accessibilityLabel, /^Checking/); assert.equal(chip().props.style({ pressed: false }).backgroundColor, '#475569');
+  env.statusFailure = new Error('Shift status unavailable'); await act(async () => release()); await act(settle);
+  assert.match(chip().props.accessibilityLabel, /^Check Status/); assert.doesNotMatch(JSON.stringify(tree.toJSON()), /Off Duty/);
+  await act(async () => chip().props.onPress()); await act(settle);
+  assert.match(JSON.stringify(tree.toJSON()), /Shift status unavailable/); assert.equal(env.foregroundRequests, 0);
+  assert.equal(tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === 'Start shift').length, 0);
+  await act(async () => tree.unmount());
+});
+
+test('an on-duty record with paused local sharing is green but explicitly explains the missing sharing session', async () => {
+  const env = harness(); env.shift = { id: 'existing-shift', status: 'on-duty', expiresAt: new Date(Date.now() + 3600000).toISOString() };
+  const Component = env.load('components/WorkLocation.js').default; let tree;
+  await act(async () => { tree = create(React.createElement(Component)); }); await act(settle);
+  const chip = tree.root.findByProps({ testID: 'duty-status-button' }); assert.match(chip.props.accessibilityLabel, /^On Duty/); assert.match(chip.props.accessibilityHint, /attention/);
+  await act(async () => chip.props.onPress()); await act(settle);
+  assert.match(JSON.stringify(tree.toJSON()), /location sharing is paused/);
+  assert.ok(tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === 'Resume location sharing').length);
+  assert.equal(env.foregroundRequests, 0); assert.equal(env.nativeOptions.length, 0); await act(async () => tree.unmount());
+});
+
+test('closing, reopening and Android Back remove the dialog without stopping the shift; hidden pages cannot retain a backdrop', async () => {
+  const env = harness(); await start(env, true);
+  const Component = env.load('components/WorkLocation.js').default; let tree;
+  await act(async () => { tree = create(React.createElement(Component, { active: true })); }); await act(settle);
+  const open = async () => { await act(async () => tree.root.findByProps({ testID: 'duty-status-button' }).props.onPress()); await act(settle); };
+  await open(); assert.equal(tree.root.findAllByProps({ testID: 'work-shift-dialog' }).length, 1);
+  await act(async () => { assert.equal(env.back(), true); }); assert.equal(tree.root.findAllByProps({ testID: 'work-shift-dialog' }).length, 0);
+  await open(); await act(async () => tree.update(React.createElement(Component, { active: false })));
+  assert.equal(tree.root.findAllByProps({ testID: 'work-shift-dialog' }).length, 0); assert.equal(env.service.workTrackingSnapshot().tracking, true);
+  assert.equal(env.calls.filter(call => call.action === 'end').length, 0); assert.equal(env.native, true);
+  assert.equal([...env.intervals.values()].filter(timer => timer.ms === 15000).length, 0);
+  await act(async () => tree.update(React.createElement(Component, { active: true }))); await act(settle); await open();
+  assert.equal(tree.root.findAllByProps({ testID: 'work-shift-dialog' }).length, 1); await act(async () => tree.unmount());
+});
+
+test('permission failure remains visible and retryable without reporting On Duty or creating a shift', async () => {
+  const env = harness(); env.foreground = false;
+  const Component = env.load('components/WorkLocation.js').default; let tree;
+  await act(async () => { tree = create(React.createElement(Component)); }); await act(settle);
+  await act(async () => tree.root.findByProps({ testID: 'duty-status-button' }).props.onPress()); await act(settle);
+  const startButton = () => tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === 'Start shift')[0];
+  await act(async () => startButton().props.onPress()); await act(settle);
+  assert.match(JSON.stringify(tree.toJSON()), /Location permission is required/);
+  assert.match(tree.root.findByProps({ testID: 'duty-status-button' }).props.accessibilityLabel, /^Off Duty/);
+  assert.equal(env.calls.filter(call => call.name === 'rlWorkShift' && call.action === 'start').length, 0);
+  assert.equal(startButton().props.disabled, false); env.foreground = true;
+  await act(async () => startButton().props.onPress()); await act(settle);
+  assert.match(tree.root.findByProps({ testID: 'duty-status-button' }).props.accessibilityLabel, /^On Duty/);
+  await act(async () => tree.unmount());
 });

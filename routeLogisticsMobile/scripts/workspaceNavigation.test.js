@@ -11,6 +11,7 @@ const { workspacePermissions } = require('../services/workspacePolicy');
 global.IS_REACT_ACT_ENVIRONMENT = true;
 const root = path.resolve(__dirname, '..'), modules = new Map(), backListeners = new Set();
 let tree, currentAuth, day, week, month, detail, route, hookCalls, refreshes, navigationCalls, alertCalls, workflowProps, workflowMounts, workflowUnmounts, managementProps;
+let shiftProps, shiftMounts, shiftUnmounts, pushProps;
 const modeStorage = new Map();
 const palette = { background: '#07120F', surface: '#14241F', text: '#EFFAF5', secondary: '#B0C8BE', border: '#405D4E', input: '#14241F', accent: '#62E3B3', button: '#087B55', danger: '#FFAAA3', glow: '#164D38' };
 const primitive = Object.fromEntries(['View','Text','Pressable','ActivityIndicator','RefreshControl'].map(name => [name, name]));
@@ -38,6 +39,20 @@ function Workflow(props) {
     buttonElement({ title: 'Discard draft and close', onPress: () => { props.onInteractionChange({ busy: false, hasDraft: false }); props.onClose(); } }),
     buttonElement({ title: 'Refresh after saved work', onPress: props.onChanged }));
 }
+function ShiftControl(props) {
+  shiftProps = props;
+  const [opened, setOpened] = React.useState(false);
+  React.useEffect(() => { shiftMounts++; return () => { shiftUnmounts++; }; }, []);
+  const report = (busy, hasDraft) => props.onInteractionChange?.({ busy, hasDraft });
+  const button = React.createElement('View', { testID: 'header-shift-control' },
+    React.createElement('Text', null, 'Explicit foreground location controls'),
+    buttonElement({ title: 'Open shift controls', disabled: props.disabled, onPress: () => { if (props.active === false || props.disabled) return; setOpened(true); report(true, false); } }));
+  const dialog = opened && props.active !== false && React.createElement('View', { testID: 'test-shift-dialog', accessibilityViewIsModal: true },
+      buttonElement({ title: 'Begin shift operation', onPress: () => report(true, false) }),
+      buttonElement({ title: 'Finish shift operation', onPress: () => report(true, false) }),
+      buttonElement({ title: 'Close shift controls', onPress: () => { setOpened(false); report(false, false); } }));
+  return typeof props.children === 'function' ? props.children({ button, dialog }) : React.createElement(React.Fragment, null, button, dialog);
+}
 function load(relative) {
   const filename = path.resolve(root, relative);
   if (modules.has(filename)) return modules.get(filename).exports;
@@ -63,8 +78,8 @@ function load(relative) {
     };
     if (name.endsWith('/components/JobWorkflow')) return Workflow;
     if (name.endsWith('/components/OfflineStatus')) return ({ onSynced }) => React.createElement('View', null, React.createElement('Text', null, 'Compact sync summary'), buttonElement({ title: 'Simulate synchronized work', onPress: onSynced }));
-    if (name.endsWith('/components/WorkLocation')) return () => React.createElement('Text', null, 'Explicit foreground location controls');
-    if (name.endsWith('/components/NativePushBridge')) return () => null;
+    if (name.endsWith('/components/WorkLocation')) return ShiftControl;
+    if (name.endsWith('/components/NativePushBridge')) return props => { pushProps = props; return null; };
     if (name === './SettingsScreen') return () => React.createElement('Text', null, 'Settings and company services catalogue');
     if (name === './EstimatesScreen') return () => React.createElement('Text', null, 'Authorized estimate management');
     if (name === './HomeScreen') return props => { managementProps = props; return React.createElement('View', { testID: 'management-home' }, React.createElement('Text', null, 'Legacy management workspace'), buttonElement({ title: 'Management schedule', onPress: () => props.navigation.navigate('schedule') })); };
@@ -106,6 +121,7 @@ async function press(label) { const node = button(label); assert.ok(node, `Visib
 async function openCard(id) { const card = visibleNodes(node => node.type === 'Pressable' && node.props.testID === `job-card-${id}`)[0]; assert.ok(card); await act(async () => card.props.onPress()); await settle(); }
 beforeEach(() => {
   tree = null; refreshes = []; hookCalls = []; navigationCalls = []; alertCalls = []; workflowProps = managementProps = null; workflowMounts = workflowUnmounts = 0;
+  shiftProps = pushProps = null; shiftMounts = shiftUnmounts = 0;
   modeStorage.clear();
   setRole('technician');
   day = query('day', [job('later', { time: '16:00', estimatedCost: 999 }), currentJob, job('early', { time: '08:00' }), job('completed', { status: 'completed', time: '07:00' })]);
@@ -286,4 +302,43 @@ test('technicians never mount management data and one shift/sync surface survive
   assert.equal(tree.root.findAll(node => node.type === 'Text' && node.children.includes('Explicit foreground location controls')).length, 1);
   assert.equal(tree.root.findAll(node => node.type === 'Text' && node.children.includes('Explicit foreground location controls'))[0], shift);
   assert.equal(tree.root.findAll(node => node.type === 'Text' && node.children.includes('Compact sync summary'))[0], sync);
+});
+
+test('Home places a single duty control in its header and suspends its dialog on other work views', async () => {
+  setRole('owner'); await render();
+  const control = tree.root.findAll(node => node.type === 'View' && node.props.testID === 'header-shift-control')[0];
+  assert.ok(control);
+  const ancestors = []; for (let parent = control.parent; parent; parent = parent.parent) ancestors.push(parent);
+  assert.ok(ancestors.some(parent => parent.type?.name === 'ScreenHeader'), 'Duty control belongs to the Home header');
+  assert.ok(!ancestors.some(parent => parent.type === 'ScrollView'), 'Duty control is outside the scrolling job list');
+  assert.equal(shiftProps.active, true); assert.equal(shiftMounts, 1);
+  await press('Schedule tab'); assert.equal(shiftProps.active, false);
+  await press('Home tab'); assert.equal(shiftProps.active, true);
+  await openCard('active'); assert.equal(shiftProps.active, false);
+  await press('Close job details'); assert.equal(shiftProps.active, true);
+  await press('Management mode'); assert.equal(shiftProps.active, false);
+  await press('Field mode'); assert.equal(shiftProps.active, true);
+  assert.equal(shiftMounts, 1); assert.equal(shiftUnmounts, 0);
+  assert.equal(tree.root.findAll(node => node.type === 'View' && node.props.testID === 'header-shift-control')[0], control);
+});
+
+test('the duty dialog blocks mode, tab and notification handoffs without discarding field drafts', async () => {
+  setRole('manager'); await render();
+  const modeButton = button('Management mode'), routeButton = button('Route tab'), fieldButton = button('Field mode'), settingsButton = button('Settings tab');
+  await press('Open shift controls');
+  assert.equal(pushProps.blocked, true);
+  assert.equal(button('Management mode'), undefined, 'Underlying navigation is hidden from accessibility while the dialog is open');
+  await act(async () => modeButton.props.onPress()); await settle(); assert.equal(fieldButton.props.accessibilityState.selected, true);
+  await act(async () => routeButton.props.onPress()); await settle(); assert.equal(routeButton.props.accessibilityState.selected, false);
+  await act(async () => pushProps.onOpenJob(currentJob)); await settle();
+  assert.equal(workflowMounts, 0);
+  await press('Begin shift operation'); assert.equal(modeButton.props.disabled, true); assert.equal(settingsButton.props.disabled, true);
+  await press('Finish shift operation'); await press('Close shift controls');
+  assert.equal(pushProps.blocked, false);
+  await openCard('active'); await press('Create photo draft');
+  // A late/hidden shift reset must not clear the work-order interaction guard.
+  await act(async () => shiftProps.onInteractionChange({ busy: false, hasDraft: false })); await settle();
+  assert.equal(pushProps.blocked, true);
+  await press('Management mode'); assert.equal(button('Field mode').props.accessibilityState.selected, true);
+  assert.match(visibleText(), /Retained selected photo/);
 });

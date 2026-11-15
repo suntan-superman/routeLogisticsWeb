@@ -13,6 +13,14 @@ Implemented November 15, 2026 on the existing `main` branch for Firebase project
   email preferences, and SMS preferences. Collapsing preserves edits and an
   already-mounted native notification component.
 - Appearance still persists locally, independently of the account.
+- **Legal & account → About Route Logistics** opens a native About dialog with
+  Workside Software LLC, the installed app version, native build number, and OS
+  details for support. Version/build values come from `expo-application`, so EAS
+  remote build increments are reported correctly. Expo Go is labeled as a
+  preview and does not report its host build as a Route Logistics release.
+  Missing build information is shown as unavailable, without using configured
+  build-number placeholders. Close dismisses the system dialog without changing
+  Settings drafts.
 - Legal links open `https://route-logistics.com/privacy` and
   `https://route-logistics.com/terms`. The terms route is a real public page;
   it previously fell through to the application router.
@@ -72,7 +80,8 @@ test account with independently authorized data loss.
 
 Local validation completed:
 
-- Mobile: **196 passed**.
+- Mobile: **201 passed**, including installed/preview version handling and the
+  About dialog's preservation of Settings drafts.
 - Web unit/UI tests: **241 passed**.
 - Functions unit tests: **138 passed, 1 existing emulator-only skip**.
 - Focused Firestore/Storage/invitation/deletion regression suite: **69 passed**.

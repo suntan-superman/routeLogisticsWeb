@@ -20,6 +20,7 @@ native.ScrollView = ({ refreshControl, children, ...props }) => React.createElem
 native.AppState = { currentState: 'active', addEventListener: (_event, listener) => { appListeners.add(listener); return { remove: () => appListeners.delete(listener) }; } };
 Object.assign(native, { StyleSheet: { create: x => x, absoluteFill: {}, absoluteFillObject: {} }, Platform: { OS: 'ios', select: x => x.ios }, Alert: { alert() {} }, Linking: { openURL: async () => {} }, Modal: ({ visible, children }) => visible ? React.createElement('Modal', null, children) : null });
 const palette = { background: '#07120F', surface: '#14241F', glass: '#14241F', text: '#EFFAF5', secondary: '#B0C8BE', border: '#405D4E', input: '#14241F', accent: '#62E3B3', button: '#087B55', danger: '#FFAAA3', highlight: '#FFFFFF', glow: '#164D38' };
+const nativeApplication = { nativeApplicationVersion: '1.0.0', nativeBuildVersion: '27' };
 function NativePushSettingsMock() {
   React.useEffect(() => { nativePushMounts++; }, []);
   return React.createElement('View', { accessibilityLabel: 'Native work notification preferences' });
@@ -33,6 +34,8 @@ function load(relative) {
     if (specifier === 'react-native') return native;
     if (specifier === 'react-native-safe-area-context') return { SafeAreaView: 'SafeAreaView', SafeAreaProvider: pass };
     if (specifier === 'expo-status-bar') return { StatusBar: 'StatusBar' };
+    if (specifier === 'expo-application') return nativeApplication;
+    if (specifier === 'expo-constants') return { executionEnvironment: 'standalone', expoConfig: { version: '0.8.0', ios: { buildNumber: '1' } } };
     if (specifier === 'expo-blur') return { BlurView: 'BlurView' };
     if (specifier === 'expo-linear-gradient') return { LinearGradient: 'LinearGradient' };
     if (specifier === '@expo/vector-icons') return { Ionicons: 'Icon', MaterialIcons: 'Icon', AntDesign: 'Icon', MaterialCommunityIcons: 'Icon' };
@@ -252,6 +255,27 @@ test('Settings opens Route Logistics legal links and reports browser failures', 
   native.Linking.openURL = async () => { throw new Error('Unavailable'); };
   await press(tree, 'Privacy policy');
   assert.match(textOf(tree), /Could not open the privacy policy.*https:\/\/route-logistics.com\/privacy/);
+});
+
+test('About opens a native dialog with installed version and build without changing Settings drafts', async () => {
+  account(); const alerts = []; let saves = 0;
+  native.Alert.alert = (...args) => alerts.push(args);
+  currentAuth.updateUserProfile = async () => { saves++; return { success: true }; };
+  const tree = await render('screens/SettingsScreen.js');
+  const name = () => tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Display name')[0];
+  await act(async () => name().props.onChangeText('Unsaved display name'));
+  await press(tree, 'About Route Logistics');
+  assert.equal(alerts.length, 1); assert.equal(alerts[0][0], 'About Route Logistics');
+  assert.match(alerts[0][1], /Workside Software LLC/);
+  assert.match(alerts[0][1], /Version: 1\.0\.0\nBuild: 27/);
+  assert.match(alerts[0][1], /Platform: iOS/);
+  assert.doesNotMatch(alerts[0][1], /0\.8\.0|luis@example\.com|membership|companyId/);
+  assert.equal(alerts[0][2][0].text, 'Close');
+  assert.equal(alerts[0][3].cancelable, true);
+  // Native Alert owns dismissal: it leaves no React Native Modal backdrop/state.
+  await press(tree, 'About Route Logistics');
+  assert.equal(alerts.length, 2); assert.equal(name().props.value, 'Unsaved display name');
+  assert.equal(saves, 0); assert.equal(tree.root.findAllByType('Modal').length, 0);
 });
 
 test('account deletion requires review, typed confirmation, and explicit unsynced-work consent', async () => {

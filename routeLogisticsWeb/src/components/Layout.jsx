@@ -48,6 +48,7 @@ const Layout = ({ children }) => {
     { name: 'Service Plans', href: '/service-plans', icon: ArrowPathIcon },
     { name: 'Invoices', href: '/invoices', icon: BanknotesIcon },
     { name: 'Reports', href: '/reports', icon: ChartBarIcon },
+    { name: 'Reviews', href: '/reviews', icon: DocumentTextIcon },
     { name: 'Integrations', href: '/integrations', icon: ArrowPathIcon },
     { name: 'Notifications', href: '/notifications', icon: ClipboardDocumentListIcon },
   ].filter(item => mayOpenRoute(item.href, can));

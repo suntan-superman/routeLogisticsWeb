@@ -23,6 +23,9 @@ async function deliverMail(db, ref, transport, from, now = Date.now(), options =
       const invoice = await tx.get(db.collection('invoices').doc(data.invoiceId));
       if (!invoice.exists || invoice.get('status') !== 'sent') { tx.update(ref, { status: 'cancelled' }); return null; }
     }
+    if (data.reviewInvitationId && !(await require('./reviewInvitations').reviewDeliveryEligible(tx, db, data, { now, enabled: options.reviewInvitationsEnabled ? options.reviewInvitationsEnabled() : process.env.RL_REVIEW_INVITATIONS_ENABLED === 'true' }))) {
+      tx.update(ref, { status: 'cancelled', failureCode: 'review-invitation-no-longer-authorized' }); return null;
+    }
     if (data.estimateId) {
       const { hash, normalizeEmail } = require('./security');
       const enabled = options.estimateEmailEnabled ? options.estimateEmailEnabled() : process.env.RL_ESTIMATE_EMAIL_ENABLED === 'true';

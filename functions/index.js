@@ -35,6 +35,8 @@ const { serviceAreaHandlers, createGoogleGeocoder } = require('./serviceAreas');
 const { serviceFormsHandler } = require('./serviceForms');
 const { paymentLifecycleHandlers } = require('./paymentLifecycle');
 const { estimateHandlers } = require('./estimates');
+const { reviewHandlers } = require('./reviews');
+const { reviewInvitationHandlers } = require('./reviewInvitations');
 
 initializeApp();
 const db = getFirestore();
@@ -142,6 +144,9 @@ exports.manageTeamMember = onCall(invites.manageTeamMember);
 exports.transferCompanyOwnership = onCall(ownershipHandler(db, applyClaims));
 exports.bulkImportCustomers = onCall(customerHandlers(db).bulkImportCustomers);
 const portal = portalHandlers(db, getAuth(), emailEnabled);
+const reviews = reviewHandlers(db);
+exports.rlCustomerReviews = onCall({ timeoutSeconds: 60 }, reviews.customer);
+exports.rlProviderReviews = onCall({ timeoutSeconds: 60 }, reviews.provider);
 exports.rlRequestCustomerOTP = onCall(portal.requestCustomerOTP);
 exports.rlVerifyCustomerOTP = onCall(portal.verifyCustomerOTP);
 const staffLogin = staffLoginHandlers(db, getAuth(), emailEnabled);
@@ -209,6 +214,16 @@ const smsConfig = {
   statusUrl: 'https://us-central1-mi-factotum-field-service.cloudfunctions.net/rlSmsStatus',
 };
 const sms = smsHandlers(db, smsConfig);
+const reviewInvitations = reviewInvitationHandlers(db, {
+  enabled: () => process.env.RL_REVIEW_INVITATIONS_ENABLED === 'true',
+  emailEnabled, appUrl: () => appUrl.value(), sms,
+});
+exports.rlReviewInvitationSettings = onCall({ timeoutSeconds: 60 }, reviewInvitations.settings);
+exports.rlReviewInvitation = onCall({ timeoutSeconds: 60 }, reviewInvitations.invitation);
+exports.rlReviewJobCreated = onDocumentCreated('jobs/{jobId}', event => reviewInvitations.onJob(null, event.data?.data(), event.params.jobId, event.id, event.data?.updateTime));
+exports.rlReviewJobUpdated = onDocumentUpdated('jobs/{jobId}', event => reviewInvitations.onJob(event.data?.before.data(), event.data?.after.data(), event.params.jobId, event.id, event.data?.after.updateTime));
+exports.rlReviewJobDeleted = onDocumentDeleted('jobs/{jobId}', event => reviewInvitations.onJob(event.data?.data(), null, event.params.jobId, event.id));
+exports.rlScheduleReviewInvitations = onSchedule({ schedule: 'every 5 minutes', maxInstances: 1, timeoutSeconds: 120 }, reviewInvitations.schedule);
 // Keep signed STOP/status callbacks bound after activation even when delivery is disabled.
 const smsSenderSecrets = ['RL_TWILIO_ACCOUNT_SID', process.env.RL_TWILIO_SENDER_MODE === 'phone-number' ? 'RL_TWILIO_FROM_NUMBER' : 'RL_TWILIO_MESSAGING_SERVICE_SID'];
 const smsCallbackSecrets = process.env.RL_SMS_SECRETS_CONFIGURED === 'true' ? [...smsSenderSecrets, 'RL_TWILIO_AUTH_TOKEN'] : [];

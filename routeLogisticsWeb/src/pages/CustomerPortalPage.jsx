@@ -7,10 +7,13 @@ import { portalAuth, portalFunctions, portalReady } from '../services/portal';
 import InvoicePayment from '../components/InvoicePayment';
 import PaymentHistory from '../components/PaymentHistory';
 import { paymentsConfigured, paymentMode } from '../services/paymentConfig';
+import CustomerReviews from '../components/CustomerReviews';
+import { useConfirmUnsavedChanges } from '../hooks/useUnsavedChanges';
 const call = (name, data) => httpsCallable(portalFunctions, name)(data).then((result) => result.data);
 const money = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
 
 export default function CustomerPortalPage() {
+  const confirmDiscard = useConfirmUnsavedChanges();
   const [user, setUser] = useState(null), [accounts, setAccounts] = useState([]);
   const [email, setEmail] = useState(''), [code, setCode] = useState(''), [challenge, setChallenge] = useState(null);
   const [busy, setBusy] = useState(true), [message, setMessage] = useState(''), [error, setError] = useState('');
@@ -47,12 +50,14 @@ export default function CustomerPortalPage() {
   }, []);
   const selectedAccount = user ? accounts.find(account => account.id === selectedId) : null;
   const selectedAccounts = selectedAccount ? [selectedAccount] : [];
-  const chooseProvider = event => {
-    if (!accounts.some(account => account.id === event.target.value)) return;
-    selection.current = event.target.value; setSelectedId(event.target.value); clearDetails(); setError(''); setMessage('');
+  const chooseProvider = async event => {
+    const next = event.target.value;
+    if (!accounts.some(account => account.id === next) || !await confirmDiscard()) return;
+    selection.current = next; setSelectedId(next); clearDetails(); setError(''); setMessage('');
   };
   const logout = async () => {
     if (submitting.current) return;
+    if (!await confirmDiscard()) return;
     submitting.current = true; requestVersion.current++; authVersion.current++; identity.current = null; selection.current = '';
     clearDetails(); setUser(null); setAccounts([]); setSelectedId(''); setCode(''); setChallenge(null); setError(''); setMessage(''); setBusy(true);
     try { await signOut(portalAuth); }
@@ -102,7 +107,7 @@ export default function CustomerPortalPage() {
       <button disabled={busy || logoutFailed} className="rounded bg-primary-700 px-4 py-2 text-white hover:bg-primary-800 disabled:opacity-50">{busy ? 'Please wait…' : challenge ? 'Sign in' : 'Email a sign-in code'}</button>
       {challenge && <button type="button" disabled={busy || logoutFailed} className="block underline" onClick={() => { authVersion.current++; setChallenge(null); setCode(''); setMessage(''); setError(''); }}>Request a new code or change email</button>}
     </form> : <>
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-4 rounded-xl border bg-white p-5"><label className="min-w-0 flex-1 font-semibold sm:max-w-lg">Service provider<select className="mt-2 block w-full rounded border-gray-300 font-normal" value={selectedId} disabled={busy || !accounts.length} onChange={chooseProvider} aria-describedby="portal-provider-help">{!accounts.length && <option value="">{busy ? 'Loading providers…' : 'No available providers'}</option>}{accounts.map(account => <option key={account.id} value={account.id}>{account.companyName}{account.contactEmail ? ` · ${account.contactEmail}` : ''}</option>)}</select></label><button type="button" className="text-primary-700 underline" disabled={busy} onClick={() => load()}>{busy ? 'Refreshing…' : 'Refresh visits and invoices'}</button><p id="portal-provider-help" className="w-full text-sm text-gray-500">Only the selected provider's records are shown. Switching providers closes open files and payment details.</p></div>
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-4 rounded-xl border bg-white p-5"><label className="min-w-0 flex-1 font-semibold sm:max-w-lg">Service provider<select className="mt-2 block w-full rounded border-gray-300 font-normal" value={selectedId} disabled={busy || !accounts.length} onChange={chooseProvider} aria-describedby="portal-provider-help">{!accounts.length && <option value="">{busy ? 'Loading providers…' : 'No available providers'}</option>}{accounts.map(account => <option key={account.id} value={account.id}>{account.companyName}{account.contactEmail ? ` · ${account.contactEmail}` : ''}</option>)}</select></label><button type="button" className="text-primary-700 underline" disabled={busy} onClick={async () => { if (await confirmDiscard()) load(); }}>{busy ? 'Refreshing…' : 'Refresh visits and invoices'}</button><p id="portal-provider-help" className="w-full text-sm text-gray-500">Only the selected provider's records are shown. Switching providers closes open files, review drafts, and payment details.</p></div>
       {busy && <p role="status" className="py-4 text-gray-600">Loading your authorized providers and service records…</p>}
       {!busy && !accounts.length && !error && <p>No service records are available. Contact your provider to check your email address.</p>}
       {selectedAccounts.map((account) => <section key={`${user.uid}:${account.id}`} aria-label="Selected provider records" className="mb-6 rounded-xl border bg-white p-5 sm:p-7">
@@ -111,6 +116,7 @@ export default function CustomerPortalPage() {
         {account.duplicateCustomerCount > 0 && <p className="mt-2 text-sm text-gray-500">Matching customer records have been combined for this provider.</p>}
         <h3 className="mb-3 mt-5 font-semibold">Service visits</h3>
         {account.jobs.length ? <ul className="divide-y">{account.jobs.map((job) => <li key={job.id} className="flex flex-wrap justify-between gap-2 py-3"><span>{job.serviceType} · {job.date} {job.time}</span><span className="capitalize">{job.status.replace('-', ' ')}</span></li>)}</ul> : <p>No visits yet.</p>}
+        <CustomerReviews accountId={account.id} userId={user.uid} />
         <h3 className="mb-3 mt-6 font-semibold">Photos and documents</h3>
         {account.photos?.length || account.documents?.length ? <ul className="grid gap-3 sm:grid-cols-2">{[...(account.photos || []), ...(account.documents || [])].map(item => <li key={`${item.kind}:${item.id}`} className="min-w-0 rounded-lg border p-4"><p className="break-words text-sm">{item.caption || item.name || (item.kind === 'photo' ? 'Service photo' : 'Service document')}</p><button type="button" className="mt-3 text-sm font-semibold text-primary-700 underline" disabled={currentFile?.loading && currentFile.item.id === item.id} onClick={() => readFile(item)}>{item.kind === 'photo' ? 'View photo' : 'Open document'}</button></li>)}</ul> : <p className="text-gray-600">No photos or documents have been shared by this provider yet.</p>}
         {currentFile && <section aria-label="Shared file preview" className="mt-5 space-y-4 rounded-xl border border-primary-200 bg-primary-50 p-5"><div className="flex items-start justify-between gap-4"><h4 className="break-words font-semibold">{currentFile.item.caption || currentFile.item.name || 'Shared service file'}</h4><button type="button" className="text-sm text-primary-700 underline" onClick={() => { fileVersion.current++; setFileView(null); }}>Close file</button></div>{currentFile.loading ? <p role="status">Loading shared file…</p> : currentFile.error ? <><p role="alert" className="text-red-700">{currentFile.error}</p><button type="button" className="underline" onClick={() => readFile(currentFile.item)}>Retry file</button></> : currentFile.data?.contentType === 'application/pdf' ? <a className="font-semibold text-primary-700 underline" href={currentFile.data.dataUri} download={String(currentFile.data.name || 'Service document').replace(/[^a-zA-Z0-9 ._-]/g, '').slice(0, 160).replace(/\.pdf$/i, '') + '.pdf'}>Download PDF document</a> : currentFile.data ? <img className="max-h-[32rem] max-w-full rounded-lg object-contain" src={currentFile.data.dataUri} alt={currentFile.item.caption || currentFile.data.name || 'Shared service visit photo'} /> : null}</section>}

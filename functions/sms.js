@@ -18,13 +18,14 @@ const {
   verifySignature
 } = require('./smsProvider');
 const { pilotEligible } = require('./smsPilot');
-const PURPOSES = ['appointment-confirmation', 'pre-visit', 'en-route', 'service-completed', 'service-follow-up'];
+const PURPOSES = ['appointment-confirmation', 'pre-visit', 'en-route', 'service-completed', 'service-follow-up', 'review-invitation'];
 const DEFAULT_TEMPLATES = {
   'appointment-confirmation': 'Your service appointment is confirmed for {date} {time}.',
   'pre-visit': 'Reminder: your service appointment is scheduled for {date} {time}.',
   'en-route': 'Your service technician is on the way.',
   'service-completed': 'Your scheduled service visit is complete. Contact us if you need help.',
-  'service-follow-up': 'Following up on your recent service visit. Contact us if you need help.'
+  'service-follow-up': 'Following up on your recent service visit. Contact us if you need help.',
+  'review-invitation': 'Please share honest feedback about your completed service in your customer portal.'
 };
 const DEFAULT_SETTINGS = {
   enabled: false,
@@ -37,7 +38,7 @@ const DEFAULT_SETTINGS = {
 const TERMINAL = ['delivered', 'undelivered', 'failed', 'canceled'];
 const time = value => value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : typeof value === 'number' ? value : Date.parse(value || '');
 const publicDate = value => Number.isFinite(time(value)) ? new Date(time(value)).toISOString() : null;
-const disclosure = company => `I agree to receive ${company} service text messages for the purposes selected below. Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for help. Consent is not a condition of purchase. Optional follow-up messages require separate consent.`;
+const disclosure = company => `I agree to receive ${company} service text messages for the purposes selected below. Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for help. Consent is not a condition of purchase. Optional follow-up messages and review invitations require separate consent.`;
 function cleanSettings(data) {
   const purposes = data.purposes;
   if (!Array.isArray(purposes) || purposes.some(item => !PURPOSES.includes(item)) || ![30, 60, 120, 1440].includes(data.reminderMinutes) || ![60, 1440, 2880].includes(data.followUpMinutes)) throw new HttpsError('invalid-argument', 'Choose supported SMS purposes and reminder intervals.');
@@ -238,13 +239,15 @@ function smsHandlers(db, config = {}) {
   }
   async function queue(jobId, purpose, {
     actor = null,
-    automatic = false
+    automatic = false,
+    reviewInvitation = null
   } = {}) {
     if (!active()) return {
       skipped: true,
       reason: 'delivery-disabled'
     };
     if (!PURPOSES.includes(purpose)) throw new HttpsError('invalid-argument', 'Unsupported SMS purpose.');
+    if (purpose === 'review-invitation' && !reviewInvitation) return { skipped: true, reason: 'secure-review-invitation-required' };
     const jobRef = ref('jobs', documentId(jobId, 'job'));
     return db.runTransaction(async tx => {
       const job = await tx.get(jobRef),
@@ -288,11 +291,22 @@ function smsHandlers(db, config = {}) {
         skipped: true,
         reason: 'suppressed-or-ambiguous'
       };
-      const eventVersion = purpose === 'appointment-confirmation' || purpose === 'pre-visit' ? `${job.get('date')}:${job.get('time')}` : purpose;
+      let reviewMetadata = {}, reviewBody = null;
+      if (purpose === 'review-invitation') {
+        const invitation = await tx.get(ref('rlReviewInvitations', documentId(reviewInvitation.invitationId, 'review invitation')));
+        const token = new URLSearchParams(String(reviewInvitation.link || '').split('#')[1] || '').get('token');
+        const expectedLink = `https://route-logistics.com/review#id=${invitation.id}&token=${token}`;
+        if (reviewInvitation.link !== expectedLink || !/^[a-f0-9]{64}$/.test(token || '') || hash(token) !== reviewInvitation.invitationHash) return { skipped: true, reason: 'review-link-invalid' };
+        reviewMetadata = { reviewInvitationId: invitation.id, reviewInvitationHash: reviewInvitation.invitationHash, reviewCompletionKey: invitation.get('completionKey') };
+        if (!(await require('./reviewInvitations').reviewDeliveryEligible(tx, db, { ...reviewMetadata, companyId, customerId: customer.id, jobId: job.id, to: phone }, { now: now(), enabled: config.reviewInvitationsEnabled ? config.reviewInvitationsEnabled() : process.env.RL_REVIEW_INVITATIONS_ENABLED === 'true', channel: 'sms' }))) return { skipped: true, reason: 'review-delivery-not-authorized' };
+        const name = String(company.get('name') || 'Your service provider').replace(/[\r\n<>]/g, ' ').slice(0, 80);
+        reviewBody = `${name}: Please share honest feedback about your completed service. All ratings are welcome. ${reviewInvitation.link} Reply STOP to opt out, HELP for help.`;
+      }
+      const eventVersion = reviewInvitation ? `${reviewInvitation.invitationId}:${reviewInvitation.suffix}` : purpose === 'appointment-confirmation' || purpose === 'pre-visit' ? `${job.get('date')}:${job.get('time')}` : purpose;
       const pilotId = broadAllowed ? null : configuredPilotId();
       const pilotRef = pilotId ? ref('rlSmsPilots', pilotId) : null;
       const pilot = pilotRef ? await tx.get(pilotRef) : null;
-      const id = hash(`${companyId}:${job.id}:${purpose}:${eventVersion}${pilotId ? `:pilot:${pilotId}:${pilot.get('version')}` : ''}`),
+      const id = purpose === 'review-invitation' ? require('./reviewInvitations').reviewSmsOutboxId(companyId, job.id, reviewInvitation.invitationId, reviewInvitation.suffix) : hash(`${companyId}:${job.id}:${purpose}:${eventVersion}${pilotId ? `:pilot:${pilotId}:${pilot.get('version')}` : ''}`),
         outbox = ref('rlSmsOutbox', id),
         old = await tx.get(outbox);
       if (pilotId && (registration.get('pilotApproved') !== true || !pilotEligible(pilot.data(), {
@@ -326,7 +340,7 @@ function smsHandlers(db, config = {}) {
         jobId: job.id,
         purpose,
         to: phone,
-        body: renderMessage(company.data(), settings, job.data(), purpose),
+        body: reviewBody || renderMessage(company.data(), settings, job.data(), purpose),
         status: 'queued',
         availableAt: now(),
         attempts: 0,
@@ -338,7 +352,8 @@ function smsHandlers(db, config = {}) {
         senderReference: sender.reference,
         ...(pilotId ? { pilotId, pilotVersion: pilot.get('version') } : {}),
         consentVersion: consent.get('version'),
-        jobSchedule: hash(`${job.get('date')}:${job.get('time')}`)
+        jobSchedule: hash(`${job.get('date')}:${job.get('time')}`),
+        ...reviewMetadata
       });
       tx.create(ref('rlSmsAudit', `${id}-queued`), {
         companyId,
@@ -369,6 +384,7 @@ function smsHandlers(db, config = {}) {
       });
     }
     if (!deliveryAllowed || !sender || (data.senderMode || 'messaging-service') !== sender.mode || data.senderReference !== undefined && data.senderReference !== sender.reference || customer.get('companyId') !== data.companyId || customer.get('isActive') === false || phoneE164(customer.get('phone')) !== data.to || consent.get('status') !== 'granted' || consent.get('phone') !== data.to || consent.get('version') !== data.consentVersion || !consent.get('purposes')?.includes(data.purpose) || suppression.get('blocked') || new Set((recipient.get('owners') || []).map(owner => owner.companyId)).size !== 1 || job.get('companyId') !== data.companyId || job.get('customerId') !== data.customerId || ['appointment-confirmation', 'pre-visit'].includes(data.purpose) && data.jobSchedule !== hash(`${job.get('date')}:${job.get('time')}`)) return false;
+    if (data.purpose === 'review-invitation' && !(await require('./reviewInvitations').reviewDeliveryEligible(tx, db, data, { now: now(), enabled: config.reviewInvitationsEnabled ? config.reviewInvitationsEnabled() : process.env.RL_REVIEW_INVITATIONS_ENABLED === 'true', channel: 'sms' }))) return false;
     if (data.actorId) {
       const members = await tx.get(db.collection('teamMembers').where('companyId', '==', data.companyId).where('uid', '==', data.actorId).limit(5));
       const company = await tx.get(ref('companies', data.companyId));
@@ -513,6 +529,9 @@ function smsHandlers(db, config = {}) {
         actor: staff
       });
     },
+    // Internal producer only. Public staff requests cannot supply trusted links.
+    queueReviewInvitation: data => queue(data.jobId, 'review-invitation', { automatic: true, reviewInvitation: data }),
+    reviewDeliveryEnabled: () => broadActive(),
     onJob: async (before, after, id) => {
       if (!active() || !after?.companyId) return {
         skipped: true

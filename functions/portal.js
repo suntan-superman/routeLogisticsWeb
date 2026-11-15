@@ -35,8 +35,7 @@ function publicJob(id, data) {
 function publicInvoice(id, data) {
   return { id, invoiceNumber: data.invoiceNumber || id, issueDate: data.issueDate || '', dueDate: data.dueDate || '', status: data.status, total: Number(data.total) || 0, currency: 'USD', lineItems: (Array.isArray(data.lineItems) ? data.lineItems : []).slice(0, 100).map((i) => ({ description: String(i.description || ''), quantity: Number(i.quantity) || 0, unitPrice: Number(i.unitPrice) || 0, amount: Number(i.amount) || 0 })) };
 }
-function portalHandlers(db, auth, emailEnabled = () => true, { bucketProvider = () => getStorage().bucket(), now = () => Date.now() } = {}) {
-  async function associations(email) {
+async function portalAssociations(db, email) {
     const customers = await customersForEmail(db, email), groups = new Map();
     for (const customer of customers) {
       const companyId = customer.get('companyId'), userId = customer.get('userId');
@@ -50,7 +49,9 @@ function portalHandlers(db, auth, emailEnabled = () => true, { bucketProvider = 
       groups.get(id).customers.push(customer);
     }
     return [...groups.values()];
-  }
+}
+function portalHandlers(db, auth, emailEnabled = () => true, { bucketProvider = () => getStorage().bucket(), now = () => Date.now() } = {}) {
+  const associations = email => portalAssociations(db, email);
   const sameScope = (group, data) => group.companyId ? data?.companyId === group.scopeValue : !data?.companyId && data?.userId === group.scopeValue;
   const ownsJob = (group, job) => job.exists && sameScope(group, job.data()) && group.customers.some(customer => customer.id === job.get('customerId'));
   return {
@@ -161,4 +162,4 @@ function portalHandlers(db, auth, emailEnabled = () => true, { bucketProvider = 
     },
   };
 }
-module.exports = { portalHandlers, otpHash, customerUid, customersForEmail, publicJob, publicInvoice, FILE_LIMIT };
+module.exports = { portalHandlers, otpHash, customerUid, customersForEmail, publicJob, publicInvoice, FILE_LIMIT, portalEmailFor, portalAssociations, activeCustomer, associationEmail };

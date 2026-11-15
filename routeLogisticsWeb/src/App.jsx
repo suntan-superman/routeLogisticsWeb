@@ -27,6 +27,8 @@ const InvoicesPage = lazy(() => import('./pages/InvoicesPage'));
 const ServicePlansPage = lazy(() => import('./pages/ServicePlansPage'));
 const AcceptInvitePage = lazy(() => import('./pages/AcceptInvitePage'));
 const CustomerPortalPage = lazy(() => import('./pages/CustomerPortalPage'));
+const ReviewsPage = lazy(() => import('./pages/ReviewsPage'));
+const ReviewInvitationPage = lazy(() => import('./pages/ReviewInvitationPage'));
 const PlatformAdminPage = lazy(() => import('./pages/PlatformAdminPage'));
 const PublicContentPage = lazy(() => import('./pages/PublicContentPage'));
 
@@ -98,6 +100,8 @@ function AppContent() {
                 <Route path="/signup" element={<SignupPage />} />
                 <Route path="/accept-invite" element={<AcceptInvitePage />} />
                 <Route path="/portal" element={<CustomerPortalPage />} />
+                <Route path="/review" element={<ReviewInvitationPage />} />
+                <Route path="/reviews" element={<ProtectedRoute><Layout><ReviewsPage /></Layout></ProtectedRoute>} />
                 <Route path="/platform-admin" element={<PlatformAdminPage />} />
                 <Route path="/faqs" element={<PublicContentPage type="faq" />} />
                 <Route path="/faqs/:slug" element={<PublicContentPage type="faq" />} />

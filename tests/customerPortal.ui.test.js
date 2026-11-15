@@ -5,7 +5,7 @@ const mobile = createRequire(path.resolve(__dirname, '../routeLogisticsMobile/pa
 const React = mobile('react'), { create, act } = mobile('react-test-renderer'), { transformSync } = web('esbuild');
 global.IS_REACT_ACT_ENVIRONMENT = true;
 const client = { name: 'isolated-customer-functions' };
-let tree, user = { uid: 'synthetic-portal-user' }, listener, calls = [], accounts, pendingPortal = null, pendingFile = null, fileError = null, portalError = null, otpError = null, requestNumber = 0, paymentProps = [];
+let tree, user = { uid: 'synthetic-portal-user' }, listener, calls = [], accounts, pendingPortal = null, pendingFile = null, fileError = null, portalError = null, otpError = null, requestNumber = 0, paymentProps = [], allowDiscard = true;
 const portalAuth = { get currentUser() { return user; } };
 const a = { id: 'company:provider-a', companyName: 'Provider A', contactEmail: 'a@example.invalid', duplicateCustomerCount: 1, jobs: [{ id: 'visit-a', serviceType: 'Provider A service visit', date: '2026-11-14', time: '10:00', status: 'completed' }], invoices: [{ id: 'invoice-a', invoiceNumber: 'INV-A', total: 35, dueDate: '2026-11-20', status: 'sent', lineItems: [{ description: 'Service A', quantity: 1, unitPrice: 35, amount: 35 }] }], photos: [{ id: 'photo-a', jobId: 'visit-a', kind: 'photo', caption: 'Shared provider A visit photo' }], documents: [{ id: 'document-a', jobId: 'visit-a', kind: 'document', name: 'Provider A service report' }], hasMore: false };
 const b = { id: 'company:provider-b', companyName: 'Provider B', contactEmail: 'b@example.invalid', jobs: [{ id: 'visit-b', serviceType: 'Provider B service visit', date: '2026-11-15', time: '11:00', status: 'scheduled' }], invoices: [{ id: 'invoice-b', invoiceNumber: 'INV-B', total: 80, dueDate: '2026-11-25', status: 'sent', lineItems: [] }], photos: [], documents: [], hasMore: false };
@@ -31,6 +31,8 @@ const mock = name => {
   if (name === 'firebase/functions') return { httpsCallable: (functionClient, endpoint) => async data => ({ data: await call(endpoint, data, functionClient) }) };
   if (name.endsWith('/services/portal')) return { portalAuth, portalFunctions: client, portalReady: Promise.resolve() };
   if (name.endsWith('/services/paymentConfig')) return { paymentsConfigured: true, paymentMode: 'test' };
+  if (name.endsWith('/components/CustomerReviews')) return { __esModule: true, default: props => React.createElement('section', { 'aria-label': 'Selected provider review scope', 'data-review-account': props.accountId, 'data-review-user': props.userId }) };
+  if (name.endsWith('/hooks/useUnsavedChanges')) return { useConfirmUnsavedChanges: () => async () => allowDiscard };
   if (name.endsWith('/components/InvoicePayment')) return { __esModule: true, default: props => { React.useEffect(() => { paymentProps.push(props); }, [props]); return React.createElement('div', { role: 'dialog', 'aria-label': 'Invoice payment', 'data-payment-invoice': props.invoiceId, 'data-isolated-client': props.functionClient === client }, React.createElement('button', { onClick: props.onClose }, 'Close test payment')); } };
   if (name.endsWith('/components/PaymentHistory')) return { __esModule: true, default: props => { React.useEffect(() => { call('rlGetInvoicePaymentHistory', { invoiceId: props.invoiceId }, props.functionClient); }, [props.invoiceId, props.functionClient]); return React.createElement('section', { 'aria-label': 'Payment history', 'data-history-invoice': props.invoiceId, 'data-isolated-client': props.functionClient === client }, 'Payment history'); } };
   throw Error('Unexpected dependency: ' + name);
@@ -46,7 +48,15 @@ const choose = async id => act(async () => tree.root.findByType('select').props.
 const expandInvoice = async index => act(async () => tree.root.findAllByType('details')[index].props.onToggle({ currentTarget: { open: true } }));
 afterEach(async () => {
   if (tree) await act(async () => tree.unmount());
-  tree = null; user = { uid: 'synthetic-portal-user' }; listener = null; calls = []; accounts = [a, b]; pendingPortal = null; pendingFile = null; fileError = null; portalError = null; otpError = null; requestNumber = 0; paymentProps = [];
+  tree = null; user = { uid: 'synthetic-portal-user' }; listener = null; calls = []; accounts = [a, b]; pendingPortal = null; pendingFile = null; fileError = null; portalError = null; otpError = null; requestNumber = 0; paymentProps = []; allowDiscard = true;
+});
+
+test('review scope follows the selected provider and unsaved review protection blocks switching, refresh and sign-out', async () => {
+  await mount(); assert.equal(tree.root.findByProps({ 'aria-label': 'Selected provider review scope' }).props['data-review-account'], a.id);
+  const before = calls.filter(row => row.name === 'getCustomerPortal').length; allowDiscard = false;
+  await choose(b.id); await act(async () => button('Refresh visits and invoices').props.onClick()); await act(async () => button('Sign out').props.onClick());
+  assert.equal(tree.root.findByType('select').props.value, a.id); assert.equal(calls.filter(row => row.name === 'getCustomerPortal').length, before); assert.equal(user.uid, 'synthetic-portal-user');
+  allowDiscard = true; await choose(b.id); assert.equal(tree.root.findByProps({ 'aria-label': 'Selected provider review scope' }).props['data-review-account'], b.id);
 });
 
 test('multi-provider records and payment buttons are shown only for the explicitly selected provider', async () => {

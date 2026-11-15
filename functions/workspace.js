@@ -2,6 +2,7 @@
 // Only return invitation context to the verified recipient; never return its secret.
 async function workspaceStatus(db, caller, claims, now = Date.now()) {
   if (!caller.emailVerified) return { status: 'verify-email' };
+  if ((await db.collection('rlAccountDeletions').doc(caller.uid).get()).exists) return { status: 'deleted' };
   if (claims?.companyId) return { status: 'company' };
   const [profile, memberships, invitations] = await Promise.all([
     db.collection('users').doc(caller.uid).get(),

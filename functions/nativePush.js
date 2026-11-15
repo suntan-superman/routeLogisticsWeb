@@ -1,6 +1,6 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { FieldValue } = require('firebase-admin/firestore');
-const { requireAuth, requireStaff, rateLimit, hash, documentId } = require('./security');
+const { requireAuth, requireAccountActive, requireStaff, rateLimit, hash, documentId } = require('./security');
 const EXPO_PROJECT_ID = 'a6b5d885-dd99-4435-bef0-b7ffe09a2890';
 const defaultPreferences = { enabled: true, assignments: true, schedule: true, status: true };
 const tokenPattern = /^(?:ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]{10,200}\]$/;
@@ -43,6 +43,7 @@ function nativePushHandlers(db, { enabled = () => false, fetcher = fetch, access
   }
   async function manage(request) {
     const { uid } = requireAuth(request, true), data = request.data || {};
+    await requireAccountActive(db, uid);
     await rateLimit(db, 'native-push', uid, 60);
     if (data.action === 'invalidate-installation') {
       if (typeof data.installationId !== 'string' || !/^[a-f0-9-]{32,80}$/i.test(data.installationId) || !Number.isSafeInteger(data.registrationSequence) || data.registrationSequence < 1) throw new HttpsError('invalid-argument', 'A valid installation release is required.');

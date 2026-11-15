@@ -12,9 +12,10 @@ import { syncTenancy, getWorkspace, restoreOfflineWorkspace } from '../services/
 import { companyProfile, serviceNames, workspacePermissions, parseInvitationLink } from '../services/workspacePolicy';
 import { requestStaffCode, signInWithStaffCode } from '../services/staffLogin';
 import { readWorkspace } from '../services/workspaceApi';
-import { isNativeInteractionActive, subscribeNativeInteraction } from '../services/nativeInteraction';
+import { isNativeInteractionActive, subscribeNativeInteraction, beginNativeInteraction } from '../services/nativeInteraction';
 import { stopShiftTracking } from '../services/workTracking';
 import { signOutNativePush } from '../services/nativePush';
+import { createMobileAccountDeletion, resumeDeletedAccountCleanup } from '../services/accountDeletion';
 
 export const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
@@ -24,6 +25,24 @@ export function AuthProvider({ children }) {
   const [accessStatus, setAccessStatus] = useState('loading'), [accessError, setAccessError] = useState('');
   const [workspaceValidatedAt, setWorkspaceValidatedAt] = useState(null);
   const generation = useRef(0), hydration = useRef(null), currentUser = useRef(user);
+  const deletedAccounts = useRef(new Set()), cleanupFailed = useRef(false), cleanupTask = useRef(null);
+  const deletion = useRef(null);
+  const finishDeletedSession = async uid => {
+    if (auth.currentUser?.uid && auth.currentUser.uid !== uid) return;
+    generation.current++; hydration.current = null;
+    const result = await AuthService.signOut();
+    if (!result.success) throw new Error('Your account was deleted, but this device could not sign out. Retry to finish clearing the session.');
+    currentUser.current = null; setUser(null); setSessionError(''); setAccessError(''); setAccessStatus('signed-out'); setWorkspaceValidatedAt(null);
+    await syncTenancy(null);
+  };
+  if (!deletion.current) deletion.current = createMobileAccountDeletion(finishDeletedSession);
+  const retryDeviceCleanup = () => {
+    if (cleanupTask.current) return cleanupTask.current;
+    const task = Promise.resolve().then(() => deletion.current.resume?.()).then(() => resumeDeletedAccountCleanup(finishDeletedSession, uid => deletedAccounts.current.add(uid))).then(() => { cleanupFailed.current = false; }).catch(error => { cleanupFailed.current = true; throw error; });
+    cleanupTask.current = task;
+    task.finally(() => { if (cleanupTask.current === task) cleanupTask.current = null; }).catch(() => {});
+    return task;
+  };
   currentUser.current = user;
   const hydrate = useCallback((account, reload = false) => {
     const uid = account?.uid || null;
@@ -34,8 +53,13 @@ export function AuthProvider({ children }) {
     const task = (async () => {
       if (!account) {
         await syncTenancy(null);
-        if (isCurrent()) { currentUser.current = null; setUser(null); setSessionError(''); setAccessError(''); setAccessStatus('signed-out'); setWorkspaceValidatedAt(null); setIsLoading(false); }
+        if (isCurrent()) { currentUser.current = null; setUser(null); setSessionError(cleanupFailed.current ? 'Your account deletion is recorded. This device still needs to remove saved data. Select Retry to finish device cleanup.' : ''); setAccessError(''); setAccessStatus('signed-out'); setWorkspaceValidatedAt(null); setIsLoading(false); }
         return { success: true, user: null, accessStatus: 'signed-out', authoritative: true };
+      }
+      if (deletedAccounts.current.has(uid)) {
+        await syncTenancy(null);
+        if (isCurrent()) { currentUser.current = null; setUser(null); setSessionError('Your account deletion is recorded and access is revoked. Select Retry to finish removing saved data from this device.'); setAccessError(''); setAccessStatus('signed-out'); setWorkspaceValidatedAt(null); setIsLoading(false); }
+        return { success: false, user: null, accessStatus: 'signed-out', authoritative: true, deletionRecorded: true };
       }
       setAccessStatus(previous ? 'checking' : 'loading'); setAccessError('');
       try {
@@ -92,11 +116,22 @@ export function AuthProvider({ children }) {
     hydration.current = { uid, promise };
     return promise;
   }, []);
-  const refreshUser = useCallback(() => hydrate(auth.currentUser, true), [hydrate]);
+  const refreshUser = useCallback(() => {
+    if (cleanupFailed.current && (!auth.currentUser || deletedAccounts.current.has(auth.currentUser.uid))) {
+      return retryDeviceCleanup().then(() => hydrate(auth.currentUser, true)).catch(() => { setSessionError('Your account deletion is recorded. Device cleanup could not finish. Select Retry to try again.'); return { success: false, user: null, deletionRecorded: true, error: { message: 'Device cleanup could not finish. Please retry.' } }; });
+    }
+    return hydrate(auth.currentUser, true);
+  }, [hydrate]);
   useEffect(() => {
     purgeLegacyReadCaches().catch(() => {});
     Promise.all(['savedCredentials', 'tempCredentials', 'userToken', 'userData'].map(key => SecureStore.deleteItemAsync(key))).catch(() => {});
-    return onAuthStateChanged(auth, account => { if (currentUser.current?.id !== account?.uid) setIsLoading(true); hydrate(account); });
+    let disposed = false, unsubscribe = () => {};
+    // Complete a previously acknowledged deletion before any session hydration
+    // can recreate that UID's cache after a restart.
+    retryDeviceCleanup().catch(() => { if (!disposed) setSessionError('A deleted account still has saved data on this device. Select Retry to finish device cleanup.'); }).finally(() => {
+      if (!disposed) unsubscribe = onAuthStateChanged(auth, account => { if (currentUser.current?.id !== account?.uid) setIsLoading(true); hydrate(account); });
+    });
+    return () => { disposed = true; unsubscribe(); };
   }, [hydrate]);
   useEffect(() => {
     const refresh = () => { if (AppState.currentState === 'active' && auth.currentUser && !isNativeInteractionActive()) refreshUser(); };
@@ -133,6 +168,22 @@ export function AuthProvider({ children }) {
     return result;
   };
   const value = { user, permissions, isAuthenticated: !!user, isLoading, sessionError, accessStatus, accessError, workspaceValidatedAt, refreshUser,
+    getAccountDeletionSummary: () => deletion.current.summary(),
+    deleteAccount: async options => {
+      const release = beginNativeInteraction();
+      // A hydration started before deletion must not recreate the deleted cache.
+      const pendingHydration = hydration.current?.promise;
+      generation.current++; hydration.current = null;
+      try {
+        await pendingHydration?.catch(() => {});
+        const uid = auth.currentUser?.uid;
+        const result = await deletion.current.remove(options);
+        if ((result.deletionRecorded || result.success) && uid) deletedAccounts.current.add(uid);
+        if (result.localCleanupPending) cleanupFailed.current = true;
+        return result;
+      }
+      finally { release(); }
+    },
     signIn: async (email, password) => finishAuthentication(await AuthService.signIn(email.trim(), password)),
     requestStaffCode,
     signInWithCode: async (challengeId, code) => { await signInWithStaffCode(challengeId, code); return finishAuthentication({ success: true }); },

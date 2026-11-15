@@ -27,3 +27,33 @@ test('technicians cannot bypass authenticated photo delivery via Storage, includ
   const fakeOwner = env.authenticatedContext('not-owner', { companyId: 'storage-co', membershipId: 'fake-owner', role: 'owner', email_verified: true }).storage();
   await assertFails(getMetadata(ref(fakeOwner, file.fullPath)));
 });
+
+test('account deletion markers immediately deny retained business Storage objects to stale owner and solo tokens', async () => {
+  const owner = env.authenticatedContext('deleted-storage-owner', { companyId: 'deleted-storage-co', role: 'owner', email_verified: true }).storage();
+  const solo = env.authenticatedContext('deleted-storage-solo', { email_verified: true }).storage();
+  const ownerPath = 'companies/deleted-storage-co/jobs/history/photo.jpg', soloPath = 'users/deleted-storage-solo/jobs/history/photo.jpg';
+  await env.withSecurityRulesDisabled(async ctx => {
+    await setDoc(doc(ctx.firestore(), 'companies/deleted-storage-co'), { ownerId: 'deleted-storage-owner' });
+    await setDoc(doc(ctx.firestore(), 'users/deleted-storage-solo'), { name: 'Synthetic solo' });
+    for (const path of [ownerPath, soloPath]) await uploadBytes(ref(ctx.storage(), path), new Uint8Array([1, 2]), { contentType: 'image/jpeg' });
+  });
+  await assertSucceeds(getMetadata(ref(owner, ownerPath))); await assertSucceeds(getMetadata(ref(solo, soloPath)));
+  await env.withSecurityRulesDisabled(async ctx => {
+    for (const uid of ['deleted-storage-owner', 'deleted-storage-solo']) await setDoc(doc(ctx.firestore(), `rlAccountDeletions/${uid}`), { status: 'deleted' });
+  });
+  await assertFails(getMetadata(ref(owner, ownerPath))); await assertFails(getMetadata(ref(solo, soloPath)));
+  await assertFails(uploadBytes(ref(solo, soloPath), new Uint8Array([3]), { contentType: 'image/jpeg' }));
+});
+
+test('active administrators retain Storage access within its two-document Firestore lookup limit', async () => {
+  const admin = env.authenticatedContext('storage-limit-admin', { companyId: 'storage-limit-co', membershipId: 'storage-limit-member', role: 'admin', email_verified: true }).storage();
+  await env.withSecurityRulesDisabled(async ctx => {
+    await setDoc(doc(ctx.firestore(), 'companies/storage-limit-co'), { ownerId: 'storage-limit-owner' });
+    await setDoc(doc(ctx.firestore(), 'teamMembers/storage-limit-member'), { uid: 'storage-limit-admin', companyId: 'storage-limit-co', role: 'admin', status: 'active' });
+  });
+  const file = ref(admin, 'companies/storage-limit-co/jobs/test/photo.jpg');
+  await assertSucceeds(uploadBytes(file, new Uint8Array([1, 2]), { contentType: 'image/jpeg' }));
+  await assertSucceeds(getMetadata(file));
+  await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), 'rlAccountDeletions/storage-limit-admin'), { status: 'pending' }));
+  await assertFails(getMetadata(file));
+});

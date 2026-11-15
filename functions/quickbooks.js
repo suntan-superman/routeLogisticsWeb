@@ -313,6 +313,7 @@ function quickBooksHandlers(db, config, transport = fetch) {
       const state = randomBytes(32).toString('hex'), attemptId = randomBytes(16).toString('hex'), credentialHash = currentCredentialHash();
       await db.runTransaction(async tx => {
         const intent = intentRef(companyId), latest = await tx.get(intent), company = await tx.get(db.doc(`companies/${companyId}`));
+        if ((await tx.get(db.doc(`rlAccountDeletions/${request.auth.uid}`))).exists) throw new HttpsError('permission-denied', 'This Route Logistics account has been deleted.');
         if (company.get('ownerId') !== request.auth.uid) throw new HttpsError('permission-denied', 'Only the current company owner can connect QuickBooks.');
         if (latest.get('disconnectLeaseUntil') > Date.now()) throw new HttpsError('unavailable', 'QuickBooks is finishing the disconnect. Retry shortly.');
         tx.set(intent, { companyId, environment: environment(), userId: request.auth.uid, attemptId, status: 'authorizing', credentialHash, lastError: null, updatedAt: new Date() });
@@ -335,6 +336,7 @@ function quickBooksHandlers(db, config, transport = fetch) {
         identity = known.data();
         await db.runTransaction(async tx => {
           const saved = await tx.get(ref), intent = await tx.get(intentRef(identity.companyId)), company = await tx.get(db.doc(`companies/${identity.companyId}`));
+          if ((await tx.get(db.doc(`rlAccountDeletions/${identity.userId}`))).exists) throw oauthFailure('owner-changed');
           if (saved.get('used') || saved.get('expiresAt') <= Date.now() || saved.get('environment') !== environment()) throw oauthFailure('expired');
           if (company.get('ownerId') !== saved.get('userId')) throw oauthFailure('owner-changed');
           if (!saved.get('attemptId') || intent.get('attemptId') !== saved.get('attemptId') || intent.get('status') !== 'authorizing') throw oauthFailure('superseded');
@@ -354,6 +356,7 @@ function quickBooksHandlers(db, config, transport = fetch) {
         const info = await companyInfo(realmId, tokens.accessToken), connection = connectionRef(identity.companyId), connectionId = randomBytes(16).toString('hex');
         await db.runTransaction(async tx => {
           const [existing, old, intent, company, reservation] = await Promise.all([tx.get(realm), tx.get(connection), tx.get(intentRef(identity.companyId)), tx.get(db.doc(`companies/${identity.companyId}`)), tx.get(claim)]);
+          if ((await tx.get(db.doc(`rlAccountDeletions/${identity.userId}`))).exists) throw oauthFailure('owner-changed');
           if (company.get('ownerId') !== identity.userId) throw oauthFailure('owner-changed');
           if (intent.get('attemptId') !== identity.attemptId || intent.get('status') !== 'authorizing' || reservation.get('attemptId') !== identity.attemptId) throw oauthFailure('superseded');
           if (currentCredentialHash() !== identity.credentialHash) throw oauthFailure('credentials-changed');

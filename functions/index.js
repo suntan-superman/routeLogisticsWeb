@@ -11,7 +11,8 @@ const { jobPhotoHandler } = require('./jobPhotos');
 const { assignmentTarget, buildAssignmentMessage, DEAD_TOKEN_CODES } = require('./notify');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineString } = require('firebase-functions/params');
-const { requireAuth, requireManager, rateLimit, normalizeEmail } = require('./security');
+const { requireAuth, requireAccountActive, requireManager, rateLimit, normalizeEmail } = require('./security');
+const { accountDeletionHandlers } = require('./accountDeletion');
 const { invitationHandlers } = require('./invitations');
 const { recurringHandlers } = require('./recurring');
 const { customerHandlers } = require('./customers');
@@ -40,6 +41,9 @@ const { reviewInvitationHandlers } = require('./reviewInvitations');
 
 initializeApp();
 const db = getFirestore();
+const accountDeletion = accountDeletionHandlers(db, getAuth());
+exports.rlDeleteAccount = onCall({ timeoutSeconds: 120 }, accountDeletion.request);
+exports.rlCompleteAccountDeletion = onDocumentCreated({ document: 'rlAccountDeletions/{uid}', retry: true, timeoutSeconds: 540 }, event => accountDeletion.complete(event.params.uid));
 const mapsCredential = applicationDefault();
 const serviceAreas = serviceAreaHandlers(db, { geocode: createGoogleGeocoder({
   projectId: process.env.GCLOUD_PROJECT || 'mi-factotum-field-service',
@@ -84,18 +88,16 @@ async function backfillOwnerData(uid, companyId) {
 }
 
 async function applyClaims(uid, email, emailVerified) {
+  await requireAccountActive(db, uid);
   const data = await loadTenancyData(uid, email);
-  const { claims, activateInviteId } = resolveClaims({ uid, email, emailVerified }, data);
+  const { claims } = resolveClaims({ uid, email, emailVerified }, data);
   const auth = getAuth();
   const userRef = db.collection('users').doc(uid);
-
-  if (activateInviteId) {
-    await db.collection('teamMembers').doc(activateInviteId).update({
-      uid,
-      status: 'active',
-      activatedAt: new Date().toISOString(),
-    });
-  }
+  const updateLiveProfile = async updates => db.runTransaction(async tx => {
+    const deletion = await tx.get(db.collection('rlAccountDeletions').doc(uid));
+    if (deletion.exists) throw new HttpsError('permission-denied', 'This Route Logistics account has been deleted.');
+    tx.set(userRef, updates, { merge: true });
+  });
 
   const account = await auth.getUser(uid);
   const retained = { ...(account.customClaims || {}) };
@@ -107,15 +109,15 @@ async function applyClaims(uid, email, emailVerified) {
   if (claims) {
     const userSnap = await userRef.get();
     const updates = { companyId: claims.companyId, rlCompanyId: claims.companyId };
-    await userRef.set(updates, { merge: true });
+    await updateLiveProfile(updates);
     if (claims.role === 'owner' && !userSnap.get('legacyBackfilledAt')) {
       await backfillOwnerData(uid, claims.companyId);
-      await userRef.set({ legacyBackfilledAt: new Date().toISOString() }, { merge: true });
+      await updateLiveProfile({ legacyBackfilledAt: new Date().toISOString() });
     }
   } else {
     const userSnap = await userRef.get();
     if (userSnap.exists && userSnap.get('companyId')) {
-      await userRef.update({ companyId: null });
+      await updateLiveProfile({ companyId: null });
     }
   }
   return claims;
@@ -273,8 +275,11 @@ exports.rlQuickBooksProcessEvents = onSchedule({ schedule: 'every 5 minutes', se
 // Re-evaluates a member's claims when their invite is deactivated or removed, and revokes live sessions.
 async function reevaluateMember(uid) {
   if (!uid) return;
+  if ((await db.collection('rlAccountDeletions').doc(uid).get()).exists) return;
   const auth = getAuth();
-  const user = await auth.getUser(uid);
+  let user;
+  try { user = await auth.getUser(uid); }
+  catch (failure) { if (failure.code === 'auth/user-not-found') return; throw failure; }
   await applyClaims(uid, user.email || null, user.emailVerified);
   await auth.revokeRefreshTokens(uid);
 }

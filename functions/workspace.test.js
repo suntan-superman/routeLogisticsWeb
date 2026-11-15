@@ -30,6 +30,6 @@ test('removed, legacy, and previously associated members cannot become solo by l
   assert.equal((await workspaceStatus(database({}, [{ uid: caller.uid, status: 'removed' }]), caller, null)).status, 'unavailable');
 });
 test('resolved active members and genuinely independent users keep their appropriate workspace', async () => {
-  assert.equal((await workspaceStatus(null, caller, { companyId: 'acme', role: 'technician' })).status, 'company');
+  assert.equal((await workspaceStatus(database(), caller, { companyId: 'acme', role: 'technician' })).status, 'company');
   assert.equal((await workspaceStatus(database(), caller, null)).status, 'solo');
 });

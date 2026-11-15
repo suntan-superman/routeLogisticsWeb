@@ -10,10 +10,12 @@ function ownershipHandler(db, applyClaims) {
     const targetRef = db.collection('teamMembers').doc(documentId(request.data?.memberId, 'member'));
     let target;
     await db.runTransaction(async (tx) => {
-      const [current, member] = await Promise.all([tx.get(company.ref), tx.get(targetRef)]);
+      const [current, member, deletion] = await Promise.all([tx.get(company.ref), tx.get(targetRef), tx.get(db.collection('rlAccountDeletions').doc(uid))]);
+      if (deletion.exists) throw new HttpsError('permission-denied', 'This Route Logistics account has been deleted.');
       target = member.data();
       if (current.get('ownerId') !== uid) throw new HttpsError('permission-denied', 'Ownership changed. Refresh your account.');
       if (!target?.uid || target.uid === uid || target.companyId !== company.id || target.status !== 'active' || target.role !== 'admin') throw new HttpsError('failed-precondition', 'Choose an active administrator in this company.');
+      if ((await tx.get(db.collection('rlAccountDeletions').doc(target.uid))).exists) throw new HttpsError('failed-precondition', 'Choose an administrator with an active account.');
       const otherCompanies = await tx.get(db.collection('companies').where('ownerId', '==', target.uid).limit(1));
       if (!otherCompanies.empty) throw new HttpsError('failed-precondition', 'This administrator already owns a company.');
       const oldMemberRef = db.collection('teamMembers').doc(memberIdFor(company.id, token.email));

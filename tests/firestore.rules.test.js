@@ -41,6 +41,24 @@ const owner = () => as('owner1', { companyId: 'c1', role: 'owner' });
 const tech = () => as('tech1', { companyId: 'c1', role: 'technician', membershipId: 't1' });
 const manager = () => as('mgr1', { companyId: 'c1', role: 'manager', membershipId: 'm1' });
 
+test('account deletion markers deny stale owner, staff and solo tokens, profile recreation and marker tampering', async () => {
+  await env.withSecurityRulesDisabled(async ctx => {
+    for (const uid of ['owner1', 'tech1', 'solo1']) await setDoc(doc(ctx.firestore(), `rlAccountDeletions/${uid}`), { status: 'pending' });
+    await deleteDoc(doc(ctx.firestore(), 'users/solo1'));
+  });
+  await assertFails(getDoc(doc(owner(), 'jobs/j1')));
+  await assertFails(updateDoc(doc(owner(), 'companies/c1'), { name: 'Stale owner change' }));
+  await assertFails(getDoc(doc(tech(), 'jobs/j1')));
+  await assertFails(getDoc(doc(as('solo1'), 'jobs/jSolo')));
+  await assertFails(setDoc(doc(as('solo1'), 'users/solo1'), { email: 's@x.com' }));
+  for (const client of [owner(), tech(), as('solo1')]) {
+    await assertFails(getDoc(doc(client, 'rlAccountDeletions/owner1')));
+    await assertFails(deleteDoc(doc(client, 'rlAccountDeletions/owner1')));
+    await assertFails(setDoc(doc(client, 'rlAccountDeletions/other'), { status: 'deleted' }));
+  }
+  await assertSucceeds(getDoc(doc(manager(), 'teamMembers/m1')));
+});
+
 test('managed estimates cannot bypass server totals, versions or customer approval via client writes', async () => {
   const record = { userId: 'owner1', companyId: 'c1', rlManaged: true, status: 'draft', total: 20 };
   await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), 'estimates/managed'), record));

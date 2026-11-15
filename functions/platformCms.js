@@ -1,7 +1,7 @@
 const { randomUUID } = require('node:crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { getStorage } = require('firebase-admin/storage');
-const { requireAuth, documentId, rateLimit, hash } = require('./security');
+const { requireAuth, requireAccountActive, documentId, rateLimit, hash } = require('./security');
 
 const TYPES = ['faq', 'testimonial', 'story'];
 const STATUSES = ['draft', 'published', 'archived'];
@@ -86,6 +86,7 @@ function platformCmsHandlers(db, config = {}) {
   const contentRef = id => db.doc(`rlPlatformContent/${identifier(id)}`);
   async function adminIdentity(request) {
     const auth = requireAuth(request, true);
+    await requireAccountActive(db, auth.uid);
     const record = await db.doc(`rlPlatformAdmins/${identifier(auth.uid, 'administrator UID')}`).get();
     if (record.get('status') !== 'active' || record.get('role') !== 'admin') throw new HttpsError('permission-denied', 'Explicit Route Logistics platform administrator access is required.');
     return auth;

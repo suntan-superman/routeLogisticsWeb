@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../theme/ThemeProvider';
 import { GlassScreen, GlassCard, GlassButton, GlassInput } from '../components/Glass';
+import LegalAccountSettings from '../components/LegalAccountSettings';
 
 export default function WorkspaceAccessScreen() {
   const { user, accessStatus, refreshUser, acceptInvitation, signOut } = useAuth();
@@ -36,5 +37,6 @@ export default function WorkspaceAccessScreen() {
       <GlassButton secondary title={pending ? 'I accepted on the web — refresh' : 'Check company access'} disabled={busy} onPress={() => run(false)} />
     </GlassCard>
     <GlassButton secondary title="Sign out" onPress={signOut} disabled={busy} />
+    <LegalAccountSettings />
   </ScrollView></KeyboardAvoidingView></GlassScreen>;
 }

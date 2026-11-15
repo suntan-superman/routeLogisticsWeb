@@ -11,7 +11,7 @@ const root = path.resolve(__dirname, '..');
 function fixture() {
   let token = { companyId: 'acme', membershipId: 'member', role: 'technician' };
   let server = async () => ({ claims: { ...token }, workspace: { status: 'company' } });
-  let companyFailure = null, syncCalls = 0, reloads = 0, authListener;
+  let companyFailure = null, syncCalls = 0, reloads = 0, authListener, offline = false, cleanupUid = null, cleanupError = null, cleanupCalls = 0;
   const modules = new Map(), storage = new Map([['rl-offline-v1:project:tech:acme:technician:member:queue', '[{"id":"saved-work"}]'], ['local-photo', 'file:///documents/keep-photo.jpg']]);
   const purges = [], app = { currentState: 'active', addEventListener: () => ({ remove() {} }) };
   const user = { uid: 'tech', email: 'luis@example.test', displayName: 'Luis', emailVerified: true,
@@ -25,9 +25,9 @@ function fixture() {
     const mockRequire = name => {
       if (name === 'react-native') return { AppState: app };
       if (name === 'expo-secure-store') return { deleteItemAsync: async () => {} };
-      if (name === '@react-native-community/netinfo') return { fetch: async () => ({ isConnected: true, isInternetReachable: true }) };
+      if (name === '@react-native-community/netinfo') return { fetch: async () => ({ isConnected: !offline, isInternetReachable: !offline }) };
       if (name === '@react-native-async-storage/async-storage') return { getItem: async key => storage.get(key) || null, setItem: async (key, value) => storage.set(key, value), multiRemove: async keys => keys.forEach(key => storage.delete(key)) };
-      if (name === '../services/offline') return { isOffline: async () => false, purgeLegacyReadCaches: async () => {}, purgeOtherRoleCaches: async (...args) => purges.push(args), offlineScope: () => { const claims = load('services/tenancy.js').getClaims(); return `scope:${claims?.role || 'none'}:${claims?.membershipId || ''}`; } };
+      if (name === '../services/offline') return { isOffline: async () => offline, purgeLegacyReadCaches: async () => {}, purgeOtherRoleCaches: async (...args) => purges.push(args), offlineScope: () => { const claims = load('services/tenancy.js').getClaims(); return `scope:${claims?.role || 'none'}:${claims?.membershipId || ''}`; } };
       if (name === 'firebase/auth') return { onAuthStateChanged: (_auth, callback) => { authListener = callback; return () => { authListener = null; }; } };
       if (name === 'firebase/firestore') return { doc: (...args) => args, where: (...args) => args, getDoc: async () => ({ exists: () => true, data: () => ({ name: 'Luis', services: ['Legacy personal service'] }) }) };
       if (name === 'firebase/functions') return { httpsCallable: () => async () => { syncCalls++; return { data: await server() }; } };
@@ -37,6 +37,7 @@ function fixture() {
       if (name === '../services/nativeInteraction') return { isNativeInteractionActive: () => false, subscribeNativeInteraction: () => () => {} };
       if (name === '../services/workTracking') return { stopShiftTracking: async () => {} };
       if (name === '../services/nativePush') return { signOutNativePush: async () => {} };
+      if (name === '../services/accountDeletion') return { createMobileAccountDeletion: () => ({ summary: async () => ({ pendingOperations: 0, pendingPhotos: 0 }), remove: async () => ({ success: true }) }), resumeDeletedAccountCleanup: async (_finish, onRecorded) => { cleanupCalls++; if (cleanupUid) onRecorded?.(cleanupUid); if (cleanupError) throw cleanupError; } };
       if (name === '../services/workspaceApi') return { readWorkspace: async () => { if (companyFailure) throw companyFailure; return { company: { name: 'Acme', services: ['Inspection'] } }; } };
       if (name.startsWith('.')) { const target = path.resolve(path.dirname(filename), name); if (target.endsWith('.json')) return nativeRequire(name); return load(target.endsWith('.js') ? target : target + '.js'); }
       return nativeRequire(name);
@@ -52,7 +53,7 @@ function fixture() {
     async mount() { await act(async () => { tree = create(React.createElement(session.AuthProvider, null, React.createElement(Probe))); }); await act(async () => authListener(user)); return value; },
     async unmount() { await act(async () => tree.unmount()); }, current: () => value,
     server: handler => { server = handler; }, token: next => { token = next; }, companyFailure: error => { companyFailure = error; },
-    syncCalls: () => syncCalls, reloads: () => reloads };
+    syncCalls: () => syncCalls, reloads: () => reloads, offline: value => { offline = value; }, cleanup: (uid, error) => { cleanupUid = uid; cleanupError = error; }, cleanupCalls: () => cleanupCalls };
 }
 const settle = () => act(async () => { await new Promise(resolve => setImmediate(resolve)); });
 test('foreground hydration is deduplicated and a temporary validation failure keeps the mounted session without a revoked status', async () => {
@@ -94,5 +95,20 @@ test('a real role change publishes a minimal new role before a failed company-pr
   assert.equal(f.current().user.role, 'technician'); assert.equal(f.current().permissions.canViewFinancial, false);
   assert.equal(f.current().accessStatus, 'unavailable'); assert.deepEqual(f.current().user.services, []);
   assert.equal(f.purges.at(-1)[1], 'scope:technician:member');
+  await f.unmount();
+});
+test('recorded deletion with offline cleanup failure cannot restore a cached session and Retry resumes cleanup', async () => {
+  const f = fixture(); f.offline(true); f.cleanup('tech', new Error('Device storage unavailable.'));
+  f.storage.set('rl-session-v3:tech', JSON.stringify({ id: 'tech', companyId: 'acme', role: 'technician', membershipId: 'member', workspace: { status: 'company' } }));
+  await f.mount();
+  assert.equal(f.current().user, null); assert.equal(f.current().isAuthenticated, false); assert.equal(f.current().permissions.canAccess, false);
+  assert.equal(f.syncCalls(), 0); assert.match(f.current().sessionError, /deletion is recorded|deletion is recorded and access/);
+  const before = f.cleanupCalls(); await act(async () => f.current().refreshUser());
+  assert.equal(f.cleanupCalls(), before + 1); assert.equal(f.current().user, null); assert.equal(f.syncCalls(), 0);
+  await f.unmount();
+});
+test('a failed cleanup receipt for another UID does not block the current account workspace', async () => {
+  const f = fixture(); f.cleanup('deleted-other', new Error('Old cleanup could not finish.'));
+  await f.mount(); assert.equal(f.current().user.id, 'tech'); assert.equal(f.current().accessStatus, 'ready'); assert.equal(f.syncCalls(), 1);
   await f.unmount();
 });

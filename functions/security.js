@@ -10,6 +10,9 @@ function requireAuth(request, verified = false) {
   if (verified && request.auth.token.email_verified !== true) throw new HttpsError('failed-precondition', 'Verify your email address first.');
   return request.auth;
 }
+async function requireAccountActive(db, uid) {
+  if ((await db.collection('rlAccountDeletions').doc(uid).get()).exists) throw new HttpsError('permission-denied', 'This Route Logistics account has been deleted. Sign out.');
+}
 function documentId(value, label = 'ID') {
   if (typeof value !== 'string' || !value || value.length > 200 || value.includes('/')) throw new HttpsError('invalid-argument', `Invalid ${label}.`);
   return value;
@@ -29,12 +32,14 @@ async function rateLimit(db, action, identity, maximum = 30, windowMs = 60_000, 
 }
 async function requireCompanyOwner(db, request, companyId) {
   const { uid } = requireAuth(request, true);
+  await requireAccountActive(db, uid);
   const company = await db.collection('companies').doc(documentId(companyId, 'company')).get();
   if (!company.exists || company.get('ownerId') !== uid) throw new HttpsError('permission-denied', 'Only the company owner can manage the team.');
   return company;
 }
 async function requireManager(db, request, data) {
   const { uid, token } = requireAuth(request, true);
+  await requireAccountActive(db, uid);
   if (!data.companyId) {
     if (data.userId === uid && !token.companyId) {
       const user = await db.collection('users').doc(uid).get();
@@ -53,6 +58,7 @@ async function requireManager(db, request, data) {
 }
 async function requireStaff(db, request, companyId) {
   const { uid, token } = requireAuth(request, true);
+  await requireAccountActive(db, uid);
   if (!companyId || token.companyId !== companyId) throw new HttpsError('permission-denied', 'Company access required.');
   const company = await db.collection('companies').doc(documentId(companyId)).get();
   if (company.get('ownerId') === uid) return { role: 'owner', uid, company };
@@ -62,4 +68,4 @@ async function requireStaff(db, request, companyId) {
   if (member.get('uid') !== uid || member.get('companyId') !== companyId || member.get('status') !== 'active' || member.get('role') !== token.role || !['admin', 'manager', 'technician'].includes(member.get('role'))) throw new HttpsError('permission-denied', 'Active company membership and current claims required.');
   return { role: member.get('role'), uid, memberId, company };
 }
-module.exports = { hash, normalizeEmail, validEmail, documentId, requireAuth, rateLimit, requireCompanyOwner, requireManager, requireStaff };
+module.exports = { hash, normalizeEmail, validEmail, documentId, requireAuth, requireAccountActive, rateLimit, requireCompanyOwner, requireManager, requireStaff };

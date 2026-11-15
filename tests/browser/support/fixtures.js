@@ -129,7 +129,9 @@ async function signIn(page, account) {
   await page.getByRole('textbox', { name: 'Email address', exact: true }).fill(account.email);
   await page.getByLabel('Password', { exact: true }).fill(account.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(page).not.toHaveURL(/\/login(?:\?|$)/);
+  // The first sign-in cold-starts Auth/workspace callable emulator workers.
+  // Wait for the real redirect without submitting the credentials a second time.
+  await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
 }
 async function portalSignIn(page, scenario) {
   await page.goto('/portal');

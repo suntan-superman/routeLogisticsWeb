@@ -166,6 +166,18 @@ export async function invalidateNativePush({ unregisterNative = true } = {}) {
   }
 }
 export async function signOutNativePush() { context = null; accessStatus = 'signed-out'; await invalidateNativePush(); update({ available: false, preferences: defaults }); }
+export async function purgeDeletedAccountPush(uid) {
+  await load();
+  const ownsDeviceState = registration?.uid === uid || pending?.recipientUid === uid || context?.id === uid || !auth.currentUser || auth.currentUser.uid === uid;
+  invalidations = invalidations.filter(value => value.uid !== uid);
+  if (invalidations.length) await AsyncStorage.setItem(invalidationsKey, JSON.stringify(invalidations));
+  else await AsyncStorage.removeItem(invalidationsKey);
+  if (ownsDeviceState) {
+    handled = []; pending = null;
+    await Promise.all([AsyncStorage.removeItem(pendingKey), AsyncStorage.removeItem(handledKey)]);
+  }
+  if (registration?.uid === uid) { registration = null; await AsyncStorage.removeItem(registrationKey); }
+}
 export function initializeNativePush() {
   if (initialized) return; initialized = true;
   Notifications.setNotificationHandler({ handleNotification: async notification => { const data = safeData(notification.request.content.data), allow = accessStatus === 'ready' && !!data && belongs(data) && !!categoryEnabled(data); return { shouldShowBanner: allow, shouldShowList: allow, shouldPlaySound: allow, shouldSetBadge: false }; } });

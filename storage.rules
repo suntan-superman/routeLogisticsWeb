@@ -5,7 +5,8 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     function signedIn() {
-      return request.auth != null && request.auth.token.get('portal', false) != true;
+      return request.auth != null && request.auth.token.get('portal', false) != true
+        && !firestore.exists(/databases/(default)/documents/rlAccountDeletions/$(request.auth.uid));
     }
     function validUpload() {
       return request.resource.size < 10 * 1024 * 1024
@@ -15,7 +16,10 @@ service firebase.storage {
     function activeCompany(companyId) {
       return signedIn() && request.auth.token.get('companyId', null) == companyId
         && request.auth.token.get('email_verified', false) == true
-        && (firestore.get(/databases/(default)/documents/companies/$(companyId)).data.ownerId == request.auth.uid
+        // Branch before the lookup: Storage allows two Firestore documents per
+        // request (the deletion marker plus either company or membership).
+        && ((request.auth.token.get('role', null) == 'owner'
+            && firestore.get(/databases/(default)/documents/companies/$(companyId)).data.ownerId == request.auth.uid)
           || (request.auth.token.get('role', null) in ['admin', 'manager', 'technician']
             && request.auth.token.get('membershipId', null) != null
             && firestore.get(/databases/(default)/documents/teamMembers/$(request.auth.token.membershipId)).data.uid == request.auth.uid

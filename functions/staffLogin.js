@@ -32,20 +32,22 @@ function staffLoginHandlers(db, auth, emailEnabled = () => true) {
       if (eligibleAccount(user, email)) {
         const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
         const now = Date.now(), emailHash = hash(email);
-        const batch = db.batch();
-        batch.create(db.doc(`rlStaffLoginChallenges/${challengeId}`), {
-          uid: user.uid, email, emailHash, codeHash: staffCodeHash(challengeId, code),
-          authValidAfterTime: user.tokensValidAfterTime || '', expiresAt: new Date(now + CODE_LIFETIME_MS),
-          attempts: 0, consumed: false, createdAt: new Date(now),
+        const mailRef = db.collection('rlMail').doc();
+        await db.runTransaction(async tx => {
+          if ((await tx.get(db.doc(`rlAccountDeletions/${user.uid}`))).exists) return;
+          tx.create(db.doc(`rlStaffLoginChallenges/${challengeId}`), {
+            uid: user.uid, email, emailHash, codeHash: staffCodeHash(challengeId, code),
+            authValidAfterTime: user.tokensValidAfterTime || '', expiresAt: new Date(now + CODE_LIFETIME_MS),
+            attempts: 0, consumed: false, createdAt: new Date(now),
+          });
+          // The latest request invalidates earlier codes, including concurrent resends.
+          tx.set(db.doc(`rlStaffLoginRequests/${emailHash}`), { challengeId, expiresAt: new Date(now + CODE_LIFETIME_MS) });
+          tx.create(mailRef, {
+            staffLoginChallengeId: challengeId, to: email, subject: 'Your Route Logistics staff sign-in code',
+            text: `Your Route Logistics sign-in code is ${code}.\n\nIt expires in 10 minutes and can be used once. Only enter it in the Route Logistics mobile app or on route-logistics.com. If you did not request this code, ignore this email.`,
+            status: 'queued', availableAt: now, createdAt: new Date(now), expiresAt: new Date(now + CODE_LIFETIME_MS),
+          });
         });
-        // The latest request invalidates earlier codes, including concurrent resends.
-        batch.set(db.doc(`rlStaffLoginRequests/${emailHash}`), { challengeId, expiresAt: new Date(now + CODE_LIFETIME_MS) });
-        batch.create(db.collection('rlMail').doc(), {
-          staffLoginChallengeId: challengeId, to: email, subject: 'Your Route Logistics staff sign-in code',
-          text: `Your Route Logistics sign-in code is ${code}.\n\nIt expires in 10 minutes and can be used once. Only enter it in the Route Logistics mobile app or on route-logistics.com. If you did not request this code, ignore this email.`,
-          status: 'queued', availableAt: now, createdAt: new Date(now), expiresAt: new Date(now + CODE_LIFETIME_MS),
-        });
-        await batch.commit();
       }
       // Never reveal whether an email exists, is verified, is disabled, or has MFA.
       return { challengeId, message: REQUEST_MESSAGE, expiresInSeconds: CODE_LIFETIME_MS / 1000 };
@@ -61,6 +63,7 @@ function staffLoginHandlers(db, auth, emailEnabled = () => true) {
         if (!data || data.consumed || data.attempts >= 5 || data.expiresAt.toMillis() <= Date.now() || !/^[a-f0-9]{64}$/.test(data.codeHash || '')) return null;
         const latest = await tx.get(db.doc(`rlStaffLoginRequests/${data.emailHash}`));
         if (latest.get('challengeId') !== id) return null;
+        if ((await tx.get(db.doc(`rlAccountDeletions/${data.uid}`))).exists) return null;
         const valid = timingSafeEqual(Buffer.from(data.codeHash, 'hex'), Buffer.from(staffCodeHash(id, code), 'hex'));
         tx.update(ref, { attempts: data.attempts + 1, consumed: valid, ...(valid ? { consumedAt: new Date() } : {}) });
         return valid ? { uid: data.uid, email: data.email, authValidAfterTime: data.authValidAfterTime } : null;
@@ -69,7 +72,7 @@ function staffLoginHandlers(db, auth, emailEnabled = () => true) {
       // Recheck live account policy after consuming the code. Never verify an email,
       // create a user, accept an invitation, or bypass an enrolled second factor.
       const user = await existingAccount(auth, 'getUser', identity.uid);
-      if (!eligibleAccount(user, identity.email) || (user.tokensValidAfterTime || '') !== identity.authValidAfterTime) throw new HttpsError('permission-denied', INVALID_CODE);
+      if (!eligibleAccount(user, identity.email) || (user.tokensValidAfterTime || '') !== identity.authValidAfterTime || (await db.doc(`rlAccountDeletions/${identity.uid}`).get()).exists) throw new HttpsError('permission-denied', INVALID_CODE);
       return { token: await auth.createCustomToken(user.uid) };
     },
   };

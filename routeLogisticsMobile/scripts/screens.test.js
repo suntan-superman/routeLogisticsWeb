@@ -11,6 +11,7 @@ global.IS_REACT_ACT_ENVIRONMENT = true;
 const root = path.resolve(__dirname, '..'), cache = new Map(), AuthContext = React.createContext(null);
 let currentAuth, changes = [], sent = [], verified = [], stored = new Map();
 let jobRequests = [], jobLoader = async () => ({ success: true, jobs: [] }), detailLoader, authRefreshes = 0;
+let nativePushMounts = 0;
 const mounted = new Set();
 const appListeners = new Set(), networkListeners = new Set();
 const pass = ({ children }) => children;
@@ -19,6 +20,10 @@ native.ScrollView = ({ refreshControl, children, ...props }) => React.createElem
 native.AppState = { currentState: 'active', addEventListener: (_event, listener) => { appListeners.add(listener); return { remove: () => appListeners.delete(listener) }; } };
 Object.assign(native, { StyleSheet: { create: x => x, absoluteFill: {}, absoluteFillObject: {} }, Platform: { OS: 'ios', select: x => x.ios }, Alert: { alert() {} }, Linking: { openURL: async () => {} }, Modal: ({ visible, children }) => visible ? React.createElement('Modal', null, children) : null });
 const palette = { background: '#07120F', surface: '#14241F', glass: '#14241F', text: '#EFFAF5', secondary: '#B0C8BE', border: '#405D4E', input: '#14241F', accent: '#62E3B3', button: '#087B55', danger: '#FFAAA3', highlight: '#FFFFFF', glow: '#164D38' };
+function NativePushSettingsMock() {
+  React.useEffect(() => { nativePushMounts++; }, []);
+  return React.createElement('View', { accessibilityLabel: 'Native work notification preferences' });
+}
 function load(relative) {
   const filename = path.resolve(root, relative);
   if (cache.has(filename)) return cache.get(filename).exports;
@@ -38,7 +43,8 @@ function load(relative) {
     if (specifier.endsWith('/contexts/LanguageContext')) return { LanguageProvider: pass, useLanguage: () => ({ t: key => key, language: 'en', changeLanguage() {} }) };
     if (specifier.endsWith('/theme/ThemeProvider')) return { ThemeProvider: pass, useTheme: () => ({ palette, colors: load('constants/colors.js').COLORS, isDark: true, ready: true, mode: 'dark', changeMode: async value => changes.push(value), reduceTransparency: false }) };
     if (specifier.endsWith('/constants/responsiveSizes')) return { FONT_SIZES: new Proxy({}, { get: () => 16 }), SPACING: new Proxy({}, { get: () => 12 }), BORDER_RADIUS: new Proxy({}, { get: () => 12 }), ICON_SIZES: new Proxy({}, { get: () => 20 }), hp: () => 20, wp: () => 20, rf: () => 16 };
-    if (/\/components\/(JobPhotos|WorkLocation|OfflineStatus|FieldWorkTools|MyRoute|NativePushBridge|NativePushSettings)$/.test(specifier)) return () => null;
+    if (specifier.endsWith('/components/NativePushSettings')) return NativePushSettingsMock;
+    if (/\/components\/(JobPhotos|WorkLocation|OfflineStatus|FieldWorkTools|MyRoute|NativePushBridge)$/.test(specifier)) return () => null;
     if (specifier === './EstimatesScreen') return () => null;
     if (specifier.endsWith('/components/JobWorkflow')) return ({ job, onClose }) => React.createElement('View', null,
       React.createElement('Text', null, job.customerName), React.createElement('Pressable', { accessibilityLabel: 'Close job details', onPress: onClose }, 'Close'));
@@ -58,10 +64,11 @@ function load(relative) {
 }
 function account(role = 'technician', status = 'company') {
   jobRequests = []; jobLoader = async () => ({ success: true, jobs: [] }); native.AppState.currentState = 'active'; authRefreshes = 0;
+  nativePushMounts = 0; native.Linking.openURL = async () => {}; native.Alert.alert = () => {};
   detailLoader = async ({ id }) => ({ job: { id, companyId: 'acme', assignedTo: 'membership', customerName: 'Assigned customer', status: 'scheduled' }, customer: null });
   const user = { id: 'luis', name: 'Luis Gonzales', email: 'luis@example.com', emailVerified: true, companyId: status === 'company' ? 'acme' : null, role: status === 'company' ? role : null, membershipId: status === 'company' ? 'membership' : null,
     workspace: { status, invitations: [{ id: 'invite', companyName: 'Acme Pest Control', role: 'technician' }] }, companyName: 'Acme Pest Control', businessName: 'Acme Pest Control', businessPhone: '555-0100', businessAddress: '1 Main St', services: ['Termite Inspection', 'Rodent Control'] };
-  currentAuth = { user, isAuthenticated: true, isLoading: false, accessStatus: status === 'company' ? 'ready' : status, permissions: workspacePermissions(user.workspace, user), refreshUser: async () => { authRefreshes++; return { success: true, user: currentAuth.user, authoritative: true, accessStatus: currentAuth.accessStatus }; }, signOut: async () => {}, updateUserProfile: async () => ({ success: true }), requestStaffCode: async email => { sent.push(email); return { challengeId: 'c'.repeat(48), message: 'Check your inbox.' }; }, signInWithCode: async (...args) => { verified.push(args); return { success: true }; } };
+  currentAuth = { user, isAuthenticated: true, isLoading: false, accessStatus: status === 'company' ? 'ready' : status, permissions: workspacePermissions(user.workspace, user), refreshUser: async () => { authRefreshes++; return { success: true, user: currentAuth.user, authoritative: true, accessStatus: currentAuth.accessStatus }; }, signOut: async () => {}, updateUserProfile: async () => ({ success: true }), getAccountDeletionSummary: async () => ({ pendingOperations: 0, pendingPhotos: 0 }), deleteAccount: async () => ({ success: true }), requestStaffCode: async email => { sent.push(email); return { challengeId: 'c'.repeat(48), message: 'Check your inbox.' }; }, signInWithCode: async (...args) => { verified.push(args); return { success: true }; } };
 }
 async function render(file, props = {}) {
   let tree;
@@ -112,6 +119,32 @@ test('only authoritative revocation says access was removed; pending and unavail
     await unmount(tree);
   }
 });
+test('pending and revoked verified accounts can review deletion and legal links without accepting company access', async () => {
+  for (const status of ['pending', 'revoked']) {
+    account('technician', status === 'pending' ? 'pending' : 'unavailable');
+    currentAuth.accessStatus = status;
+    let accepts = 0, reviews = 0, deletes = 0;
+    currentAuth.acceptInvitation = async () => { accepts++; return { success: true }; };
+    currentAuth.getAccountDeletionSummary = async () => { reviews++; return { pendingOperations: 1, pendingPhotos: 0 }; };
+    currentAuth.deleteAccount = async () => { deletes++; return { success: true }; };
+    const links = [];
+    native.Linking.openURL = async url => links.push(url);
+    const tree = await render('App.js');
+    assert.match(textOf(tree), /Legal & account/);
+    await press(tree, 'Privacy policy'); await press(tree, 'Terms of service');
+    assert.deepEqual(links, ['https://route-logistics.com/privacy', 'https://route-logistics.com/terms']);
+    await press(tree, 'Delete my account');
+    assert.match(textOf(tree), /Review account deletion|1 unsynced edit/);
+    assert.equal(reviews, 1); assert.equal(accepts, 0); assert.equal(deletes, 0);
+    assert.doesNotMatch(textOf(tree), /Manage work|Open company settings on the web|Your schedule|Manage services|Save profile & preferences/);
+    await press(tree, 'Cancel account deletion');
+    assert.match(textOf(tree), status === 'pending' ? /Join your company/ : /Company access removed/);
+    native.Linking.openURL = async () => { throw new Error('Unavailable'); };
+    await press(tree, 'Terms of service');
+    assert.match(textOf(tree), /Could not open the terms of service.*https:\/\/route-logistics.com\/terms/);
+    await unmount(tree);
+  }
+});
 test('technician Home and Settings display company data without management controls', async () => {
   account();
   const home = await render('screens/HomeScreen.js');
@@ -119,7 +152,9 @@ test('technician Home and Settings display company data without management contr
   assert.doesNotMatch(textOf(home), /Manage work|Schedule service|"Customers"|"Estimates"/);
   await unmount(home);
   const settings = await render('screens/SettingsScreen.js');
-  assert.match(textOf(settings), /555-0100/); assert.match(textOf(settings), /Termite Inspection/); assert.match(textOf(settings), /Rodent Control/);
+  assert.match(textOf(settings), /555-0100/); assert.doesNotMatch(textOf(settings), /Termite Inspection|Rodent Control/);
+  await press(settings, 'Services');
+  assert.match(textOf(settings), /Termite Inspection/); assert.match(textOf(settings), /Rodent Control/);
   assert.doesNotMatch(textOf(settings), /Manage services|Open company settings on the web/);
   assert.equal(settings.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Business name').length, 0);
   assert.equal(settings.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityRole === 'radio').length, 3);
@@ -165,6 +200,171 @@ test('Settings formats personal phone input and saves the displayed number witho
   assert.equal(phone().props.keyboardType, 'phone-pad');
   await press(tree, 'Save profile & preferences');
   assert.equal(saved.phoneNumber, '(661) 555-0123'); assert.equal(saved.businessName, undefined);
+});
+
+test('Settings starts with services and notifications collapsed and hides the inactive language selector', async () => {
+  account();
+  const tree = await render('screens/SettingsScreen.js');
+  const section = label => tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === label)[0];
+  assert.equal(section('Services').props.accessibilityState.expanded, false);
+  assert.equal(section('Notification preferences').props.accessibilityState.expanded, false);
+  assert.match(textOf(tree), /Services.*2/);
+  assert.doesNotMatch(textOf(tree), /English|Español|Language|Termite Inspection|Email notifications|SMS notifications/);
+  assert.match(textOf(tree), /Business name|Business address|1 Main St/);
+  assert.equal(nativePushMounts, 0);
+  await press(tree, 'Services');
+  assert.equal(section('Services').props.accessibilityState.expanded, true);
+  assert.match(textOf(tree), /Termite Inspection|Rodent Control/);
+  await press(tree, 'Services');
+  assert.doesNotMatch(textOf(tree), /Termite Inspection|Rodent Control/);
+  assert.match(textOf(tree), /1 Main St/);
+});
+
+test('notification collapse preserves unsaved changes and keeps an activated native panel mounted', async () => {
+  account(); currentAuth.user.emailNotifications = false; currentAuth.user.smsNotifications = true;
+  let saved;
+  currentAuth.updateUserProfile = async value => { saved = value; return { success: true }; };
+  const tree = await render('screens/SettingsScreen.js');
+  await press(tree, 'Notification preferences');
+  assert.equal(nativePushMounts, 1);
+  const notification = label => tree.root.findAll(node => node.type === 'Switch' && node.props.accessibilityLabel === label)[0];
+  assert.equal(notification('Email notifications').props.value, false);
+  assert.equal(notification('SMS notifications').props.value, true);
+  await act(async () => notification('Email notifications').props.onValueChange(true));
+  const name = tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Display name')[0];
+  await act(async () => name.props.onChangeText('Updated name'));
+  await press(tree, 'Notification preferences');
+  const hiddenPanel = tree.root.findAll(node => node.type === 'View' && node.props.importantForAccessibility === 'no-hide-descendants')[0];
+  assert.equal(hiddenPanel.props.style.display, 'none');
+  await press(tree, 'Notification preferences');
+  assert.equal(notification('Email notifications').props.value, true);
+  assert.equal(nativePushMounts, 1);
+  await press(tree, 'Save profile & preferences');
+  assert.deepEqual({ name: saved.name, email: saved.emailNotifications, sms: saved.smsNotifications }, { name: 'Updated name', email: true, sms: true });
+});
+
+test('Settings opens Route Logistics legal links and reports browser failures', async () => {
+  account(); const links = [];
+  native.Linking.openURL = async url => links.push(url);
+  const tree = await render('screens/SettingsScreen.js');
+  await press(tree, 'Privacy policy'); await press(tree, 'Terms of service');
+  assert.deepEqual(links, ['https://route-logistics.com/privacy', 'https://route-logistics.com/terms']);
+  native.Linking.openURL = async () => { throw new Error('Unavailable'); };
+  await press(tree, 'Privacy policy');
+  assert.match(textOf(tree), /Could not open the privacy policy.*https:\/\/route-logistics.com\/privacy/);
+});
+
+test('account deletion requires review, typed confirmation, and explicit unsynced-work consent', async () => {
+  account(); const requests = []; let resolveDeletion;
+  currentAuth.getAccountDeletionSummary = async () => ({ pendingOperations: 2, pendingPhotos: 1 });
+  currentAuth.deleteAccount = async value => { requests.push(value); return new Promise(resolve => { resolveDeletion = resolve; }); };
+  const tree = await render('screens/SettingsScreen.js');
+  await press(tree, 'Delete my account');
+  assert.equal(requests.length, 0); assert.match(textOf(tree), /2 unsynced edits and 1 unsynced photo/);
+  assert.match(textOf(tree), /Company-owned customers, jobs, invoices, photos, and service history remain/);
+  assert.equal(tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Type DELETE to confirm').length, 0);
+  await press(tree, 'Continue to confirmation');
+  const final = () => tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === 'Permanently delete my account')[0];
+  assert.equal(final().props.disabled, true);
+  const confirmation = tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Type DELETE to confirm')[0];
+  await act(async () => confirmation.props.onChangeText('DELETE'));
+  assert.equal(final().props.disabled, true);
+  const discard = tree.root.findAll(node => node.type === 'Switch' && node.props.accessibilityLabel === 'Discard unsynced work on this device')[0];
+  await act(async () => discard.props.onValueChange(true));
+  assert.equal(final().props.disabled, false);
+  await act(async () => { final().props.onPress(); final().props.onPress(); });
+  assert.equal(requests.length, 1); assert.deepEqual(requests[0], { confirmation: 'DELETE', discardPendingWork: true });
+  assert.equal(final().props.accessibilityState.busy, true);
+  await act(async () => resolveDeletion({ success: true }));
+  assert.match(textOf(tree), /Your Route Logistics account was deleted/);
+});
+
+test('deletion failures retain confirmation context, owner restrictions, and a retry path', async () => {
+  account('owner'); let attempts = 0;
+  currentAuth.deleteAccount = async () => ++attempts === 1 ? { success: false, error: { code: 'functions/failed-precondition', message: 'Transfer ownership before deleting your account because other staff remain.' } } : { success: true };
+  const tree = await render('screens/SettingsScreen.js');
+  await press(tree, 'Delete my account');
+  assert.match(textOf(tree), /transfer ownership in company settings on the web/);
+  await press(tree, 'Continue to confirmation');
+  const confirmation = () => tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Type DELETE to confirm')[0];
+  await act(async () => confirmation().props.onChangeText('DELETE'));
+  await press(tree, 'Permanently delete my account');
+  assert.match(textOf(tree), /Transfer ownership before deleting your account because other staff remain/);
+  assert.equal(confirmation().props.value, 'DELETE');
+  await press(tree, 'Permanently delete my account');
+  assert.equal(attempts, 2); assert.match(textOf(tree), /Your Route Logistics account was deleted/);
+});
+
+test('account deletion review errors and recent-login failures are actionable without deleting automatically', async () => {
+  account(); let reviews = 0, deletions = 0, signouts = 0;
+  currentAuth.getAccountDeletionSummary = async () => { if (++reviews === 1) throw new Error('Connect to the internet and retry.'); return { pendingOperations: 0, pendingPhotos: 0 }; };
+  currentAuth.deleteAccount = async () => { deletions++; return { success: false, error: { code: 'functions/failed-precondition', message: 'Sign out and sign back in, then delete your account within five minutes.' } }; };
+  currentAuth.signOut = async () => { signouts++; };
+  const tree = await render('screens/SettingsScreen.js');
+  await press(tree, 'Delete my account');
+  assert.match(textOf(tree), /Connect to the internet and retry/); assert.equal(deletions, 0);
+  await press(tree, 'Retry account deletion review'); await press(tree, 'Continue to confirmation');
+  const confirmation = tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Type DELETE to confirm')[0];
+  await act(async () => confirmation.props.onChangeText('DELETE'));
+  await press(tree, 'Permanently delete my account');
+  assert.match(textOf(tree), /sign out and sign back in/); assert.equal(deletions, 1);
+  assert.equal(signouts, 0);
+  await press(tree, 'Sign out to verify your identity'); assert.equal(signouts, 1);
+});
+
+test('cancelled deletion ignores late review results and never submits deletion', async () => {
+  account(); let resolveReview, deletions = 0;
+  currentAuth.getAccountDeletionSummary = () => new Promise(resolve => { resolveReview = resolve; });
+  currentAuth.deleteAccount = async () => { deletions++; return { success: true }; };
+  const tree = await render('screens/SettingsScreen.js');
+  const open = tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === 'Delete my account')[0];
+  await act(async () => { open.props.onPress(); });
+  await press(tree, 'Cancel account deletion');
+  await act(async () => resolveReview({ pendingOperations: 7, pendingPhotos: 9 }));
+  assert.equal(deletions, 0); assert.doesNotMatch(textOf(tree), /7 unsynced|Continue to confirmation/);
+  assert.ok(tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === 'Delete my account').length);
+});
+
+test('durably accepted deletion reports pending cleanup without claiming it already finished', async () => {
+  account(); const alerts = [];
+  native.Alert.alert = (...args) => alerts.push(args);
+  currentAuth.deleteAccount = async () => ({ success: true, deletionPending: true });
+  const tree = await render('screens/SettingsScreen.js');
+  await press(tree, 'Delete my account'); await press(tree, 'Continue to confirmation');
+  const confirmation = tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Type DELETE to confirm')[0];
+  await act(async () => confirmation.props.onChangeText('DELETE'));
+  await press(tree, 'Permanently delete my account');
+  assert.equal(alerts.length, 1); assert.equal(alerts[0][0], 'Deletion requested');
+  assert.match(alerts[0][1], /access is revoked.*cleanup will retry automatically/);
+  assert.doesNotMatch(textOf(tree), /Your Route Logistics account was deleted/);
+});
+
+test('server-provided ownership blockers disable final confirmation', async () => {
+  account('owner');
+  currentAuth.getAccountDeletionSummary = async () => ({ pendingOperations: 0, pendingPhotos: 0, blockers: [{ message: 'Transfer ownership to an active owner before continuing.' }] });
+  const tree = await render('screens/SettingsScreen.js');
+  await press(tree, 'Delete my account');
+  assert.match(textOf(tree), /Transfer ownership to an active owner before continuing/);
+  const next = tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === 'Continue to confirmation')[0];
+  assert.equal(next.props.disabled, true);
+  await press(tree, 'Cancel account deletion');
+  assert.doesNotMatch(textOf(tree), /Type DELETE to confirm|Continue to confirmation/);
+});
+
+test('confirmed server deletion with failed local cleanup offers cleanup only and never requests reauthentication', async () => {
+  account(); let reviews = 0, attempts = 0;
+  currentAuth.getAccountDeletionSummary = async () => { reviews++; return { pendingOperations: 0, pendingPhotos: 0 }; };
+  currentAuth.deleteAccount = async () => ++attempts === 1 ? { success: false, deletionRecorded: true, localCleanupPending: true, error: { code: 'account/local-cleanup-failed', message: 'Your deletion request is confirmed and account access is revoked. Retry cleanup.' } } : { success: true, deleted: true };
+  const tree = await render('screens/SettingsScreen.js');
+  await press(tree, 'Delete my account'); await press(tree, 'Continue to confirmation');
+  const confirmation = tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Type DELETE to confirm')[0];
+  await act(async () => confirmation.props.onChangeText('DELETE'));
+  await press(tree, 'Permanently delete my account');
+  assert.match(textOf(tree), /Your deletion request is already accepted and account access is revoked/);
+  assert.doesNotMatch(textOf(tree), /Your account has not been deleted|Sign out to verify|Cancel account deletion|Type DELETE to confirm/);
+  await press(tree, 'Retry device cleanup');
+  assert.equal(attempts, 2); assert.equal(reviews, 1);
+  assert.match(textOf(tree), /Your Route Logistics account was deleted/);
 });
 
 test('assigned work refreshes manually, on return and reconnect, using the selected period', async () => {

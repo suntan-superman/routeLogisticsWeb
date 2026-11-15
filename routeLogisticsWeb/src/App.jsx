@@ -34,6 +34,7 @@ const PublicContentPage = lazy(() => import('./pages/PublicContentPage'));
 
 const NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
+const TermsPage = lazy(() => import('./pages/TermsPage'));
 const RoutesPage = lazy(() => import('./pages/RoutesPage'));
 const TeamLocationsPage = lazy(() => import('./pages/TeamLocationsPage'));
 const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
@@ -80,7 +81,7 @@ const HomeOrLanding = () => {
 
 function PrivateRouteMetadata() {
   const { pathname } = useLocation();
-  const publicPage = pathname === '/' || pathname === '/privacy' || /^\/(faqs|testimonials|success-stories)(\/|$)/.test(pathname);
+  const publicPage = pathname === '/' || pathname === '/privacy' || pathname === '/terms' || /^\/(faqs|testimonials|success-stories)(\/|$)/.test(pathname);
   return publicPage ? null : <Helmet><meta name="robots" content="noindex, nofollow" /></Helmet>;
 }
 function AppContent() {
@@ -112,6 +113,7 @@ function AppContent() {
                 <Route path="/estimate-approval" element={<EstimateApprovalPage />} />
                 <Route path="/estimates" element={<ProtectedRoute><Layout><EstimatesPage /></Layout></ProtectedRoute>} />
                 <Route path="/privacy" element={<PrivacyPage />} />
+                <Route path="/terms" element={<TermsPage />} />
                 <Route path="/notifications" element={<ProtectedRoute><Layout><NotificationsPage /></Layout></ProtectedRoute>} />
                 <Route path="/routes" element={<ProtectedRoute><Layout><RoutesPage /></Layout></ProtectedRoute>} />
                 <Route path="/team-locations" element={<ProtectedRoute><Layout><TeamLocationsPage /></Layout></ProtectedRoute>} />

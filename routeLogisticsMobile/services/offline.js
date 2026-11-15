@@ -10,6 +10,20 @@ import { getClaims, tenantFields, requireWorkspace } from './tenancy';
 import { createQueue, retryDelay } from './offlineQueueCore';
 
 const queues = new Map(), draining = new Map(), listeners = new Set();
+const pausedAccounts = new Set(), writing = new Map();
+const accountPrefix = uid => `rl-offline-v1:${auth.app.options.projectId}:${uid}:`;
+const pausedScope = scope => [...pausedAccounts].some(uid => scope.startsWith(accountPrefix(uid)));
+function trackWrite(uid, task) {
+  if (!writing.has(uid)) writing.set(uid, new Set());
+  writing.get(uid).add(task);
+  return task.finally(() => { writing.get(uid)?.delete(task); });
+}
+function saveWork(change) {
+  const uid = auth.currentUser?.uid;
+  if (!uid || pausedAccounts.has(uid)) return Promise.reject(new Error('Account deletion is in progress. Saved work cannot change until it finishes.'));
+  const task = Promise.resolve().then(change);
+  return trackWrite(uid, task);
+}
 export const offlineVersion = (v) => v?.toDate ? v.toDate().toISOString() : v?.seconds != null ? new Date(v.seconds * 1000 + (v.nanoseconds || 0) / 1e6).toISOString() : v || null;
 export const isOffline = async () => { const net = await NetInfo.fetch(); return net.isConnected === false || net.isInternetReachable === false; };
 export function offlineScope() {
@@ -24,7 +38,7 @@ function queue(scope = offlineScope()) { if (!queues.has(scope)) queues.set(scop
 export const queuedWork = () => queue().read();
 export const getQueuedOperation = async id => (await queuedWork()).find(row => row.id === id) || null;
 export const readCache = async (name, scope = offlineScope()) => JSON.parse(await AsyncStorage.getItem(`${scope}:cache:policy2:${name}`) || 'null');
-export const writeCache = (name, data, scope = offlineScope()) => AsyncStorage.setItem(`${scope}:cache:policy2:${name}`, JSON.stringify(data));
+export const writeCache = (name, data, scope = offlineScope()) => pausedScope(scope) ? Promise.resolve() : trackWrite(scope.split(':')[2], AsyncStorage.setItem(`${scope}:cache:policy2:${name}`, JSON.stringify(data)));
 export async function cachedRead(name, loader) {
   const scope = offlineScope();
   if (await isOffline()) { const cached = await readCache(name, scope); if (cached == null) throw new Error('Open this view online once to save it for offline use.'); return cached; }
@@ -40,7 +54,7 @@ export async function overlayJobs(jobs) {
     syncState: row.state, syncOperationId: row.id, syncError: row.error || '', syncErrorCode: row.errorCode || null, syncPatch: row.patch,
   }), job));
 }
-export async function saveJobOffline(jobId, patch, options = {}) {
+export const saveJobOffline = (jobId, patch, options = {}) => saveWork(async () => {
   const scope = offlineScope(), jobs = await readCache('job-bases', scope) || {};
   let base = jobs[jobId];
   if (!base && !(await isOffline())) base = (await readWorkspace('jobs', { id: jobId })).job;
@@ -57,8 +71,8 @@ export async function saveJobOffline(jobId, patch, options = {}) {
   });
   void flushOffline().catch(() => {});
   return { success: true, queued: true, operationId: id };
-}
-export async function savePhotoOffline(job, uri, metadata = {}) {
+});
+export const savePhotoOffline = (job, uri, metadata = {}) => saveWork(async () => {
   const scope = offlineScope(), id = Crypto.randomUUID(), attribution = tenantFields();
   const directory = `${FileSystem.documentDirectory}rl-photos/`;
   await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
@@ -70,19 +84,19 @@ export async function savePhotoOffline(job, uri, metadata = {}) {
   for (const key of ['width', 'height']) if (Number.isFinite(metadata[key]) && metadata[key] > 0) safeMetadata[key] = metadata[key];
   await queue(scope).add({ id, kind: 'photo', jobId: job.id, customerId: job.customerId || null, localUri, metadata: safeMetadata, attribution, storagePath: `${base}/jobs/${job.id}/${id}.jpg`, createdAt: Date.now() });
   void flushOffline().catch(() => {}); return id;
-}
+});
 async function sendPhoto(row, scope) {
   if (offlineScope() !== scope) throw new Error('Workspace changed.');
   const base64 = await FileSystem.readAsStringAsync(row.localUri, { encoding: FileSystem.EncodingType.Base64 });
   await callWorkspace('rlJobPhoto', { action: 'upload', operationId: row.id, jobId: row.jobId, base64 });
   return { status: 'synced' };
 }
-export async function saveApplicationOffline(jobId, record) {
+export const saveApplicationOffline = (jobId, record) => saveWork(async () => {
   const scope = offlineScope(), id = Crypto.randomUUID();
   await queue(scope).add({ id, kind: 'application', jobId, record, createdAt: Date.now() });
   void flushOffline().catch(() => {}); return { success: true, queued: true };
-}
-export async function saveServiceFormOffline(job, record) {
+});
+export const saveServiceFormOffline = (job, record) => saveWork(async () => {
   const scope = offlineScope(), claims = getClaims();
   if (!auth.currentUser?.emailVerified || !job?.id || ['completed','cancelled','canceled'].includes(job.status) || (claims?.companyId ? job.companyId !== claims.companyId : job.companyId || job.userId !== auth.currentUser.uid)
     || claims?.role === 'technician' && job.assignedTo !== claims.membershipId) throw new Error('Your verified current workspace and job assignment are required to save this service form.');
@@ -94,7 +108,7 @@ export async function saveServiceFormOffline(job, record) {
     rows.push({ id, kind: 'service-form', jobId: job.id, record: payload, template: cached.form.template, createdAt: Date.now(), state: 'pending', attempts: 0, nextAttempt: 0 });
   });
   void flushOffline().catch(() => {}); return { success: true, queued: true, operationId: id };
-}
+});
 export async function purgeLegacyReadCaches() {
   const keys = await AsyncStorage.getAllKeys();
   const legacy = keys.filter(key => (key.startsWith('rl-offline-v1:') && key.includes(':cache:') && !key.includes(':cache:policy2:')) || /^rl-session-v[12]:/.test(key));
@@ -108,6 +122,7 @@ export async function purgeOtherRoleCaches(uid, currentScope) {
 }
 export function flushOffline() {
   const scope = offlineScope(), work = queue(scope);
+  if (pausedScope(scope)) return Promise.resolve();
   if (draining.has(scope)) return draining.get(scope);
   const task = (async () => {
     if (await isOffline()) return;
@@ -116,7 +131,7 @@ export function flushOffline() {
     for (const saved of await work.read()) {
       const row = (await work.read()).find((entry) => entry.id === saved.id);
       if (!row) continue;
-      if (AppState.currentState !== 'active' || offlineScope() !== scope || await isOffline()) break;
+      if (pausedScope(scope) || AppState.currentState !== 'active' || offlineScope() !== scope || await isOffline()) break;
       if (row.state !== 'pending' || row.nextAttempt > Date.now()) continue;
       const ordered = await work.read();
       const earlier = ordered.slice(0, ordered.findIndex((entry) => entry.id === row.id)).find((other) => other.jobId === row.jobId && (other.kind === 'job' || row.patch?.status === 'completed' && other.kind === 'service-form') && !['synced', 'discarded'].includes(other.state));
@@ -147,7 +162,7 @@ export function flushOffline() {
   draining.set(scope, task);
   return task;
 }
-export async function resolveOffline(id, action) {
+export const resolveOffline = (id, action) => saveWork(async () => {
   const work = queue();
   let operationId = id;
   await work.edit((rows) => {
@@ -163,4 +178,36 @@ export async function resolveOffline(id, action) {
   });
   void flushOffline().catch(() => {});
   return { operationId };
+});
+
+// Deletion must settle a send already in flight before invalidating the account.
+// New saves and cache writes stay blocked until deletion fails or the app exits.
+export async function pauseOfflineForAccount(uid) {
+  pausedAccounts.add(uid);
+  await Promise.allSettled([
+    ...[...draining].filter(([scope]) => scope.startsWith(accountPrefix(uid))).map(([, task]) => task),
+    ...(writing.get(uid) || []),
+  ]);
+  return () => { pausedAccounts.delete(uid); notify(); };
+}
+async function accountQueues(uid) {
+  const prefix = accountPrefix(uid);
+  const keys = new Set((await AsyncStorage.getAllKeys()).filter(key => key.startsWith(prefix) && key.endsWith(':queue')));
+  for (const scope of queues.keys()) if (scope.startsWith(prefix)) keys.add(`${scope}:queue`);
+  return Promise.all([...keys].map(async key => ({ key, rows: await queue(key.slice(0, -6)).read() })));
+}
+export async function accountOfflineSummary(uid) {
+  const rows = (await accountQueues(uid)).flatMap(value => value.rows).filter(row => !['synced', 'discarded'].includes(row.state));
+  return { pendingOperations: rows.filter(row => row.kind !== 'photo').length, pendingPhotos: rows.filter(row => row.kind === 'photo').length };
+}
+export async function purgeOfflineForAccount(uid) {
+  const prefix = accountPrefix(uid), records = await accountQueues(uid);
+  const directory = `${FileSystem.documentDirectory}rl-photos/`;
+  // Never delete arbitrary picker/library paths or another account's photos.
+  const photos = new Set(records.flatMap(record => record.rows).filter(row => row.kind === 'photo' && typeof row.localUri === 'string' && row.localUri.startsWith(directory) && /^[A-Za-z0-9-]+\.jpg$/.test(row.localUri.slice(directory.length))).map(row => row.localUri));
+  await Promise.all([...photos].map(uri => FileSystem.deleteAsync(uri, { idempotent: true })));
+  const keys = (await AsyncStorage.getAllKeys()).filter(key => key.startsWith(prefix) || [`rl-session-v1:${uid}`, `rl-session-v2:${uid}`, `rl-session-v3:${uid}`].includes(key));
+  if (keys.length) await AsyncStorage.multiRemove(keys);
+  for (const scope of queues.keys()) if (scope.startsWith(prefix)) queues.delete(scope);
+  notify();
 }

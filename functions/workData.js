@@ -202,11 +202,13 @@ function workDataHandlers(db, config = {}) {
       if (!name || name.length > 200) throw new HttpsError('invalid-argument', 'Enter your company name.');
       const ref = db.collection('companies').doc(), profile = db.doc(`users/${scope.uid}`);
       await db.runTransaction(async tx => {
-        const [user, owned, memberships, invitations] = await Promise.all([
+        const [user, owned, memberships, invitations, deletion] = await Promise.all([
           tx.get(profile), tx.get(db.collection('companies').where('ownerId', '==', scope.uid).limit(1)),
           tx.get(db.collection('teamMembers').where('uid', '==', scope.uid).limit(1)),
           tx.get(db.collection('teamMembers').where('email', '==', String(request.auth.token.email || '').trim().toLowerCase()).limit(1)),
+          tx.get(db.collection('rlAccountDeletions').doc(scope.uid)),
         ]);
+        if (deletion.exists) throw new HttpsError('permission-denied', 'This Route Logistics account has been deleted.');
         if (user.get('companyId') || user.get('rlCompanyId') || !owned.empty || !memberships.empty || !invitations.empty) throw new HttpsError('permission-denied', 'Use your existing company or invitation.');
         tx.create(ref, { ownerId: scope.uid, name, services: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
         tx.set(profile, { companyId: ref.id, rlCompanyId: ref.id }, { merge: true });

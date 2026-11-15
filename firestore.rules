@@ -10,7 +10,8 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     function signedIn() {
-      return request.auth != null && request.auth.token.get('portal', false) != true;
+      return request.auth != null && request.auth.token.get('portal', false) != true
+        && !exists(/databases/$(database)/documents/rlAccountDeletions/$(request.auth.uid));
     }
     function uid() {
       return request.auth.uid;

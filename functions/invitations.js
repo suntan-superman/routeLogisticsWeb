@@ -20,7 +20,8 @@ async function createInvitation(db, { companyId, email: input, role, invitedBy, 
   const code = randomBytes(32).toString('hex');
   const member = { companyId, email, role, invitedBy, status: 'pending', schemaVersion: 2, expiresAt: now + INVITE_LIFETIME_MS, updatedAt: new Date(now).toISOString() };
   const { id, inviteUrl } = await db.runTransaction(async (tx) => {
-    const [identity, company, all] = await Promise.all([tx.get(identityRef), tx.get(db.collection('companies').doc(companyId)), tx.get(db.collection('teamMembers').where('companyId', '==', companyId))]);
+    const [identity, company, all, deletion] = await Promise.all([tx.get(identityRef), tx.get(db.collection('companies').doc(companyId)), tx.get(db.collection('teamMembers').where('companyId', '==', companyId)), tx.get(db.collection('rlAccountDeletions').doc(invitedBy))]);
+    if (deletion.exists) throw new HttpsError('permission-denied', 'This Route Logistics account has been deleted.');
     if (company.get('ownerId') !== invitedBy) throw new HttpsError('permission-denied', 'Only the current owner can issue invitations.');
     // Include mixed-case legacy emails. The identity document serializes concurrent calls.
     const matches = all.docs.filter((d) => normalizeEmail(d.get('email')) === email);
@@ -34,7 +35,12 @@ async function createInvitation(db, { companyId, email: input, role, invitedBy, 
       if (record.id !== id) tx.update(record.ref, { status: 'superseded', supersededBy: id, updatedAt: member.updatedAt });
     }
     tx.set(identityRef, { companyId, email, memberId: id, updatedAt: new Date(now) });
-    tx.set(ref, { ...(old?.data() || {}), ...member, uid: null, activatedAt: null, supersededBy: null, createdAt: old?.get('createdAt') || member.updatedAt });
+    const next = { ...(old?.data() || {}), ...member, uid: null, activatedAt: null, supersededBy: null, createdAt: old?.get('createdAt') || member.updatedAt };
+    // Full replacement omits deletion-only fields; deletion sentinels require a
+    // merge/update and must never become part of an invitation payload.
+    delete next.accountDeletionUid; delete next.accountDeletedAt;
+    if (old?.get('accountDeletionUid')) delete next.name;
+    tx.set(ref, next);
     tx.set(db.collection('rlInviteSecrets').doc(id), { codeHash: hash(code) });
     if (queueEmail) tx.create(db.collection('rlMail').doc(), {
       invitationId: id, invitationHash: hash(code),
@@ -61,16 +67,19 @@ function invitationHandlers(db, applyClaims, appUrl, emailEnabled = () => true) 
       const memberRef = db.collection('teamMembers').doc(id);
       // Lock the user in the same transaction to prevent accepting two companies concurrently.
       await db.runTransaction(async (tx) => {
-        const [snap, secret, user, owned, memberships] = await Promise.all([
+        const [snap, secret, user, owned, memberships, deletion] = await Promise.all([
           tx.get(memberRef), tx.get(db.collection('rlInviteSecrets').doc(id)), tx.get(db.collection('users').doc(uid)),
           tx.get(db.collection('companies').where('ownerId', '==', uid).limit(1)),
           tx.get(db.collection('teamMembers').where('uid', '==', uid).where('status', '==', 'active')),
+          tx.get(db.collection('rlAccountDeletions').doc(uid)),
         ]);
+        if (deletion.exists) throw new HttpsError('permission-denied', 'This Route Logistics account has been deleted.');
         const invite = { ...snap.data(), ...secret.data() };
         checkInvitation(invite, { uid, email: token.email, emailVerified: token.email_verified === true }, request.data?.code);
         if (!owned.empty || memberships.docs.some((d) => d.id !== id) || (user.get('rlCompanyId') && user.get('rlCompanyId') !== invite.companyId)) throw new HttpsError('failed-precondition', 'Your account already belongs to a company. Contact the owner before changing companies.');
         const company = await tx.get(db.collection('companies').doc(invite.companyId));
         if (!company.exists) throw new HttpsError('not-found', 'Company no longer exists.');
+        if (company.get('ownerId') && (await tx.get(db.collection('rlAccountDeletions').doc(company.get('ownerId')))).exists) throw new HttpsError('failed-precondition', 'This company is no longer accepting invitations.');
         tx.update(memberRef, { uid, status: 'active', activatedAt: new Date().toISOString() });
         tx.set(db.collection('users').doc(uid), { companyId: invite.companyId, rlCompanyId: invite.companyId }, { merge: true });
       });

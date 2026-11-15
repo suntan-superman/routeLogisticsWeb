@@ -22,9 +22,41 @@ async function openSeedEstimate(page, scenario) {
 }
 
 async function checkProperty(scope, address, outcome) {
-  await scope.getByLabel('Service property address', { exact: true }).fill(address);
+  const input = scope.getByLabel('Service property address', { exact: true });
+  const unlock = scope.getByRole('button', { name: 'Enable Editing', exact: true });
+  if (await input.isDisabled() && await unlock.count()) await unlock.click();
+  await input.fill(address);
   await scope.getByRole('button', { name: 'Check service property', exact: true }).click();
   await expect(scope.getByText(outcome, { exact: true })).toBeVisible();
+}
+
+async function setSyntheticCustomerAddress(page, scenario) {
+  // Change only this test's already-authorized emulator customer through the
+  // real customer editor. Its seeded historical job deliberately stays put.
+  // The job will use the existing cached inside address, never a paid lookup.
+  await page.goto('/customers');
+  await expect(customerRow(page, scenario.customerName)).toBeVisible();
+  await customerRow(page, scenario.customerName).getByRole('button').first().click();
+  await page.getByRole('button', { name: 'Edit Customer', exact: true }).click();
+  const edit = page.getByRole('heading', { name: 'Edit Customer', exact: true }).locator('../..');
+  await edit.getByPlaceholder('123 Main Street', { exact: true }).fill('1 Infinite Loop');
+  await edit.getByPlaceholder('Bakersfield', { exact: true }).fill('Cupertino');
+  await edit.getByPlaceholder('CA', { exact: true }).fill('CA');
+  await edit.getByPlaceholder('93311', { exact: true }).fill('95014');
+  await edit.getByRole('button', { name: 'Save Changes', exact: true }).click();
+  await expect(page.getByText('Customer updated successfully!', { exact: true })).toBeVisible();
+  return scenario.read('customers', scenario.ids.customerId);
+}
+
+async function openAddressJob(page, scenario, title) {
+  await page.goto('/jobs');
+  await page.getByRole('button', { name: 'New Job', exact: true }).click();
+  const form = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Schedule New Job', exact: true }) });
+  await form.locator('select').first().selectOption(scenario.ids.customerId);
+  await form.getByPlaceholder('e.g. General Pest Control', { exact: true }).fill(title);
+  await form.locator('input[type="date"]').fill(laterDate());
+  await form.locator('input[type="time"]').fill('10:45');
+  return form;
 }
 
 test('PW-OPS-01 @smoke unauthenticated operational routes require sign-in', async ({ page }) => {
@@ -323,4 +355,68 @@ test('PW-OPS-12 owner can view invoice and payment history without changing invo
   await history.getByRole('button', { name: 'Close history', exact: true }).click();
   await expect(history).toHaveCount(0);
   expect(await scenario.read('invoices', scenario.ids.invoiceId)).toEqual(before);
+});
+
+test('PW-OPS-13 saved job addresses are locked and an explicitly edited one-off visit leaves the customer unchanged', async ({ page, scenario }) => {
+  annotate('DSP-002', 'CRM-002');
+  const historyBefore = await scenario.read('jobs', scenario.ids.jobId);
+  await signIn(page, scenario.accounts.owner);
+  const customerBefore = await setSyntheticCustomerAddress(page, scenario);
+  const service = `One-off browser property ${scenario.ids.companyId}`;
+  const form = await openAddressJob(page, scenario, service);
+  const address = form.getByLabel('Service property address', { exact: true });
+  await expect(address).toHaveValue(outsideAddress(scenario));
+  await expect(address).toBeDisabled();
+  await expect(form.getByText(/Using the customer's saved address/)).toBeVisible();
+  await expect(form.getByRole('checkbox', { name: "Update customer's saved address", exact: true })).toHaveCount(0);
+  await form.getByRole('button', { name: 'Enable Editing', exact: true }).click();
+  await expect(address).toBeEnabled();
+  await checkProperty(form, insideAddress(scenario), 'Property is inside coverage');
+  const permanent = form.getByRole('checkbox', { name: "Update customer's saved address", exact: true });
+  await expect(permanent).not.toBeChecked();
+  await form.getByRole('button', { name: 'Schedule Job', exact: true }).click();
+  await expect(page.getByText('Job scheduled', { exact: true })).toBeVisible();
+  await expect(form).toHaveCount(0);
+  const jobs = (await scenario.list('jobs')).filter(job => job.serviceType === service);
+  expect(jobs).toHaveLength(1);
+  expect(jobs[0]).toMatchObject({ companyId: scenario.ids.companyId, customerId: scenario.ids.customerId, address: insideAddress(scenario), serviceProperty: { address: insideAddress(scenario) } });
+  expect(await scenario.read('customers', scenario.ids.customerId)).toEqual(customerBefore);
+  expect(await scenario.read('jobs', scenario.ids.jobId)).toEqual(historyBefore);
+});
+
+test('PW-OPS-14 permanent address opt-in updates the selected customer and refreshes the next locked job default', async ({ page, scenario }) => {
+  annotate('DSP-002', 'CRM-002', 'SEC-003');
+  const historyBefore = await scenario.read('jobs', scenario.ids.jobId);
+  const duplicateBefore = await scenario.read('customers', scenario.ids.duplicateCustomerId);
+  await signIn(page, scenario.accounts.owner);
+  const customerBefore = await setSyntheticCustomerAddress(page, scenario);
+  const service = `Permanent browser property ${scenario.ids.companyId}`;
+  const form = await openAddressJob(page, scenario, service);
+  const address = form.getByLabel('Service property address', { exact: true });
+  await expect(address).toHaveValue(outsideAddress(scenario));
+  await expect(address).toBeDisabled();
+  await checkProperty(form, insideAddress(scenario), 'Property is inside coverage');
+  const permanent = form.getByRole('checkbox', { name: "Update customer's saved address", exact: true });
+  await expect(permanent).not.toBeChecked();
+  await permanent.check();
+  await form.getByRole('button', { name: 'Schedule Job', exact: true }).click();
+  await expect(page.getByText('Job scheduled and customer address updated.', { exact: true })).toBeVisible();
+  await expect(form).toHaveCount(0);
+  const jobs = (await scenario.list('jobs')).filter(job => job.serviceType === service);
+  expect(jobs).toHaveLength(1);
+  expect(jobs[0]).toMatchObject({ companyId: scenario.ids.companyId, customerId: scenario.ids.customerId, address: insideAddress(scenario), serviceProperty: { address: insideAddress(scenario) } });
+  const updated = await scenario.read('customers', scenario.ids.customerId);
+  expect(updated.address).toContain('1600 Amphitheatre Parkway');
+  expect(updated.address).not.toBe(customerBefore.address);
+  expect(updated).toMatchObject({ companyId: customerBefore.companyId, userId: customerBefore.userId, name: customerBefore.name, email: customerBefore.email, phone: customerBefore.phone });
+  expect(await scenario.read('customers', scenario.ids.duplicateCustomerId)).toEqual(duplicateBefore);
+  expect(await scenario.read('jobs', scenario.ids.jobId)).toEqual(historyBefore);
+  // No page reload: the scheduling parent's successful-save refresh must make
+  // the corrected customer address available to the very next new-job form.
+  await page.getByRole('button', { name: 'New Job', exact: true }).click();
+  const next = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Schedule New Job', exact: true }) });
+  await next.locator('select').first().selectOption(scenario.ids.customerId);
+  await expect(next.getByLabel('Service property address', { exact: true })).toHaveValue(insideAddress(scenario));
+  await expect(next.getByLabel('Service property address', { exact: true })).toBeDisabled();
+  expect((await scenario.list('jobs')).filter(job => job.serviceType === service)).toHaveLength(1);
 });

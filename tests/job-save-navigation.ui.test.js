@@ -6,9 +6,10 @@ const mobile = createRequire(path.resolve(__dirname,'../routeLogisticsMobile/pac
 const React = mobile('react'), { create, act } = mobile('react-test-renderer'), { transformSync } = web('esbuild');
 global.IS_REACT_ACT_ENVIRONMENT = true;
 let tree, env;
-let calendarDate;
+let calendarDate, legacyCustomer;
 before(async () => {
   calendarDate = await import(pathToFileURL(path.resolve(__dirname, '../routeLogisticsWeb/src/utils/calendarDate.js')).href);
+  legacyCustomer = await import(pathToFileURL(path.resolve(__dirname, '../routeLogisticsWeb/src/utils/legacyCustomer.js')).href);
 });
 const settle = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return {promise,resolve}; };
@@ -45,6 +46,7 @@ const mock = name => {
   if(name.endsWith('/services/maps'))return{loadMaps:async()=>{throw Error('Maps should not be requested in these tests');}};
   if(name.endsWith('/utils/dispatch'))return{STATUS_COLORS:{scheduled:'blue',completed:'green'},scheduleWarning:()=>'',jobPosition:job=>job.location||null,jobAddress:job=>job.address||''};
   if(name.endsWith('/utils/calendarDate'))return calendarDate;
+  if(name.endsWith('/utils/legacyCustomer'))return legacyCustomer;
   if(name.endsWith('/utils/routePlanning'))return{googleNavigation:()=> 'https://example.invalid'};
   if(name.endsWith('/utils/workLocations'))return{LOCATION_LABELS:{},locationState:()=>'',nearestOnDuty:()=>[]};
   if(name.endsWith('/utils/dispatchMap'))return{addressKey:value=>String(value),mapPoint:()=>null,createDispatchAddressResolver:()=>({snapshot:()=>({pending:0,failed:0})})};

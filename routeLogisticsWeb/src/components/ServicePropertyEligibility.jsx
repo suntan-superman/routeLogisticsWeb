@@ -11,7 +11,7 @@ export default function ServicePropertyEligibility(props) {
   return <ServicePropertyForm key={`${currentUser?.uid || ''}:${props.companyId || ''}:${role || ''}`} {...props} />;
 }
 
-function ServicePropertyForm({ companyId, serviceCategories = [], value = {}, onChange, onPolicyLoaded, purpose = 'scheduling', billingAddress = '', existing = false, disabled = false, fixedProperty = false, fixedCategory = false, policy: suppliedPolicy }) {
+function ServicePropertyForm({ companyId, serviceCategories = [], value = {}, onChange, onPolicyLoaded, purpose = 'scheduling', billingAddress = '', existing = false, disabled = false, addressReadOnly = false, fixedProperty = false, fixedCategory = false, policy: suppliedPolicy }) {
   const [policy, setPolicy] = useState(suppliedPolicy || null), [busy, setBusy] = useState(''), [error, setError] = useState('');
   const [policyAttempt, setPolicyAttempt] = useState(0), [loadingPolicy, setLoadingPolicy] = useState(!suppliedPolicy);
   const [checked, setChecked] = useState(null), [reason, setReason] = useState('');
@@ -36,7 +36,7 @@ function ServicePropertyForm({ companyId, serviceCategories = [], value = {}, on
     return () => { state.mounted = false; state.sequence++; state.busy = false; };
   }, [companyId, suppliedPolicy, policyAttempt, onPolicyLoaded]);
   const patch = changes => {
-    if (disabled || fixedProperty && Object.hasOwn(changes, 'address') || fixedCategory && Object.hasOwn(changes, 'serviceCategory')) return;
+    if (disabled || (fixedProperty || addressReadOnly) && Object.hasOwn(changes, 'address') || fixedCategory && Object.hasOwn(changes, 'serviceCategory')) return;
     setChecked(null); setError(''); setReason('');
     onChange?.({ ...value, ...changes, exceptionId: null, confirmed: false });
   };
@@ -60,13 +60,13 @@ function ServicePropertyForm({ companyId, serviceCategories = [], value = {}, on
     } finally { state.busy = false; if (state.mounted && sequence === state.sequence) setBusy(''); }
   };
   return <section aria-label="Service property eligibility" className="space-y-4 rounded-xl border border-gray-200 bg-white p-5">
-    <div><h3 className="text-lg font-semibold">Service property</h3><p className="mt-1 text-sm text-gray-600">Enter the property where the service will take place. Coverage is checked against the provider’s saved service areas.</p></div>
+    <div><h3 className="text-lg font-semibold">Service property</h3><p className="mt-1 text-sm text-gray-600">Review where the service will take place. Use a saved address or enter a different property. Coverage is checked against the provider’s saved service areas.</p></div>
     {existing && <p className="text-sm text-gray-600">Existing appointments stay valid when coverage changes. A changed service property will need a new eligibility check.</p>}
     {fixedProperty && <p className="text-sm text-gray-600">This workflow uses the recorded service property. You can check coverage or obtain an owner exception without changing its address.</p>}
     {settings && settings.configured === false && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Service areas have not been configured. Existing scheduling is preserved; public requests cannot be approved until coverage is configured.</p>}
     <fieldset disabled={!!busy || disabled} className="space-y-4">
-      <label className="block text-sm font-medium">Service property address<input aria-label="Service property address" disabled={fixedProperty} autoComplete="off" className={fieldClass} value={address} maxLength={278} onChange={event => patch({ address: event.target.value })} placeholder="Street, city, state and ZIP code" /></label>
-      {billingAddress && <button type="button" disabled={fixedProperty} className="text-sm font-medium text-primary-700 underline" onClick={() => patch({ address: billingAddress })}>Use this as the service property</button>}
+      <label className="block text-sm font-medium">Service property address<input aria-label="Service property address" disabled={fixedProperty || addressReadOnly} autoComplete="off" className={fieldClass} value={address} maxLength={278} onChange={event => patch({ address: event.target.value })} placeholder="Street, city, state and ZIP code" /></label>
+      {billingAddress && billingAddress.trim() !== address.trim() && <div><p className="text-sm text-gray-600">Customer address: {billingAddress}</p><button type="button" disabled={fixedProperty || addressReadOnly} className="text-sm font-medium text-primary-700 underline" onClick={() => patch({ address: billingAddress })}>Use this as the service property</button></div>}
       {!!categories.length && <label className="block text-sm font-medium">Service category<select aria-label="Service property category" disabled={fixedCategory} className={fieldClass} value={serviceCategory} onChange={event => patch({ serviceCategory: event.target.value })}><option value="">Choose a service category</option>{categories.map(category => <option key={category} value={category}>{category}</option>)}</select></label>}
       <button type="button" className={actionClass} disabled={disabled || !companyId || !address.trim() || !!busy || loadingPolicy || !settings} onClick={() => invoke(false)}>{busy === 'check' ? 'Checking property…' : loadingPolicy ? 'Loading service-area policy…' : 'Check service property'}</button>
     </fieldset>

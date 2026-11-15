@@ -6,6 +6,7 @@ import { auth } from '../services/firebase';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useAuth } from '../contexts/AuthContext';
 import ServicePropertyEligibility from './ServicePropertyEligibility';
+import { customerAddress, customerView, legacyDate } from '../utils/legacyCustomer';
 
 const SERVICE_TYPES = [
   'General Pest Control',
@@ -39,7 +40,7 @@ const emptyForm = (defaults, job) => (job ? {
   date: job.date || todayStr(),
   time: job.time || '09:00',
   estimatedDuration: String(job.estimatedDuration ?? '1'),
-  address: job.address || '',
+  address: typeof job.address === 'string' ? job.address : customerAddress({ address: job.address }),
   totalCost: job.totalCost === undefined || job.totalCost === null ? '' : String(job.totalCost),
   priority: job.priority || 'medium',
   notes: job.notes || ''
@@ -56,28 +57,50 @@ const emptyForm = (defaults, job) => (job ? {
   ...defaults
 });
 const formSnapshot = form => JSON.stringify(Object.fromEntries(Object.entries(form).map(([field,value])=>[field,['estimatedDuration','totalCost'].includes(field)?Number(value || 0):String(value ?? '').trim()])));
-const propertyFor = source => ({ address: source?.serviceProperty?.address || source?.serviceProperty?.formattedAddress || '', serviceCategory: source?.serviceCategory || '', exceptionId: source?.serviceAreaExceptionId || source?.serviceAreaEligibility?.exceptionId || null, confirmed: false });
+const propertyFor = (source, customer) => ({ address: (typeof source?.serviceProperty === 'string' ? source.serviceProperty : source?.serviceProperty?.address || source?.serviceProperty?.formattedAddress) || (typeof source?.address === 'string' ? source.address : customerAddress({ address: source?.address })) || customerAddress(customer), serviceCategory: source?.serviceCategory || '', exceptionId: source?.serviceAreaExceptionId || source?.serviceAreaEligibility?.exceptionId || null, confirmed: false });
 const propertySnapshot = property => JSON.stringify([property.address.trim(), property.serviceCategory.trim(), property.exceptionId || null]);
+const customerVersion = customer => typeof customer?.updatedAt === 'string' ? customer.updatedAt : legacyDate(customer?.updatedAt)?.toISOString() || null;
 
 const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
-  const { company } = useAuth();
+  const { company, can } = useAuth();
   const isEdit = !!job;
+  const initialCustomer = !job && customers.find(customer => customer.id === defaults?.customerId);
   const [form, setForm] = useState(() => emptyForm(defaults, job));
-  const [property, setProperty] = useState(() => propertyFor(job || defaults)), [savedProperty, setSavedProperty] = useState(() => propertySnapshot(propertyFor(job || defaults)));
+  const [property, setProperty] = useState(() => propertyFor(job || defaults, initialCustomer)), [savedProperty, setSavedProperty] = useState(() => propertySnapshot(propertyFor(job || defaults, initialCustomer)));
+  const initialCustomerPending = useRef(!job && !!defaults?.customerId && !initialCustomer && !propertyFor(defaults).address);
   const [serviceAreaPolicy, setServiceAreaPolicy] = useState(null);
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
+  const [addressEditing, setAddressEditing] = useState(false), [saveCustomerAddress, setSaveCustomerAddress] = useState(false);
   const [pastAck, setPastAck] = useState(false);
   const [savedForm,setSavedForm] = useState(()=>formSnapshot(emptyForm(defaults,job)));
+  const selectedCustomer = customers.find(customer => customer.id === form.customerId);
+  const selectedCustomerAddress = customerAddress(selectedCustomer);
+  const currentAddress = company?.id ? property.address : form.address;
+  const canSaveCustomerAddress = !!can?.('customers.manage') && !!selectedCustomer && !!currentAddress.trim() && currentAddress.trim() !== selectedCustomerAddress.trim();
   const alive = useRef(false), savingRef = useRef(false), closing = useRef(false);
+  const addressEditCustomer = useRef(null);
   const propertyChanged = propertySnapshot(property) !== savedProperty;
   const locationChanged = propertyChanged || isEdit && form.customerId !== job.customerId;
-  const formDirty = formSnapshot(form) !== savedForm || propertyChanged;
+  const formDirty = formSnapshot(form) !== savedForm || propertyChanged || saveCustomerAddress;
   const warnDirty = formDirty || !!reason.trim();
   const {confirmDiscard} = useUnsavedChanges(warnDirty,{message:'You have unsaved job details. Leave without saving them?'});
   const requestClose = useCallback(async()=>{if(savingRef.current||closing.current)return;closing.current=true;try{if(!warnDirty||await confirmDiscard())onClose();}finally{closing.current=false;}},[warnDirty,confirmDiscard,onClose]);
 
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
+
+  useEffect(() => {
+    if (!initialCustomerPending.current || savingRef.current) return;
+    const customer = customers.find(row => row.id === form.customerId);
+    if (!customer) return;
+    initialCustomerPending.current = false;
+    const address = customerAddress(customer);
+    if (!address) return;
+    setProperty(previous => ({ ...previous, address, exceptionId: null, confirmed: false }));
+    setSavedProperty(previous => { const saved = JSON.parse(previous); saved[0] = address; saved[2] = null; return JSON.stringify(saved); });
+    setForm(previous => ({ ...previous, address }));
+    setSavedForm(previous => formSnapshot({ ...JSON.parse(previous), address }));
+  }, [customers, form.customerId]);
 
   useEffect(() => {
     const onKey = (e) => {if(e.key==='Escape'&&!e.defaultPrevented){e.preventDefault();requestClose();}};
@@ -87,6 +110,9 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
 
   const set = (field, value) => {
     if(savingRef.current)return;
+    if (field === 'address' && !addressEditing) return;
+    if (field === 'address') initialCustomerPending.current = false;
+    if (field === 'address' && value.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false);
     setPastAck(false);
     setForm((f) => ({ ...f, [field]: value }));
   };
@@ -94,16 +120,14 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
   const timeChanged = !isEdit || form.date !== job.date || form.time !== job.time;
   const isPast = timeChanged && !!form.date && !!form.time && new Date(`${form.date}T${form.time}`) < new Date();
 
-  const customerAddress = (c) => {
-    const address = typeof c?.address === 'string' ? c.address : c?.address?.street || c?.address?.line1 || '';
-    return [address, c?.city || c?.address?.city, [c?.state || c?.address?.state, c?.zipCode || c?.address?.zipCode].filter(Boolean).join(' ')].filter(Boolean).join(', ');
-  };
-
   const pickCustomer = (id) => {
     if(savingRef.current)return;
+    initialCustomerPending.current = false;
+    setAddressEditing(false); setSaveCustomerAddress(false); addressEditCustomer.current = null;
     const c = customers.find((x) => x.id === id);
-    setForm((f) => ({ ...f, customerId: id, address: company?.id ? '' : c && !f.address ? customerAddress(c) : f.address }));
-    if (company?.id) setProperty(previous => ({ ...previous, address: '', exceptionId: null, confirmed: false }));
+    const address = customerAddress(c);
+    setForm((f) => ({ ...f, customerId: id, address: company?.id ? address : c && !f.address ? address : f.address }));
+    if (company?.id) setProperty(previous => ({ ...previous, address, exceptionId: null, confirmed: false }));
   };
 
   const submit = async (e) => {
@@ -132,35 +156,40 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
       date: form.date,
       time: form.time,
       estimatedDuration: duration,
-      address: isEdit && !locationChanged ? form.address.trim() || job.address || '' : property.address.trim() || form.address.trim() || customerAddress(customer),
+      address: isEdit && !locationChanged ? form.address.trim() || job.address || '' : (company?.id ? property.address.trim() : '') || form.address.trim() || customerAddress(customer),
       ...(company?.id && (locationChanged || !isEdit && property.address.trim()) ? { serviceProperty: { address: property.address.trim() }, serviceCategory: property.serviceCategory.trim(), serviceAreaExceptionId: property.exceptionId || null } : {}),
       totalCost: cost,
       priority: form.priority,
       notes: form.notes.trim()
     };
 
-    let saved;
+    const options = saveCustomerAddress ? { saveCustomerAddress: true, expectedCustomerVersion: addressEditCustomer.current?.version ?? null } : undefined;
+    if (saveCustomerAddress && (!addressEditing || addressEditCustomer.current?.id !== customer.id || !canSaveCustomerAddress)) { savingRef.current = false; setSaving(false); return toast.error('Review the customer address before saving it permanently.'); }
+    if (saveCustomerAddress) { details.serviceProperty = { address: currentAddress.trim() }; if (company?.id) { details.serviceCategory = property.serviceCategory.trim(); details.serviceAreaExceptionId = property.exceptionId || null; } }
+    let saved, savedCustomer, customerAddressUpdated = false;
     try { if (isEdit) {
       const by = auth.currentUser?.displayName || auth.currentUser?.email || 'Unknown';
       const edit = buildJobEdit(job, details, { by, reason });
-      if (!edit) {
+      if (!edit && !saveCustomerAddress) {
         toast('No changes to save');
         return onClose();
       }
-      const res = await JobManagementService.updateJob(job.id, edit, job.updatedAt ?? null);
+      const res = await JobManagementService.updateJob(job.id, edit || details, job.updatedAt ?? null, options);
       if (!alive.current)return;
       if (!res.success) throw Error(res.error || 'Could not update job');
-      setSavedForm(formSnapshot(form));setSavedProperty(propertySnapshot(property));setReason('');
-      toast.success('Job updated – flagged as modified from original');
-      saved={...job,...edit};
+      setSavedForm(formSnapshot(form));setSavedProperty(propertySnapshot(property));setReason('');setSaveCustomerAddress(false);
+      customerAddressUpdated = res.customerAddressUpdated === true;
+      savedCustomer = res.customer;
+      toast.success(customerAddressUpdated ? 'Job and customer address updated.' : 'Job updated – flagged as modified from original');
+      saved={...job,...(edit || details)};
     } else {
-      const result = await JobManagementService.createJob(details);
+      const result = await JobManagementService.createJob(details, options);
       if (!alive.current)return;
       if (!result.success) throw Error(result.error || 'Could not create job');
-      setSavedForm(formSnapshot(form));setSavedProperty(propertySnapshot(property));setReason('');toast.success('Job scheduled');saved=result.job;
+      setSavedForm(formSnapshot(form));setSavedProperty(propertySnapshot(property));setReason('');setSaveCustomerAddress(false);customerAddressUpdated = result.customerAddressUpdated === true;savedCustomer=result.customer;toast.success(customerAddressUpdated ? 'Job scheduled and customer address updated.' : 'Job scheduled');saved=result.job;
     } } catch(error) { if(alive.current)toast.error(error.message || 'Unable to save this job. Your changes are available to retry.');return; }
     finally { savingRef.current=false;if(alive.current)setSaving(false); }
-    try { await onCreated(saved); } catch { if(alive.current)toast.error('The job was saved, but the job list could not refresh. Refresh the page to see it.'); }
+    try { await onCreated(saved, { customerAddressUpdated, ...(savedCustomer ? { customer: customerView(savedCustomer.id, savedCustomer) } : {}) }); } catch { if(alive.current)toast.error('The job was saved, but the job list could not refresh. Refresh the page to see it.'); }
   };
 
   return (
@@ -224,14 +253,20 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
             <label className={label}>Service address</label>
             <input
               value={form.address}
+              disabled={!addressEditing || saving}
               onChange={(e) => set('address', e.target.value)}
               className={input}
               placeholder="Defaults to the customer's address"
             />
           </div>}
+          <div className="rounded-lg border border-gray-200 p-3">
+            {!addressEditing ? <button type="button" disabled={saving || !form.customerId} className="text-sm font-medium text-primary-700 underline disabled:opacity-50" onClick={() => { initialCustomerPending.current = false; addressEditCustomer.current = { id: form.customerId, version: customerVersion(selectedCustomer) }; setAddressEditing(true); }}>Enable Editing</button> : <p className="text-sm font-medium text-gray-700">Address editing enabled for this job.</p>}
+            {addressEditing && canSaveCustomerAddress && <label className="mt-3 flex items-start gap-2 text-sm"><input type="checkbox" aria-label="Update customer's saved address" checked={saveCustomerAddress} disabled={saving} onChange={event => setSaveCustomerAddress(event.target.checked)} /><span>Update customer's saved address<span className="mt-1 block text-xs text-gray-600">New jobs will default to this address. Recorded job and service-plan addresses will not be rewritten.</span></span></label>}
+          </div>
           {company?.id && <>
-            {isEdit && job.address && !job.serviceProperty && <p className="text-sm text-gray-600">Recorded service address: {job.address}. Normal edits preserve this appointment; enter a service property only when changing its location.</p>}
-            <ServicePropertyEligibility companyId={company.id} serviceCategories={company.serviceCategories || []} value={property} purpose="scheduling" existing={isEdit} billingAddress={customerAddress(customers.find(customer => customer.id === form.customerId))} onPolicyLoaded={setServiceAreaPolicy} onChange={next => { if (savingRef.current) return; setProperty(next); if (next.address !== property.address) setForm(previous => ({ ...previous, address: next.address })); }} />
+            {isEdit && job.address && !job.serviceProperty && <p className="text-sm text-gray-600">Recorded service address: {typeof job.address === 'string' ? job.address : customerAddress({ address: job.address })}. Normal edits preserve this appointment; enter a service property only when changing its location.</p>}
+            {!!selectedCustomerAddress && property.address === selectedCustomerAddress && <p className="text-sm text-gray-600">Using the customer's saved address. Change the service property below if this visit is at a different location.</p>}
+            <ServicePropertyEligibility key={form.customerId} companyId={company.id} serviceCategories={company.serviceCategories || []} value={property} purpose="scheduling" existing={isEdit} disabled={saving} addressReadOnly={!addressEditing} billingAddress={selectedCustomerAddress} onPolicyLoaded={setServiceAreaPolicy} onChange={next => { if (savingRef.current || !addressEditing && next.address !== property.address) return; initialCustomerPending.current = false; if (next.address.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false); setProperty(next); if (next.address !== property.address) setForm(previous => ({ ...previous, address: next.address })); }} />
           </>}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

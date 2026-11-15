@@ -28,10 +28,11 @@ class JobManagementService {
     return user.uid;
   }
 
-  static async createJob(jobData) {
+  static async createJob(jobData, options = {}) {
     try {
       requireCapability('jobs.schedule');
-      if (getClaims()?.companyId) { const result = await callWorkspace('rlManageJob', { action: 'create', job: jobData }); return { success: true, jobId: result.id, ...(await readWorkspace('jobs', { id: result.id })) }; }
+      if (options.saveCustomerAddress === true) requireCapability('customers.manage');
+      if (getClaims()?.companyId || options.saveCustomerAddress === true) { const result = await callWorkspace('rlManageJob', { action: 'create', job: jobData, ...(options.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}) }); return { success: true, jobId: result.id, ...(await readWorkspace('jobs', { id: result.id })), customerAddressUpdated: result.customerAddressUpdated === true }; }
       const now = new Date().toISOString();
       const job = {
         ...jobData,
@@ -141,10 +142,11 @@ class JobManagementService {
   }
 
   // Update job
-  static async updateJob(jobId, updates, expectedUpdatedAt = undefined) {
+  static async updateJob(jobId, updates, expectedUpdatedAt = undefined, options = {}) {
     try {
       requireCapability('jobs.schedule');
-      if (getClaims()?.companyId) { await callWorkspace('rlManageJob', { action: 'update', id: jobId, job: updates, ...(expectedUpdatedAt !== undefined ? { expectedVersion: expectedUpdatedAt } : {}) }); return this.getJob(jobId); }
+      if (options.saveCustomerAddress === true) requireCapability('customers.manage');
+      if (getClaims()?.companyId || options.saveCustomerAddress === true) { const result = await callWorkspace('rlManageJob', { action: 'update', id: jobId, job: updates, ...(expectedUpdatedAt !== undefined ? { expectedVersion: expectedUpdatedAt } : {}), ...(options.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}) }); return { success: true, ...(await readWorkspace('jobs', { id: jobId })), customerAddressUpdated: result.customerAddressUpdated === true }; }
       this.getCurrentUserId();
       
       // Verify user owns the job

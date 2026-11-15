@@ -3,6 +3,7 @@ import { motion as Motion } from 'framer-motion';
 import JobManagementService from '../services/jobManagementService';
 import CustomerService from '../services/customerService';
 import JobFormModal from '../components/JobFormModal';
+import { customerView } from '../utils/legacyCustomer';
 import JobChangeHistory, { ModifiedBadge } from '../components/JobChangeHistory';
 import { useConfirm } from '../components/ConfirmProvider';
 import { 
@@ -99,6 +100,14 @@ const JobManagementPage = () => {
     window.addEventListener('keydown', keydown);
     return () => { live.current = false; lifecycle.current++; window.removeEventListener('keydown', keydown); };
   }, []);
+
+  const refreshSavedCustomer = async (saved, metadata) => {
+    if (!metadata?.customerAddressUpdated || !saved?.customerId) return;
+    const result = metadata.customer ? { success: true, customer: metadata.customer } : await CustomerService.getCustomer(saved.customerId);
+    if (!result.success || !result.customer) { toast.error('Job and customer address saved. Refresh the page to load the updated customer address.'); return; }
+    const updated = customerView(saved.customerId, result.customer);
+    setCustomers(rows => rows.map(customer => customer.id === updated.id ? updated : customer));
+  };
 
   useEffect(() => {
     loadJobs();
@@ -932,7 +941,8 @@ const JobManagementPage = () => {
           job={selectedJob}
           customers={customers}
           onClose={() => { setShowEditModal(false); setSelectedJob(null); }}
-          onCreated={() => {
+          onCreated={async (saved, metadata) => {
+            await refreshSavedCustomer(saved, metadata);
             setShowEditModal(false);
             setSelectedJob(null);
             loadJobs();
@@ -945,7 +955,8 @@ const JobManagementPage = () => {
         <JobFormModal
           customers={customers}
           onClose={() => setShowNewJob(false)}
-          onCreated={() => {
+          onCreated={async (saved, metadata) => {
+            await refreshSavedCustomer(saved, metadata);
             setShowNewJob(false);
             loadJobs();
             loadStats();

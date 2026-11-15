@@ -29,5 +29,15 @@ export const customerActive = (data) => data.isActive !== false && !data.deleted
 export function customerView(id, data) {
   const address = typeof data.address === 'string' ? data.address : text(data.address?.street || data.address?.line1);
   return { ...data, id, name: customerName(data), phone: text(data.phone) || text(data.phoneNumber), address,
+    city: text(data.city) || text(data.address?.city), state: text(data.state) || text(data.address?.state),
+    zipCode: data.zipCode || data.postalCode || data.address?.zipCode || data.address?.postalCode || '',
     isActive: customerActive(data), totalSpent: Number.isFinite(Number(data.totalSpent)) ? Number(data.totalSpent) : 0 };
+}
+export function customerAddress(data) {
+  if (!data) return '';
+  const view = customerView(data.id, data);
+  const normalize = value => String(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const locality = [view.city, view.state, view.zipCode].filter(Boolean).join(' ');
+  if (locality && normalize(view.address).endsWith(normalize(locality))) return view.address;
+  return [view.address, view.city, [view.state, view.zipCode].filter(Boolean).join(' ')].filter(Boolean).join(', ');
 }

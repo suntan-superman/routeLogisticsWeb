@@ -4,12 +4,22 @@ const { FieldPath } = require('firebase-admin/firestore');
 const { documentId, rateLimit } = require('./security');
 const { accessScope, requireCapability, hasCapability, checkJob } = require('./access');
 const { version } = require('./offline');
-const { serviceAreaWorkflow, servicePropertySite } = require('./serviceAreaWorkflows');
+const { serviceAreaWorkflow, servicePropertySite, propertyAddress } = require('./serviceAreaWorkflows');
 
 const JOB_FIELDS = ['userId', 'companyId', 'customerId', 'customerName', 'customerPhone', 'serviceType', 'serviceCategory', 'title', 'address', 'city', 'state', 'zipCode', 'serviceArea', 'date', 'time', 'windowStart', 'windowEnd', 'estimatedDuration', 'duration', 'priority', 'status', 'assignedTo', 'workNotes', 'actualWorkDone', 'actualHours', 'completionNotes', 'completedAt', 'createdAt', 'updatedAt'];
 const PRICING_FIELDS = ['totalCost', 'estimatedCost', 'laborRate', 'laborHours', 'materialCost', 'materials', 'scopeOfWork', 'notes', 'description', 'servicePlanId'];
-const CUSTOMER_FIELDS = ['userId', 'companyId', 'name', 'firstName', 'lastName', 'email', 'emailNormalized', 'phone', 'phoneNumber', 'address', 'city', 'state', 'zipCode', 'isActive', 'status', 'createdAt', 'updatedAt', 'lastServiceDate', 'totalJobs', 'emailConsent', 'notes', 'serviceInstructions'];
+const CUSTOMER_FIELDS = ['userId', 'companyId', 'name', 'firstName', 'lastName', 'email', 'emailNormalized', 'phone', 'phoneNumber', 'address', 'city', 'state', 'zipCode', 'postalCode', 'isActive', 'status', 'createdAt', 'updatedAt', 'lastServiceDate', 'totalJobs', 'emailConsent', 'notes', 'serviceInstructions'];
 const APPLICATION_FIELDS = ['product', 'epaRegNo', 'activeIngredient', 'amount', 'unit', 'targetPest', 'areaTreated', 'method', 'applicatorLicense', 'notes'];
+function customerVersion(value) {
+  if (value instanceof Date || typeof value === 'number') {
+    const date = value instanceof Date ? value : new Date(Math.abs(value) < 1e11 ? value * 1000 : value);
+    return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+  }
+  try {
+    const normalized = version(value);
+    return typeof normalized === 'string' ? normalized : null;
+  } catch { return null; }
+}
 const primitive = value => value == null || ['string', 'number', 'boolean'].includes(typeof value);
 function pick(data, fields) {
   return Object.fromEntries(fields.filter(key => data[key] !== undefined && (primitive(data[key]) || typeof data[key]?.toDate === 'function' || data[key] instanceof Date)).map(key => [key, data[key]?.toDate ? data[key].toDate().toISOString() : data[key] instanceof Date ? data[key].toISOString() : data[key]]));
@@ -27,9 +37,9 @@ function projectJob(id, data, role) {
   return { id, ...pick(data, JOB_FIELDS), ...coordinates(data), ...property, ...area, ...(hasCapability(role, 'jobs.pricing') ? pick(data, PRICING_FIELDS) : { notes: typeof data.workNotes === 'string' ? data.workNotes : '' }) };
 }
 function projectCustomer(id, data, role) {
-  if (hasCapability(role, 'reports.financial')) return { ...data, id };
-  const fields = role === 'technician' ? ['name', 'firstName', 'lastName', 'phone', 'phoneNumber', 'address', 'city', 'state', 'zipCode', 'serviceInstructions'] : CUSTOMER_FIELDS;
-  return { id, ...pick(data, fields), ...(data.address && typeof data.address === 'object' ? { address: pick(data.address, ['street', 'line1', 'city', 'state', 'zipCode']) } : {}), ...coordinates(data) };
+  if (hasCapability(role, 'reports.financial')) return { ...data, id, updatedAt: customerVersion(data.updatedAt) };
+  const fields = role === 'technician' ? ['name', 'firstName', 'lastName', 'phone', 'phoneNumber', 'address', 'city', 'state', 'zipCode', 'postalCode', 'serviceInstructions'] : CUSTOMER_FIELDS;
+  return { id, ...pick(data, fields), ...(role !== 'technician' ? { updatedAt: customerVersion(data.updatedAt) } : {}), ...(data.address && typeof data.address === 'object' ? { address: pick(data.address, ['street', 'line1', 'city', 'state', 'zipCode', 'postalCode']) } : {}), ...coordinates(data) };
 }
 function projectCompany(id, data, role) {
   if (role === 'owner' || role === 'admin') return { ...data, id };
@@ -54,6 +64,19 @@ function withCustomerLocation(data, customer) {
 }
 function workDataHandlers(db, config = {}) {
   const serviceAreas = serviceAreaWorkflow(db, config);
+  const customerInScope = (customer, scope) => customer?.exists && (scope.companyId ? customer.get('companyId') === scope.companyId : !customer.get('companyId') && customer.get('userId') === scope.uid);
+  async function assertAddressActor(tx, scope) {
+    const deleted = await tx.get(db.doc(`rlAccountDeletions/${scope.uid}`));
+    if (deleted.exists) throw new HttpsError('permission-denied', 'This account no longer has access.');
+    if (scope.companyId) {
+      const company = await tx.get(db.doc(`companies/${scope.companyId}`));
+      const current = scope.role === 'owner' ? company : await tx.get(db.doc(`teamMembers/${scope.memberId}`));
+      if (!company.exists || !current.exists || (scope.role === 'owner' ? current.get('ownerId') !== scope.uid : current.get('uid') !== scope.uid || current.get('companyId') !== scope.companyId || current.get('status') !== 'active' || current.get('role') !== scope.role)) throw new HttpsError('permission-denied', 'Your customer-management access changed. Refresh before saving.');
+    } else {
+      const profile = await tx.get(db.doc(`users/${scope.uid}`));
+      if (profile.get('rlCompanyId') || profile.get('companyId')) throw new HttpsError('permission-denied', 'Your workspace changed. Refresh before saving.');
+    }
+  }
   return {
     read: async request => {
       const scope = await accessScope(db, request), data = request.data || {}, resource = data.resource;
@@ -126,6 +149,10 @@ function workDataHandlers(db, config = {}) {
       const scope = await requireCapability(db, request, action === 'assign' ? 'jobs.assign' : 'jobs.schedule');
       await rateLimit(db, 'job-manage', scope.uid, 120);
       if (!['create', 'update', 'delete', 'assign'].includes(action)) throw new HttpsError('invalid-argument', 'Invalid job operation.');
+      if (data.saveCustomerAddress !== undefined && typeof data.saveCustomerAddress !== 'boolean') throw new HttpsError('invalid-argument', 'Choose whether to update the saved customer address.');
+      const saveCustomerAddress = data.saveCustomerAddress === true;
+      if (saveCustomerAddress && (!['create', 'update'].includes(action) || !hasCapability(scope.role, 'customers.manage'))) throw new HttpsError('permission-denied', 'Customer-management access is required to save this address.');
+      if (saveCustomerAddress && (!Object.hasOwn(data, 'expectedCustomerVersion') || data.expectedCustomerVersion !== null && (typeof data.expectedCustomerVersion !== 'string' || data.expectedCustomerVersion.length > 128))) throw new HttpsError('invalid-argument', 'Refresh the selected customer before updating its saved address.');
       const ref = action === 'create' ? db.collection('jobs').doc() : db.doc(`jobs/${documentId(data.id)}`);
       const input = data.job || {};
       const permitted = [...JOB_FIELDS, ...PRICING_FIELDS, 'latitude', 'longitude', 'workNotes', 'cancelledAt', 'cancellationReason'];
@@ -133,31 +160,39 @@ function workDataHandlers(db, config = {}) {
       if (patch.status && !['scheduled', 'en-route', 'in-progress', 'completed', 'cancelled'].includes(patch.status)) throw new HttpsError('invalid-argument', 'Invalid job status.');
       const initial = action === 'create' ? null : await ref.get();
       if (initial) checkJob(scope, initial.data());
+      const savedAddress = propertyAddress(input), customerId = patch.customerId || initial?.get('customerId');
+      if (saveCustomerAddress && (!customerId || !input.serviceProperty || !savedAddress || savedAddress.length > 278)) throw new HttpsError('invalid-argument', 'Choose a customer and explicitly enter its new service property address.');
       if (patch.customerId) {
         const customer = await db.doc(`customers/${documentId(patch.customerId)}`).get();
         if (!customer.exists || (scope.companyId ? customer.get('companyId') !== scope.companyId : customer.get('companyId') || customer.get('userId') !== scope.uid)) throw new HttpsError('permission-denied', 'Choose a customer in this workspace.');
       }
       // Resolve Google once before entering a retried Firestore transaction.
       // Existing status/date/notes edits do not revisit changed boundaries.
-      const area = ['create', 'update'].includes(action) ? await serviceAreas.prepare(scope, input, initial?.data() || {}, 'scheduling', action === 'create') : null;
+      const area = ['create', 'update'].includes(action) ? await serviceAreas.prepare(scope, input, initial?.data() || {}, 'scheduling', action === 'create' || saveCustomerAddress) : null;
       if (area) Object.assign(patch, area.patch);
+      if (saveCustomerAddress && !scope.companyId) Object.assign(patch, { address: savedAddress, city: '', state: '', zipCode: '', latitude: null, longitude: null, location: null, serviceProperty: { address: savedAddress, validated: false } });
       return db.runTransaction(async tx => {
         const existing = await tx.get(ref);
         if (action !== 'create') {
           checkJob(scope, existing.data());
           if (data.expectedVersion !== undefined && version(existing.get('updatedAt')) !== version(data.expectedVersion)) throw new HttpsError('aborted', 'This job changed. Refresh it before saving.');
-          if (area && !existing.updateTime.isEqual(initial.updateTime)) throw new HttpsError('aborted', 'This job changed while its service property was being checked. Refresh before saving.');
+          if ((area || saveCustomerAddress) && !existing.updateTime.isEqual(initial.updateTime)) throw new HttpsError('aborted', 'This job changed while its service property was being checked. Refresh before saving.');
         }
-        if (patch.customerId) {
-          const customer = await tx.get(db.doc(`customers/${documentId(patch.customerId)}`));
-          if (!customer.exists || (scope.companyId ? customer.get('companyId') !== scope.companyId : customer.get('companyId') || customer.get('userId') !== scope.uid)) throw new HttpsError('permission-denied', 'Choose a customer in this workspace.');
+        let customer;
+        if (patch.customerId || saveCustomerAddress) {
+          customer = await tx.get(db.doc(`customers/${documentId(patch.customerId || customerId)}`));
+          if (!customerInScope(customer, scope)) throw new HttpsError('permission-denied', 'Choose a customer in this workspace.');
+        }
+        if (saveCustomerAddress) {
+          await assertAddressActor(tx, scope);
+          if (customerVersion(customer.get('updatedAt')) !== customerVersion(data.expectedCustomerVersion)) throw new HttpsError('aborted', 'The customer changed. Refresh it before saving the permanent address change.');
         }
         if (patch.assignedTo && scope.companyId && patch.assignedTo !== scope.company.get('ownerId')) {
           const member = await tx.get(db.doc(`teamMembers/${documentId(patch.assignedTo)}`));
           if (member.get('companyId') !== scope.companyId || member.get('status') !== 'active' || !member.get('uid')) throw new HttpsError('permission-denied', 'Choose an active company member.');
         }
         await serviceAreas.assertCurrent(tx, area);
-        const updatedAt = new Date(Math.max(Date.now(), Date.parse(version(existing.get('updatedAt'))) + 1 || 0)).toISOString();
+        const updatedAt = new Date(Math.max(Date.now(), Date.parse(version(existing.get('updatedAt'))) + 1 || 0, saveCustomerAddress ? Date.parse(customerVersion(customer.get('updatedAt'))) + 1 || 0 : 0)).toISOString();
         const before = existing.data() || {};
         if (action === 'delete') tx.delete(ref);
         else if (action === 'create') tx.create(ref, { ...patch, userId: scope.uid, ...(scope.companyId ? { companyId: scope.companyId } : {}), status: patch.status || 'scheduled', createdAt: updatedAt, updatedAt });
@@ -168,7 +203,15 @@ function workDataHandlers(db, config = {}) {
         }
         const audit = db.collection('rlAudit').doc();
         tx.create(audit, { action: `job.${action}`, companyId: scope.companyId, actorId: scope.uid, jobId: ref.id, fromMemberId: before.assignedTo || null, toMemberId: patch.assignedTo ?? before.assignedTo ?? null, createdAt: updatedAt });
-        return { id: ref.id, updatedAt, ...(area ? { serviceArea: area.result } : {}) };
+        if (saveCustomerAddress) {
+          const property = patch.serviceProperty;
+          const validated = property?.validated === true && Number.isFinite(property.latitude) && Number.isFinite(property.longitude);
+          const addressPatch = { address: property?.address || savedAddress, city: '', state: '', zipCode: '', latitude: validated ? property.latitude : null, longitude: validated ? property.longitude : null, location: validated ? { latitude: property.latitude, longitude: property.longitude } : null };
+          const original = Object.fromEntries(['address', 'city', 'state', 'zipCode', 'postalCode', 'latitude', 'longitude', 'location'].filter(field => customer.get(field) !== undefined).map(field => [field, customer.get(field)]));
+          tx.update(customer.ref, { ...addressPatch, postalCode: '', updatedAt });
+          tx.create(db.collection('rlAudit').doc(), { action: 'customer.address.update', companyId: scope.companyId, customerId: customer.id, jobId: ref.id, actorId: scope.uid, original, changes: addressPatch, createdAt: updatedAt });
+        }
+        return { id: ref.id, updatedAt, ...(area ? { serviceArea: area.result } : {}), ...(saveCustomerAddress ? { customerAddressUpdated: true, customerUpdatedAt: updatedAt } : {}) };
       });
     },
     application: async request => {

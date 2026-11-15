@@ -12,6 +12,7 @@ import { doc, setDoc, getDoc, updateDoc, collection, addDoc, getDocs, deleteDoc,
 import { auth, db } from '../constants/firebase';
 import { scopeWhere, tenantFields, localDate, getClaims, requireWorkspace }  from './tenancy';
 import { cachedRead, overlayJobs, readCache, writeCache, saveJobOffline, isOffline } from './offline';
+import { addressMutationError, hasAddressFields } from './addressValidation';
 
 export class AuthService {
   // Check if Firebase Auth is available
@@ -263,30 +264,11 @@ export class CustomerService {
       const customerDoc = {
         ...customerData,
         email: (customerData.email || '').trim().toLowerCase(),
-        emailNormalized: (customerData.email || '').trim().toLowerCase(),
-        isActive: true,
-        ...tenantFields(),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
       };
-
-      const docRef = await addDoc(collection(db, 'customers'), customerDoc);
-
-      return {
-        success: true,
-        customer: {
-          id: docRef.id,
-          ...customerDoc
-        }
-      };
+      const result = await callWorkspace('rlManageCustomer', { action: 'create', customer: customerDoc });
+      return { success: true, customer: { ...result.customer, id: result.id }, updatedAt: result.updatedAt };
     } catch (error) {
-      return {
-        success: false,
-        error: {
-          message: 'Failed to add customer',
-          code: error.code
-        }
-      };
+      return addressMutationError(error, 'Failed to add customer');
     }
   }
 
@@ -318,7 +300,7 @@ export class CustomerService {
 
       const customers = await cachedRead('customers', async () => {
         const snapshot = await getDocs(q);
-        return snapshot.docs.map((row) => { const data = row.data(); return { id: row.id, name: data.name?.trim() || data.displayName || [data.firstName, data.lastName].filter(Boolean).join(' ') || 'Name not provided', phone: data.phone || data.phoneNumber || '', email: data.email || '', address: typeof data.address === 'string' ? data.address : data.address?.street || '', city: data.city || '', state: data.state || '', zipCode: data.zipCode || '' }; });
+        return snapshot.docs.map((row) => { const data = row.data(); return { id: row.id, name: data.name?.trim() || data.displayName || [data.firstName, data.lastName].filter(Boolean).join(' ') || 'Name not provided', phone: data.phone || data.phoneNumber || '', email: data.email || '', address: typeof data.address === 'string' ? data.address : data.address?.street || data.address?.line1 || '', city: data.city || data.address?.city || '', state: data.state || data.address?.state || '', zipCode: data.zipCode || data.postalCode || data.address?.zipCode || data.address?.postalCode || '', updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : data.updatedAt || null }; });
       });
 
       return {
@@ -337,7 +319,7 @@ export class CustomerService {
   }
 
   // Update a customer
-  static async updateCustomer(customerId, customerData) {
+  static async updateCustomer(customerId, customerData, expectedVersion = undefined) {
     try {
       requireWorkspace(true);
       const userId = this.getCurrentUserId();
@@ -348,20 +330,10 @@ export class CustomerService {
         };
       }
 
-      await updateDoc(doc(db, 'customers', customerId), {
-        ...customerData,
-        updatedAt: new Date().toISOString()
-      });
-
-      return { success: true };
+      const result = await callWorkspace('rlManageCustomer', { action: 'update', id: customerId, customer: customerData, ...(hasAddressFields(customerData) || expectedVersion !== undefined ? { expectedVersion: expectedVersion ?? null } : {}) });
+      return { success: true, customer: { ...result.customer, id: result.id }, updatedAt: result.updatedAt };
     } catch (error) {
-      return {
-        success: false,
-        error: {
-          message: 'Failed to update customer',
-          code: error.code
-        }
-      };
+      return addressMutationError(error, 'Failed to update customer');
     }
   }
 
@@ -597,7 +569,7 @@ export class JobService {
   }
 
   // Add a new job/appointment
-  static async addJob(jobData) {
+  static async addJob(jobData, options = undefined) {
     try {
       requireWorkspace(true);
       const userId = this.getCurrentUserId();
@@ -619,23 +591,18 @@ export class JobService {
         updatedAt: new Date().toISOString(),
       };
 
-      const docRef = getClaims()?.companyId ? await callWorkspace('rlManageJob', { action: 'create', job: jobDoc }) : await addDoc(collection(db, 'jobs'), jobDoc);
+      const docRef = await callWorkspace('rlManageJob', { action: 'create', job: jobDoc, ...(options?.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}) });
 
       return {
         success: true,
+        customerAddressUpdated: docRef.customerAddressUpdated === true,
         job: {
           id: docRef.id,
           ...jobDoc
         }
       };
     } catch (error) {
-      return {
-        success: false,
-        error: {
-          message: 'Failed to add job',
-          code: error.code
-        }
-      };
+      return addressMutationError(error, 'Failed to add job');
     }
   }
 
@@ -712,10 +679,10 @@ export class JobService {
   }
 
   // Update a job
-  static async updateJob(jobId, jobData) {
+  static async updateJob(jobId, jobData, expectedVersion = undefined, options = undefined) {
     try {
       const supported = ['status', 'notes', 'actualWorkDone', 'actualHours', 'completionNotes', 'completedAt'];
-      if (Object.keys(jobData).every((key) => supported.includes(key)) && (!jobData.status || ['en-route', 'in-progress', 'completed'].includes(jobData.status))) return await saveJobOffline(jobId, jobData);
+      if (options?.saveCustomerAddress !== true && Object.keys(jobData).every((key) => supported.includes(key)) && (!jobData.status || ['en-route', 'in-progress', 'completed'].includes(jobData.status))) return await saveJobOffline(jobId, jobData);
       requireWorkspace(true);
       if (await isOffline()) throw new Error('Scheduling and pricing changes require an internet connection. Work notes and completion details can be saved offline.');
       const userId = this.getCurrentUserId();
@@ -726,7 +693,7 @@ export class JobService {
         };
       }
 
-      if (getClaims()?.companyId) { await callWorkspace('rlManageJob', { action: 'update', id: jobId, job: jobData }); return { success: true }; }
+      if (getClaims()?.companyId || hasAddressFields(jobData) || options?.saveCustomerAddress === true) { const result = await callWorkspace('rlManageJob', { action: 'update', id: jobId, job: jobData, ...(expectedVersion !== undefined ? { expectedVersion } : {}), ...(options?.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}) }); return { success: true, customerAddressUpdated: result.customerAddressUpdated === true }; }
       await updateDoc(doc(db, 'jobs', jobId), {
         ...jobData,
         updatedAt: new Date().toISOString(),
@@ -734,13 +701,7 @@ export class JobService {
 
       return { success: true };
     } catch (error) {
-      return {
-        success: false,
-        error: {
-          message: error.message || 'Failed to update job',
-          code: error.code
-        }
-      };
+      return addressMutationError(error, 'Failed to update job');
     }
   }
 

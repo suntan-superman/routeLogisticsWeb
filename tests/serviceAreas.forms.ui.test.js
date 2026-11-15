@@ -17,6 +17,8 @@ function load(relative){const file=path.resolve(__dirname,'../routeLogisticsWeb/
  if(name==='react')return React;if(name==='react-hot-toast')return{__esModule:true,default:toast};
  if(name.endsWith('/AuthContext'))return{useAuth:()=>({company,currentUser:{uid:'owner'},role:'owner',can:capability=>capability!=='customers.manage'||allowCustomerManage})};
  if(name.endsWith('/ServicePropertyEligibility'))return{__esModule:true,default:PropertyMock};
+ if(name.endsWith('/ThemedSelect'))return{__esModule:true,default:props=>React.createElement('select',{'aria-label':props.label,value:props.value,disabled:props.disabled,onChange:event=>props.onChange(event.target.value)},(props.options||[]).map(option=>React.createElement('option',{key:option.value,value:option.value,disabled:option.disabled},option.label)))};
+ if(name.endsWith('/TimeSelect'))return{__esModule:true,default:props=>React.createElement('input',{type:'time','aria-label':props.label,value:props.value,disabled:props.disabled,onChange:event=>props.onChange(event.target.value)})};
  if(name.endsWith('/useUnsavedChanges'))return{useUnsavedChanges:value=>{dirty=value;return{confirmDiscard:async()=>true};}};
  if(name.endsWith('/ConfirmProvider'))return{useConfirm:()=>async()=>true};
  if(name.endsWith('/services/firebase'))return{auth:{currentUser:{uid:'owner',displayName:'Controlled owner'}}};
@@ -25,7 +27,7 @@ function load(relative){const file=path.resolve(__dirname,'../routeLogisticsWeb/
  if(name.endsWith('/servicePlanService'))return{FREQUENCIES:[{days:90,label:'Quarterly'}],listServicePlans:async()=>({success:true,plans:[]}),createServicePlan:async value=>{planWrites.push(value);return{success:true};},updateServicePlan:async()=>({success:true}),deleteServicePlan:async()=>({success:true}),generateNextJob:async()=>({success:true})};
  if(name.endsWith('/serviceLogService'))return{listServiceLogs:async()=>({success:true,logs:[]}),logsToCsv:()=>''};
  if(name.endsWith('/tenancy'))return{canManage:()=>true};
- if(name.startsWith('.')){const resolved=path.resolve(path.dirname(file),name);return load(path.relative(path.resolve(__dirname,'../routeLogisticsWeb/src'),path.extname(resolved)?resolved:resolved+'.js'));}
+ if(name.startsWith('.')){const resolved=path.resolve(path.dirname(file),name);return load(path.relative(path.resolve(__dirname,'../routeLogisticsWeb/src'),path.extname(resolved)?resolved:fs.existsSync(resolved+'.jsx')?resolved+'.jsx':resolved+'.js'));}
  throw Error('Unexpected dependency '+name);
  };new Function('React','require','module','exports',transformSync(fs.readFileSync(file,'utf8'),{loader:file.endsWith('.jsx')?'jsx':'js',format:'cjs'}).code)(React,mock,module,module.exports);cache.set(file,module.exports);return module.exports;}
 const Job=load('components/JobFormModal.jsx').default,Plans=load('pages/ServicePlansPage.jsx').default;

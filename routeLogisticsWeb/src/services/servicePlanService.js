@@ -7,7 +7,7 @@ import { functions } from './firebase';
 const ok = (data = {}) => ({ success: true, ...data });
 const fail = (error) => {
   console.error(error);
-  return { success: false, error: error.message || String(error) };
+  return { success: false, error: error.message || String(error), ...(error.code ? { code: error.code } : {}), ...(error.details ? { details: error.details } : {}) };
 };
 
 export const FREQUENCIES = [

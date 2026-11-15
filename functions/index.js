@@ -16,6 +16,7 @@ const { accountDeletionHandlers } = require('./accountDeletion');
 const { invitationHandlers } = require('./invitations');
 const { recurringHandlers } = require('./recurring');
 const { customerHandlers } = require('./customers');
+const { customerAddressHandlers } = require('./customerAddresses');
 const { portalHandlers } = require('./portal');
 const { staffLoginHandlers } = require('./staffLogin');
 const { drainMail } = require('./mail');
@@ -50,6 +51,7 @@ const serviceAreas = serviceAreaHandlers(db, { geocode: createGoogleGeocoder({
   getAccessToken: async () => (await mapsCredential.getAccessToken()).access_token,
 }) });
 exports.rlServiceAreas = onCall({ timeoutSeconds: 60 }, serviceAreas.handle);
+exports.rlManageCustomer = onCall({ timeoutSeconds: 60 }, customerAddressHandlers(db, { serviceAreas }).handle);
 
 const TENANT_COLLECTIONS = ['customers', 'jobs', 'appointments', 'photos', 'estimates', 'estimateTemplates', 'invoices', 'servicePlans', 'serviceLogs'];
 const appUrl = defineString('RL_APP_URL', { default: 'https://route-logistics.com' });
@@ -144,7 +146,7 @@ exports.sendTeamInviteEmail = onCall(invites.sendTeamInviteEmail);
 exports.acceptTeamInvite = onCall(invites.acceptTeamInvite);
 exports.manageTeamMember = onCall(invites.manageTeamMember);
 exports.transferCompanyOwnership = onCall(ownershipHandler(db, applyClaims));
-exports.bulkImportCustomers = onCall(customerHandlers(db).bulkImportCustomers);
+exports.bulkImportCustomers = onCall({ timeoutSeconds: 300 }, customerHandlers(db, { serviceAreas }).bulkImportCustomers);
 const portal = portalHandlers(db, getAuth(), emailEnabled);
 const reviews = reviewHandlers(db);
 exports.rlCustomerReviews = onCall({ timeoutSeconds: 60 }, reviews.customer);

@@ -142,7 +142,9 @@ test('company owners with other active members must explicitly transfer ownershi
   assert.equal((await get('rlQbConnections/retained-connection')).status, 'connected');
 });
 
-test('ownership transfer racing deletion cannot delete the active company owner out from under its team', async () => {
+test('ownership transfer racing deletion cannot delete the active company owner out from under its team', async context => {
+  // Ownership and deletion must evaluate the same fixture auth_time clock.
+  context.mock.method(Date, 'now', () => now);
   await set('companies/delete-co', { ownerId: 'delete-staff', name: 'Synthetic company' });
   await set('teamMembers/new-owner', { companyId: 'delete-co', uid: 'new-owner', email: 'new-owner@example.test', status: 'active', role: 'admin' });
   const transfer = ownershipHandler(db, async () => null);

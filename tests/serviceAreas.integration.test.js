@@ -33,9 +33,10 @@ async function fixture() {
   return { id, companyId, ownerUid, owner, manager, managerId, admin, tech, request, service, save, check, calls: () => calls, advance: n => clock += n, duringGeocode: fn => { duringGeocode = fn; } };
 }
 
-test('unconfigured company workflows retain legacy eligibility while public service requests fail closed', async () => {
-  const f = await fixture(); assert.equal((await f.check(undefined)).eligible, true); assert.equal((await f.check(INSIDE, { purpose: 'public-request' })).eligible, false);
-  const status = await f.service.handle(f.request({ action: 'status' })); assert.equal(status.settings.configured, false); assert.equal(status.settings.publishCoverage, false); assert.equal(f.calls(), 0);
+test('unconfigured coverage verifies supplied addresses while public service requests fail closed', async () => {
+  const f = await fixture(); assert.equal((await f.check(INSIDE)).property.formattedAddress, INSIDE); assert.equal((await f.check(INSIDE, { purpose: 'public-request' })).eligible, false);
+  assert.equal((await f.check('999 Unresolved Street, Example, CA 93312')).eligible, false);
+  const status = await f.service.handle(f.request({ action: 'status' })); assert.equal(status.settings.configured, false); assert.equal(status.settings.publishCoverage, false); assert.equal(f.calls(), 2);
 });
 test('owners and managers manage private settings; admins may inspect/check but cannot save, technicians and other tenants are denied', async () => {
   const f = await fixture(), other = await fixture();

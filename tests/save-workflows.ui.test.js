@@ -39,6 +39,7 @@ async function estimates(name,data) {
 }
 const mock = name => {
   if(name==='react')return React;
+  if(name.endsWith('/components/TimeSelect'))return{__esModule:true,default:props=>React.createElement('label',null,props.label,React.createElement('input',{type:'time','aria-label':props.label,value:props.value,disabled:props.disabled,onChange:event=>props.onChange(event.target.value)}))};
   if(name==='react-hot-toast')return{__esModule:true,default:{success:message=>env.toasts.push({kind:'success',message}),error:message=>env.toasts.push({kind:'error',message})}};
   if(name.endsWith('/hooks/useUnsavedChanges'))return{useUnsavedChanges:dirty=>{env.dirty=dirty;return{confirmDiscard:async()=>{env.confirmCalls++;return env.confirm;}};}};
   if(name==='firebase/functions')return{httpsCallable:(_functions,name)=>async data=>({data:await routing(name,data)})};
@@ -57,6 +58,7 @@ const mock = name => {
   }};
   if(name.endsWith('/utils/serviceForms'))return utilities('serviceForms');
   if(name.endsWith('/utils/estimateDraft'))return utilities('estimateDraft');
+  if(name.endsWith('/AddressValidationNotice'))return compile('components/AddressValidationNotice.jsx',mock);
   if(name.endsWith('/components/ServicePropertyEligibility'))return env.kind==='estimates-geography'?compile('components/ServicePropertyEligibility.jsx',mock):{__esModule:true,default:()=>null};
   if(name.endsWith('/services/customerService'))return{__esModule:true,default:{getCustomers:async()=>({success:true,customers:[{id:'customer-1',name:'Customer',address:'Customer billing address must not become the service property'}],hasMore:false})}};
   if(name.endsWith('/services/estimateService'))return{callEstimate:estimates,prepareEstimatePhoto:()=>{},downloadEstimatePdf:()=>{}};
@@ -86,6 +88,16 @@ test('changing technician can be cancelled without discarding an edited route',a
   await act(async()=>tree.root.findByProps({'aria-label':'Move First later'}).props.onClick());env.confirm=false;
   const selector=tree.root.findAll(node=>node.type==='select')[0];await act(async()=>selector.props.onChange({target:{value:'tech-2'}}));
   assert.equal(selector.props.value,'tech-1');assert.equal(env.confirmCalls,1);assert.equal(env.dirty,true);
+});
+
+test('route departure time selection stays local until an explicit route operation',async()=>{
+  reset('route');await render('pages/RoutesPage.jsx');await click('Load jobs');
+  const departure=()=>inputFor('Depart');const previous=departure().props.value;
+  const callsBefore=env.calls.length;
+  await act(async()=>departure().props.onChange({target:{value:'08:15'}}));
+  assert.equal(departure().props.value,'08:15');assert.equal(env.calls.length,callsBefore);
+  await act(async()=>departure().props.onChange({target:{value:previous}}));
+  assert.equal(departure().props.value,previous);assert.equal(env.calls.length,callsBefore);
 });
 
 test('checklist compares saved values and unordered selections so reverting removes its dirty warning',async()=>{

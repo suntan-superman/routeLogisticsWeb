@@ -12,6 +12,18 @@ const addressKey = value => String(value || '').trim().replace(/\s+/g, ' ').toLo
 const finitePoint = value => typeof value?.latitude === 'number' && Number.isFinite(value.latitude) && Math.abs(value.latitude) <= 90 && typeof value?.longitude === 'number' && Number.isFinite(value.longitude) && Math.abs(value.longitude) <= 180;
 const fail = (code, message) => { throw new HttpsError(code, message); };
 const DEFAULT_SETTINGS = { configured: false, revision: 0, operatingAddress: '', operatingLocation: null, method: 'zip', zipCodes: [], radiusMiles: 25, categoryOverrides: [], acceptingNewCustomers: false, publishCoverage: false, allowOutOfAreaRequests: false };
+const INVALID_ADDRESS = 'Google could not verify this street address. Check its street number, city, state and ZIP code.';
+function addressValidationError(status, message, suggestedAddress) {
+  const details = { status, message, ...(suggestedAddress ? { suggestedAddress } : {}) };
+  return new HttpsError(status === 'unavailable' ? 'unavailable' : 'failed-precondition', message, { addressValidation: details });
+}
+function addressValidationDetails(error) {
+  const source = error?.details?.addressValidation;
+  const status = ['confirmation-required', 'invalid', 'unavailable'].includes(source?.status) ? source.status : error?.code === 'unavailable' ? 'unavailable' : 'invalid';
+  const message = status === 'unavailable' ? 'Google address verification is temporarily unavailable. Retry before saving this address.' : status === 'confirmation-required' ? 'Google found a possible corrected address. Review it before saving.' : INVALID_ADDRESS;
+  const suggestion = typeof source?.suggestedAddress === 'string' ? source.suggestedAddress.trim() : '';
+  return { status, message, ...(status === 'confirmation-required' && suggestion.length >= 8 && suggestion.length <= 278 && !/[<>\u0000-\u001f]/.test(suggestion) ? { suggestedAddress: suggestion } : {}) };
+}
 
 function propertyAddress(value) {
   if (typeof value !== 'string') fail('invalid-argument', 'Enter the service property street address.');
@@ -72,12 +84,12 @@ function evaluateCoverage(settings, property, serviceCategory, { categories = []
   return { eligible: inside, status: inside ? 'inside' : 'outside', reason: inside ? 'radius-covered' : 'radius-outside-coverage', message: inside ? 'The service property is inside the provider’s coverage radius.' : 'The service property is outside this provider’s coverage radius.', distanceMiles: Math.round(distance * 100) / 100 };
 }
 function trustedProperty(value, now) {
-  if (!finitePoint(value) || !/^\d{5}$/.test(value?.postalCode || '') || value?.countryCode !== 'US' || !LOCATION_TYPES.includes(value?.locationType) || value?.streetAddressVerified !== true || typeof value.formattedAddress !== 'string' || value.formattedAddress.length < 8 || value.formattedAddress.length > 500) fail('failed-precondition', 'The street address could not be validated precisely enough. Correct it before continuing.');
+  if (!finitePoint(value) || !/^\d{5}$/.test(value?.postalCode || '') || value?.countryCode !== 'US' || !LOCATION_TYPES.includes(value?.locationType) || value?.streetAddressVerified !== true || typeof value.formattedAddress !== 'string' || value.formattedAddress.length < 8 || value.formattedAddress.length > 278 || /[<>\u0000-\u001f]/.test(value.formattedAddress)) fail('failed-precondition', 'The street address could not be validated precisely enough. Correct it before continuing.');
   return { address: value.formattedAddress, formattedAddress: value.formattedAddress, latitude: value.latitude, longitude: value.longitude, postalCode: value.postalCode, countryCode: 'US', locationType: value.locationType, streetAddressVerified: true, placeId: typeof value.placeId === 'string' ? value.placeId.slice(0, 300) : '', source: 'google-address-validation', validatedAt: new Date(now).toISOString() };
 }
 function createGoogleGeocoder({ getAccessToken, projectId = 'mi-factotum-field-service', fetchImpl = fetch } = {}) {
   return async address => {
-    if (typeof getAccessToken !== 'function' || !/^[a-z][a-z0-9-]{4,62}$/.test(projectId)) fail('unavailable', 'Service-address validation is not configured. Contact your company owner.');
+    if (typeof getAccessToken !== 'function' || !/^[a-z][a-z0-9-]{4,62}$/.test(projectId)) throw addressValidationError('unavailable', 'Google address verification is not configured. Contact your company owner.');
     const validatedInput = propertyAddress(address);
     let response, data;
     try {
@@ -85,14 +97,24 @@ function createGoogleGeocoder({ getAccessToken, projectId = 'mi-factotum-field-s
       response = await fetchImpl('https://addressvalidation.googleapis.com/v1:validateAddress', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'X-Goog-User-Project': projectId, 'Content-Type': 'application/json' }, body: JSON.stringify({ address: { regionCode: 'US', addressLines: [validatedInput] } }), signal: AbortSignal.timeout(15000), redirect: 'error' });
       if (!response.ok) throw Error('provider-http'); data = await response.json();
     }
-    catch { fail('unavailable', 'Service-address validation is temporarily unavailable. Please retry.'); }
+    catch { throw addressValidationError('unavailable', 'Google address verification is temporarily unavailable. Please retry.'); }
     const result = data?.result, verdict = result?.verdict, checked = result?.address, postal = checked?.postalAddress, components = checked?.addressComponents || [];
     const precise = ['PREMISE', 'SUB_PREMISE'];
     const street = type => components.find(row => row.componentType === type);
-    const critical = components.filter(row => ['street_number', 'route', 'premise', 'subpremise'].includes(row.componentType));
+    const critical = components.filter(row => ['street_number', 'route', 'premise', 'subpremise', 'locality', 'administrative_area_level_1', 'postal_code'].includes(row.componentType));
+    const preciseCandidate = verdict?.addressComplete === true && precise.includes(verdict.validationGranularity) && precise.includes(verdict.geocodeGranularity)
+      && postal?.regionCode === 'US' && /^\d{5}(?:-\d{4})?$/.test(postal?.postalCode || '') && finitePoint(result?.geocode?.location)
+      && street('street_number') && street('route') && critical.every(row => row.confirmationLevel === 'CONFIRMED')
+      && verdict.hasUnconfirmedComponents !== true && !checked?.missingComponentTypes?.length && !checked?.unconfirmedComponentTypes?.length && !checked?.unresolvedTokens?.length;
+    // Explicitly resubmitting Google's precise, confirmed canonical address is
+    // sufficient review even when Google retains normalization flags.
+    const canonicalInput = typeof checked?.formattedAddress === 'string' && addressKey(checked.formattedAddress) === addressKey(validatedInput);
     if (verdict?.addressComplete !== true || !precise.includes(verdict.validationGranularity) || !precise.includes(verdict.geocodeGranularity) || verdict.hasUnconfirmedComponents === true
       || checked?.missingComponentTypes?.length || checked?.unconfirmedComponentTypes?.length || checked?.unresolvedTokens?.length || postal?.regionCode !== 'US'
-      || !street('street_number') || !street('route') || critical.some(row => row.confirmationLevel !== 'CONFIRMED' || row.inferred === true || row.replaced === true)) fail('failed-precondition', 'The street address could not be validated precisely enough. Include its street number, city, state and ZIP code.');
+      || !street('street_number') || !street('route') || critical.some(row => row.confirmationLevel !== 'CONFIRMED' || !canonicalInput && (row.inferred === true || row.replaced === true))) {
+      const suggested = preciseCandidate && typeof checked.formattedAddress === 'string' && checked.formattedAddress.length <= 278 && !/[<>\u0000-\u001f]/.test(checked.formattedAddress) && addressKey(checked.formattedAddress) !== addressKey(validatedInput) ? checked.formattedAddress : null;
+      throw addressValidationError(suggested ? 'confirmation-required' : 'invalid', suggested ? 'Google found a possible corrected address. Review it before saving.' : INVALID_ADDRESS, suggested);
+    }
     return trustedProperty({ latitude: result.geocode?.location?.latitude, longitude: result.geocode?.location?.longitude, postalCode: String(postal.postalCode || '').slice(0, 5), countryCode: 'US', locationType: verdict.geocodeGranularity, streetAddressVerified: true, formattedAddress: checked.formattedAddress, placeId: result.geocode?.placeId }, Date.now());
   };
 }
@@ -110,8 +132,14 @@ function serviceAreaHandlers(db, config = {}) {
       try { return trustedProperty(cached.get('property'), time(cached.get('validatedAt')) || now()); } catch { /* Revalidate an unusable private cache record. */ }
     }
     const property = trustedProperty(await geocode(address), now());
-    await ref.set({ companyId, addressKey: addressKey(address), property, validatedAt: new Date(now()), expiresAt: new Date(now() + 30 * DAY) });
+    await ref.set({ ...(companyId.startsWith('user:') ? { userId: companyId.slice(5) } : { companyId }), addressKey: addressKey(address), property, validatedAt: new Date(now()), expiresAt: new Date(now() + 30 * DAY) });
     return property;
+  }
+  async function validateAddress(scope, address) {
+    const key = scope.companyId || (scope.uid ? `user:${scope.uid}` : null);
+    if (!key) fail('permission-denied', 'An authorized workspace is required to verify an address.');
+    try { return await resolve(key, address); }
+    catch (error) { const details = addressValidationDetails(error); throw addressValidationError(details.status, details.message, details.suggestedAddress); }
   }
   const propertyFingerprint = property => hash(`${addressKey(property.formattedAddress)}:${property.latitude}:${property.longitude}:${property.postalCode}`);
   function exceptionValid(row, company, input, result) {
@@ -121,14 +149,17 @@ function serviceAreaHandlers(db, config = {}) {
     const { companyId } = input, purpose = input.purpose || 'scheduling', publicRequest = input.publicRequest === true || ['public-request', 'booking'].includes(purpose);
     if (!PURPOSES.includes(purpose)) fail('invalid-argument', 'Choose a supported service-area check purpose.');
     const requestAddressHash = hash(addressKey(input.propertyAddress)), base = { companyId: companyId || null, purpose, serviceCategory: categoryKey(input.serviceCategory), requestAddressHash, checkedAt: new Date(now()).toISOString(), property: null };
-    if (!companyId) return issue({ ...base, ...evaluateCoverage(null, null, input.serviceCategory, { publicRequest }), settingsRevision: 0, policyExists: false });
-    const [stored, company] = await Promise.all([policyRef(companyId).get(), db.doc(`companies/${documentId(companyId)}`).get()]), settings = snapshot(stored), state = { ...base, settingsRevision: settings.revision, policyExists: stored.exists, providerFingerprint: providerFingerprint(company) };
-    if (!company.exists || company.get('isActive') === false || company.get('deletedAt')) return issue({ ...state, eligible: false, status: 'unavailable', reason: 'provider-unavailable', message: 'This provider is not available for new service requests.' });
-    if (!settings.configured || publicRequest && settings.acceptingNewCustomers !== true) return issue({ ...state, ...evaluateCoverage(settings, null, input.serviceCategory, { publicRequest }) });
+    const [stored, company] = companyId ? await Promise.all([policyRef(companyId).get(), db.doc(`companies/${documentId(companyId)}`).get()]) : [null, null];
+    const settings = stored ? snapshot(stored) : { ...DEFAULT_SETTINGS }, state = { ...base, settingsRevision: settings.revision, policyExists: stored?.exists === true, ...(company ? { providerFingerprint: providerFingerprint(company) } : {}) };
+    if (company && (!company.exists || company.get('isActive') === false || company.get('deletedAt'))) return issue({ ...state, eligible: false, status: 'unavailable', reason: 'provider-unavailable', message: 'This provider is not available for new service requests.' });
+    if (publicRequest && (!settings.configured || settings.acceptingNewCustomers !== true)) return issue({ ...state, ...evaluateCoverage(settings, null, input.serviceCategory, { publicRequest }) });
+    // Unconfigured coverage is not an exemption from verifying a supplied address.
+    // Addressless historical/contact-only records are preserved until one is entered.
+    if (!settings.configured && !String(input.propertyAddress || '').trim()) return issue({ ...state, ...evaluateCoverage(settings, null, input.serviceCategory, { publicRequest }) });
     let property;
-    try { property = await resolve(companyId, input.propertyAddress); }
-    catch { return issue({ ...state, eligible: false, status: 'invalid-address', reason: 'property-address-unvalidated', message: 'The service property address could not be validated. Correct the address or retry before continuing.' }); }
-    const result = { ...state, ...evaluateCoverage(settings, property, input.serviceCategory, { categories: companyCategories(company.data()), publicRequest }), property, propertyFingerprint: propertyFingerprint(property) };
+    try { property = await validateAddress({ companyId, uid: input.uid }, input.propertyAddress); }
+    catch (error) { const addressValidation = addressValidationDetails(error); return issue({ ...state, eligible: false, status: 'invalid-address', reason: 'property-address-unvalidated', message: addressValidation.message, addressValidation }); }
+    const result = { ...state, ...evaluateCoverage(settings, property, input.serviceCategory, { categories: companyCategories(company?.data()), publicRequest }), property, propertyFingerprint: propertyFingerprint(property) };
     if (result.status === 'outside' && settings.allowOutOfAreaRequests && input.exceptionId) {
       const exception = await exceptionRef(input.exceptionId).get();
       if (exceptionValid(exception, company, { ...input, purpose }, result)) return issue({ ...result, eligible: true, status: 'exception-approved', reason: 'owner-approved-out-of-area', message: 'The company owner approved this service property outside coverage.', exceptionId: exception.id, exceptionExpiresAt: new Date(time(exception.get('expiresAt'))).toISOString() });
@@ -192,6 +223,6 @@ function serviceAreaHandlers(db, config = {}) {
     fail('invalid-argument', 'Choose a supported service-area action.');
   }
   function publicEligibility(result) { return { eligible: result.eligible === true, status: result.status, message: result.message }; }
-  return { handle, checkForWorkflow, assertWorkflowCurrent, publicEligibility };
+  return { handle, checkForWorkflow, assertWorkflowCurrent, publicEligibility, validateAddress };
 }
-module.exports = { serviceAreaHandlers, createGoogleGeocoder, DEFAULT_SETTINGS, cleanSettings, coverageRule, distanceMiles, evaluateCoverage, trustedProperty, propertyAddress, categoryKey, companyCategories };
+module.exports = { serviceAreaHandlers, createGoogleGeocoder, DEFAULT_SETTINGS, cleanSettings, coverageRule, distanceMiles, evaluateCoverage, trustedProperty, propertyAddress, categoryKey, companyCategories, addressValidationDetails };

@@ -46,7 +46,7 @@ function fixture(role = 'manager') {
       if (name.endsWith('/AuthContext')) return { useAuth: env.auth };
       if (name.endsWith('/ThemeProvider')) return { useTheme: () => ({ palette }) };
       if (name.endsWith('/components/MobileUI')) return { ScreenHeader: ({ title, onBack }) => React.createElement('View', null, React.createElement('Text', null, title), onBack && React.createElement('Pressable', { accessibilityLabel: 'Back', onPress: onBack })) };
-      if (name.endsWith('/components/Glass')) return { GlassCard: ({ children }) => React.createElement('View', null, children), GlassButton: ({ title, onPress, disabled, busy }) => React.createElement('Pressable', { accessibilityLabel: title, disabled: disabled || busy, onPress }, React.createElement('Text', null, title)), GlassInput: ({ label, ...props }) => React.createElement('TextInput', { accessibilityLabel: label, ...props }) };
+      if (name === './Glass' || name.endsWith('/components/Glass')) return { GlassCard: ({ children }) => React.createElement('View', null, children), GlassButton: ({ title, accessibilityLabel, onPress, disabled, busy }) => React.createElement('Pressable', { accessibilityLabel: accessibilityLabel || title, disabled: disabled || busy, onPress }, React.createElement('Text', null, title)), GlassInput: ({ label, ...props }) => React.createElement('TextInput', { accessibilityLabel: label, ...props }) };
       if (name.endsWith('/nativeInteraction')) return { beginNativeInteraction: () => { env.interactions++; return () => env.interactions--; } };
       if (name.endsWith('/services/firebase')) return { CustomerService: { getCustomers: async () => ({ success: true, customers: env.customers }) } };
       if (name.endsWith('/customerService')) return { getCustomers: async () => ({ success: true, customers: env.customers, hasMore: false }) };
@@ -102,6 +102,18 @@ test('approved prospect conversion requires explicit customer creation and prese
   const env = fixture(); env.record = savedEstimate('approved'); const tree = await renderNative(env); await press(tree, 'Open estimate'); assert.equal(tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Estimate title')[0].props.editable, false);
   const createCustomer = tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === 'Create customer from approved prospect')[0]; await act(async () => createCustomer.props.onPress()); await fill(tree, 'Job service date (YYYY-MM-DD)', '2026-11-20'); await press(tree, 'Convert approved estimate to job'); assert.equal(env.converted, 0); await press(tree, 'Confirm job conversion');
   const conversion = env.calls.find(call => call.action === 'convert'); assert.equal(conversion.createCustomer, true); assert.equal(conversion.expectedVersion, 2); assert.equal(env.calls.filter(call => call.action === 'save').length, 0); assert.match(json(tree), /converted-job/); await act(async () => tree.unmount());
+});
+test('native estimate conversion offers quarter-hour choices instead of an arbitrary time text field', async () => {
+  const env = fixture(); env.record = savedEstimate('approved'); const tree = await renderNative(env); await press(tree, 'Open estimate');
+  assert.equal(tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Job time (HH:mm)').length, 0);
+  await press(tree, 'Job time');
+  const minutes = tree.root.findAll(node => node.type === 'Pressable' && /^Minute /.test(node.props.accessibilityLabel || ''));
+  assert.deepEqual(minutes.map(node => node.props.accessibilityLabel), ['Minute 00', 'Minute 15', 'Minute 30', 'Minute 45']);
+  await press(tree, 'Minute 45'); await press(tree, 'Use selected time');
+  const createCustomer = tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === 'Create customer from approved prospect')[0];
+  await act(async () => createCustomer.props.onPress()); await fill(tree, 'Job service date (YYYY-MM-DD)', '2026-11-20');
+  await press(tree, 'Convert approved estimate to job'); await press(tree, 'Confirm job conversion');
+  assert.equal(env.calls.find(call => call.action === 'convert').schedule.time, '09:45'); await act(async () => tree.unmount());
 });
 test('actual email failure is visible separately from the sent estimate status and sending requires confirmation', async () => {
   const env = fixture(); env.record = savedEstimate('sent'); env.delivery = { status: 'failed', attempts: 2, failureCode: 'SMTP_REJECTED', sentAt: null }; const tree = await renderNative(env); await press(tree, 'Open estimate'); assert.match(json(tree), /SMTP_REJECTED/); assert.match(json(tree), /2 attempts/); await press(tree, 'Email estimate for approval'); assert.equal(env.calls.filter(call => call.action === 'deliver').length, 0);

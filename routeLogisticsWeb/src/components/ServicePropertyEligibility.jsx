@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 import { callWorkspace } from '../services/workspaceApi';
+import AddressValidationNotice from './AddressValidationNotice';
 
 const fieldClass = 'mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500';
 const actionClass = 'rounded-lg bg-primary-700 px-4 py-2 font-medium text-white hover:bg-primary-800 disabled:cursor-not-allowed disabled:opacity-50';
@@ -11,10 +12,11 @@ export default function ServicePropertyEligibility(props) {
   return <ServicePropertyForm key={`${currentUser?.uid || ''}:${props.companyId || ''}:${role || ''}`} {...props} />;
 }
 
-function ServicePropertyForm({ companyId, serviceCategories = [], value = {}, onChange, onPolicyLoaded, purpose = 'scheduling', billingAddress = '', existing = false, disabled = false, addressReadOnly = false, fixedProperty = false, fixedCategory = false, policy: suppliedPolicy }) {
+function ServicePropertyForm({ companyId, serviceCategories = [], value = {}, onChange, onPolicyLoaded, purpose = 'scheduling', billingAddress = '', existing = false, disabled = false, addressReadOnly = false, fixedProperty = false, fixedCategory = false, validation: externalValidation = null, policy: suppliedPolicy }) {
   const [policy, setPolicy] = useState(suppliedPolicy || null), [busy, setBusy] = useState(''), [error, setError] = useState('');
   const [policyAttempt, setPolicyAttempt] = useState(0), [loadingPolicy, setLoadingPolicy] = useState(!suppliedPolicy);
   const [checked, setChecked] = useState(null), [reason, setReason] = useState('');
+  const [addressValidation, setAddressValidation] = useState(null);
   const runtime = useRef({ mounted: false, sequence: 0, busy: false, fingerprint: '' });
   const address = value.address || '', serviceCategory = value.serviceCategory || '';
   const settings = (suppliedPolicy || policy)?.settings;
@@ -37,7 +39,7 @@ function ServicePropertyForm({ companyId, serviceCategories = [], value = {}, on
   }, [companyId, suppliedPolicy, policyAttempt, onPolicyLoaded]);
   const patch = changes => {
     if (disabled || (fixedProperty || addressReadOnly) && Object.hasOwn(changes, 'address') || fixedCategory && Object.hasOwn(changes, 'serviceCategory')) return;
-    setChecked(null); setError(''); setReason('');
+    setChecked(null); setError(''); setReason(''); setAddressValidation(null);
     onChange?.({ ...value, ...changes, exceptionId: null, confirmed: false });
   };
   const invoke = async approve => {
@@ -45,17 +47,18 @@ function ServicePropertyForm({ companyId, serviceCategories = [], value = {}, on
     if (state.busy || !state.mounted || disabled || !companyId || !address.trim()) return;
     if (approve && (!result || result.status !== 'outside' || !canApprove || !reason.trim())) return;
     state.busy = true; const sequence = ++state.sequence, requested = fingerprint;
-    setBusy(approve ? 'approve' : 'check'); setError('');
+    setBusy(approve ? 'approve' : 'check'); setError(''); setAddressValidation(null);
     try {
       const data = await callWorkspace('rlServiceAreas', { action: approve ? 'approveException' : 'check', companyId, propertyAddress: address, serviceCategory, purpose, ...(approve ? { reason: reason.trim() } : {}), ...(!approve && value.exceptionId ? { exceptionId: value.exceptionId } : {}) });
       if (!state.mounted || sequence !== state.sequence || requested !== state.fingerprint) return;
       const outcome = data.result || data;
+      setAddressValidation(outcome.addressValidation || null);
       setChecked({ fingerprint: requested, result: outcome });
       onChange?.({ ...value, confirmed: outcome.eligible === true, ...(approve ? { exceptionId: data.exceptionId } : {}) });
       if (approve) { setReason(''); toast.success('The owner-approved property exception was recorded.'); }
     } catch (failure) {
       if (state.mounted && sequence === state.sequence && requested === state.fingerprint) {
-        setChecked(null); setError(failure.message || 'The service property could not be checked. Review the address and try again.');
+        setChecked(null); setError(failure.message || 'The service property could not be checked. Review the address and try again.'); setAddressValidation(failure.details?.addressValidation || null);
       }
     } finally { state.busy = false; if (state.mounted && sequence === state.sequence) setBusy(''); }
   };
@@ -63,14 +66,15 @@ function ServicePropertyForm({ companyId, serviceCategories = [], value = {}, on
     <div><h3 className="text-lg font-semibold">Service property</h3><p className="mt-1 text-sm text-gray-600">Review where the service will take place. Use a saved address or enter a different property. Coverage is checked against the provider’s saved service areas.</p></div>
     {existing && <p className="text-sm text-gray-600">Existing appointments stay valid when coverage changes. A changed service property will need a new eligibility check.</p>}
     {fixedProperty && <p className="text-sm text-gray-600">This workflow uses the recorded service property. You can check coverage or obtain an owner exception without changing its address.</p>}
-    {settings && settings.configured === false && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Service areas have not been configured. Existing scheduling is preserved; public requests cannot be approved until coverage is configured.</p>}
+    {settings && settings.configured === false && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Service areas have not been configured. Google still verifies new or changed addresses. Public requests remain unavailable until coverage is configured.</p>}
     <fieldset disabled={!!busy || disabled} className="space-y-4">
       <label className="block text-sm font-medium">Service property address<input aria-label="Service property address" disabled={fixedProperty || addressReadOnly} autoComplete="off" className={fieldClass} value={address} maxLength={278} onChange={event => patch({ address: event.target.value })} placeholder="Street, city, state and ZIP code" /></label>
       {billingAddress && billingAddress.trim() !== address.trim() && <div><p className="text-sm text-gray-600">Customer address: {billingAddress}</p><button type="button" disabled={fixedProperty || addressReadOnly} className="text-sm font-medium text-primary-700 underline" onClick={() => patch({ address: billingAddress })}>Use this as the service property</button></div>}
       {!!categories.length && <label className="block text-sm font-medium">Service category<select aria-label="Service property category" disabled={fixedCategory} className={fieldClass} value={serviceCategory} onChange={event => patch({ serviceCategory: event.target.value })}><option value="">Choose a service category</option>{categories.map(category => <option key={category} value={category}>{category}</option>)}</select></label>}
       <button type="button" className={actionClass} disabled={disabled || !companyId || !address.trim() || !!busy || loadingPolicy || !settings} onClick={() => invoke(false)}>{busy === 'check' ? 'Checking property…' : loadingPolicy ? 'Loading service-area policy…' : 'Check service property'}</button>
     </fieldset>
-    {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+    {error && !addressValidation && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+    <AddressValidationNotice validation={externalValidation || addressValidation} onAccept={suggestedAddress => patch({ address: suggestedAddress })} disabled={disabled || !!busy || fixedProperty || addressReadOnly} />
     {error && !settings && <button type="button" disabled={disabled} className="text-sm text-primary-700 underline" onClick={() => setPolicyAttempt(value => value + 1)}>Retry service-area settings</button>}
     {result && <div role={result.eligible ? 'status' : 'alert'} className={`rounded-lg p-3 text-sm ${result.eligible ? 'bg-emerald-50 text-emerald-900' : 'bg-amber-50 text-amber-900'}`}>
       <p className="font-semibold">{result.status === 'unconfigured' ? 'Service areas are not configured' : result.eligible ? result.status === 'exception-approved' ? 'Approved property exception' : 'Property is inside coverage' : result.status === 'outside' ? 'Property is outside coverage' : 'Property is not eligible yet'}</p>

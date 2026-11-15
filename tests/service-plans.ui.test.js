@@ -4,24 +4,27 @@ const { createRequire } = require('node:module');
 const mobile = createRequire(path.resolve(__dirname, '../routeLogisticsMobile/package.json')), web = createRequire(path.resolve(__dirname, '../routeLogisticsWeb/package.json'));
 const React = mobile('react'), {create,act} = mobile('react-test-renderer'), {transformSync} = web('esbuild');
 global.IS_REACT_ACT_ENVIRONMENT = true;
-let tree,env;
+let tree,env, Notice;
 const settle = () => new Promise(resolve=>setImmediate(resolve));
 const deferred = () => {let resolve;const promise=new Promise(done=>{resolve=done;});return{promise,resolve};};
-function reset(){env={calls:[],toasts:[],dirty:false,confirm:true,confirmCalls:0,manage:true,response:{success:true},pending:null};}
+function reset(){env={calls:[],toasts:[],dirty:false,confirm:true,confirmCalls:0,manage:true,response:{success:true},pending:null,company:'company-1'};}
 const toast=message=>env.toasts.push({kind:'notice',message});toast.success=message=>env.toasts.push({kind:'success',message});toast.error=message=>env.toasts.push({kind:'error',message});
 const dependencies=name=>{
   if(name==='react')return React;
   if(name==='react-hot-toast')return{__esModule:true,default:toast};
+  if(name.endsWith('/components/AddressValidationNotice'))return{__esModule:true,default:Notice};
+  if(name.endsWith('/components/TimeSelect'))return{__esModule:true,default:props=>React.createElement('label',null,props.label,React.createElement('input',{type:'time','aria-label':props.label,value:props.value,disabled:props.disabled,onChange:event=>props.onChange(event.target.value)}))};
   if(name.endsWith('/services/customerService'))return{__esModule:true,default:{getCustomers:async()=>({success:true,customers:[{id:'customer-1',name:'Authorized customer'}]})}};
   if(name.endsWith('/services/servicePlanService'))return{FREQUENCIES:[{days:30,label:'Monthly'},{days:90,label:'Quarterly'}],listServicePlans:async()=>({success:true,plans:[]}),createServicePlan:async data=>{env.calls.push(data);if(env.pending)await env.pending.promise;if(env.thrown)throw env.thrown;return env.response;},updateServicePlan:async()=>({success:true}),deleteServicePlan:async()=>({success:true}),generateNextJob:async()=>({success:true})};
   if(name.endsWith('/services/serviceLogService'))return{listServiceLogs:async()=>({success:true,logs:[]}),logsToCsv:()=>''};
   if(name.endsWith('/services/tenancy'))return{canManage:()=>env.manage};
   if(name.endsWith('/components/ConfirmProvider'))return{useConfirm:()=>async()=>true};
   if(name.endsWith('/hooks/useUnsavedChanges'))return{useUnsavedChanges:dirty=>{env.dirty=dirty;return{confirmDiscard:async()=>{env.confirmCalls++;return env.confirm;}};}};
-  if(name.endsWith('/contexts/AuthContext'))return{useAuth:()=>({currentUser:{uid:'owner-1'},company:{id:'company-1'}})};
-  if(name.endsWith('/components/ServicePropertyEligibility'))return{__esModule:true,default:props=>{React.useEffect(()=>{props.onPolicyLoaded?.({settings:{configured:false}});},[props.onPolicyLoaded]);return null;}};
+  if(name.endsWith('/contexts/AuthContext'))return{useAuth:()=>({currentUser:{uid:'owner-1'},company:env.company?{id:env.company}:null})};
+  if(name.endsWith('/components/ServicePropertyEligibility'))return{__esModule:true,default:props=>{env.property=props;React.useEffect(()=>{props.onPolicyLoaded?.({settings:{configured:false}});},[props.onPolicyLoaded]);return React.createElement('section',null,React.createElement('input',{'aria-label':'Service property address',value:props.value.address,onChange:event=>props.onChange({...props.value,address:event.target.value,exceptionId:null,confirmed:false})}),React.createElement(Notice,{validation:props.validation,disabled:props.disabled,onAccept:address=>props.onChange({...props.value,address,exceptionId:null,confirmed:false})}));}};
   throw Error('Unexpected dependency: '+name);
 };
+const noticeModule={exports:{}};new Function('React','require','module','exports',transformSync(fs.readFileSync(path.resolve(__dirname,'../routeLogisticsWeb/src/components/AddressValidationNotice.jsx'),'utf8'),{loader:'jsx',format:'cjs'}).code)(React,dependencies,noticeModule,noticeModule.exports);Notice=noticeModule.exports.default;
 const moduleValue={exports:{}};
 new Function('React','require','module','exports',transformSync(fs.readFileSync(path.resolve(__dirname,'../routeLogisticsWeb/src/pages/ServicePlansPage.jsx'),'utf8'),{loader:'jsx',format:'cjs'}).code)(React,dependencies,moduleValue,moduleValue.exports);
 const Page=moduleValue.exports.default;
@@ -38,6 +41,12 @@ test('new plan requires an actual valid change and reverting clears the unsaved 
   await change('Frequency','90');assert.equal(env.dirty,false);
   await change('Customer *','customer-1');assert.equal(button('Create plan').props.disabled,false);assert.equal(env.dirty,true);
   await change('Customer *','');assert.equal(button('Create plan').props.disabled,true);assert.equal(env.dirty,false);assert.equal(env.calls.length,0);
+});
+
+test('service-plan time selection saves its selected quarter hour',async()=>{
+  reset();await render();await click('New plan');await change('Customer *','customer-1');
+  await change('Time','09:45');assert.equal(field('Time').props.value,'09:45');
+  await submit();assert.equal(env.calls.length,1);assert.equal(env.calls[0].time,'09:45');
 });
 
 test('cancel retains edited plan on Keep editing and resets it after confirmed discard',async()=>{
@@ -64,4 +73,38 @@ test('in-flight plan creation disables fields and blocks duplicate submit operat
 test('transport failure remains retryable and a downgraded role cannot submit its draft',async()=>{
   reset();await render();await click('New plan');await change('Customer *','customer-1');env.thrown=new Error('Network unavailable.');await submit();assert.equal(env.toasts.at(-1).message,'Network unavailable.');assert.equal(env.dirty,true);
   env.manage=false;await submit();assert.equal(env.calls.length,1);assert.equal(field('Customer *').props.value,'customer-1');
+});
+
+test('a plan address suggestion retains its draft and is explicitly applied before a separate save',async()=>{
+  reset();await render();await click('New plan');await change('Customer *','customer-1');await change('Notes','Keep these visit instructions');
+  await act(async()=>env.property.onChange({address:'Unconfirmed property',serviceCategory:'Pest Control',exceptionId:'old-owner-approval',confirmed:false}));
+  env.response={success:false,error:'Review the address.',details:{addressValidation:{status:'confirmation-required',suggestedAddress:'100 Confirmed Property, Bakersfield, CA 93312',message:'Google suggested a more precise address.'}}};
+  await submit();assert.equal(field('Notes').props.value,'Keep these visit instructions');assert.equal(env.calls.length,1);assert.ok(button('Use suggested address'));
+  await click('Use suggested address');assert.equal(env.calls.length,1);assert.equal(env.property.value.address,'100 Confirmed Property, Bakersfield, CA 93312');assert.equal(env.property.value.exceptionId,null);assert.equal(button('Use suggested address'),undefined);
+  env.response={success:true};await submit();assert.equal(env.calls.length,2);assert.equal(env.calls[1].serviceProperty.address,'100 Confirmed Property, Bakersfield, CA 93312');assert.equal(env.calls[1].serviceAreaExceptionId,null);assert.equal(env.calls[1].notes,'Keep these visit instructions');
+});
+
+test('solo plans show address suggestions and serialize the accepted property explicitly',async()=>{
+  reset();env.company=null;await render();await click('New plan');await change('Customer *','customer-1');
+  const address=()=>tree.root.findByProps({'aria-label':'Service property address'});
+  await act(async()=>address().props.onChange({target:{value:'Unconfirmed solo property'}}));
+  env.response={success:false,error:'Confirm property.',details:{addressValidation:{status:'confirmation-required',suggestedAddress:'200 Confirmed Solo Property',message:'Review the corrected property.'}}};
+  await submit();await click('Use suggested address');assert.equal(env.calls.length,1);assert.equal(address().props.value,'200 Confirmed Solo Property');
+  env.response={success:true};await submit();assert.deepEqual(env.calls[1].serviceProperty,{address:'200 Confirmed Solo Property'});assert.equal(env.calls[1].serviceAreaExceptionId,null);
+});
+
+test('unavailable plan validation remains visible and a manual address or form change removes stale proposals',async()=>{
+  reset();await render();await click('New plan');await change('Customer *','customer-1');await change('Notes','Retained plan');
+  env.response={success:false,error:'Google is unavailable.',details:{addressValidation:{status:'unavailable',message:'Try the address check again shortly.'}}};
+  await submit();assert.match(JSON.stringify(tree.toJSON()),/Address check unavailable/);assert.equal(field('Notes').props.value,'Retained plan');assert.equal(button('Use suggested address'),undefined);
+  await act(async()=>env.property.onChange({...env.property.value,address:'Another explicit property'}));assert.doesNotMatch(JSON.stringify(tree.toJSON()),/Address check unavailable/);assert.equal(env.calls.length,1);
+  await submit();assert.match(JSON.stringify(tree.toJSON()),/Address check unavailable/);await click('Cancel');await click('New plan');assert.doesNotMatch(JSON.stringify(tree.toJSON()),/Address check unavailable/);
+});
+
+test('service-plan client retains structured address rejection details from its callable',async()=>{
+  const failure=Object.assign(new Error('Review this address.'),{code:'functions/failed-precondition',details:{addressValidation:{status:'confirmation-required',suggestedAddress:'A confirmed test property'}}});
+  const module={exports:{}}, mock=name=>name==='firebase/functions'?{httpsCallable:()=>async()=>{throw failure;}}:name==='firebase/firestore'?{}:name==='./firebase'?{db:{},functions:{}}:name==='./tenancy'?{scopeWhere:()=>{}}:(()=>{throw Error('Unexpected service dependency '+name);})();
+  new Function('require','module','exports',transformSync(fs.readFileSync(path.resolve(__dirname,'../routeLogisticsWeb/src/services/servicePlanService.js'),'utf8'),{loader:'js',format:'cjs'}).code)(mock,module,module.exports);
+  const originalError=console.error;let result;try{console.error=()=>{};result=await module.exports.createServicePlan({customerId:'customer-1',nextServiceDate:'2030-01-02',frequencyDays:30});}finally{console.error=originalError;}
+  assert.equal(result.success,false);assert.equal(result.code,failure.code);assert.deepEqual(result.details,failure.details);
 });

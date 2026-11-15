@@ -19,6 +19,9 @@ before(async () => {
     batch.set(doc(db, `rlServiceAreas/${configured}`), { configured: true, revision: 1, operatingAddress: 'Private operating location', zipCodes: ['93312'] });
     for (const name of privateCollections.slice(1)) batch.set(doc(db, `${name}/geo-rules-private`), { companyId: configured, address: 'Private service property', eligible: true });
     for (const name of records) { batch.set(doc(db, `${name}/geo-rules-${name}-history`), data(configured)); batch.set(doc(db, `${name}/geo-rules-${name}-other`), data(other, 'other-owner')); }
+    for (const companyId of [configured, legacy]) batch.set(doc(db, `customers/geo-rules-customer-${companyId}`), { userId: ownerUid, companyId, name: 'Historical address customer', address: '100 Unverified Historical Street', totalSpent: 0 });
+    batch.set(doc(db, 'users/geo-rules-solo'), { name: 'Synthetic solo owner' });
+    batch.set(doc(db, 'customers/geo-rules-solo-customer'), { userId: 'geo-rules-solo', name: 'Solo historical customer', address: '100 Historical Solo Street' });
     batch.set(doc(db, 'jobs/geo-rules-managed-job'), { ...data(configured), serviceProperty: { address: 'Server-validated property' }, serviceAreaEligibility: { eligible: true, settingsRevision: 1 }, serviceAreaManaged: true });
     await batch.commit();
   });
@@ -36,9 +39,12 @@ test('configured historical records permit ordinary non-geographic edits but nev
   await assertSucceeds(updateDoc(doc(actor(), 'jobs/geo-rules-managed-job'), { date: '2026-12-02', notes: 'No retroactive invalidation' }));
   await assertFails(updateDoc(doc(actor(), 'jobs/geo-rules-managed-job'), { serviceAreaEligibility: { eligible: false } }));
 });
-test('unconfigured legacy creation is preserved while server geographic proofs cannot be self-asserted', async () => {
+test('unconfigured coverage cannot bypass Google verification; addressless records and non-address edits remain available', async () => {
   for (const name of records) {
-    const db = actor('owner', legacy); await assertSucceeds(setDoc(doc(db, `${name}/geo-rules-legacy-${name}`), data(legacy)));
+    const db = actor('owner', legacy); await assertFails(setDoc(doc(db, `${name}/geo-rules-unverified-${name}`), data(legacy)));
+    await assertSucceeds(setDoc(doc(db, `${name}/geo-rules-legacy-${name}`), { ...data(legacy), address: '' }));
+    await assertSucceeds(updateDoc(doc(db, `${name}/geo-rules-legacy-${name}`), { notes: 'Historical edits preserved' }));
+    await assertFails(updateDoc(doc(db, `${name}/geo-rules-legacy-${name}`), { address: '200 Unverified Street, Example, CA 93312' }));
     await assertFails(setDoc(doc(db, `${name}/geo-rules-forged-${name}`), { ...data(legacy), serviceAreaEligibility: { eligible: true } }));
     await assertFails(updateDoc(doc(db, `${name}/geo-rules-legacy-${name}`), { serviceAreaManaged: true }));
   }
@@ -55,4 +61,19 @@ test('tenant isolation and technician authorization remain enforced independentl
   await assertFails(setDoc(doc(actor('technician'), 'jobs/geo-rules-tech-forgery'), data(configured, 'geo-rules-technician')));
   await assertFails(updateDoc(doc(actor('technician'), 'jobs/geo-rules-jobs-history'), { notes: 'Unauthorized direct job edit' }));
   await assertFails(updateDoc(doc(actor(), 'jobs/geo-rules-jobs-history'), { companyId: legacy }));
+});
+test('customer physical addresses and Google proofs are server-owned even when coverage is unconfigured', async () => {
+  for (const companyId of [configured, legacy]) {
+    const db = actor('owner', companyId), target = doc(db, `customers/geo-rules-customer-${companyId}`);
+    await assertSucceeds(updateDoc(target, { notes: 'Preserve non-address editing' }));
+    for (const patch of [{ address: '200 Unverified Street, Example, CA 93312' }, { city: 'Changed city' }, { latitude: 35, longitude: -119 }, { location: { latitude: 35, longitude: -119 } }, { addressValidation: { source: 'google-address-validation', validated: true } }]) await assertFails(updateDoc(target, patch));
+    await assertFails(setDoc(doc(db, `customers/geo-rules-unverified-${companyId}`), { userId: ownerUid, companyId, name: 'Forged address', address: '200 Unverified Street' }));
+    await assertSucceeds(setDoc(doc(db, `customers/geo-rules-addressless-${companyId}`), { userId: ownerUid, companyId, name: 'Contact only', address: '' }));
+  }
+});
+test('solo customers and jobs cannot bypass mandatory address verification while historical non-address edits remain valid', async () => {
+  const db = env.authenticatedContext('geo-rules-solo', { email_verified: true }).firestore();
+  await assertSucceeds(updateDoc(doc(db, 'customers/geo-rules-solo-customer'), { phone: '555-0101' }));
+  await assertFails(updateDoc(doc(db, 'customers/geo-rules-solo-customer'), { address: '200 Unverified Solo Street' }));
+  for (const name of ['customers', 'jobs', 'servicePlans']) await assertFails(setDoc(doc(db, `${name}/geo-rules-solo-forged-${name}`), { userId: 'geo-rules-solo', name: 'Unverified', status: 'scheduled', address: '200 Unverified Solo Street' }));
 });

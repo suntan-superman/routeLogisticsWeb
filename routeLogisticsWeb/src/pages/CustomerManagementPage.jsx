@@ -18,6 +18,7 @@ import {
 import toast from 'react-hot-toast';
 import CustomerImport from '../components/CustomerImport';
 import CustomerSmsConsent from '../components/CustomerSmsConsent';
+import AddressValidationNotice from '../components/AddressValidationNotice';
 import { canManage, can } from '../services/tenancy';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 
@@ -45,12 +46,14 @@ const CustomerManagementPage = () => {
   // Form states
   const [customerData, setCustomerData] = useState(customerForm);
   const [savedCustomer, setSavedCustomer] = useState(() => customerSnapshot(customerForm()));
+  const [addressValidation, setAddressValidation] = useState(null);
+  const editingCustomerVersion = useRef(null);
   const closing = useRef(false), saving = useRef(false);
   const formDirty = (showAddModal || showEditModal) && canManage() && customerSnapshot(customerData) !== savedCustomer;
   const { confirmDiscard } = useUnsavedChanges(formDirty, { message:'You have unsaved customer details. Leave without saving them?' });
   const closeEditor = useCallback(async () => {
     if(saving.current || closing.current)return;closing.current=true;
-    try{if(formDirty && !(await confirmDiscard()))return;setShowAddModal(false);setShowEditModal(false);setSelectedCustomer(null);const empty=customerForm();setCustomerData(empty);setSavedCustomer(customerSnapshot(empty));}
+    try{if(formDirty && !(await confirmDiscard()))return;setShowAddModal(false);setShowEditModal(false);setSelectedCustomer(null);setAddressValidation(null);editingCustomerVersion.current=null;const empty=customerForm();setCustomerData(empty);setSavedCustomer(customerSnapshot(empty));}
     finally{closing.current=false;}
   },[formDirty,confirmDiscard]);
   useEffect(()=>{if(!showAddModal&&!showEditModal)return;const onKey=event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();closeEditor();}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[showAddModal,showEditModal,closeEditor]);
@@ -131,6 +134,8 @@ const CustomerManagementPage = () => {
   },[customers,searchTerm,activeFilter,sortBy]);
 
   const handleInputChange = (field, value) => {
+    if (saving.current) return;
+    setAddressValidation(null);
     setCustomerData(prev => ({
       ...prev,
       [field]: field === 'phone' ? formatPhone(value) : value
@@ -138,7 +143,14 @@ const CustomerManagementPage = () => {
   };
 
   const resetForm = () => {
+    setAddressValidation(null);editingCustomerVersion.current=null;
     const empty=customerForm();setCustomerData(empty);setSavedCustomer(customerSnapshot(empty));
+  };
+
+  const useSuggestedAddress = address => {
+    if (saving.current) return;
+    setCustomerData(previous => ({ ...previous, address, city: '', state: '', zipCode: '' }));
+    setAddressValidation(null);
   };
 
   const handleAddCustomer = async () => {
@@ -149,7 +161,7 @@ const CustomerManagementPage = () => {
       return;
     }
 
-    saving.current=true;setIsLoading(true);
+    saving.current=true;setIsLoading(true);setAddressValidation(null);
     try {
       const result = await CustomerService.createCustomer(customerData);
       if (result.success) {
@@ -159,6 +171,7 @@ const CustomerManagementPage = () => {
         loadStats();
         toast.success('Customer added successfully!');
       } else {
+        setAddressValidation(result.addressValidation || null);
         toast.error(result.error);
       }
     } catch (error) {
@@ -176,9 +189,9 @@ const CustomerManagementPage = () => {
       return;
     }
 
-    saving.current=true;setIsLoading(true);
+    saving.current=true;setIsLoading(true);setAddressValidation(null);
     try {
-      const result = await CustomerService.updateCustomer(selectedCustomer.id, customerData);
+      const result = await CustomerService.updateCustomer(selectedCustomer.id, customerData, editingCustomerVersion.current);
       if (result.success) {
         setCustomers(prev => prev.map(customer => 
           customer.id === selectedCustomer.id ? result.customer : customer
@@ -188,6 +201,7 @@ const CustomerManagementPage = () => {
         resetForm();
         toast.success('Customer updated successfully!');
       } else {
+        setAddressValidation(result.addressValidation || null);
         toast.error(result.error);
       }
     } catch (error) {
@@ -247,6 +261,8 @@ const CustomerManagementPage = () => {
   const openEditModal = (customer) => {
     if (!canManage()) return toast.error('Your role does not allow customer changes.');
     setSelectedCustomer(customer);
+    editingCustomerVersion.current = typeof customer.updatedAt === 'string' ? customer.updatedAt : legacyDate(customer.updatedAt)?.toISOString() || null;
+    setAddressValidation(null);
     const values=customerForm(customer);setCustomerData(values);setSavedCustomer(customerSnapshot(values));
     setShowEditModal(true);
   };
@@ -573,7 +589,7 @@ const CustomerManagementPage = () => {
                 </button>
               </div>
               
-              <div className="space-y-4">
+              <fieldset disabled={isLoading} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Name *</label>
                   <input
@@ -663,8 +679,9 @@ const CustomerManagementPage = () => {
                     placeholder="Additional notes about this customer..."
                   />
                 </div>
-              </div>
+              </fieldset>
               
+              <AddressValidationNotice validation={addressValidation} onAccept={useSuggestedAddress} disabled={isLoading} />
               <div className="flex justify-end space-x-3 mt-6">
                 <button
                   onClick={closeEditor}
@@ -703,7 +720,7 @@ const CustomerManagementPage = () => {
                 </button>
               </div>
               
-              <div className="space-y-4">
+              <fieldset disabled={isLoading} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Name *</label>
                   <input
@@ -806,8 +823,9 @@ const CustomerManagementPage = () => {
                     Active customer
                   </label>
                 </div>
-              </div>
+              </fieldset>
               
+              <AddressValidationNotice validation={addressValidation} onAccept={useSuggestedAddress} disabled={isLoading} />
               <div className="flex justify-end space-x-3 mt-6">
                 <button
                   onClick={closeEditor}

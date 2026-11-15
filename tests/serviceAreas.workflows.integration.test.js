@@ -38,7 +38,7 @@ test('new jobs use the explicit validated service property, never billing coordi
 
 test('configured job creation fails safely for outside, absent or unvalidated properties despite forged client flags',async()=>{
  const f=await fixture();
- for(const property of [{address:OUTSIDE},undefined,{address:''},{address:'500 Unresolved Service Road, Example, CA 93301'}])await assert.rejects(f.work.manageJob(f.request({action:'create',job:f.job({serviceProperty:property,address:INSIDE,latitude:35,longitude:-119,eligible:true})})),{code:'failed-precondition'});
+ for(const property of [{address:OUTSIDE},undefined,{address:''},{address:'500 Unresolved Service Road, Example, CA 93301'}])await assert.rejects(f.work.manageJob(f.request({action:'create',job:f.job({serviceProperty:property,address:property===undefined?undefined:INSIDE,latitude:35,longitude:-119,eligible:true})})),{code:'failed-precondition'});
  assert.equal((await db.collection('jobs').where('companyId','==',f.id).get()).size,0);
 });
 
@@ -88,10 +88,11 @@ test('revoked manager access during address validation cannot commit job, estima
  }
 });
 
-test('unconfigured providers retain legacy scheduling and legacy appointments are not rewritten',async()=>{
- const f=await fixture({configured:false}),before=f.calls(),saved=await f.work.manageJob(f.request({action:'create',job:{customerId:f.customerId,address:OUTSIDE,date:'2026-11-15',serviceType:'Legacy-style service'}}));assert.equal(f.calls(),before);
- const legacy=await db.doc('jobs/'+saved.id).get();assert.equal(legacy.get('address'),OUTSIDE);assert.equal(legacy.get('serviceProperty'),undefined);
- await f.saveSettings({});await f.work.manageJob(f.request({action:'update',id:saved.id,job:{notes:'Preserve this established appointment',date:'2026-12-01'}}));assert.equal((await legacy.ref.get()).get('serviceProperty'),undefined);
+test('unconfigured providers validate new addresses without rewriting historical appointments',async()=>{
+ const f=await fixture({configured:false}),before=f.calls(),saved=await f.work.manageJob(f.request({action:'create',job:{customerId:f.customerId,address:OUTSIDE,date:'2026-11-15',serviceType:'Legacy-style service'}}));assert.equal(f.calls(),before+1);
+ const created=await db.doc('jobs/'+saved.id).get();assert.equal(created.get('address'),OUTSIDE);assert.equal(created.get('serviceProperty.validated'),true);
+ const legacy=db.doc('jobs/'+f.id+'-old-appointment');await legacy.set({companyId:f.id,userId:f.uid,address:OUTSIDE,status:'scheduled'});
+ await f.saveSettings({});const calls=f.calls();await f.work.manageJob(f.request({action:'update',id:legacy.id,job:{notes:'Preserve this established appointment',date:'2026-12-01'}}));assert.equal((await legacy.get()).get('serviceProperty'),undefined);assert.equal(f.calls(),calls);
 });
 
 test('estimate properties stay separate from billing contact and survive boundary-only changes',async()=>{

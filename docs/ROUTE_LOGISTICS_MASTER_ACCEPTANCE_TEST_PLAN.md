@@ -8,7 +8,43 @@ Use the existing production site, Firebase project and corporate TestFlight app 
 
 Route Logistics has a deployed, tested field-work foundation suitable for a **controlled pilot after the short physical core workflow passes**. It is not yet certified across every browser, device, optional commercial feature or integration delivery path. All 100 current source Cloud Functions are ACTIVE. Current server/rules/web/auth regressions pass. The initial mobile test-harness failure was repaired with test-only changes; the full corrected mobile rerun passed 168/168.
 
-Current browser coverage is **27 scenarios** (81 configured executions across Chromium, Firefox and WebKit). The latest job-address changes passed **27/27 Chromium** cases, including locked saved-address defaults, explicit editing, one-off changes and atomic permanent updates. New address scenarios have not been run in Firefox/WebKit. Earlier evidence for the original 25 scenarios is retained below, including the later clean 75/75 Jobs-date run. Physical iPhone/Android and genuine provider acceptance remain separate.
+Current browser coverage is **27 scenarios** (81 configured executions across Chromium, Firefox and WebKit). See the November 15 address/time addendum below for the latest execution evidence. Earlier evidence for the original 25 scenarios is retained below, including the later clean 75/75 Jobs-date run. Physical iPhone/Android and genuine provider acceptance remain separate.
+
+### November 15 — address validation and scheduling controls
+
+Customer scheduling selection uses the green app theme. Web job, estimate-conversion,
+service-plan and route-departure controls, plus native scheduling/edit/conversion
+controls, offer quarter-hour choices. Existing odd-minute records are preserved.
+
+New or changed customer/service addresses require server Google validation,
+including unconfigured service territories and independent workspaces. Corrections
+require explicit acceptance into the draft and a separate Save. Invalid/unavailable
+results retain drafts; unchanged historical appointments are preserved. Direct
+Firestore writes cannot forge physical addresses, coordinates or Google proof.
+Atomic permanent updates replace old validation metadata and retain audit history.
+
+Current automated evidence: **287/287 web**, **224/224 mobile**, **144 Functions
+passes/one existing skip**, and **125/125 focused emulator cases**. The broader
+rules/integration run passed **374/375**; its sole failure was an expired frozen
+login timestamp in a deletion/ownership test fixture. The fixture now mocks its
+clock without changing authorization. The final affected-file rerun passed
+**28/28**, including that test and the new permanent-validation-metadata regression.
+Web lint/build, Expo Doctor **18/18**, dependency compatibility and iOS export pass.
+All 27 distinct Chromium scenarios passed across the full and focused runs.
+PW-OPS-10 through PW-OPS-14 passed **15/15 across Chromium, Firefox and WebKit**,
+including green selection, quarter-hour choices and one-off/permanent addresses.
+The original full run had one label assertion include a decorative checkmark;
+the corrected label assertion passed in all three engines. Other Firefox/WebKit
+cases were not rerun. Details are in `docs/JOB_ADDRESS_EDITING.md`.
+
+One read-only Google Address Validation request for Google's public campus address
+returned **HTTP 200**, complete **PREMISE** validation/geocoding and no unconfirmed
+components. This provider check did not read or modify customer data. Emulator
+tests use synthetic, tenant-private verified fixtures and make no provider calls.
+
+Physical acceptance remains required after rebuilding: select quarter-hour times,
+cancel/reopen the picker, review invalid/corrected addresses, and verify one-visit
+versus explicitly permanent changes. No physical/manual case is newly marked Pass.
 
 | Cases | Pass | Fail | Blocked | Not Run | Dated historical live/provider Pass |
 | --- | --- | --- | --- | --- | --- |
@@ -21,7 +57,7 @@ The 44 Pass results include current automated/read-only checks and **nine dated 
 | Implemented and deployed | 100/100 source exports ACTIVE; current Netlify routes reachable; web source inventory below | Active metadata/HTTP 200 does not prove every business action |
 | Current automated regression | Functions 138 pass/1 skip; final full web 232 pass including five emulator guards; rules/integration 330 pass; Auth E2E 6 pass | Emulators/test transports are not provider or physical-device delivery |
 | Mobile regression | 168/168 pass after test-only workspaceApi/React harness correction | Initial stale-loader failure retained as resolved history; physical camera acceptance remains separate |
-| Browser regression | Latest Chromium27/27; original25-case cross-engine evidence and clean Jobs-date75/75 retained below | New address scenarios not run in Firefox/WebKit; physical/manual cases unchanged |
+| Browser regression | 27 distinct Chromium scenarios passed across full/focused runs; PW-OPS-10–14 passed15/15 across all three engines; earlier cross-engine evidence retained below | Other Firefox/WebKit cases not rerun in this batch; physical/manual cases unchanged |
 | Historically provider-verified | Stripe test settlement; QuickBooks sandbox writes/tax/payments; Twilio delivered/STOP/START; iOS push/tap; portal OTP and review email/submission | Dates and exact scenarios in Section G; no new provider transaction/message in this run |
 | Physical acceptance outstanding | Current installed build, camera/gallery/reopen, assigned-job completion, offline restart/sync, background GPS, push app states | Execute Section F with synthetic work before using real pilot visits |
 | Source gaps / intentionally off | Native manager geography forms, industry selector, overlap guard, discounts, full native CRM; live Stripe/QB production/broad SMS/review automation off | Use supported web workflows and scoped pilot limits; do not weaken backend authorization |

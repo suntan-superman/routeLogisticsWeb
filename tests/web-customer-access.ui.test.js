@@ -10,15 +10,15 @@ const React = mobileRequire('react');
 const { create, act } = mobileRequire('react-test-renderer');
 const { transformSync } = webRequire('esbuild');
 global.IS_REACT_ACT_ENVIRONMENT = true;
-let role, customers, writes, dirty=false,discard=true,discardCalls=0,saveFailure=false;
+let role, customers, writes, dirty=false,discard=true,discardCalls=0,saveFailure=false,addressFailure=null,updateRequests=[];
 const keyListeners=new Set();
 global.window={addEventListener:(name,callback)=>{if(name==='keydown')keyListeners.add(callback);},removeEventListener:(name,callback)=>{if(name==='keydown')keyListeners.delete(callback);}};
 const user = { uid: 'test-user', emailVerified: true, getIdToken: async () => 'test-token', getIdTokenResult: async () => ({ claims: { companyId: 'test-company', role, membershipId: 'test-member' } }) };
 const service = {
   getCustomers: async () => ({ success: true, customers, hasMore: false }),
   getCustomerStats: async () => ({ success: true, stats: { totalCustomers: customers.length } }),
-  createCustomer: async data => { writes.push(data); return { success: true, customer: { id: 'new', ...data } }; },
-  updateCustomer:async(id,data)=>{writes.push(data);return saveFailure?{success:false,error:'Customer save unavailable.'}:{success:true,customer:{id,...data}};},
+  createCustomer: async data => { writes.push(data); return addressFailure ? { success: false, error: addressFailure.message, addressValidation: addressFailure } : { success: true, customer: { id: 'new', ...data } }; },
+  updateCustomer:async(id,data,expectedVersion)=>{writes.push(data);updateRequests.push({id,data,expectedVersion});return addressFailure?{success:false,error:addressFailure.message,addressValidation:addressFailure}:saveFailure?{success:false,error:'Customer save unavailable.'}:{success:true,customer:{id,...data}};},
 };
 const cache = new Map();
 function load(relative) {
@@ -40,7 +40,7 @@ function load(relative) {
     if (specifier === './firebase') return { auth: { currentUser: user }, functions: {} };
     if (specifier.startsWith('.')) {
       const resolved = path.resolve(path.dirname(filename), specifier);
-      return load(path.extname(resolved) ? resolved : resolved + '.js');
+      return load(path.extname(resolved) ? resolved : fs.existsSync(resolved + '.js') ? resolved + '.js' : resolved + '.jsx');
     }
     throw new Error(`Unexpected dependency: ${specifier}`);
   };
@@ -53,7 +53,7 @@ const Page = load('pages/CustomerManagementPage.jsx').default;
 const tenancy = load('services/tenancy.js');
 async function setRole(value) { role = value; await tenancy.syncTenancy(); }
 async function render(value, records = [{ id: 'active', name: 'Active customer', isActive: true }, { id: 'inactive', name: 'Inactive customer', isActive: false }]) {
-  await setRole(value); customers = records; writes = [];dirty=false;discard=true;discardCalls=0;saveFailure=false;
+  await setRole(value); customers = records; writes = [];dirty=false;discard=true;discardCalls=0;saveFailure=false;addressFailure=null;updateRequests=[];
   let tree;
   await act(async () => { tree = create(React.createElement(Page)); });
   return tree;
@@ -134,5 +134,53 @@ test('failed customer saves keep edits and permit retry without dropping the war
   await act(async()=>tree.root.findByProps({placeholder:'Enter customer name'}).props.onChange({target:{value:'Retained customer'}}));saveFailure=true;
   await act(async()=>buttons(tree,'Save Changes')[0].props.onClick());assert.equal(tree.root.findByProps({placeholder:'Enter customer name'}).props.value,'Retained customer');assert.equal(dirty,true);assert.equal(buttons(tree,'Save Changes')[0].props.disabled,false);
   saveFailure=false;await act(async()=>buttons(tree,'Save Changes')[0].props.onClick());assert.equal(buttons(tree,'Save Changes').length,0);assert.equal(dirty,false);
+  await act(async()=>tree.unmount());
+});
+
+const field=(tree,placeholder)=>tree.root.findByProps({placeholder});
+const change=async(tree,placeholder,value)=>act(async()=>field(tree,placeholder).props.onChange({target:{value}}));
+const suggestion={status:'confirmation-required',message:'Google found a suggested address. Confirm it before saving.',suggestedAddress:'1600 Amphitheatre Parkway, Mountain View, CA 94043'};
+
+test('customer add displays the Google suggestion without saving or replacing the draft until explicitly accepted',async()=>{
+  const tree=await render('manager');await act(async()=>buttons(tree,'Add Customer')[0].props.onClick());
+  await change(tree,'Enter customer name','Synthetic review contact');await change(tree,'123 Main Street','1600 Amphitheatre Pkw');
+  await change(tree,'Bakersfield','Old city');await change(tree,'CA','CA');await change(tree,'93311','99999');
+  addressFailure=suggestion;
+  await act(async()=>buttons(tree,'Add Customer').at(-1).props.onClick());
+  assert.equal(writes.length,1);assert.equal(field(tree,'123 Main Street').props.value,'1600 Amphitheatre Pkw');
+  assert.match(JSON.stringify(tree.toJSON()),/Google found a suggested address/);assert.equal(buttons(tree,'Use suggested address')[0].props.type,'button');
+  await act(async()=>buttons(tree,'Use suggested address')[0].props.onClick());
+  assert.equal(writes.length,1);assert.equal(field(tree,'123 Main Street').props.value,suggestion.suggestedAddress);
+  for(const placeholder of ['Bakersfield','CA','93311'])assert.equal(field(tree,placeholder).props.value,'');
+  assert.equal(field(tree,'Enter customer name').props.value,'Synthetic review contact');assert.equal(buttons(tree,'Use suggested address').length,0);
+  addressFailure=null;await act(async()=>buttons(tree,'Add Customer').at(-1).props.onClick());
+  assert.equal(writes.length,2);assert.equal(writes[1].address,suggestion.suggestedAddress);assert.equal(buttons(tree,'Cancel').length,0);
+  await act(async()=>tree.unmount());
+});
+
+test('customer edit keeps the version captured before editing and retains the draft after validation failure',async()=>{
+  const tree=await render('manager',[{id:'active',name:'Saved contact',address:'Old service address',updatedAt:'original-v1',isActive:true}]);
+  await act(async()=>icons(tree,'PencilIcon')[0].parent.props.onClick());
+  await change(tree,'123 Main Street','An edited service address');
+  customers[0]={...customers[0],updatedAt:'background-v2'};await act(async()=>tree.update(React.createElement(Page)));
+  addressFailure=suggestion;await act(async()=>buttons(tree,'Save Changes')[0].props.onClick());
+  assert.equal(updateRequests[0].expectedVersion,'original-v1');assert.equal(field(tree,'123 Main Street').props.value,'An edited service address');
+  assert.equal(buttons(tree,'Save Changes')[0].props.disabled,false);assert.equal(dirty,true);
+  await change(tree,'123 Main Street','A manually corrected address');assert.equal(buttons(tree,'Use suggested address').length,0);
+  await act(async()=>buttons(tree,'Cancel')[0].props.onClick());
+  await act(async()=>icons(tree,'PencilIcon')[0].parent.props.onClick());assert.equal(buttons(tree,'Use suggested address').length,0);
+  await act(async()=>tree.unmount());
+});
+
+for(const status of ['invalid','unavailable'])test(`customer ${status} address feedback remains actionable and preserves form fields`,async()=>{
+  const tree=await render('manager');await act(async()=>buttons(tree,'Add Customer')[0].props.onClick());
+  await change(tree,'Enter customer name','Retained synthetic contact');await change(tree,'123 Main Street','An unresolved address');
+  addressFailure={status,message:status==='invalid'?'Google could not confirm this property. Review the address.':'The address check is unavailable. Try again shortly.'};
+  await act(async()=>buttons(tree,'Add Customer').at(-1).props.onClick());
+  assert.match(JSON.stringify(tree.toJSON()),new RegExp(addressFailure.message.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
+  assert.equal(field(tree,'Enter customer name').props.value,'Retained synthetic contact');assert.equal(field(tree,'123 Main Street').props.value,'An unresolved address');
+  assert.equal(buttons(tree,'Use suggested address').length,0);assert.equal(buttons(tree,'Add Customer').at(-1).props.disabled,false);
+  await act(async()=>buttons(tree,'Cancel')[0].props.onClick());await act(async()=>buttons(tree,'Add Customer')[0].props.onClick());
+  assert.equal(tree.root.findAll(node=>node.props['aria-label']==='Address validation').length,0);
   await act(async()=>tree.unmount());
 });

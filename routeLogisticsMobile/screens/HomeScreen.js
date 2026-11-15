@@ -3,6 +3,7 @@ import {
   View,
   Text,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   ScrollView,
   StatusBar,
@@ -21,6 +22,10 @@ import WorkLocation from '../components/WorkLocation';
 import OfflineStatus from '../components/OfflineStatus';
 import { canManage, localDate } from '../services/tenancy';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { QuarterHourPicker } from '../components/QuarterHourTimePicker';
+import { timeLabel } from '../services/quarterHourTime';
+import AddressValidationNotice from '../components/AddressValidationNotice';
+import { formatSavedAddress, recordVersion } from '../services/addressValidation';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeProvider';
 import { GlassScreen, GlassCard, GlassButton, IconButton } from '../components/Glass';
@@ -39,6 +44,25 @@ function InlineJobPanel({ visible, keepMounted = false, label, priority = 10, ch
       zIndex: priority, display: visible ? 'flex' : 'none', backgroundColor: palette.background }}>{children}</View>;
 }
 
+function ServiceAddressEditor({ address, editing, disabled, onEnable, onChange, validation, onUseSuggested, canUpdateCustomer, permanent, onPermanent, label = 'Service property address' }) {
+  const { palette } = useTheme();
+  return <GlassCard style={{ gap: 12 }}>
+    <Text style={{ color: palette.text, fontWeight: '700' }}>{label}</Text>
+    <TextInput accessibilityLabel={label} value={address} editable={editing && !disabled} multiline
+      placeholder="Street, city, state and ZIP code" placeholderTextColor={palette.secondary}
+      onChangeText={value => { if (editing && !disabled) onChange(value); }}
+      style={{ color: palette.text, borderColor: palette.border, borderWidth: 1, borderRadius: 12, padding: 12, minHeight: 60, opacity: editing ? 1 : 0.75 }} />
+    {!editing && <GlassButton secondary title="Enable Editing" disabled={disabled} onPress={onEnable} />}
+    <Text style={{ color: palette.secondary }}>The saved property is locked. Enable editing to use a different service address for this visit.</Text>
+    {editing && canUpdateCustomer && <Pressable accessibilityRole="checkbox" accessibilityLabel="Update customer's saved address" accessibilityState={{ checked: permanent, disabled }} disabled={disabled} onPress={() => onPermanent(!permanent)} style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+      <Ionicons name={permanent ? 'checkbox' : 'square-outline'} size={24} color={palette.accent} />
+      <Text style={{ color: palette.text, flex: 1 }}>Update customer's saved address</Text>
+    </Pressable>}
+    {editing && <Text style={{ color: palette.secondary }}>Changes apply to this visit only unless you choose to update the customer's saved address. Existing visits keep their recorded property.</Text>}
+    <AddressValidationNotice validation={validation} onUseSuggested={onUseSuggested} editingEnabled={editing} disabled={disabled} />
+  </GlassCard>;
+}
+
 const HomeScreen = ({ navigation, embedded = false, active = true, onInteractionChange, managementAction, onManagementActionHandled }) => {
   const { user, signOut, permissions, refreshUser } = useContext(AuthContext);
   const { colors: COLORS, palette, isDark } = useTheme();
@@ -52,6 +76,11 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
 
   // Schedule Service Form State
   const [selectedCustomer, setSelectedCustomer] = useState('');
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [scheduleAddress, setScheduleAddress] = useState(''), [scheduleAddressEditing, setScheduleAddressEditing] = useState(false);
+  const [scheduleAddressValidation, setScheduleAddressValidation] = useState(null), [scheduleError, setScheduleError] = useState('');
+  const [saveScheduleCustomerAddress, setSaveScheduleCustomerAddress] = useState(false), [isScheduling, setIsScheduling] = useState(false);
+  const scheduleCustomerVersion = useRef(null), scheduleSaving = useRef(false);
   const [selectedService, setSelectedService] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
@@ -64,6 +93,8 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
+  const [editingCustomer, setEditingCustomer] = useState(null), [customerValidation, setCustomerValidation] = useState(null), [customerError, setCustomerError] = useState('');
+  const [isSavingCustomer, setIsSavingCustomer] = useState(false), customerSaving = useRef(false), customerBase = useRef({ address: '', version: null });
 
   // Customer data from Firebase
   const [customers, setCustomers] = useState([]);
@@ -94,6 +125,10 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
   const [showJobEditModal, setShowJobEditModal] = useState(false);
   const [editJobData, setEditJobData] = useState({});
   const [isEditingJob, setIsEditingJob] = useState(false);
+  const [jobAddressEditing, setJobAddressEditing] = useState(false), [jobAddressValidation, setJobAddressValidation] = useState(null), [jobEditError, setJobEditError] = useState('');
+  const [saveJobCustomerAddress, setSaveJobCustomerAddress] = useState(false), jobEditBase = useRef({ address: '', version: null, customerVersion: null }), jobMutation = useRef(0), jobSaving = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; jobMutation.current++; }; }, []);
 
   // Estimates states
   const [showEstimatesModal, setShowEstimatesModal] = useState(false);
@@ -133,16 +168,17 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
 
   // Form validation
   const isScheduleFormValid = () => {
-    return selectedCustomer && selectedService && selectedDate && selectedTime && duration;
+    return selectedCustomerId && scheduleAddress.trim() && selectedService && selectedDate && selectedTime && duration;
   };
 
   const isCustomerFormValid = () => {
-    return customerName && customerPhone && customerAddress;
+    return customerName.trim() && customerPhone.trim();
   };
 
   // Reset form when modal closes
   const resetScheduleForm = () => {
     setSelectedCustomer('');
+    setSelectedCustomerId(''); setScheduleAddress(''); setScheduleAddressEditing(false); setScheduleAddressValidation(null); setScheduleError(''); setSaveScheduleCustomerAddress(false); scheduleCustomerVersion.current = null;
     setSelectedService('');
     setSelectedDate('');
     setSelectedTime('');
@@ -158,6 +194,7 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
     setCustomerPhone('');
     setCustomerAddress('');
     setCustomerEmail('');
+    setEditingCustomer(null); setCustomerValidation(null); setCustomerError(''); customerBase.current = { address: '', version: null };
   };
 
   // Load customers from Firebase
@@ -195,35 +232,97 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
   }, [selectedWork.job, selectedWork.dataChecked, selectedWork.accessStatus, selectedJob]);
 
   useEffect(() => {
-    if (!selectedJob && !showScheduleModal && !showJobEditModal) return;
+    if (!selectedJob && !showScheduleModal && !showScheduleServiceModal && !showCustomerModal && !showJobEditModal && !showTimePicker && !showDatePicker) return;
     const subscription = BackHandler?.addEventListener('hardwareBackPress', () => {
+      if (showTimePicker) { setShowTimePicker(false); return true; }
+      if (showDatePicker) { setShowDatePicker(false); return true; }
+      if (customerSaving.current || scheduleSaving.current || jobSaving.current) return true;
       if (jobInteractionRef.current.busy || jobInteractionRef.current.hasDraft) {
         Alert.alert('Finish this job step', 'Save or discard the selected photo or completion draft before leaving.'); return true;
       }
-      if (showJobEditModal) setShowJobEditModal(false);
+      if (showCustomerModal) setShowCustomerModal(false);
+      else if (showScheduleServiceModal) setShowScheduleServiceModal(false);
+      else if (showJobEditModal) { jobMutation.current++; setShowJobEditModal(false); }
       else if (selectedJob) closeJobWorkflow();
       else setShowScheduleModal(false);
       return true;
     });
     return () => subscription?.remove();
-  }, [selectedJob, showScheduleModal, showJobEditModal, closeJobWorkflow]);
+  }, [selectedJob, showScheduleModal, showScheduleServiceModal, showCustomerModal, showJobEditModal, showTimePicker, showDatePicker, closeJobWorkflow]);
 
-  // Add customer to Firebase
-  const addCustomerToFirebase = async (customerData) => {
+  const startCustomerEdit = customer => {
+    if (customerSaving.current) return;
+    const address = formatSavedAddress(customer);
+    customerBase.current = { address, version: recordVersion(customer.updatedAt) };
+    setEditingCustomer(customer.id); setCustomerName(customer.name || ''); setCustomerPhone(customer.phone || '');
+    setCustomerAddress(address); setCustomerEmail(customer.email || ''); setCustomerError(''); setCustomerValidation(null);
+  };
+
+  const saveCustomer = async () => {
+    if (customerSaving.current || !isCustomerFormValid()) return;
+    customerSaving.current = true; setIsSavingCustomer(true); setCustomerError(''); setCustomerValidation(null);
     try {
-      const result = await CustomerService.addCustomer(customerData);
+      const customerData = { name: customerName.trim(), phone: customerPhone.trim(), email: customerEmail.trim() };
+      if (!editingCustomer || customerAddress.trim() !== customerBase.current.address) Object.assign(customerData, {
+        address: customerAddress.trim(), city: '', state: '', zipCode: '', postalCode: '',
+      });
+      const result = editingCustomer
+        ? await CustomerService.updateCustomer(editingCustomer, customerData, customerBase.current.version)
+        : await CustomerService.addCustomer(customerData);
+      if (!mounted.current) return;
       if (result.success) {
-        // Reload customers to get the updated list
         await loadCustomers();
-        return true;
+        if (!mounted.current) return;
+        Alert.alert('Success', editingCustomer ? 'Customer updated successfully.' : 'Customer added successfully.');
+        resetCustomerForm();
       } else {
-        Alert.alert('Error', result.error.message);
-        return false;
+        setCustomerValidation(result.error?.addressValidation || null);
+        setCustomerError(result.error?.message || 'Could not save the customer. Please try again.');
       }
     } catch (error) {
-      console.error('Add customer error:', error);
-      Alert.alert('Error', 'Failed to add customer');
-      return false;
+      if (mounted.current) setCustomerError(error.message || 'Could not save the customer. Please try again.');
+    } finally {
+      customerSaving.current = false;
+      if (mounted.current) setIsSavingCustomer(false);
+    }
+  };
+
+  const chooseCustomer = customer => {
+    if (scheduleSaving.current) return;
+    setSelectedCustomer(customer.name); setSelectedCustomerId(customer.id); setScheduleAddress(formatSavedAddress(customer));
+    setScheduleAddressEditing(false); setSaveScheduleCustomerAddress(false); scheduleCustomerVersion.current = null;
+    setScheduleAddressValidation(null); setScheduleError(''); setShowCustomerDropdown(false);
+  };
+  const scheduleCustomer = customers.find(customer => customer.id === selectedCustomerId);
+  const editCustomer = customers.find(customer => customer.id === selectedJob?.customerId);
+  const canSaveCustomerAddress = permissions.can?.('customers.manage') === true;
+  const schedulePermanentAvailable = canSaveCustomerAddress && !!scheduleCustomer && scheduleAddress.trim() !== formatSavedAddress(scheduleCustomer);
+  const editPermanentAvailable = canSaveCustomerAddress && !!editCustomer && (editJobData.address || '').trim() !== formatSavedAddress(editCustomer);
+  const saveScheduledJob = async () => {
+    if (scheduleSaving.current || !isScheduleFormValid()) return;
+    scheduleSaving.current = true; setIsScheduling(true); setScheduleError(''); setScheduleAddressValidation(null);
+    try {
+      const jobData = { customerId: selectedCustomerId, customerName: selectedCustomer, customerPhone: scheduleCustomer?.phone || '',
+        serviceType: selectedService, date: selectedDate, time: selectedTime, duration, estimatedCost: estimatedCost || null,
+        notes: notes || '', address: scheduleAddress.trim(), serviceProperty: { address: scheduleAddress.trim() } };
+      const options = saveScheduleCustomerAddress && schedulePermanentAvailable
+        ? { saveCustomerAddress: true, expectedCustomerVersion: scheduleCustomerVersion.current } : undefined;
+      const result = await JobService.addJob(jobData, options);
+      if (!mounted.current) return;
+      if (result.success) {
+        if (result.customerAddressUpdated) await loadCustomers();
+        if (!mounted.current) return;
+        Alert.alert('Success', result.customerAddressUpdated ? 'Service scheduled and customer address updated.' : 'Service scheduled successfully.');
+        resetScheduleForm(); setShowScheduleServiceModal(false); loadJobs();
+      } else {
+        setScheduleAddressValidation(result.error?.addressValidation || null);
+        setScheduleError(result.error?.message || 'Could not schedule the service. Please try again.');
+      }
+    } catch (error) {
+      if (mounted.current) setScheduleError(error.message || 'Could not schedule the service. Please try again.');
+    } finally {
+      scheduleSaving.current = false;
+      if (mounted.current) setIsScheduling(false);
     }
   };
 
@@ -356,38 +455,15 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
 
   const closeDatePicker = () => setShowDatePicker(false);
 
-  const handleTimeChange = (event, selectedTime) => {
-    // On Android, close immediately. On iOS, keep open until "Done" is pressed
-    if (Platform.OS === 'android') {
-      setShowTimePicker(false);
-    }
-
-    if (selectedTime) {
-      // Round to nearest quarter hour
-      const minutes = selectedTime.getMinutes();
-      const roundedMinutes = Math.round(minutes / 15) * 15;
-
-      // Create new date with rounded time
-      const roundedTime = new Date(selectedTime);
-      roundedTime.setMinutes(roundedMinutes);
-
-      const timeString = roundedTime.toLocaleTimeString('en-US', {
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true
-      });
-      setSelectedTime(timeString);
-
-      // If we're in edit mode, update the edit job data
-      if (showJobEditModal) {
-        setEditJobData({...editJobData, time: timeString});
-      }
-    }
+  const handleTimeChange = time => {
+    setSelectedTime(time);
+    if (showJobEditModal) setEditJobData(previous => ({ ...previous, time }));
+    setShowTimePicker(false);
   };
 
   const closeTimePicker = () => setShowTimePicker(false);
-  const openDatePicker = () => setShowDatePicker(true);
-  const openTimePicker = () => setShowTimePicker(true);
+  const openDatePicker = () => { setShowTimePicker(false); setShowDatePicker(true); };
+  const openTimePicker = () => { setShowDatePicker(false); setShowTimePicker(true); };
 
   // Job panels are ordinary views: no native presentation/dismissal race.
   const handleJobSelection = job => {
@@ -400,8 +476,14 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
   // Handle job editing
   const handleJobEdit = (job) => {
     if (!canManage()) { Alert.alert('Manager access required', 'Ask your manager to make this change.'); return; }
+    if (jobSaving.current) return;
+    const address = job.serviceProperty?.address || job.serviceProperty?.formattedAddress || formatSavedAddress(job);
+    jobMutation.current++;
+    jobEditBase.current = { id: job.id, address, version: recordVersion(job.updatedAt), customerVersion: null };
+    setJobAddressEditing(false); setJobAddressValidation(null); setJobEditError(''); setSaveJobCustomerAddress(false);
     setSelectedJob(job);
     setEditJobData({
+      address,
       customerName: job.customerName || '',
       serviceType: job.serviceType || '',
       date: job.date || '',
@@ -417,29 +499,35 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
 
   // Save edited job
   const saveEditedJob = async () => {
-    if (!selectedJob) return;
-
-    setIsEditingJob(true);
+    if (!selectedJob || jobSaving.current) return;
+    const mutation = jobMutation.current;
+    jobSaving.current = true; setIsEditingJob(true); setJobAddressValidation(null); setJobEditError('');
 
     try {
-      const updatedJobData = {
-        ...editJobData,
-        updatedAt: new Date().toISOString()
-      };
-
-      const result = await JobService.updateJob(selectedJob.id, updatedJobData);
+      const { address, ...updatedJobData } = editJobData;
+      if (address.trim() !== jobEditBase.current.address || saveJobCustomerAddress && editPermanentAvailable) Object.assign(updatedJobData, {
+        address: address.trim(), serviceProperty: { address: address.trim() }, city: '', state: '', zipCode: '', postalCode: '',
+      });
+      const options = saveJobCustomerAddress && editPermanentAvailable
+        ? { saveCustomerAddress: true, expectedCustomerVersion: jobEditBase.current.customerVersion } : undefined;
+      const result = await JobService.updateJob(jobEditBase.current.id, updatedJobData, jobEditBase.current.version, options);
+      if (!mounted.current || mutation !== jobMutation.current) return;
 
       if (result.success) {
-        Alert.alert('Success', 'Job updated successfully!');
+        if (result.customerAddressUpdated) await loadCustomers();
+        if (!mounted.current || mutation !== jobMutation.current) return;
+        Alert.alert('Success', result.customerAddressUpdated ? 'Job and customer address updated successfully.' : 'Job updated successfully.');
         setShowJobEditModal(false);
         loadJobs(); // Refresh the jobs list
       } else {
-        Alert.alert('Error', result.error?.message || 'Failed to update job');
+        setJobAddressValidation(result.error?.addressValidation || null);
+        setJobEditError(result.error?.message || 'Could not update the job. Please try again.');
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to update job');
+      if (mounted.current && mutation === jobMutation.current) setJobEditError(error.message || 'Could not update the job. Please try again.');
     } finally {
-      setIsEditingJob(false);
+      jobSaving.current = false;
+      if (mounted.current && mutation === jobMutation.current) setIsEditingJob(false);
     }
   };
 
@@ -617,6 +705,8 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
     // Pre-populate the schedule service form with customer info
     resetScheduleForm();
     setSelectedCustomer(job.customerName);
+    setSelectedCustomerId(job.customerId || '');
+    setScheduleAddress(job.serviceProperty?.address || job.serviceProperty?.formattedAddress || formatSavedAddress(job));
     setSelectedService(job.serviceType);
     setNotes(`Follow-up for job completed on ${new Date().toLocaleDateString()}`);
 
@@ -725,24 +815,24 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
       </Modal>
 
       {/* Customer Management Modal */}
-      <Modal
+      <InlineJobPanel label="Customer management" priority={20}
         visible={showCustomerModal && managing}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowCustomerModal(false)}
       >
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <View style={styles.bottomModalOverlay}>
           <View style={styles.bottomModalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Customers</Text>
               <TouchableOpacity 
-                onPress={() => setShowCustomerModal(false)}
+                disabled={isSavingCustomer}
+                onPress={() => { if (!customerSaving.current) setShowCustomerModal(false); }}
                 style={styles.closeButton}
               >
                 <MaterialIcons name="close" size={24} color={COLORS.text.primary} />
               </TouchableOpacity>
             </View>
 
+            <ScrollView style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
             <View style={styles.searchContainer}>
               <MaterialIcons name="search" size={20} color={COLORS.gray[500]} style={styles.searchIcon} />
               <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
@@ -752,7 +842,7 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
               />
             </View>
 
-            <ScrollView style={styles.customerList}>
+            <ScrollView style={styles.customerList} nestedScrollEnabled>
               {isLoadingCustomers ? (
                 <View style={styles.emptyState}>
                   <MaterialIcons name="refresh" size={48} color={COLORS.primary[500]} />
@@ -769,10 +859,10 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
                   <View key={customer.id} style={styles.customerItem}>
                     <View style={styles.customerInfo}>
                       <Text style={styles.customerName}>{customer.name}</Text>
-                      <Text style={styles.customerDetails}>{customer.address} • {customer.phone}</Text>
+                      <Text style={styles.customerDetails}>{formatSavedAddress(customer)} • {customer.phone}</Text>
                     </View>
                     <View style={styles.customerActions}>
-                      <TouchableOpacity style={styles.actionIcon}>
+                      <TouchableOpacity accessibilityLabel={`Edit customer ${customer.name}`} disabled={isSavingCustomer} style={styles.actionIcon} onPress={() => startCustomerEdit(customer)}>
                         <MaterialIcons name="edit" size={20} color={COLORS.primary[500]} />
                       </TouchableOpacity>
                       <TouchableOpacity 
@@ -803,13 +893,14 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
             </ScrollView>
 
             <View style={styles.customerForm}>
-              <Text style={styles.formSectionTitle}>Add New Customer</Text>
+              <Text style={styles.formSectionTitle}>{editingCustomer ? 'Edit Customer' : 'Add New Customer'}</Text>
 
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>Name *</Text>
                 <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                   style={styles.textInput}
                   placeholder="Customer Name"
+                  accessibilityLabel="Customer name" editable={!isSavingCustomer}
                   value={customerName}
                   onChangeText={setCustomerName}
                 />
@@ -820,6 +911,7 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
                 <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                   style={styles.textInput}
                   placeholder="(555) 123-4567"
+                  accessibilityLabel="Customer phone" editable={!isSavingCustomer}
                   keyboardType="phone-pad"
                   value={customerPhone}
                   onChangeText={setCustomerPhone}
@@ -827,14 +919,15 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
               </View>
 
               <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Address *</Text>
+                <Text style={styles.formLabel}>Service address (optional for a new contact)</Text>
                 <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                   style={[styles.textInput, styles.textArea]}
                   placeholder="123 Main St, City, State 12345"
+                  accessibilityLabel="Customer service address" editable={!isSavingCustomer}
                   multiline
                   numberOfLines={2}
                   value={customerAddress}
-                  onChangeText={setCustomerAddress}
+                  onChangeText={value => { setCustomerAddress(value); setCustomerValidation(null); setCustomerError(''); }}
                 />
               </View>
 
@@ -843,47 +936,39 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
                 <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
                   style={styles.textInput}
                   placeholder="customer@email.com"
+                  accessibilityLabel="Customer email" editable={!isSavingCustomer}
                   keyboardType="email-address"
                   value={customerEmail}
                   onChangeText={setCustomerEmail}
                 />
               </View>
+              <AddressValidationNotice validation={customerValidation} disabled={isSavingCustomer} onUseSuggested={address => { setCustomerAddress(address); setCustomerValidation(null); setCustomerError(''); }} />
+              {!!customerError && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{customerError}</Text>}
+              {editingCustomer && <GlassButton secondary title="Cancel customer edit" disabled={isSavingCustomer} onPress={resetCustomerForm} />}
             </View>
 
             <TouchableOpacity 
               style={[
                 styles.addButton,
-                !isCustomerFormValid() && styles.disabledButton
+                (!isCustomerFormValid() || isSavingCustomer) && styles.disabledButton
               ]}
-              onPress={async () => {
-                if (isCustomerFormValid()) {
-                  const customerData = {
-                    name: customerName,
-                    phone: customerPhone,
-                    address: customerAddress,
-                    email: customerEmail || ''
-                  };
-
-                  const success = await addCustomerToFirebase(customerData);
-                  if (success) {
-                    Alert.alert('Success', 'Customer added successfully!');
-                    resetCustomerForm();
-                  }
-                }
-              }}
-              disabled={!isCustomerFormValid()}
+              accessibilityLabel={editingCustomer ? 'Save customer' : 'Add customer'}
+              onPress={saveCustomer}
+              disabled={!isCustomerFormValid() || isSavingCustomer}
             >
               <MaterialIcons name="add" size={24} color={COLORS.white} />
               <Text style={[
                 styles.addButtonText,
                 !isCustomerFormValid() && styles.disabledButtonText
               ]}>
-                Add Customer
+                {isSavingCustomer ? 'Saving...' : editingCustomer ? 'Save Customer' : 'Add Customer'}
               </Text>
             </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
-      </Modal>
+        </KeyboardAvoidingView>
+      </InlineJobPanel>
 
       {/* Schedule Service Modal */}
       <InlineJobPanel label="Schedule service" priority={20}
@@ -901,7 +986,8 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>{t('scheduleServiceTitle')}</Text>
                 <TouchableOpacity 
-                  onPress={() => setShowScheduleServiceModal(false)}
+                  disabled={isScheduling}
+                  onPress={() => { if (!scheduleSaving.current) setShowScheduleServiceModal(false); }}
                   style={styles.closeButton}
                 >
                   <MaterialIcons name="close" size={24} color={COLORS.text.primary} />
@@ -916,6 +1002,7 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>{t('customer')} *</Text>
                 <TouchableOpacity 
+                  accessibilityLabel="Select service customer" disabled={isScheduling}
                   style={styles.customerSelector}
                   onPress={() => setShowCustomerDropdown(!showCustomerDropdown)}
                 >
@@ -939,14 +1026,13 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
                       customers.map((customer) => (
                         <TouchableOpacity
                           key={customer.id}
+                          accessibilityLabel={`Select customer ${customer.name}`}
+                          disabled={isScheduling}
                           style={styles.dropdownItem}
-                          onPress={() => {
-                            setSelectedCustomer(customer.name);
-                            setShowCustomerDropdown(false);
-                          }}
+                          onPress={() => chooseCustomer(customer)}
                         >
                           <Text style={styles.dropdownItemText}>{customer.name}</Text>
-                          <Text style={styles.dropdownItemSubtext}>{customer.address}</Text>
+                          <Text style={styles.dropdownItemSubtext}>{formatSavedAddress(customer)}</Text>
                         </TouchableOpacity>
                       ))
                     )}
@@ -954,9 +1040,17 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
                 )}
               </View>
 
+              <ServiceAddressEditor address={scheduleAddress} editing={scheduleAddressEditing} disabled={isScheduling}
+                onEnable={() => { scheduleCustomerVersion.current = recordVersion(scheduleCustomer?.updatedAt); setScheduleAddressEditing(true); }}
+                onChange={value => { setScheduleAddress(value); setScheduleAddressValidation(null); setScheduleError(''); }}
+                validation={scheduleAddressValidation} onUseSuggested={value => { if (scheduleAddressEditing) { setScheduleAddress(value); setScheduleAddressValidation(null); setScheduleError(''); } }}
+                canUpdateCustomer={schedulePermanentAvailable} permanent={saveScheduleCustomerAddress} onPermanent={setSaveScheduleCustomerAddress} />
+              {!!scheduleError && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{scheduleError}</Text>}
+
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>{t('serviceType')} *</Text>
                 <TouchableOpacity 
+                  accessibilityLabel="Select service type"
                   style={styles.serviceSelector}
                   onPress={() => setShowServiceDropdown(!showServiceDropdown)}
                 >
@@ -984,6 +1078,7 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
                       user.services.map((service, index) => (
                         <TouchableOpacity
                           key={index}
+                          accessibilityLabel={`Select service ${service}`}
                           style={styles.dropdownItem}
                           onPress={() => {
                             setSelectedService(service);
@@ -1001,7 +1096,7 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
               <View style={styles.formRow}>
                 <View style={styles.formGroupHalf}>
                   <Text style={styles.formLabel}>{t('date')} *</Text>
-                  <TouchableOpacity style={styles.dateSelector} onPress={openDatePicker}>
+                  <TouchableOpacity accessibilityLabel="Service date" style={styles.dateSelector} onPress={openDatePicker}>
                     <MaterialIcons name="calendar-today" size={20} color={COLORS.primary[500]} />
                     <Text style={[styles.dateSelectorText, selectedDate && styles.selectedText]}>
                       {selectedDate || t('selectDate')}
@@ -1010,10 +1105,10 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
                 </View>
                 <View style={styles.formGroupHalf}>
                   <Text style={styles.formLabel}>{t('time')} *</Text>
-                  <TouchableOpacity style={styles.timeSelector} onPress={openTimePicker}>
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="Service time" style={styles.timeSelector} onPress={openTimePicker}>
                     <MaterialIcons name="access-time" size={20} color={COLORS.primary[500]} />
                     <Text style={[styles.timeSelectorText, selectedTime && styles.selectedText]}>
-                      {selectedTime || t('selectTime')}
+                      {selectedTime ? timeLabel(selectedTime) : t('selectTime')}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -1057,7 +1152,9 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
             <View style={styles.modalActions}>
               <TouchableOpacity 
                 style={[styles.modalButton, styles.cancelButton]}
+                disabled={isScheduling}
                 onPress={() => {
+                  if (scheduleSaving.current) return;
                   resetScheduleForm();
                   setShowScheduleServiceModal(false);
                 }}
@@ -1068,45 +1165,17 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
                 style={[
                   styles.modalButton, 
                   styles.confirmButton,
-                  !isScheduleFormValid() && styles.disabledButton
+                  (!isScheduleFormValid() || isScheduling) && styles.disabledButton
                 ]}
-                onPress={async () => {
-                  if (isScheduleFormValid()) {
-                    try {
-                      const jobData = {
-                        customerName: selectedCustomer,
-                        serviceType: selectedService,
-                        date: selectedDate,
-                        time: selectedTime,
-                        duration: duration,
-                        estimatedCost: estimatedCost || null,
-                        notes: notes || '',
-                      };
-
-                      const result = await JobService.addJob(jobData);
-
-                      if (result.success) {
-                        Alert.alert('Success', 'Service scheduled successfully!');
-                        resetScheduleForm();
-                        setShowScheduleServiceModal(false);
-                        // Reload jobs to show the new one
-                        loadJobs();
-                      } else {
-                        Alert.alert('Error', result.error?.message || 'Failed to schedule service');
-                      }
-                    } catch (error) {
-                      console.error('Schedule service error:', error);
-                      Alert.alert('Error', 'Failed to schedule service');
-                    }
-                  }
-                }}
-                disabled={!isScheduleFormValid()}
+                accessibilityLabel="Save scheduled service"
+                onPress={saveScheduledJob}
+                disabled={!isScheduleFormValid() || isScheduling}
               >
                 <Text style={[
                   styles.confirmButtonText,
                   !isScheduleFormValid() && styles.disabledButtonText
                 ]}>
-                  {t('scheduleServiceButton')}
+                  {isScheduling ? 'Saving...' : t('scheduleServiceButton')}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1263,41 +1332,17 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
         />
       )}
 
-      {/* Time Picker Modal for iOS */}
-      {Platform.OS === 'ios' && showTimePicker && (
-        <InlineJobPanel label="Choose service time" priority={30}
-          visible={showTimePicker}
-          transparent={true}
-          animationType="slide"
-          onRequestClose={closeTimePicker}
-        >
+      {/* One ordinary-view time chooser on both platforms; never a native Modal. */}
+      {showTimePicker && (
+        <InlineJobPanel label="Choose service time" priority={30} visible>
           <View style={styles.pickerModalOverlay}>
-            <View style={styles.pickerModalContent}>
-              <View style={styles.pickerHeader}>
-                <TouchableOpacity onPress={closeTimePicker}>
-                  <Text style={styles.pickerDoneButton}>Done</Text>
-                </TouchableOpacity>
-              </View>
-              <DateTimePicker themeVariant={isDark ? 'dark' : 'light'}
-                value={selectedDateTime}
-                mode="time"
-                display="spinner"
-                onChange={handleTimeChange}
-                style={styles.iosDatePicker}
-              />
+            <View style={[styles.pickerModalContent, { maxHeight: '90%' }]}>
+              <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 22 }}>
+                <QuarterHourPicker value={showJobEditModal ? editJobData.time : selectedTime} disabled={isEditingJob} onChange={handleTimeChange} onCancel={closeTimePicker} />
+              </ScrollView>
             </View>
           </View>
         </InlineJobPanel>
-      )}
-
-      {/* Time Picker for Android */}
-      {Platform.OS === 'android' && showTimePicker && (
-        <DateTimePicker themeVariant={isDark ? 'dark' : 'light'}
-          value={selectedDateTime}
-          mode="time"
-          display="default"
-          onChange={handleTimeChange}
-        />
       )}
 
       {/* Job Edit Modal */}
@@ -1312,7 +1357,8 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Edit Job</Text>
               <TouchableOpacity 
-                onPress={() => setShowJobEditModal(false)}
+                disabled={isEditingJob}
+                onPress={() => { if (!jobSaving.current) { jobMutation.current++; setShowJobEditModal(false); } }}
                 style={styles.closeButton}
               >
                 <MaterialIcons name="close" size={24} color={COLORS.text.primary} />
@@ -1324,6 +1370,12 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
               style={styles.editForm}
             >
               <ScrollView style={styles.editFormContent}>
+                <ServiceAddressEditor address={editJobData.address || ''} editing={jobAddressEditing} disabled={isEditingJob}
+                  onEnable={() => { jobEditBase.current.customerVersion = recordVersion(editCustomer?.updatedAt); setJobAddressEditing(true); }}
+                  onChange={address => { setEditJobData(previous => ({ ...previous, address })); setJobAddressValidation(null); setJobEditError(''); }}
+                  validation={jobAddressValidation} onUseSuggested={address => { if (jobAddressEditing) { setEditJobData(previous => ({ ...previous, address })); setJobAddressValidation(null); setJobEditError(''); } }}
+                  canUpdateCustomer={editPermanentAvailable} permanent={saveJobCustomerAddress} onPermanent={setSaveJobCustomerAddress} />
+                {!!jobEditError && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{jobEditError}</Text>}
                 <View style={styles.formGroup}>
                   <Text style={styles.formLabel}>Customer Name *</Text>
                   <TextInput keyboardAppearance={isDark ? 'dark' : 'light'}
@@ -1361,11 +1413,13 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
                   <View style={[styles.formGroup, styles.halfWidth]}>
                     <Text style={styles.formLabel}>Time *</Text>
                     <TouchableOpacity 
+                      accessibilityRole="button"
+                      accessibilityLabel="Edit job time"
                       style={styles.dateTimeButton}
                       onPress={openTimePicker}
                     >
                       <Text style={styles.dateTimeButtonText}>
-                        {editJobData.time || 'Select Time'}
+                        {editJobData.time ? timeLabel(editJobData.time) : 'Select Time'}
                       </Text>
                       <MaterialIcons name="access-time" size={20} color={COLORS.primary[500]} />
                     </TouchableOpacity>
@@ -1456,7 +1510,8 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
             <View style={styles.modalActions}>
               <TouchableOpacity 
                 style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => setShowJobEditModal(false)}
+                disabled={isEditingJob}
+                onPress={() => { if (!jobSaving.current) { jobMutation.current++; setShowJobEditModal(false); } }}
               >
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
@@ -1466,7 +1521,7 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
                   styles.confirmButton,
                   (!editJobData.customerName || !editJobData.serviceType || !editJobData.date || !editJobData.time) && styles.disabledButton
                 ]}
-                onPress={saveEditedJob}
+                accessibilityLabel="Save job changes" onPress={saveEditedJob}
                 disabled={!editJobData.customerName || !editJobData.serviceType || !editJobData.date || !editJobData.time || isEditingJob}
               >
                 <Text style={[
@@ -1839,7 +1894,7 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
 
       {/* Customer Selection Modal */}
       <Modal
-        visible={showCustomerDropdown}
+        visible={showCustomerDropdown && showCreateEstimateModal}
         transparent={true}
         animationType="slide"
         onRequestClose={() => setShowCustomerDropdown(false)}
@@ -1876,7 +1931,7 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
                     <View style={styles.customerInfo}>
                       <Text style={styles.customerName}>{customer.name}</Text>
                       <Text style={styles.customerDetails}>
-                        {customer.phone} • {customer.address}
+                        {customer.phone} • {formatSavedAddress(customer)}
                       </Text>
                     </View>
                   </TouchableOpacity>
@@ -1901,7 +1956,7 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
 
       {/* Service Type Selection Modal */}
       <Modal
-        visible={showServiceDropdown}
+        visible={showServiceDropdown && showCreateEstimateModal}
         transparent={true}
         animationType="slide"
         onRequestClose={() => setShowServiceDropdown(false)}

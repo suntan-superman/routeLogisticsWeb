@@ -53,7 +53,7 @@ async function fixture({ configured = true, solo = false, updatedAt = OLD_VERSIO
     calls++;
     if (hook) { const next = hook; hook = null; await next(); }
     if (address.includes('Unresolved')) throw new Error('Synthetic address lookup failure');
-    return { formattedAddress: address, latitude: address === OUTSIDE ? 34 : 35, longitude: -119, postalCode: address === OUTSIDE ? '90001' : '93312', countryCode: 'US', locationType: 'ROOFTOP', streetAddressVerified: true };
+    return { formattedAddress: address, latitude: address === OUTSIDE ? 34 : 35, longitude: -119, postalCode: address === OUTSIDE ? '90001' : '93312', countryCode: 'US', locationType: 'ROOFTOP', streetAddressVerified: true, placeId: 'synthetic-confirmed-place' };
   } });
   if (configured && !solo) {
     paths.add(`rlServiceAreas/${id}`);
@@ -62,7 +62,7 @@ async function fixture({ configured = true, solo = false, updatedAt = OLD_VERSIO
   const work = workDataHandlers(db, { serviceAreas: area });
   const job = patch => ({ customerId, serviceType: 'Synthetic inspection', serviceCategory: 'Pest Control', serviceProperty: { address: PROPERTY }, date: '2030-01-02', time: '09:00', ...patch });
   const save = patch => ({ action: 'create', job: job(), saveCustomerAddress: true, expectedCustomerVersion: OLD_VERSION, ...patch });
-  return { id, uid, customerId, original, work, job, save, request, calls: () => calls, onGeocode: value => { hook = value; } };
+  return { id, uid, customerId, original, work, area, job, save, request, calls: () => calls, onGeocode: value => { hook = value; } };
 }
 
 test('ordinary scheduling and explicit one-off changes do not modify the saved customer address', async () => {
@@ -88,6 +88,24 @@ test('owners, administrators and managers explicitly save validated customer and
     assert.equal(customer.totalSpent, before.totalSpent); assert.equal(customer.notes, before.notes); assert.equal(customer.phone, before.phone);
     const audits = await db.collection('rlAudit').where('companyId', '==', f.id).where('action', '==', 'customer.address.update').get();
     assert.equal(audits.size, 1); assert.equal(audits.docs[0].get('original.address'), before.address); assert.equal(audits.docs[0].get('customerId'), f.customerId);
+  }
+});
+
+test('permanent address changes replace prior Google validation metadata and audit both versions', async () => {
+  for (const solo of [false, true]) {
+    const f = await fixture({ solo });
+    const originalValidation = { source: 'google-address-validation', validatedAt: OLD_VERSION, postalCode: '93301', placeId: 'synthetic-original-place' };
+    await db.doc(`customers/${f.customerId}`).update({ addressValidation: originalValidation });
+    const saved = await f.work.manageJob(f.request(f.save()));
+    const customer = await get(`customers/${f.customerId}`), verified = saved.serviceArea.property;
+    const expectedValidation = { source: 'google-address-validation', validatedAt: verified.validatedAt, postalCode: '93312', placeId: 'synthetic-confirmed-place' };
+    assert.equal(customer.address, PROPERTY); assert.deepEqual(customer.addressValidation, expectedValidation);
+    assert.notEqual(customer.addressValidation.validatedAt, originalValidation.validatedAt);
+    assert.equal(customer.totalSpent, f.original.totalSpent); assert.equal(customer.notes, f.original.notes);
+    const audits = await db.collection('rlAudit').where('actorId', '==', f.uid).where('action', '==', 'customer.address.update').get();
+    assert.equal(audits.size, 1); assert.deepEqual(audits.docs[0].get('original.addressValidation'), originalValidation);
+    assert.deepEqual(audits.docs[0].get('changes.addressValidation'), expectedValidation);
+    assert.equal(audits.docs[0].get('changes.postalCode'), '');
   }
 });
 
@@ -156,13 +174,13 @@ test('membership and customer tenancy are rechecked after geocoding and before t
   }
 });
 
-test('unconfigured coverage stores the explicit new address while discarding old and spoofed coordinates', async () => {
+test('unconfigured coverage still verifies the new address and replaces spoofed coordinates with Google coordinates', async () => {
   const f = await fixture({ configured: false });
   const saved = await f.work.manageJob(f.request(f.save({ job: f.job({ serviceProperty: { address: PROPERTY, latitude: 0, longitude: 0, validated: true } }) })));
   const customer = await get(`customers/${f.customerId}`), job = await get(`jobs/${saved.id}`);
-  assert.equal(f.calls(), 0); assert.equal(customer.address, PROPERTY);
-  assert.equal(customer.latitude, null); assert.equal(customer.longitude, null); assert.equal(customer.location, null);
-  assert.equal(job.serviceProperty.validated, false); assert.equal(job.latitude, null);
+  assert.equal(f.calls(), 1); assert.equal(customer.address, PROPERTY);
+  assert.equal(customer.latitude, 35); assert.equal(customer.longitude, -119); assert.deepEqual(customer.location, { latitude: 35, longitude: -119 });
+  assert.equal(job.serviceProperty.validated, true); assert.equal(job.latitude, 35); assert.equal(job.serviceAreaEligibility.status, 'unconfigured');
 });
 
 test('a solo owner can atomically update their own saved customer address through the callable', async () => {
@@ -193,7 +211,7 @@ test('a concurrent solo job customer change cannot redirect a permanent update t
     };
     const value = Reflect.get(target, key, target); return typeof value === 'function' ? value.bind(target) : value;
   } });
-  const api = workDataHandlers(changingDb);
+  const api = workDataHandlers(changingDb, { serviceAreas: f.area });
   await assert.rejects(api.manageJob(f.request(f.save({ action: 'update', id: jobId, job: { serviceProperty: { address: PROPERTY } } }))), { code: 'aborted' });
   assert.equal((await get(`customers/${f.customerId}`)).address, f.original.address);
   assert.equal((await get(`customers/${secondCustomer}`)).address, 'Replacement customer address');

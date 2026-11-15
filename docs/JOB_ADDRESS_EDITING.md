@@ -26,12 +26,24 @@ technicians cannot schedule jobs or change customer records. Independent
 business owners use the same atomic operation for permanent updates.
 
 The customer address is stored as one full address string. Stale city/state/ZIP
-components and coordinates are cleared, and only coordinates from server
-validation can replace them. No Maps lookup runs merely from selecting a
-customer or enabling editing. Existing configured coverage still validates
-the explicit service property on save; unconfigured providers retain their
-existing scheduling behavior. Other estimate and service-plan workflows retain
-their explicit address-selection behavior.
+components and validation metadata are replaced with the verified result.
+Only coordinates from server validation can replace them. No Maps lookup runs
+merely from selecting a customer or enabling editing.
+
+New and changed physical customer/service addresses must pass the server's
+Google Address Validation check, including providers without configured service
+areas and independent workspaces. This applies to customer forms/imports,
+job scheduling/edits, service plans and estimate conversion. Ordinary edits to
+unchanged historical addresses do not trigger revalidation or alter past jobs.
+Server-private, tenant-scoped verified results are cached to avoid redundant
+paid requests; client coordinates and eligibility flags are never proof.
+
+If Google returns a precise, confirmed correction, the form displays **Use
+suggested address**. This changes only the draft; the user must save again.
+Unconfirmed/approximate results are rejected. Invalid or unavailable checks
+retain the draft and show retry/correction guidance. Approved estimate
+addresses remain immutable and require a new draft/reapproval to change.
+Direct client writes cannot bypass physical-address validation.
 
 Successful permanent saves refresh the scheduling form's customer default
 without requiring a page reload. Recorded addresses on other jobs and service
@@ -39,16 +51,37 @@ plans are not rewritten. Legacy records without their own location continue to
 inherit the customer's address when read; this change does not migrate those
 historical records.
 
-Backend deployment needs only `rlManageJob` and `rlReadWorkspace` (normalized
-customer address/revision projection). No Firebase rules, secrets, mobile binary,
-or unrelated integration changes are needed for this repair.
+Address validation uses the existing Google Address Validation API with runtime
+Application Default Credentials in the same Firebase project. No browser key
+or new secret is needed. Deploy the affected Route Logistics callables
+(`rlManageCustomer`, `rlManageJob`, `rlServiceAreas`, `rlManageServicePlan`,
+`rlEstimate`, `bulkImportCustomers`) and Firestore rules together. Web changes
+deploy from `main`; native changes require an updated mobile build.
+
+The scheduling customer picker now uses the app's green selection theme.
+All editable web/mobile appointment and route departure time controls offer
+quarter hours (`00`, `15`, `30`, `45`). Existing odd-minute values are retained
+until explicitly changed; recorded timestamps and durations are not rounded.
 
 Tests use synthetic emulator records. No real customer address is edited during
 development acceptance.
 
-Validation: web unit/UI **260/260**; focused Firestore integration/rules
-**103/103**, including **13** atomic-address cases; Functions **138 passed / 1
-existing skip**; Chromium browser **27/27**, including the two new address
-journeys. Web lint/build passed (two preexisting hook warnings). Firefox and
-WebKit remain configured; the new address journeys have not been run in those
-engines. Physical/manual acceptance is separate.
+November 15 validation: web unit/UI **287/287**, mobile **224/224**, Functions
+**144 passed / one existing skip**, focused emulator **125/125**, and the final
+affected-file emulator rerun **28/28**. The broader integration/rules run passed
+**374/375**; its sole failure was a frozen login timestamp expiring against the
+ownership test's real clock. The fixture now shares its clock with both handlers,
+and that test passes in the final rerun; application authorization was unchanged.
+
+All **27 distinct Chromium scenarios** passed across the full and focused runs.
+The initial time-label assertion included the decorative selection checkmark;
+it now inspects the label text. Workflows PW-OPS-10 through PW-OPS-14 then passed
+**15/15 across Chromium, Firefox and WebKit**, including the green highlight,
+keyboard selection, 96 quarter-hour choices, one-off and permanent addresses.
+Other Firefox/WebKit cases were not rerun in this batch.
+
+Web lint/build passed with two preexisting hook warnings. Expo Doctor **18/18**,
+dependency compatibility and iOS export passed. One actual Google validation of
+Google's public campus returned **HTTP 200**, complete **PREMISE** validation and
+geocoding, and no unconfirmed components. No production customer record was
+changed. Physical iPhone/Android acceptance remains required after rebuilding.

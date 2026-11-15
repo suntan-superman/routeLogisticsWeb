@@ -5,6 +5,7 @@ import { callWorkspace } from '../services/workspaceApi';
 import { loadMaps } from '../services/maps';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import ServicePropertyEligibility from './ServicePropertyEligibility';
+import AddressValidationNotice from './AddressValidationNotice';
 
 const inputClass = 'mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500';
 const actionClass = 'rounded-lg bg-primary-700 px-4 py-2 font-medium text-white hover:bg-primary-800 disabled:cursor-not-allowed disabled:opacity-50';
@@ -44,6 +45,7 @@ export default function ServiceAreasSettings({ company: suppliedCompany }) {
 function ServiceAreasForm({ company, allowed }) {
   const [data, setData] = useState(null), [form, setForm] = useState(null), [saved, setSaved] = useState('');
   const [busy, setBusy] = useState(''), [error, setError] = useState(''), [message, setMessage] = useState('');
+  const [addressValidation, setAddressValidation] = useState(null);
   const [preview, setPreview] = useState(false), [previewCategory, setPreviewCategory] = useState(''), [property, setProperty] = useState({ address: '', serviceCategory: '' });
   const runtime = useRef({ mounted: false, sequence: 0, busy: false });
   const dirty = allowed && !!form && JSON.stringify(form) !== saved;
@@ -52,13 +54,14 @@ function ServiceAreasForm({ company, allowed }) {
     const state = runtime.current;
     if (!state.mounted || state.busy) return;
     state.busy = true; const sequence = ++state.sequence;
-    setBusy(kind); setError(''); setMessage('');
+    setBusy(kind); setError(''); setMessage(''); setAddressValidation(null);
     try {
       const result = await operation();
       if (state.mounted && sequence === state.sequence) onSuccess(result);
     } catch (failure) {
       if (state.mounted && sequence === state.sequence) {
         setError(failure.message || 'Service areas could not be updated. Your changes are available to retry.');
+        setAddressValidation(failure.details?.addressValidation || null);
         if (['functions/permission-denied', 'functions/unauthenticated'].includes(failure.code)) { setForm(null); setData(null); setPreview(false); }
         if (kind === 'save') toast.error(failure.message || 'Service areas were not saved.');
       }
@@ -77,7 +80,7 @@ function ServiceAreasForm({ company, allowed }) {
   if (!allowed) return <section className="rounded-xl border border-gray-200 bg-white p-6"><h2 className="text-xl font-semibold">Service Areas</h2><p className="mt-2">Company owners and managers manage service territories. Technicians cannot change coverage or approve exceptions.</p></section>;
   const categories = (company.serviceCategories || []).filter(value => typeof value === 'string' && value.trim());
   const validationError = form ? validation(form) : '';
-  const patch = change => { setForm(previous => ({ ...previous, ...change })); setMessage(''); };
+  const patch = change => { setForm(previous => ({ ...previous, ...change })); setMessage(''); if (Object.hasOwn(change, 'operatingAddress')) setAddressValidation(null); };
   const updateOverride = (index, changes) => setForm(previous => ({ ...previous, categoryOverrides: previous.categoryOverrides.map((row, position) => position === index ? { ...row, ...changes } : row) }));
   const save = () => {
     if (!dirty || validationError) return;
@@ -89,7 +92,8 @@ function ServiceAreasForm({ company, allowed }) {
   const previewRule = data?.settings?.categoryOverrides?.find(row => row.serviceCategory === previewCategory) || data?.settings;
   return <section aria-label="Service area settings" className="space-y-6 rounded-xl border border-gray-200 bg-white p-5 sm:p-6">
     <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-xl font-semibold">Service Areas</h2><p className="mt-1 max-w-3xl text-sm text-gray-600">Define coverage around the service property. Changes apply to future checks and do not rewrite existing appointments, customer locations or service history.</p></div><button type="button" className="text-sm font-medium text-primary-700 underline disabled:opacity-50" disabled={!!busy} onClick={reload}>Reload service areas</button></div>
-    {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-red-800">{error}</p>}
+    {error && !addressValidation && <p role="alert" className="rounded-lg bg-red-50 p-3 text-red-800">{error}</p>}
+    <AddressValidationNotice validation={addressValidation} onAccept={operatingAddress => patch({ operatingAddress })} disabled={!!busy || !allowed || !form} />
     {message && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-emerald-900">{message}</p>}
     {!form && !error && <p role="status">Loading service areas…</p>}
     {form && <>

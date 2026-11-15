@@ -5,6 +5,7 @@ import * as Crypto from 'expo-crypto';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../theme/ThemeProvider';
 import { GlassButton, GlassCard, GlassInput } from '../components/Glass';
+import QuarterHourTimeField from '../components/QuarterHourTimePicker';
 import { ScreenHeader } from '../components/MobileUI';
 import { CustomerService } from '../services/firebase';
 import { beginNativeInteraction } from '../services/nativeInteraction';
@@ -123,7 +124,7 @@ export default function EstimatesScreen({ onInteractionChange, active = true }) 
               <Pressable accessibilityRole="checkbox" accessibilityLabel="Create customer from approved prospect" accessibilityState={{ checked: createCustomer }} onPress={() => { setCreateCustomer(value => !value); setConversionCustomerId(''); }} disabled={busy} style={{ minHeight: 48, padding: 12, borderWidth: 1, borderColor: palette.border, borderRadius: 12 }}><Text style={{ color: palette.text }}>{createCustomer ? '☑' : '☐'} Create customer from approved prospect</Text></Pressable>
             </>}
             <GlassInput label="Job service date (YYYY-MM-DD)" value={schedule.date} onChangeText={date => setSchedule(previous => ({ ...previous, date }))} />
-            <GlassInput label="Job time (HH:mm)" value={schedule.time} onChangeText={time => setSchedule(previous => ({ ...previous, time }))} />
+            <QuarterHourTimeField label="Job time" value={schedule.time} disabled={busy} onChange={time => setSchedule(previous => ({ ...previous, time }))} />
             <GlassButton title="Convert approved estimate to job" disabled={busy || dirty || (!record.customerId && !createCustomer && !conversionCustomerId)} onPress={() => setConfirm('convert')} />
           </>}
           {!!(record.convertedJobId || record.jobId) && <Text style={{ color: palette.accent }}>Converted job: {record.convertedJobId || record.jobId}. Repeating conversion will not create another job.</Text>}

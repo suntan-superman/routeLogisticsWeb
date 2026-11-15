@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { cleanSettings, distanceMiles, evaluateCoverage, createGoogleGeocoder, propertyAddress, trustedProperty } = require('./serviceAreas');
+const { cleanSettings, distanceMiles, evaluateCoverage, createGoogleGeocoder, propertyAddress, trustedProperty, addressValidationDetails } = require('./serviceAreas');
 const point = { latitude: 35.4, longitude: -119, postalCode: '93312', countryCode: 'US', locationType: 'PREMISE', streetAddressVerified: true, formattedAddress: '100 Main Street, Bakersfield, CA 93312, USA' };
 const input = { operatingAddress: point.formattedAddress, method: 'zip', zipCodes: ['93312'], radiusMiles: 10, categoryOverrides: [], acceptingNewCustomers: true };
 const configured = { ...cleanSettings(input), configured: true, operatingLocation: point };
@@ -47,7 +47,7 @@ test('Google validation fails closed on incomplete, approximate, uncertain or re
   for (const field of ['missingComponentTypes', 'unconfirmedComponentTypes', 'unresolvedTokens']) { const row = response(); row.address[field] = ['street_number']; invalid.push(row); }
   for (const flag of ['inferred', 'replaced']) { const row = response(); row.address.addressComponents[0][flag] = true; invalid.push(row); }
   const wrongCountry = response(); wrongCountry.address.postalAddress.regionCode = 'CA'; invalid.push(wrongCountry);
-  for (const result of invalid) await assert.rejects(createGoogleGeocoder({ getAccessToken: async () => 'synthetic', fetchImpl: async () => ({ ok: true, json: async () => ({ result }) }) })(point.formattedAddress), { code: 'failed-precondition' });
+  for (const result of invalid) await assert.rejects(createGoogleGeocoder({ getAccessToken: async () => 'synthetic', fetchImpl: async () => ({ ok: true, json: async () => ({ result }) }) })('100 Main Stret, Bakersfield, CA 93312'), { code: 'failed-precondition' });
 });
 test('noncritical ZIP suffix inference is allowed but invalid provider responses and provider failures stay sanitized', async () => {
   const row = response(); row.verdict.hasInferredComponents = true; row.address.addressComponents.push({ componentType: 'postal_code_suffix', confirmationLevel: 'CONFIRMED', inferred: true });
@@ -55,4 +55,24 @@ test('noncritical ZIP suffix inference is allowed but invalid provider responses
   await assert.rejects(createGoogleGeocoder({ getAccessToken: async () => 'PRIVATE TOKEN', fetchImpl: async () => { throw Error('PRIVATE TOKEN provider body'); } })(point.formattedAddress), error => error.code === 'unavailable' && !error.message.includes('PRIVATE'));
   await assert.rejects(createGoogleGeocoder()(point.formattedAddress), { code: 'unavailable' });
   assert.throws(() => trustedProperty({ ...point, longitude: Infinity }, Date.now()), { code: 'failed-precondition' });
+});
+test('Google corrections are offered for explicit review and only a separately verified resubmission succeeds', async () => {
+  const corrected = response(), entered = '100 Main Stret, Bakersfield, CA 93312'; corrected.address.addressComponents[1].replaced = true;
+  let calls = 0;
+  const validate = createGoogleGeocoder({ getAccessToken: async () => 'synthetic', fetchImpl: async (_url, options) => {
+    calls++; assert.ok(JSON.parse(options.body).address.addressLines[0]); return { ok: true, json: async () => ({ result: corrected }) };
+  } });
+  await assert.rejects(validate(entered), error => {
+    assert.equal(error.code, 'failed-precondition'); assert.deepEqual(error.details.addressValidation, { status: 'confirmation-required', message: 'Google found a possible corrected address. Review it before saving.', suggestedAddress: point.formattedAddress }); return true;
+  });
+  assert.equal((await validate(point.formattedAddress)).formattedAddress, point.formattedAddress); assert.equal(calls, 2);
+});
+test('inferred locality/postal changes need review and malformed or approximate results never invent a suggestion', async () => {
+  const corrected = response(); corrected.address.addressComponents.push({ componentType: 'postal_code', confirmationLevel: 'CONFIRMED', replaced: true });
+  const validate = result => createGoogleGeocoder({ getAccessToken: async () => 'synthetic', fetchImpl: async () => ({ ok: true, json: async () => ({ result }) }) })('100 Main Street, Bakersfield, CA 93301');
+  await assert.rejects(validate(corrected), error => error.details.addressValidation.suggestedAddress === point.formattedAddress);
+  for (const row of [response({ geocode: { location: { latitude: 999, longitude: -119 } } }), response({ verdict: { addressComplete: false, validationGranularity: 'LOCALITY', geocodeGranularity: 'LOCALITY' } })]) {
+    await assert.rejects(validate(row), error => !addressValidationDetails(error).suggestedAddress);
+  }
+  assert.deepEqual(addressValidationDetails({ code: 'unavailable', message: 'PRIVATE TOKEN provider body', details: { addressValidation: { status: 'unavailable', message: 'PRIVATE TOKEN', suggestedAddress: '<script>private</script>' } } }), { status: 'unavailable', message: 'Google address verification is temporarily unavailable. Retry before saving this address.' });
 });

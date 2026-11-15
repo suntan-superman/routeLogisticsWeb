@@ -13,6 +13,19 @@ const laterDate = () => {
 const annotate = (...ids) => test.info().annotations.push({ type: 'acceptance', description: ids.join(', ') });
 const customerRow = (page, name) => page.getByRole('row').filter({ has: page.getByText(name, { exact: true }) });
 const estimateCard = (page, title) => page.locator('article').filter({ has: page.getByRole('heading', { name: title, exact: true }) });
+const timeOptionLabel = value => { const [hour, minute] = value.split(':').map(Number); return `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`; };
+
+async function chooseCustomer(scope, name) {
+  const customer = scope.getByRole('combobox', { name: 'Customer', exact: true });
+  await customer.click();
+  await customer.fill(name);
+  await scope.getByRole('listbox').getByRole('option', { name, exact: true }).click();
+}
+
+async function chooseTime(scope, label, value) {
+  await scope.getByRole('combobox', { name: label, exact: true }).click();
+  await scope.getByRole('listbox').getByRole('option', { name: timeOptionLabel(value), exact: true }).click();
+}
 
 async function openSeedEstimate(page, scenario) {
   await page.goto('/estimates');
@@ -33,16 +46,17 @@ async function checkProperty(scope, address, outcome) {
 async function setSyntheticCustomerAddress(page, scenario) {
   // Change only this test's already-authorized emulator customer through the
   // real customer editor. Its seeded historical job deliberately stays put.
-  // The job will use the existing cached inside address, never a paid lookup.
+  // Both the edited customer and the later job use tenant-private cached
+  // canonical addresses. No Google API lookup is needed by this journey.
   await page.goto('/customers');
   await expect(customerRow(page, scenario.customerName)).toBeVisible();
   await customerRow(page, scenario.customerName).getByRole('button').first().click();
   await page.getByRole('button', { name: 'Edit Customer', exact: true }).click();
   const edit = page.getByRole('heading', { name: 'Edit Customer', exact: true }).locator('../..');
-  await edit.getByPlaceholder('123 Main Street', { exact: true }).fill('1 Infinite Loop');
-  await edit.getByPlaceholder('Bakersfield', { exact: true }).fill('Cupertino');
-  await edit.getByPlaceholder('CA', { exact: true }).fill('CA');
-  await edit.getByPlaceholder('93311', { exact: true }).fill('95014');
+  await edit.getByPlaceholder('123 Main Street', { exact: true }).fill(outsideAddress(scenario));
+  await edit.getByPlaceholder('Bakersfield', { exact: true }).fill('');
+  await edit.getByPlaceholder('CA', { exact: true }).fill('');
+  await edit.getByPlaceholder('93311', { exact: true }).fill('');
   await edit.getByRole('button', { name: 'Save Changes', exact: true }).click();
   await expect(page.getByText('Customer updated successfully!', { exact: true })).toBeVisible();
   return scenario.read('customers', scenario.ids.customerId);
@@ -52,10 +66,10 @@ async function openAddressJob(page, scenario, title) {
   await page.goto('/jobs');
   await page.getByRole('button', { name: 'New Job', exact: true }).click();
   const form = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Schedule New Job', exact: true }) });
-  await form.locator('select').first().selectOption(scenario.ids.customerId);
+  await chooseCustomer(form, scenario.customerName);
   await form.getByPlaceholder('e.g. General Pest Control', { exact: true }).fill(title);
   await form.locator('input[type="date"]').fill(laterDate());
-  await form.locator('input[type="time"]').fill('10:45');
+  await chooseTime(form, 'Start time', '10:45');
   return form;
 }
 
@@ -132,10 +146,12 @@ test('PW-OPS-05 @smoke owner creates and edits a customer with persisted success
   await editor.getByPlaceholder('Enter customer name', { exact: true }).fill(name);
   await editor.getByPlaceholder('email@example.com', { exact: true }).fill(`customer-${scenario.ids.companyId}@example.invalid`);
   await editor.getByPlaceholder('(555) 123-4567', { exact: true }).fill('2025550146');
-  await editor.getByPlaceholder('123 Main Street', { exact: true }).fill('1600 Amphitheatre Parkway');
-  await editor.getByPlaceholder('Bakersfield', { exact: true }).fill('Mountain View');
-  await editor.getByPlaceholder('CA', { exact: true }).fill('CA');
-  await editor.getByPlaceholder('93311', { exact: true }).fill('94043');
+  // Use the exact tenant-private Google validation cache entry seeded by the
+  // emulator fixture. The backend still validates it; no provider call occurs.
+  await editor.getByPlaceholder('123 Main Street', { exact: true }).fill(insideAddress(scenario));
+  await editor.getByPlaceholder('Bakersfield', { exact: true }).fill('');
+  await editor.getByPlaceholder('CA', { exact: true }).fill('');
+  await editor.getByPlaceholder('93311', { exact: true }).fill('');
   await editor.getByPlaceholder('Additional notes about this customer...', { exact: true }).fill('Synthetic browser customer; do not contact.');
   await editor.getByRole('button', { name: 'Add Customer', exact: true }).click();
   await expect(page.getByText('Customer added successfully!', { exact: true })).toBeVisible();
@@ -155,7 +171,7 @@ test('PW-OPS-05 @smoke owner creates and edits a customer with persisted success
   await expect(page.getByText('Updated synthetic browser note.', { exact: true })).toBeVisible();
   const saved = (await scenario.list('customers')).filter(customer => customer.name === name);
   expect(saved).toHaveLength(1);
-  expect(saved[0]).toMatchObject({ companyId: scenario.ids.companyId, notes: 'Updated synthetic browser note.', isActive: true });
+  expect(saved[0]).toMatchObject({ companyId: scenario.ids.companyId, address: insideAddress(scenario), city: '', state: '', zipCode: '', notes: 'Updated synthetic browser note.', isActive: true, addressValidation: { source: 'google-address-validation' } });
 });
 
 test.describe('Pacific Jobs calendar-date regression', () => {
@@ -173,10 +189,10 @@ test('PW-OPS-06 manager schedules an eligible property and the job appears on di
   const service = `Browser scheduled service ${scenario.ids.companyId}`;
   const date = '2026-11-14';
   const displayedDate = 'Nov 14, 2026';
-  await form.locator('select').first().selectOption(scenario.ids.customerId);
+  await chooseCustomer(form, scenario.customerName);
   await form.getByPlaceholder('e.g. General Pest Control', { exact: true }).fill(service);
   await form.locator('input[type="date"]').fill(date);
-  await form.locator('input[type="time"]').fill('14:30');
+  await chooseTime(form, 'Start time', '14:30');
   await checkProperty(form, insideAddress(scenario), 'Property is inside coverage');
   await form.getByRole('button', { name: 'Schedule Job', exact: true }).click();
   const savedMessage = page.getByText('Job scheduled', { exact: true });
@@ -324,7 +340,7 @@ test('PW-OPS-11 recipient approval converts once to a tenant-scoped scheduled jo
   await signIn(page, scenario.accounts.owner);
   await openSeedEstimate(page, scenario);
   await page.getByLabel('Service date', { exact: true }).fill(laterDate());
-  await page.getByLabel('Time', { exact: true }).fill('11:15');
+  await chooseTime(page, 'Time', '11:15');
   await page.getByRole('button', { name: 'Convert approved estimate to job', exact: true }).click();
   await page.getByRole('dialog', { name: 'Confirm estimate action', exact: true }).getByRole('button', { name: 'Confirm job conversion', exact: true }).click();
   await expect(page.getByText(/^Converted job: .*Conversion is recorded once\.$/)).toBeVisible();
@@ -368,6 +384,46 @@ test('PW-OPS-13 saved job addresses are locked and an explicitly edited one-off 
   await expect(address).toHaveValue(outsideAddress(scenario));
   await expect(address).toBeDisabled();
   await expect(form.getByText(/Using the customer's saved address/)).toBeVisible();
+  const customer = form.getByRole('combobox', { name: 'Customer', exact: true });
+  await customer.click();
+  const selected = form.getByRole('listbox').getByRole('option', { name: scenario.customerName, exact: true });
+  await expect(selected).toHaveAttribute('aria-selected', 'true');
+  await selected.hover();
+  await expect.poll(() => selected.evaluate(node => {
+    const [red, green, blue] = getComputedStyle(node).backgroundColor.match(/[\d.]+/g).map(Number);
+    return green > red && green > blue;
+  })).toBe(true);
+  await customer.press('Escape');
+  await expect(form.getByRole('listbox')).toHaveCount(0);
+  await expect(form).toBeVisible();
+  await customer.click();
+  await customer.fill('zz-no-customer-match-zz');
+  await expect(form.getByRole('listbox').getByRole('option')).toHaveCount(0);
+  await customer.press('Escape');
+  await expect(customer).toHaveValue(scenario.customerName);
+  await expect(address).toHaveValue(outsideAddress(scenario));
+  await customer.click();
+  await customer.fill(scenario.customerName);
+  const targetId = await form.getByRole('listbox').getByRole('option', { name: scenario.customerName, exact: true }).getAttribute('id');
+  await customer.press('Home');
+  for (let attempts = 0; attempts < 20 && await customer.getAttribute('aria-activedescendant') !== targetId; attempts++) await customer.press('ArrowDown');
+  await expect(customer).toHaveAttribute('aria-activedescendant', targetId);
+  await customer.press('Enter');
+  await expect(customer).toHaveValue(scenario.customerName);
+  await expect(form.getByRole('listbox')).toHaveCount(0);
+  await customer.click(); await customer.press('Tab');
+  await expect(form.getByRole('listbox')).toHaveCount(0);
+  await expect(customer).not.toBeFocused();
+  await customer.click();
+  await form.getByRole('heading', { name: 'Schedule New Job', exact: true }).click();
+  await expect(form.getByRole('listbox')).toHaveCount(0);
+  const startTime = form.getByRole('combobox', { name: 'Start time', exact: true });
+  await startTime.click();
+  const times = form.getByRole('listbox').getByRole('option');
+  await expect(times).toHaveCount(96);
+  for (const option of await times.locator('span:first-child').allTextContents()) expect(option.trim()).toMatch(/^\d{1,2}:(00|15|30|45) (AM|PM)$/);
+  await form.getByRole('listbox').getByRole('option', { name: '9:15 AM', exact: true }).click();
+  await expect(startTime).toHaveValue('9:15 AM');
   await expect(form.getByRole('checkbox', { name: "Update customer's saved address", exact: true })).toHaveCount(0);
   await form.getByRole('button', { name: 'Enable Editing', exact: true }).click();
   await expect(address).toBeEnabled();
@@ -379,7 +435,7 @@ test('PW-OPS-13 saved job addresses are locked and an explicitly edited one-off 
   await expect(form).toHaveCount(0);
   const jobs = (await scenario.list('jobs')).filter(job => job.serviceType === service);
   expect(jobs).toHaveLength(1);
-  expect(jobs[0]).toMatchObject({ companyId: scenario.ids.companyId, customerId: scenario.ids.customerId, address: insideAddress(scenario), serviceProperty: { address: insideAddress(scenario) } });
+  expect(jobs[0]).toMatchObject({ companyId: scenario.ids.companyId, customerId: scenario.ids.customerId, address: insideAddress(scenario), time: '09:15', serviceProperty: { address: insideAddress(scenario) } });
   expect(await scenario.read('customers', scenario.ids.customerId)).toEqual(customerBefore);
   expect(await scenario.read('jobs', scenario.ids.jobId)).toEqual(historyBefore);
 });
@@ -415,7 +471,7 @@ test('PW-OPS-14 permanent address opt-in updates the selected customer and refre
   // the corrected customer address available to the very next new-job form.
   await page.getByRole('button', { name: 'New Job', exact: true }).click();
   const next = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Schedule New Job', exact: true }) });
-  await next.locator('select').first().selectOption(scenario.ids.customerId);
+  await chooseCustomer(next, scenario.customerName);
   await expect(next.getByLabel('Service property address', { exact: true })).toHaveValue(insideAddress(scenario));
   await expect(next.getByLabel('Service property address', { exact: true })).toBeDisabled();
   expect((await scenario.list('jobs')).filter(job => job.serviceType === service)).toHaveLength(1);

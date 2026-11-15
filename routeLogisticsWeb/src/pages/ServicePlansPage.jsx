@@ -8,6 +8,8 @@ import { useConfirm } from '../components/ConfirmProvider';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useAuth } from '../contexts/AuthContext';
 import ServicePropertyEligibility from '../components/ServicePropertyEligibility';
+import TimeSelect from '../components/TimeSelect';
+import AddressValidationNotice from '../components/AddressValidationNotice';
 
 const input = 'mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm';
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -22,6 +24,7 @@ const ServicePlansPage = () => {
   const [customers, setCustomers] = useState([]);
   const [form, setForm] = useState(blank);
   const [serviceProperty, setServiceProperty] = useState(emptyProperty), [serviceAreaPolicy, setServiceAreaPolicy] = useState(null);
+  const [addressValidation, setAddressValidation] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false), savingRef = useRef(false);
   const [loading, setLoading] = useState(true);
@@ -32,7 +35,7 @@ const ServicePlansPage = () => {
   const { confirmDiscard } = useUnsavedChanges(manage && showForm && formChanged, { message: 'You have an unsaved service plan. Leave without saving it?' });
   const toggleForm = async () => {
     if (savingRef.current || (showForm && formChanged && !(await confirmDiscard()))) return;
-    setForm(blank); setServiceProperty(emptyProperty()); setServiceAreaPolicy(null); setShowForm(value => !value);
+    setForm(blank); setServiceProperty(emptyProperty()); setServiceAreaPolicy(null); setAddressValidation(null); setShowForm(value => !value);
   };
 
   const load = useCallback(async () => {
@@ -49,15 +52,17 @@ const ServicePlansPage = () => {
   useEffect(() => {
     load();
   }, [load]);
+  useEffect(() => { setAddressValidation(null); }, [company?.id]);
 
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const set = (k) => (e) => { setAddressValidation(null); setForm((f) => ({ ...f, [k]: e.target.value })); };
+  const changeProperty = value => { if (savingRef.current) return; setAddressValidation(null); setServiceProperty(value); };
 
   const submit = async (e) => {
     e.preventDefault();
     if (!manage || !canManage() || savingRef.current || !formChanged) return;
     if (company?.id && !serviceAreaPolicy) return toast.error('Wait for service-area settings to load, or retry the property check.');
     if (company?.id && serviceAreaPolicy.settings?.configured && !serviceProperty.address.trim()) return toast.error('Enter the service property address explicitly before creating this plan.');
-    savingRef.current = true; setSaving(true);
+    savingRef.current = true; setSaving(true); setAddressValidation(null);
     try {
       const customer = customers.find((c) => c.id === form.customerId);
       const res = await createServicePlan({
@@ -65,15 +70,15 @@ const ServicePlansPage = () => {
         customerName: customer?.name || '',
         customerPhone: customer?.phone || '',
         address: serviceProperty.address.trim() || customerAddress(customer),
-        ...(company?.id && serviceProperty.address.trim() ? { serviceProperty: { address: serviceProperty.address.trim() }, serviceCategory: serviceProperty.serviceCategory.trim(), serviceAreaExceptionId: serviceProperty.exceptionId || null } : {}),
+        ...(serviceProperty.address.trim() ? { serviceProperty: { address: serviceProperty.address.trim() }, serviceCategory: serviceProperty.serviceCategory.trim(), serviceAreaExceptionId: serviceProperty.exceptionId || null } : {}),
       });
-      if (!res.success) return toast.error(res.error);
+      if (!res.success) { setAddressValidation(res.details?.addressValidation || null); return toast.error(res.error); }
       toast.success('Service plan created');
       setForm(blank);
-      setServiceProperty(emptyProperty()); setServiceAreaPolicy(null);
+      setServiceProperty(emptyProperty()); setServiceAreaPolicy(null); setAddressValidation(null);
       setShowForm(false);
       load();
-    } catch (failure) { toast.error(failure.message || 'The service plan could not be saved. Please try again.'); }
+    } catch (failure) { setAddressValidation(failure.details?.addressValidation || null); toast.error(failure.message || 'The service plan could not be saved. Please try again.'); }
     finally { savingRef.current = false; setSaving(false); }
   };
 
@@ -126,7 +131,7 @@ const ServicePlansPage = () => {
         <form onSubmit={submit} className="bg-white border rounded-lg p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <fieldset disabled={saving} className="contents">
           <label className="text-sm text-gray-700 sm:col-span-2">Customer *
-            <select required aria-label="Service plan customer" className={input} value={form.customerId} onChange={event => { setForm(previous => ({ ...previous, customerId: event.target.value })); setServiceProperty(previous => ({ ...previous, address: '', exceptionId: null, confirmed: false })); }}>
+            <select required aria-label="Service plan customer" className={input} value={form.customerId} onChange={event => { setAddressValidation(null); setForm(previous => ({ ...previous, customerId: event.target.value })); setServiceProperty(previous => ({ ...previous, address: '', exceptionId: null, confirmed: false })); }}>
               <option value="">Select…</option>
               {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
@@ -136,10 +141,10 @@ const ServicePlansPage = () => {
             <select className={input} value={form.frequencyDays} onChange={set('frequencyDays')}>{FREQUENCIES.map((f) => <option key={f.days} value={f.days}>{f.label}</option>)}</select>
           </label>
           <label className="text-sm text-gray-700">First service date<input required type="date" className={input} value={form.nextServiceDate} onChange={set('nextServiceDate')} /></label>
-          <label className="text-sm text-gray-700">Time<input type="time" className={input} value={form.time} onChange={set('time')} /></label>
+          <TimeSelect label="Time" className={input} value={form.time} disabled={saving} onChange={time => setForm(previous => ({ ...previous, time }))} />
           <label className="text-sm text-gray-700">Price per visit ($)<input type="number" min="0" step="0.01" className={input} value={form.price} onChange={set('price')} /></label>
           <label className="text-sm text-gray-700">Notes<input className={input} value={form.notes} onChange={set('notes')} /></label>
-          {company?.id && <div className="sm:col-span-2"><ServicePropertyEligibility companyId={company.id} serviceCategories={company.serviceCategories || []} value={serviceProperty} onChange={setServiceProperty} onPolicyLoaded={setServiceAreaPolicy} purpose="scheduling" billingAddress={customerAddress(customers.find(customer => customer.id === form.customerId))} /></div>}
+          {company?.id ? <div className="sm:col-span-2"><ServicePropertyEligibility companyId={company.id} serviceCategories={company.serviceCategories || []} value={serviceProperty} validation={addressValidation} onChange={changeProperty} onPolicyLoaded={setServiceAreaPolicy} purpose="scheduling" disabled={saving} billingAddress={customerAddress(customers.find(customer => customer.id === form.customerId))} /></div> : <div className="sm:col-span-2 space-y-3"><label className="text-sm text-gray-700">Service property address<input aria-label="Service property address" className={input} value={serviceProperty.address} maxLength={278} onChange={event => changeProperty({ ...serviceProperty, address: event.target.value, exceptionId: null, confirmed: false })} /></label><AddressValidationNotice validation={addressValidation} disabled={saving} onAccept={address => changeProperty({ ...serviceProperty, address, exceptionId: null, confirmed: false })} /></div>}
           <div className="sm:col-span-2 flex justify-end"><button disabled={!formChanged || !form.customerId || !form.serviceType.trim() || !!company?.id && !serviceAreaPolicy} className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700">{saving ? 'Saving…' : 'Create plan'}</button></div>
           </fieldset>
         </form>

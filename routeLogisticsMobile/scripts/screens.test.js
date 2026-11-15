@@ -12,12 +12,14 @@ const root = path.resolve(__dirname, '..'), cache = new Map(), AuthContext = Rea
 let currentAuth, changes = [], sent = [], verified = [], stored = new Map();
 let jobRequests = [], jobLoader = async () => ({ success: true, jobs: [] }), detailLoader, authRefreshes = 0;
 let nativePushMounts = 0;
+let customerRows = [], customerSaves = [], jobSaves = [], customerSave, jobSave;
 const mounted = new Set();
-const appListeners = new Set(), networkListeners = new Set();
+const appListeners = new Set(), networkListeners = new Set(), backListeners = new Set();
 const pass = ({ children }) => children;
 const native = Object.fromEntries(['View','Text','TextInput','Pressable','TouchableOpacity','ScrollView','KeyboardAvoidingView','ActivityIndicator','Image','Switch','Button','StatusBar','RefreshControl'].map(name => [name, name]));
 native.ScrollView = ({ refreshControl, children, ...props }) => React.createElement('ScrollView', props, refreshControl, children);
 native.AppState = { currentState: 'active', addEventListener: (_event, listener) => { appListeners.add(listener); return { remove: () => appListeners.delete(listener) }; } };
+native.BackHandler = { addEventListener: (_event, listener) => { backListeners.add(listener); return { remove: () => backListeners.delete(listener) }; } };
 Object.assign(native, { StyleSheet: { create: x => x, absoluteFill: {}, absoluteFillObject: {} }, Platform: { OS: 'ios', select: x => x.ios }, Alert: { alert() {} }, Linking: { openURL: async () => {} }, Modal: ({ visible, children }) => visible ? React.createElement('Modal', null, children) : null });
 const palette = { background: '#07120F', surface: '#14241F', glass: '#14241F', text: '#EFFAF5', secondary: '#B0C8BE', border: '#405D4E', input: '#14241F', accent: '#62E3B3', button: '#087B55', danger: '#FFAAA3', highlight: '#FFFFFF', glow: '#164D38' };
 const nativeApplication = { nativeApplicationVersion: '1.0.0', nativeBuildVersion: '27' };
@@ -39,7 +41,7 @@ function load(relative) {
     if (specifier === 'expo-blur') return { BlurView: 'BlurView' };
     if (specifier === 'expo-linear-gradient') return { LinearGradient: 'LinearGradient' };
     if (specifier === '@expo/vector-icons') return { Ionicons: 'Icon', MaterialIcons: 'Icon', AntDesign: 'Icon', MaterialCommunityIcons: 'Icon' };
-    if (specifier === '@react-native-community/datetimepicker') return () => null;
+    if (specifier === '@react-native-community/datetimepicker') return 'NativeDatePicker';
     if (specifier === '@react-native-community/netinfo') return { addEventListener: listener => { networkListeners.add(listener); listener({ isConnected: true, isInternetReachable: true }); return () => networkListeners.delete(listener); } };
     if (specifier === '@react-native-async-storage/async-storage') return { getItem: async key => stored.get(key) || null, setItem: async (key, value) => stored.set(key, value), removeItem: async key => stored.delete(key) };
     if (specifier === './AuthContext' || specifier.endsWith('/contexts/AuthContext')) return { AuthContext, AuthProvider: pass, useAuth: () => currentAuth };
@@ -54,7 +56,7 @@ function load(relative) {
     if (specifier.endsWith('/services/tenancy')) return { canManage: () => currentAuth.permissions.canManage, localDate: () => '2026-11-13' };
     if (specifier === './offline' || specifier.endsWith('/services/offline')) return { cachedRead: (_key, loader) => loader(), readCache: async () => null, overlayJobs: async jobs => jobs };
     if (specifier === './workspaceApi' || specifier.endsWith('/services/workspaceApi')) return { callWorkspace: async () => ({ stops: [], saved: null }), readWorkspace: async (resource, options) => { assert.equal(resource, 'jobs'); return detailLoader(options); } };
-    if (specifier === './firebase' || specifier.endsWith('/services/firebase')) return { CustomerService: { getCustomers: async () => ({ success: true, customers: [] }) }, JobService: { getJobsByDateRange: async (startDate, endDate) => { const range = { startDate, endDate }; jobRequests.push(range); return jobLoader(range); } }, EstimateService: {} };
+    if (specifier === './firebase' || specifier.endsWith('/services/firebase')) return { CustomerService: { getCustomers: async () => ({ success: true, customers: customerRows.map(row => ({ ...row })) }), addCustomer: async data => { customerSaves.push({ action: 'create', data }); return customerSave({ action: 'create', data }); }, updateCustomer: async (id, data, expectedVersion) => { customerSaves.push({ action: 'update', id, data, expectedVersion }); return customerSave({ action: 'update', id, data, expectedVersion }); } }, JobService: { addJob: async (data, options) => { jobSaves.push({ action: 'create', data, options }); return jobSave(); }, updateJob: async (id, data, expectedVersion, options) => { jobSaves.push({ action: 'update', id, data, expectedVersion, options }); return jobSave(); }, getJobsByDateRange: async (startDate, endDate) => { const range = { startDate, endDate }; jobRequests.push(range); return jobLoader(range); } }, EstimateService: {} };
     if (specifier.startsWith('.')) {
       const resolved = path.resolve(path.dirname(filename), specifier);
       return load(resolved.endsWith('.js') ? resolved : resolved + '.js');
@@ -68,6 +70,7 @@ function load(relative) {
 function account(role = 'technician', status = 'company') {
   jobRequests = []; jobLoader = async () => ({ success: true, jobs: [] }); native.AppState.currentState = 'active'; authRefreshes = 0;
   nativePushMounts = 0; native.Linking.openURL = async () => {}; native.Alert.alert = () => {};
+  customerRows = []; customerSaves = []; jobSaves = []; customerSave = async () => ({ success: true }); jobSave = async () => ({ success: true });
   detailLoader = async ({ id }) => ({ job: { id, companyId: 'acme', assignedTo: 'membership', customerName: 'Assigned customer', status: 'scheduled' }, customer: null });
   const user = { id: 'luis', name: 'Luis Gonzales', email: 'luis@example.com', emailVerified: true, companyId: status === 'company' ? 'acme' : null, role: status === 'company' ? role : null, membershipId: status === 'company' ? 'membership' : null,
     workspace: { status, invitations: [{ id: 'invite', companyName: 'Acme Pest Control', role: 'technician' }] }, companyName: 'Acme Pest Control', businessName: 'Acme Pest Control', businessPhone: '555-0100', businessAddress: '1 Main St', services: ['Termite Inspection', 'Rodent Control'] };
@@ -90,7 +93,7 @@ afterEach(async () => {
   // Cleanup must run after failed assertions too; providers own native listeners
   // and timers and must never keep a failed screen suite alive.
   for (const tree of [...mounted]) await unmount(tree);
-  assert.equal(appListeners.size, 0); assert.equal(networkListeners.size, 0);
+  assert.equal(appListeners.size, 0); assert.equal(networkListeners.size, 0); assert.equal(backListeners.size, 0); native.Platform.OS = 'ios';
 });
 const textOf = tree => JSON.stringify(tree.toJSON());
 async function press(tree, label) {
@@ -541,6 +544,26 @@ test('manager action requests open the established edit and follow-up forms with
   assert.deepEqual(consumed, [1, 2]);
 });
 
+for (const os of ['ios', 'android']) test(`${os} manager time selection preserves odd-minute records on cancel and reopens without native modals`, async () => {
+  account('manager'); native.Platform.OS = os;
+  const job = { id: 'quarter-time-job', companyId: 'acme', customerName: 'Quarter customer', serviceType: 'Inspection', status: 'scheduled', date: '2026-11-13', time: '09:07' };
+  detailLoader = async () => ({ job, customer: null });
+  const home = await render('screens/HomeScreen.js', { managementAction: { id: `time-${os}`, kind: 'edit', job } });
+  const open = async () => { const control = home.root.findAll(node => node.type === 'TouchableOpacity' && node.props.accessibilityLabel === 'Edit job time')[0]; assert.ok(control); await act(async () => control.props.onPress()); await settle(); };
+  const pickerPanels = () => home.root.findAll(node => node.type === 'View' && node.props.accessibilityLabel === 'Choose service time');
+  await open(); assert.equal(pickerPanels().length, 1); assert.equal(home.root.findAllByType('Modal').length, 0);
+  assert.deepEqual(home.root.findAll(node => node.type === 'Pressable' && /^Minute /.test(node.props.accessibilityLabel || '')).map(node => node.props.accessibilityLabel), ['Minute 00', 'Minute 15', 'Minute 30', 'Minute 45']);
+  await press(home, 'Cancel time selection'); assert.equal(pickerPanels().length, 0); assert.match(textOf(home), /9:07 AM/);
+  await open(); await press(home, 'Minute 15');
+  if (os === 'android') await act(async () => { assert.equal([...backListeners].at(-1)(), true); });
+  else await press(home, 'Cancel time selection');
+  assert.equal(pickerPanels().length, 0); assert.match(textOf(home), /9:07 AM/);
+  assert.ok(home.root.findAll(node => node.type === 'TouchableOpacity' && node.props.accessibilityLabel === 'Edit job time')[0]);
+  await open(); await press(home, 'Minute 45'); await press(home, 'Use selected time');
+  assert.equal(pickerPanels().length, 0); assert.match(textOf(home), /9:45 AM/); assert.equal(job.time, '09:07');
+  assert.equal(home.root.findAllByType('Modal').length, 0);
+});
+
 test('management form requests cannot grant technicians or other tenants edit access', async () => {
   for (const role of ['technician', 'manager']) {
     account(role);
@@ -550,4 +573,115 @@ test('management form requests cannot grant technicians or other tenants edit ac
     assert.doesNotMatch(textOf(home), /Blocked job/);
     await unmount(home);
   }
+});
+
+const propertyInput = tree => tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Service property address')[0];
+async function touch(tree, label) {
+  const target = tree.root.findAll(node => ['Pressable', 'TouchableOpacity'].includes(node.type) && node.props.accessibilityLabel === label)[0];
+  assert.ok(target, `Control '${label}' must exist`); assert.notEqual(target.props.disabled, true);
+  await act(async () => target.props.onPress()); await settle();
+}
+async function input(tree, label, value) {
+  const target = tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === label)[0];
+  assert.ok(target, label); await act(async () => target.props.onChangeText(value)); await settle();
+}
+const addressCustomer = () => ({ id: 'property-customer', name: 'Property customer', phone: '555-0100', address: { street: '1 Saved St', city: 'Bakersfield', state: 'CA', postalCode: '93312' }, updatedAt: '2026-11-14T10:00:00.000Z' });
+const addressJob = () => ({ id: 'property-job', companyId: 'acme', customerId: 'property-customer', customerName: 'Property customer', serviceType: 'Inspection', status: 'scheduled', date: '2026-11-15', time: '09:15', address: '8 Historical St, Bakersfield, CA 93312', updatedAt: '2026-11-14T12:00:00.000Z' });
+
+test('job properties start locked and Google suggestions require explicit application and a separate Save', async () => {
+  account('manager'); customerRows = [addressCustomer()]; const job = addressJob(); detailLoader = async () => ({ job });
+  const suggestion = '9 Corrected St, Bakersfield, CA 93312';
+  jobSave = async () => ({ success: false, error: { message: 'Review this address.', addressValidation: { status: 'confirmation-required', message: 'Review this address.', suggestedAddress: suggestion } } });
+  const home = await render('screens/HomeScreen.js', { managementAction: { id: 'address-review', kind: 'edit', job } });
+  assert.equal(propertyInput(home).props.value, job.address); assert.equal(propertyInput(home).props.editable, false);
+  await input(home, 'Service property address', 'Unapproved overwrite'); assert.equal(propertyInput(home).props.value, job.address);
+  await press(home, 'Enable Editing'); await input(home, 'Service property address', '9 Corected');
+  await touch(home, 'Save job changes'); assert.equal(jobSaves.length, 1); assert.match(textOf(home), /Review the suggested address/);
+  assert.equal(propertyInput(home).props.value, '9 Corected'); assert.equal(jobSaves[0].expectedVersion, job.updatedAt);
+  await press(home, 'Use suggested address'); assert.equal(propertyInput(home).props.value, suggestion); assert.equal(jobSaves.length, 1);
+  assert.equal(jobSaves[0].options, undefined); assert.equal(jobSaves[0].data.serviceProperty.address, '9 Corected');
+  jobSave = async () => ({ success: true }); await touch(home, 'Save job changes');
+  assert.equal(jobSaves.length, 2); assert.equal(jobSaves[1].data.address, suggestion); assert.deepEqual(jobSaves[1].data.serviceProperty, { address: suggestion });
+  assert.equal(job.address, '8 Historical St, Bakersfield, CA 93312'); assert.equal(customerSaves.length, 0);
+});
+
+test('ordinary job edits preserve historical address without recertifying or rewriting the customer', async () => {
+  account('manager'); customerRows = [addressCustomer()]; const job = addressJob(); detailLoader = async () => ({ job });
+  const home = await render('screens/HomeScreen.js', { managementAction: { id: 'address-unchanged', kind: 'edit', job } });
+  await touch(home, 'Save job changes');
+  assert.equal(jobSaves.length, 1); assert.equal(Object.hasOwn(jobSaves[0].data, 'address'), false);
+  assert.equal(Object.hasOwn(jobSaves[0].data, 'serviceProperty'), false); assert.equal(jobSaves[0].options, undefined); assert.equal(customerSaves.length, 0);
+});
+
+test('permanent job address updates are unchecked by default and retain the captured revision and draft after conflict', async () => {
+  account('owner'); customerRows = [addressCustomer()]; const job = addressJob(); detailLoader = async () => ({ job });
+  jobSave = async () => ({ success: false, error: { code: 'functions/aborted', message: 'The customer changed. Refresh it before saving.' } });
+  const home = await render('screens/HomeScreen.js', { managementAction: { id: 'address-permanent', kind: 'edit', job } });
+  assert.equal(home.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityRole === 'checkbox').length, 0);
+  await press(home, 'Enable Editing');
+  const checkbox = () => home.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === "Update customer's saved address")[0];
+  assert.equal(checkbox().props.accessibilityState.checked, false); await press(home, "Update customer's saved address");
+  const original = customerRows[0].updatedAt; customerRows[0] = { ...customerRows[0], updatedAt: '2026-11-15T10:00:00.000Z' };
+  await touch(home, 'Save job changes');
+  assert.deepEqual(jobSaves[0].options, { saveCustomerAddress: true, expectedCustomerVersion: original });
+  assert.deepEqual(jobSaves[0].data.serviceProperty, { address: job.address });
+  assert.match(textOf(home), /The customer changed/); assert.equal(checkbox().props.accessibilityState.checked, true); assert.equal(propertyInput(home).props.value, job.address);
+  assert.equal(home.root.findAll(node => node.type === 'View' && node.props.accessibilityLabel === 'Edit job').length, 1);
+});
+
+test('customer edits capture the loaded revision, retain drafts on failure, and separately save applied proposals', async () => {
+  account('owner'); customerRows = [addressCustomer()];
+  customerSave = async () => ({ success: false, error: { message: 'Confirm the corrected address.', addressValidation: { status: 'confirmation-required', message: 'Confirm the corrected address.', suggestedAddress: '2 Corrected St, Bakersfield, CA 93312' } } });
+  const home = await render('screens/HomeScreen.js'); await press(home, 'Customers'); await touch(home, 'Edit customer Property customer');
+  await input(home, 'Customer service address', '2 Corected St'); await touch(home, 'Save customer');
+  assert.equal(customerSaves.length, 1); assert.equal(customerSaves[0].expectedVersion, addressCustomer().updatedAt);
+  assert.equal(customerSaves[0].data.city, ''); assert.equal(customerSaves[0].data.postalCode, '');
+  await press(home, 'Use suggested address'); assert.equal(customerSaves.length, 1);
+  assert.equal(home.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Customer service address')[0].props.value, '2 Corrected St, Bakersfield, CA 93312');
+  customerSave = async () => ({ success: true }); await touch(home, 'Save customer'); assert.equal(customerSaves.length, 2);
+  assert.equal(customerSaves[1].expectedVersion, addressCustomer().updatedAt); assert.equal(home.root.findAllByType('Modal').length, 0);
+});
+
+test('new contact-only customers can be saved without a physical address and unavailable checks preserve the draft', async () => {
+  account('owner'); const home = await render('screens/HomeScreen.js'); await press(home, 'Customers');
+  await input(home, 'Customer name', 'Synthetic contact'); await input(home, 'Customer phone', '555-0100'); await touch(home, 'Add customer');
+  assert.equal(customerSaves[0].data.address, ''); assert.equal(customerSaves[0].action, 'create');
+  customerSave = async () => ({ success: false, error: { message: 'Try address verification again.', addressValidation: { status: 'unavailable', message: 'Try address verification again.' } } });
+  await input(home, 'Customer name', 'Retry customer'); await input(home, 'Customer phone', '555-0101'); await input(home, 'Customer service address', '3 Saved St'); await touch(home, 'Add customer');
+  assert.match(textOf(home), /Address verification is unavailable/); assert.doesNotMatch(textOf(home), /Use suggested address/);
+  assert.equal(home.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Customer name')[0].props.value, 'Retry customer');
+});
+
+test('scheduling prefills the selected property and switching customers resets lock and permanent choice without a native picker overlay', async () => {
+  account('owner'); customerRows = [addressCustomer(), { id: 'no-address', name: 'Contact only', phone: '555-0101', updatedAt: null }];
+  const home = await render('screens/HomeScreen.js'); await press(home, 'Schedule service');
+  await touch(home, 'Select service customer'); assert.equal(home.root.findAllByType('Modal').length, 0);
+  await touch(home, 'Select customer Property customer'); assert.equal(propertyInput(home).props.value, '1 Saved St, Bakersfield, CA 93312'); assert.equal(propertyInput(home).props.editable, false);
+  await press(home, 'Enable Editing'); await input(home, 'Service property address', '3 Oneoff St'); await press(home, "Update customer's saved address");
+  await touch(home, 'Select service customer'); await touch(home, 'Select customer Contact only');
+  assert.equal(propertyInput(home).props.value, ''); assert.equal(propertyInput(home).props.editable, false);
+  assert.equal(home.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityRole === 'checkbox').length, 0);
+  await press(home, 'Enable Editing'); await input(home, 'Service property address', '4 Contact Service St');
+  assert.equal(propertyInput(home).props.value, '4 Contact Service St'); assert.equal(jobSaves.length, 0); assert.equal(home.root.findAllByType('Modal').length, 0);
+});
+
+for (const permanent of [false, true]) test(`scheduled property ${permanent ? 'permanent' : 'one-visit'} changes save the selected customer ID with explicit address-only metadata`, async () => {
+  account('owner'); customerRows = [addressCustomer()]; const notices = []; native.Alert.alert = (...args) => notices.push(args);
+  jobSave = async () => ({ success: true, customerAddressUpdated: permanent });
+  const home = await render('screens/HomeScreen.js'); await press(home, 'Schedule service');
+  await touch(home, 'Select service customer'); await touch(home, 'Select customer Property customer');
+  await press(home, 'Enable Editing'); await input(home, 'Service property address', '7 New Service St, Bakersfield, CA 93312');
+  if (permanent) await press(home, "Update customer's saved address");
+  await touch(home, 'Select service type'); await touch(home, 'Select service Termite Inspection');
+  await touch(home, 'Service date'); const date = home.root.findAllByType('NativeDatePicker')[0];
+  await act(async () => date.props.onChange({ type: 'set' }, new Date('2026-11-15T12:00:00.000Z'))); await settle();
+  await touch(home, 'Service time'); await press(home, 'Hour 9'); await press(home, 'AM'); await press(home, 'Minute 15'); await press(home, 'Use selected time');
+  const duration = home.root.findAll(node => node.type === 'TextInput' && node.props.placeholder === '2')[0];
+  await act(async () => duration.props.onChangeText('1')); await settle(); await touch(home, 'Save scheduled service');
+  assert.equal(jobSaves.length, 1); assert.equal(jobSaves[0].data.customerId, 'property-customer'); assert.equal(jobSaves[0].data.time, '09:15');
+  assert.deepEqual(jobSaves[0].data.serviceProperty, { address: '7 New Service St, Bakersfield, CA 93312' });
+  assert.equal(jobSaves[0].data.latitude, undefined); assert.equal(jobSaves[0].data.serviceArea, undefined); assert.equal(customerSaves.length, 0);
+  assert.deepEqual(jobSaves[0].options, permanent ? { saveCustomerAddress: true, expectedCustomerVersion: addressCustomer().updatedAt } : undefined);
+  assert.equal(home.root.findAll(node => node.type === 'View' && node.props.accessibilityLabel === 'Schedule service').length, 0);
+  assert.ok(notices.some(args => String(args[1]).includes(permanent ? 'customer address updated' : 'scheduled successfully')));
 });

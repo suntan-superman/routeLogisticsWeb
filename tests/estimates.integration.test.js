@@ -2,19 +2,22 @@ const {test,before,after}=require('node:test'),assert=require('node:assert/stric
 const req=require('node:module').createRequire(require('node:path').resolve(__dirname,'../functions/package.json'));
 const {initializeApp,deleteApp}=req('firebase-admin/app'),{getFirestore}=req('firebase-admin/firestore');
 const {estimateHandlers}=require('../functions/estimates'),{deliverMail}=require('../functions/mail'),{hash}=require('../functions/security');
+const {serviceAreaHandlers}=require('../functions/serviceAreas');
 let app,db,sequence=0;
 before(()=>{if(!process.env.FIRESTORE_EMULATOR_HOST)throw Error('Local emulator required; no production writes allowed.');app=initializeApp({projectId:'demo-routelogistics'},'estimate-tests');db=getFirestore(app);});after(()=>deleteApp(app));
 async function fixture({enabled=true,email=true}={}){
   const id=`quote-${++sequence}`,uid=`${id}-owner`,memberId=`${id}-member`,customerId=`${id}-customer`,files=new Map();let clock=Date.parse('2026-11-13T18:00:00Z'),operation=0;
-  await db.doc(`companies/${id}`).set({ownerId:uid,name:'Controlled Company'});await db.doc(`teamMembers/${memberId}`).set({companyId:id,uid:`${id}-tech`,role:'technician',status:'active'});await db.doc(`customers/${customerId}`).set({userId:uid,companyId:id,name:'Controlled customer',email:`${id}@example.invalid`,phone:'+16615550101',address:'Test address',isActive:true});
+  await db.doc(`companies/${id}`).set({ownerId:uid,name:'Controlled Company'});await db.doc(`teamMembers/${memberId}`).set({companyId:id,uid:`${id}-tech`,role:'technician',status:'active'});await db.doc(`customers/${customerId}`).set({userId:uid,companyId:id,name:'Controlled customer',email:`${id}@example.invalid`,phone:'+16615550101',address:'100 Synthetic Customer Street, Example, CA 93312',isActive:true});
   const bucket={file:path=>({save:async(bytes,options)=>files.set(path,{bytes:Buffer.from(bytes),contentType:options.contentType,metadata:options.metadata}),getMetadata:async()=>{const file=files.get(path);if(!file)throw Error('Private file unavailable');return [{size:file.bytes.length,contentType:file.contentType,...file.metadata}];},download:async()=>[files.get(path).bytes]})};
-  const config={enabled:()=>enabled,emailEnabled:()=>email,appUrl:()=> 'https://route-logistics.com',now:()=>clock,bucketProvider:()=>bucket};const handlers=estimateHandlers(db,config);
+  let geocodeCalls=0;
+  const serviceAreas=serviceAreaHandlers(db,{now:()=>clock,geocode:async address=>{geocodeCalls++;if(address.includes('Invalid'))throw Error('Synthetic invalid address');return {formattedAddress:address,latitude:35,longitude:-119,postalCode:'93312',countryCode:'US',locationType:'PREMISE',streetAddressVerified:true};}});
+  const config={enabled:()=>enabled,emailEnabled:()=>email,appUrl:()=> 'https://route-logistics.com',now:()=>clock,bucketProvider:()=>bucket,serviceAreas};const handlers=estimateHandlers(db,config);
   const owner={uid,token:{companyId:id,role:'owner',email_verified:true}},tech={uid:`${id}-tech`,token:{companyId:id,membershipId:memberId,role:'technician',email_verified:true}};
   const request=(data,auth=owner)=>({data,auth}),draft={customerId,title:'Controlled quote',serviceType:'Inspection',scopeOfWork:'Work scope',notes:'',lineItems:[{kind:'labor',description:'Inspection',quantity:1.5,unitPrice:100},{kind:'material',description:'Material',quantity:2,unitPrice:25}],taxRate:7.5,validDays:30,photoIds:[]};
   const save=(data=draft,extra={})=>handlers.handle(request({action:'save',operationId:`operation-${id}-${String(++operation).padStart(8,'0')}`,data,...extra}));
   const send=async estimate=>{const result=await handlers.handle(request({action:'deliver',estimateId:estimate.id,expectedVersion:estimate.version}));const mail=await db.doc(`rlMail/${result.mailId}`).get();const token=mail.get('text').match(/token=([a-f0-9]{64})/)[1];return {result,mail,token};};
   const approve=(estimate,token,extra={})=>handlers.approval({data:{action:'approve',estimateId:estimate.id,token,signerName:'Controlled signer',acceptedTerms:true,...extra},rawRequest:{ip:id}});
-  return {id,uid,memberId,customerId,files,bucket,handlers,owner,tech,request,draft,save,send,approve,time:()=>clock,advance:ms=>clock+=ms};
+  return {id,uid,memberId,customerId,files,bucket,handlers,owner,tech,request,draft,save,send,approve,time:()=>clock,advance:ms=>clock+=ms,geocodeCalls:()=>geocodeCalls};
 }
 test('new estimates calculate totals server-side, version immutably and reject stale writes or other companies',async()=>{
   const f=await fixture(),other=await fixture();const {estimate}=await f.save({...f.draft,total:0,totalCents:1});assert.equal(estimate.totalCents,21500);assert.equal(estimate.version,1);
@@ -76,17 +79,24 @@ test('client-forged approval status cannot convert without the private approved 
 });
 
 test('approved prospects create one explicitly requested customer and one scheduled job without changing approved terms',async()=>{
-  const f=await fixture(),{estimate}=await f.save({...f.draft,customerId:null,prospect:{name:'Prospect',email:`new-${f.id}@example.invalid`,phone:'+16615550102',address:'Prospect service address'}}),{token}=await f.send(estimate);await f.approve(estimate,token);
+  const f=await fixture(),{estimate}=await f.save({...f.draft,customerId:null,prospect:{name:'Prospect',email:`new-${f.id}@example.invalid`,phone:'+16615550102',address:'200 Synthetic Prospect Street, Example, CA 93312'}}),{token}=await f.send(estimate);await f.approve(estimate,token);
   const convert={action:'convert',estimateId:estimate.id,expectedVersion:1,createCustomer:true,schedule:{date:'2026-12-02',time:'09:00'}};
   const first=await f.handlers.handle(f.request(convert)),second=await f.handlers.handle(f.request(convert));assert.equal(first.jobId,second.jobId);
   const job=await db.doc(`jobs/${first.jobId}`).get(),customer=await db.doc(`customers/${job.get('customerId')}`).get();assert.equal(customer.get('source'),'rl-approved-estimate');assert.equal(customer.get('email'),`new-${f.id}@example.invalid`);assert.equal(customer.get('companyId'),f.id);
+  assert.equal(customer.get('addressValidation.source'),'google-address-validation');assert.equal(job.get('serviceProperty.validated'),true);assert.equal(f.geocodeCalls(),1);
   assert.equal((await db.doc(`rlEstimateVersions/${hash(`${estimate.id}:1`)}`).get()).get('customerId'),null);
 });
 test('prospect conversion requires explicit matching-customer reuse and never overwrites an existing customer',async()=>{
-  const f=await fixture(),before=(await db.doc(`customers/${f.customerId}`).get()).data(),{estimate}=await f.save({...f.draft,customerId:null,prospect:{name:'Existing prospect',email:before.email,address:'Quoted service address'}}),{token}=await f.send(estimate);await f.approve(estimate,token);
+  const f=await fixture(),before=(await db.doc(`customers/${f.customerId}`).get()).data(),{estimate}=await f.save({...f.draft,customerId:null,prospect:{name:'Existing prospect',email:before.email,address:'300 Synthetic Quoted Street, Example, CA 93312'}}),{token}=await f.send(estimate);await f.approve(estimate,token);
   const convert={action:'convert',estimateId:estimate.id,expectedVersion:1,schedule:{date:'2026-12-02',time:'09:00'}};
   await assert.rejects(f.handlers.handle(f.request({...convert,createCustomer:true})),{code:'failed-precondition'});
   const result=await f.handlers.handle(f.request({...convert,customerId:f.customerId}));assert.equal((await db.doc(`jobs/${result.jobId}`).get()).get('customerId'),f.customerId);assert.deepEqual((await db.doc(`customers/${f.customerId}`).get()).data(),before);
+});
+test('conversion cannot create a new customer or job using an unverified approved prospect address',async()=>{
+  const f=await fixture(),{estimate}=await f.save({...f.draft,customerId:null,prospect:{name:'Invalid synthetic prospect',email:`invalid-${f.id}@example.invalid`,address:'999 Invalid Street, Example, CA 93312'}}),{token}=await f.send(estimate);await f.approve(estimate,token);
+  await assert.rejects(f.handlers.handle(f.request({action:'convert',estimateId:estimate.id,expectedVersion:1,createCustomer:true,schedule:{date:'2026-12-02',time:'09:00'}})),error=>error.code==='failed-precondition'&&error.details.addressValidation.status==='invalid');
+  assert.equal((await db.doc(`jobs/rl_estimate_${estimate.id}`).get()).exists,false);assert.equal((await db.doc(`customers/rl_estimate_${estimate.id}_customer`).get()).exists,false);
+  assert.equal((await db.doc(`rlEstimateVersions/${hash(`${estimate.id}:1`)}`).get()).get('recipient.address'),'999 Invalid Street, Example, CA 93312');
 });
 test('legacy object addresses survive PDF and job conversion and invalid dates report actionable errors',async()=>{
   const f=await fixture();await db.doc(`customers/${f.customerId}`).update({address:{line1:'123 Legacy Street',city:'Bakersfield',state:'CA',zipCode:'93312'}});

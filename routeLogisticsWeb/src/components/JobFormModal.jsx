@@ -6,6 +6,9 @@ import { auth } from '../services/firebase';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useAuth } from '../contexts/AuthContext';
 import ServicePropertyEligibility from './ServicePropertyEligibility';
+import ThemedSelect from './ThemedSelect';
+import TimeSelect from './TimeSelect';
+import AddressValidationNotice from './AddressValidationNotice';
 import { customerAddress, customerView, legacyDate } from '../utils/legacyCustomer';
 
 const SERVICE_TYPES = [
@@ -72,6 +75,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [addressEditing, setAddressEditing] = useState(false), [saveCustomerAddress, setSaveCustomerAddress] = useState(false);
+  const [addressValidation, setAddressValidation] = useState(null);
   const [pastAck, setPastAck] = useState(false);
   const [savedForm,setSavedForm] = useState(()=>formSnapshot(emptyForm(defaults,job)));
   const selectedCustomer = customers.find(customer => customer.id === form.customerId);
@@ -112,6 +116,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
     if(savingRef.current)return;
     if (field === 'address' && !addressEditing) return;
     if (field === 'address') initialCustomerPending.current = false;
+    if (field === 'address') setAddressValidation(null);
     if (field === 'address' && value.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false);
     setPastAck(false);
     setForm((f) => ({ ...f, [field]: value }));
@@ -124,6 +129,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
     if(savingRef.current)return;
     initialCustomerPending.current = false;
     setAddressEditing(false); setSaveCustomerAddress(false); addressEditCustomer.current = null;
+    setAddressValidation(null);
     const c = customers.find((x) => x.id === id);
     const address = customerAddress(c);
     setForm((f) => ({ ...f, customerId: id, address: company?.id ? address : c && !f.address ? address : f.address }));
@@ -176,7 +182,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
       }
       const res = await JobManagementService.updateJob(job.id, edit || details, job.updatedAt ?? null, options);
       if (!alive.current)return;
-      if (!res.success) throw Error(res.error || 'Could not update job');
+      if (!res.success) throw Object.assign(Error(res.error || 'Could not update job'), { addressValidation: res.addressValidation });
       setSavedForm(formSnapshot(form));setSavedProperty(propertySnapshot(property));setReason('');setSaveCustomerAddress(false);
       customerAddressUpdated = res.customerAddressUpdated === true;
       savedCustomer = res.customer;
@@ -185,9 +191,9 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
     } else {
       const result = await JobManagementService.createJob(details, options);
       if (!alive.current)return;
-      if (!result.success) throw Error(result.error || 'Could not create job');
+      if (!result.success) throw Object.assign(Error(result.error || 'Could not create job'), { addressValidation: result.addressValidation });
       setSavedForm(formSnapshot(form));setSavedProperty(propertySnapshot(property));setReason('');setSaveCustomerAddress(false);customerAddressUpdated = result.customerAddressUpdated === true;savedCustomer=result.customer;toast.success(customerAddressUpdated ? 'Job scheduled and customer address updated.' : 'Job scheduled');saved=result.job;
-    } } catch(error) { if(alive.current)toast.error(error.message || 'Unable to save this job. Your changes are available to retry.');return; }
+    } } catch(error) { if(alive.current) { setAddressValidation(error.addressValidation || null); toast.error(error.message || 'Unable to save this job. Your changes are available to retry.'); }return; }
     finally { savingRef.current=false;if(alive.current)setSaving(false); }
     try { await onCreated(saved, { customerAddressUpdated, ...(savedCustomer ? { customer: customerView(savedCustomer.id, savedCustomer) } : {}) }); } catch { if(alive.current)toast.error('The job was saved, but the job list could not refresh. Refresh the page to see it.'); }
   };
@@ -205,15 +211,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
         </div>
 
         <div className="space-y-4 px-6 py-5">
-          <div>
-            <label className={label}>Customer *</label>
-            <select value={form.customerId} onChange={(e) => pickCustomer(e.target.value)} className={input} autoFocus>
-              <option value="">{customers.length ? 'Select a customer…' : 'No customers yet – add one first'}</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
+          <ThemedSelect label="Customer" required value={form.customerId} options={[{ value: '', label: 'Select a customer…' }, ...customers.map(customer => ({ value: customer.id, label: customer.name }))]} onChange={pickCustomer} disabled={saving} placeholder={customers.length ? 'Select a customer…' : 'No customers yet – add one first'} autoFocus />
 
           <div>
             <label className={label}>Service type *</label>
@@ -234,10 +232,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
               <label className={label}>Date *</label>
               <input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} className={input} />
             </div>
-            <div>
-              <label className={label}>Start time *</label>
-              <input type="time" value={form.time} onChange={(e) => set('time', e.target.value)} className={input} />
-            </div>
+            <TimeSelect label="Start time" required value={form.time} onChange={value => set('time', value)} disabled={saving} />
             <div>
               <label className={label}>Duration (hrs)</label>
               <input
@@ -266,8 +261,10 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
           {company?.id && <>
             {isEdit && job.address && !job.serviceProperty && <p className="text-sm text-gray-600">Recorded service address: {typeof job.address === 'string' ? job.address : customerAddress({ address: job.address })}. Normal edits preserve this appointment; enter a service property only when changing its location.</p>}
             {!!selectedCustomerAddress && property.address === selectedCustomerAddress && <p className="text-sm text-gray-600">Using the customer's saved address. Change the service property below if this visit is at a different location.</p>}
-            <ServicePropertyEligibility key={form.customerId} companyId={company.id} serviceCategories={company.serviceCategories || []} value={property} purpose="scheduling" existing={isEdit} disabled={saving} addressReadOnly={!addressEditing} billingAddress={selectedCustomerAddress} onPolicyLoaded={setServiceAreaPolicy} onChange={next => { if (savingRef.current || !addressEditing && next.address !== property.address) return; initialCustomerPending.current = false; if (next.address.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false); setProperty(next); if (next.address !== property.address) setForm(previous => ({ ...previous, address: next.address })); }} />
+            <ServicePropertyEligibility key={form.customerId} companyId={company.id} serviceCategories={company.serviceCategories || []} value={property} purpose="scheduling" existing={isEdit} disabled={saving} addressReadOnly={!addressEditing} billingAddress={selectedCustomerAddress} onPolicyLoaded={setServiceAreaPolicy} onChange={next => { if (savingRef.current || !addressEditing && next.address !== property.address) return; initialCustomerPending.current = false; if (next.address.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false); if (next.address !== property.address) setAddressValidation(null); setProperty(next); if (next.address !== property.address) setForm(previous => ({ ...previous, address: next.address })); }} />
           </>}
+          <AddressValidationNotice validation={addressValidation} disabled={saving || !addressEditing} onAccept={address => { if (savingRef.current || !addressEditing) return; initialCustomerPending.current = false; setAddressValidation(null); if (address.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false); setForm(previous => ({ ...previous, address })); if (company?.id) setProperty(previous => ({ ...previous, address, exceptionId: null, confirmed: false })); }} />
+          {addressValidation?.suggestedAddress && !addressEditing && <p className="text-sm text-gray-600">Choose Enable Editing to use Google's suggested address.</p>}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>

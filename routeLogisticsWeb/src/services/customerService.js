@@ -1,4 +1,4 @@
-import { readWorkspace } from './workspaceApi';
+import { readWorkspace, callWorkspace } from './workspaceApi';
 import { 
   collection, 
   doc, 
@@ -6,7 +6,6 @@ import {
   updateDoc, 
   getDocs, 
   query, 
-  addDoc,
   deleteDoc,
   orderBy,
   limit,
@@ -15,9 +14,13 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { auth } from './firebase';
-import { scopeWhere, tenantFields, isInScope, getClaims, can, requireCapability } from './tenancy';
+import { scopeWhere, isInScope, getClaims, can, requireCapability } from './tenancy';
 import { csvCell } from '../utils/customerCsv';
 import { customerView, customerActive, legacyDate } from '../utils/legacyCustomer';
+
+const editableFields = ['name', 'firstName', 'lastName', 'email', 'phone', 'phoneNumber', 'address', 'city', 'state', 'zipCode', 'postalCode', 'notes', 'serviceInstructions', 'isActive', 'status', 'emailConsent'];
+const customerInput = data => Object.fromEntries(editableFields.filter(field => Object.hasOwn(data || {}, field)).map(field => [field, data[field]]));
+const customerFailure = failure => ({ success: false, error: failure?.message || 'The customer could not be saved. Please try again.', ...(failure?.details?.addressValidation ? { addressValidation: failure.details.addressValidation } : {}) });
 
 class CustomerService {
   // Get current user ID
@@ -34,33 +37,10 @@ class CustomerService {
     try {
       requireCapability('customers.manage');
       this.getCurrentUserId();
-      
-      const customer = {
-        ...customerData,
-        email: (customerData.email || '').trim().toLowerCase(),
-        emailNormalized: (customerData.email || '').trim().toLowerCase(),
-        ...tenantFields(),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        isActive: true,
-        totalJobs: 0,
-        totalSpent: 0,
-        lastServiceDate: null
-      };
-
-      const docRef = await addDoc(collection(db, 'customers'), customer);
-      
-      return {
-        success: true,
-        customerId: docRef.id,
-        customer: { id: docRef.id, ...customer }
-      };
+      const result = await callWorkspace('rlManageCustomer', { action: 'create', customer: customerInput(customerData) });
+      return { success: true, customerId: result.id, customer: customerView(result.id, result.customer) };
     } catch (error) {
-      console.error('Error creating customer:', error);
-      return {
-        success: false,
-        error: error.message
-      };
+      return customerFailure(error);
     }
   }
 
@@ -177,35 +157,14 @@ class CustomerService {
   }
 
   // Update customer
-  static async updateCustomer(customerId, updates) {
+  static async updateCustomer(customerId, updates, expectedVersion = null) {
     try {
       requireCapability('customers.manage');
       this.getCurrentUserId();
-      
-      // Verify user owns the customer
-      const customerResult = await this.getCustomer(customerId);
-      if (!customerResult.success) {
-        return customerResult;
-      }
-
-      const updatedData = {
-        ...updates,
-        ...(updates.email !== undefined ? { email: updates.email.trim().toLowerCase(), emailNormalized: updates.email.trim().toLowerCase() } : {}),
-        updatedAt: new Date().toISOString()
-      };
-
-      await updateDoc(doc(db, 'customers', customerId), updatedData);
-
-      return {
-        success: true,
-        customer: { ...customerResult.customer, ...updatedData }
-      };
+      const result = await callWorkspace('rlManageCustomer', { action: 'update', id: customerId, customer: customerInput(updates), expectedVersion });
+      return { success: true, customer: customerView(result.id, result.customer) };
     } catch (error) {
-      console.error('Error updating customer:', error);
-      return {
-        success: false,
-        error: error.message
-      };
+      return customerFailure(error);
     }
   }
 

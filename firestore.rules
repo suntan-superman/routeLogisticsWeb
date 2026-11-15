@@ -87,15 +87,29 @@ service cloud.firestore {
     }
     function geographicFields() {
       return ['customerId', 'serviceProperty', 'propertyAddress', 'serviceCategory', 'serviceType',
-        'address', 'city', 'state', 'zipCode', 'latitude', 'longitude', 'location',
+        'address', 'city', 'state', 'zipCode', 'postalCode', 'latitude', 'longitude', 'location',
         'serviceAreaExceptionId', 'serviceAreaEligibility', 'serviceAreaManaged'];
+    }
+    function physicalAddressFields() {
+      return ['address', 'city', 'state', 'zipCode', 'postalCode', 'latitude', 'longitude', 'location',
+        'serviceProperty', 'propertyAddress', 'addressValidation'];
+    }
+    function addresslessCreate() {
+      return request.resource.data.get('address', '') in ['', null]
+        && request.resource.data.get('city', '') in ['', null]
+        && request.resource.data.get('state', '') in ['', null]
+        && request.resource.data.get('zipCode', '') in ['', null]
+        && request.resource.data.get('postalCode', '') in ['', null]
+        && !request.resource.data.keys().hasAny(['latitude', 'longitude', 'location', 'serviceProperty', 'propertyAddress', 'addressValidation']);
     }
     function geographicCreate() {
       return !configuredServiceArea(request.resource.data)
+        && addresslessCreate()
         && !request.resource.data.keys().hasAny(['serviceAreaEligibility', 'serviceAreaManaged']);
     }
     function geographicUpdate() {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['serviceAreaEligibility', 'serviceAreaManaged'])
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(physicalAddressFields())
         && (!configuredServiceArea(resource.data)
           || !request.resource.data.diff(resource.data).affectedKeys().hasAny(geographicFields()));
     }
@@ -147,10 +161,11 @@ service cloud.firestore {
     // ---------- customers ----------
     match /customers/{id} {
       allow read: if financeAccess(resource.data);
-      allow create: if validCreate(false) && (financeAccess(request.resource.data)
+      allow create: if validCreate(false) && addresslessCreate() && (financeAccess(request.resource.data)
         || (request.resource.data.get('totalSpent', 0) == 0
           && !request.resource.data.keys().hasAny(['balance', 'revenue', 'paymentStatus', 'invoiceBalance', 'quickbooksId', 'quickbooksCustomerId'])));
       allow update: if manageable(resource.data) && tenancyUnchanged()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(physicalAddressFields())
         && (financeAccess(resource.data) || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['totalSpent', 'balance', 'revenue', 'paymentStatus', 'invoiceBalance', 'quickbooksId', 'quickbooksCustomerId']));
       allow delete: if financeAccess(resource.data);
     }

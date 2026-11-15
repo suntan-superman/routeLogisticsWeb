@@ -24,6 +24,8 @@ const {
   rateLimit
 } = require('./security');
 const { serviceAreaWorkflow, storedGeometry, propertyAddress } = require('./serviceAreaWorkflows');
+const { serviceAreaHandlers } = require('./serviceAreas');
+const { validatedCustomerAddress } = require('./customerAddresses');
 const PHOTO_LIMIT = 1572864,
   PDF_LIMIT = 10 * 1024 * 1024;
 const timestamp = value => value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : Date.parse(value || '');
@@ -211,6 +213,7 @@ async function createEstimatePdf(estimate, company, photos = []) {
 }
 function estimateHandlers(db, config = {}) {
   const serviceAreas = serviceAreaWorkflow(db, config);
+  const addressValidator = config.serviceAreas || serviceAreaHandlers(db, config);
   const enabled = config.enabled || (() => false),
     emailEnabled = config.emailEnabled || (() => false),
     now = config.now || (() => Date.now()),
@@ -586,17 +589,21 @@ function estimateHandlers(db, config = {}) {
         const jobId = `rl_estimate_${id}`,
           jobRef = ref('jobs', jobId);
         const [initialJob, initialVersion, initialApproval] = await Promise.all([jobRef.get(), versionRef(id, estimate.version).get(), secretRef(id).get()]);
-        let area = null;
+        let area = null, newCustomerAddress = null;
         if (!initialJob.exists) {
           if (estimate.status !== 'approved' || !initialVersion.exists || initialApproval.get('status') !== 'approved' || initialApproval.get('version') !== estimate.version) fail('failed-precondition', 'This exact estimate version must be approved by its recipient before conversion.');
           const approvedSource = initialVersion.data(), requestedAddress = propertyAddress(schedule), approvedAddress = propertyAddress(approvedSource);
           if (approvedAddress && requestedAddress && requestedAddress.trim().toLowerCase() !== approvedAddress.trim().toLowerCase()) fail('failed-precondition', 'The approved service property cannot be changed during conversion. Save and approve a revised estimate.');
           if (approvedSource.serviceCategory && schedule.serviceCategory && approvedSource.serviceCategory !== schedule.serviceCategory) fail('failed-precondition', 'The approved service category cannot be changed during conversion. Save and approve a revised estimate.');
+          const destinationAddress = approvedSource.recipient?.address || '';
           area = await serviceAreas.prepare(scope, {
-            serviceProperty: approvedSource.serviceProperty || schedule.serviceProperty,
+            serviceProperty: approvedSource.serviceProperty || schedule.serviceProperty || (destinationAddress ? { address: destinationAddress } : undefined),
             serviceCategory: approvedSource.serviceCategory || schedule.serviceCategory || '',
             serviceAreaExceptionId: data.serviceAreaExceptionId || schedule.serviceAreaExceptionId
           }, {}, 'scheduling', true);
+          // Copying an approved prospect into a new customer is still a new
+          // physical address write; never alter the immutable approved text.
+          if (!approvedSource.customerId && !data.customerId && data.createCustomer === true && destinationAddress) newCustomerAddress = validatedCustomerAddress(await addressValidator.validateAddress(scope, destinationAddress));
         }
         return db.runTransaction(async tx => {
           const [current, approval, snapshot, existing] = await Promise.all([tx.get(target), tx.get(secretRef(id)), tx.get(versionRef(id, estimate.version)), tx.get(jobRef)]);
@@ -620,7 +627,7 @@ function estimateHandlers(db, config = {}) {
             const newId = `rl_estimate_${id}_customer`, destination = ref('customers', newId);
             const [existingCustomer, matches] = await Promise.all([tx.get(destination), tx.get(db.collection('customers').where(scope.companyId ? 'companyId' : 'userId','==',scope.companyId || scope.uid).where('email','==',source.recipient.email).limit(2))]);
             if (existingCustomer.exists || !matches.empty) fail('failed-precondition', 'A customer already uses this approved email. Select the matching company customer explicitly.');
-            newCustomer = {userId:current.get('userId'),...(scope.companyId ? {companyId:scope.companyId} : {}),name:source.recipient.name,email:source.recipient.email,emailNormalized:source.recipient.email,phone:source.recipient.phone,address:source.recipient.address,city:'',state:'',zipCode:'',isActive:true,totalSpent:0,totalJobs:0,lastServiceDate:null,source:'rl-approved-estimate',createdFromEstimateId:id,createdAt:new Date(now()).toISOString(),updatedAt:new Date(now()).toISOString()};
+            newCustomer = {userId:current.get('userId'),...(scope.companyId ? {companyId:scope.companyId} : {}),name:source.recipient.name,email:source.recipient.email,emailNormalized:source.recipient.email,phone:source.recipient.phone,address:source.recipient.address,city:'',state:'',zipCode:'',...(newCustomerAddress || {}),isActive:true,totalSpent:0,totalJobs:0,lastServiceDate:null,source:'rl-approved-estimate',createdFromEstimateId:id,createdAt:new Date(now()).toISOString(),updatedAt:new Date(now()).toISOString()};
             customer = {id:newId,ref:destination,get:key=>newCustomer[key]};
           } else fail('failed-precondition', 'Select a matching company customer or explicitly create one from this approved prospect.');
           let assignedTo = schedule.assignedTo || null;

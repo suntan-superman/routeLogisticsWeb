@@ -32,7 +32,7 @@ class JobManagementService {
     try {
       requireCapability('jobs.schedule');
       if (options.saveCustomerAddress === true) requireCapability('customers.manage');
-      if (getClaims()?.companyId || options.saveCustomerAddress === true) { const result = await callWorkspace('rlManageJob', { action: 'create', job: jobData, ...(options.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}) }); return { success: true, jobId: result.id, ...(await readWorkspace('jobs', { id: result.id })), customerAddressUpdated: result.customerAddressUpdated === true }; }
+      if (getClaims()?.companyId || options.saveCustomerAddress === true || jobData.address || jobData.serviceProperty || jobData.propertyAddress) { const result = await callWorkspace('rlManageJob', { action: 'create', job: jobData, ...(options.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}) }); return { success: true, jobId: result.id, ...(await readWorkspace('jobs', { id: result.id })), customerAddressUpdated: result.customerAddressUpdated === true }; }
       const now = new Date().toISOString();
       const job = {
         ...jobData,
@@ -45,7 +45,7 @@ class JobManagementService {
       return { success: true, jobId: docRef.id, job: { id: docRef.id, ...job } };
     } catch (error) {
       console.error('Error creating job:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message, addressValidation: error.details?.addressValidation };
     }
   }
 
@@ -146,7 +146,7 @@ class JobManagementService {
     try {
       requireCapability('jobs.schedule');
       if (options.saveCustomerAddress === true) requireCapability('customers.manage');
-      if (getClaims()?.companyId || options.saveCustomerAddress === true) { const result = await callWorkspace('rlManageJob', { action: 'update', id: jobId, job: updates, ...(expectedUpdatedAt !== undefined ? { expectedVersion: expectedUpdatedAt } : {}), ...(options.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}) }); return { success: true, ...(await readWorkspace('jobs', { id: jobId })), customerAddressUpdated: result.customerAddressUpdated === true }; }
+      if (getClaims()?.companyId || options.saveCustomerAddress === true || ['address','city','state','zipCode','serviceProperty','propertyAddress'].some(field => Object.hasOwn(updates, field))) { const result = await callWorkspace('rlManageJob', { action: 'update', id: jobId, job: updates, ...(expectedUpdatedAt !== undefined ? { expectedVersion: expectedUpdatedAt } : {}), ...(options.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}) }); return { success: true, ...(await readWorkspace('jobs', { id: jobId })), customerAddressUpdated: result.customerAddressUpdated === true }; }
       this.getCurrentUserId();
       
       // Verify user owns the job
@@ -179,7 +179,8 @@ class JobManagementService {
       console.error('Error updating job:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        addressValidation: error.details?.addressValidation
       };
     }
   }

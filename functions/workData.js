@@ -170,7 +170,6 @@ function workDataHandlers(db, config = {}) {
       // Existing status/date/notes edits do not revisit changed boundaries.
       const area = ['create', 'update'].includes(action) ? await serviceAreas.prepare(scope, input, initial?.data() || {}, 'scheduling', action === 'create' || saveCustomerAddress) : null;
       if (area) Object.assign(patch, area.patch);
-      if (saveCustomerAddress && !scope.companyId) Object.assign(patch, { address: savedAddress, city: '', state: '', zipCode: '', latitude: null, longitude: null, location: null, serviceProperty: { address: savedAddress, validated: false } });
       return db.runTransaction(async tx => {
         const existing = await tx.get(ref);
         if (action !== 'create') {
@@ -206,9 +205,11 @@ function workDataHandlers(db, config = {}) {
         if (saveCustomerAddress) {
           const property = patch.serviceProperty;
           const validated = property?.validated === true && Number.isFinite(property.latitude) && Number.isFinite(property.longitude);
-          const addressPatch = { address: property?.address || savedAddress, city: '', state: '', zipCode: '', latitude: validated ? property.latitude : null, longitude: validated ? property.longitude : null, location: validated ? { latitude: property.latitude, longitude: property.longitude } : null };
-          const original = Object.fromEntries(['address', 'city', 'state', 'zipCode', 'postalCode', 'latitude', 'longitude', 'location'].filter(field => customer.get(field) !== undefined).map(field => [field, customer.get(field)]));
-          tx.update(customer.ref, { ...addressPatch, postalCode: '', updatedAt });
+          const verifiedProperty = area.result.property;
+          const addressPatch = { address: property?.address || savedAddress, city: '', state: '', zipCode: '', postalCode: '', latitude: validated ? property.latitude : null, longitude: validated ? property.longitude : null, location: validated ? { latitude: property.latitude, longitude: property.longitude } : null,
+            addressValidation: { source: 'google-address-validation', validatedAt: verifiedProperty.validatedAt, postalCode: verifiedProperty.postalCode, placeId: verifiedProperty.placeId || '' } };
+          const original = Object.fromEntries(['address', 'city', 'state', 'zipCode', 'postalCode', 'latitude', 'longitude', 'location', 'addressValidation'].filter(field => customer.get(field) !== undefined).map(field => [field, customer.get(field)]));
+          tx.update(customer.ref, { ...addressPatch, updatedAt });
           tx.create(db.collection('rlAudit').doc(), { action: 'customer.address.update', companyId: scope.companyId, customerId: customer.id, jobId: ref.id, actorId: scope.uid, original, changes: addressPatch, createdAt: updatedAt });
         }
         return { id: ref.id, updatedAt, ...(area ? { serviceArea: area.result } : {}), ...(saveCustomerAddress ? { customerAddressUpdated: true, customerUpdatedAt: updatedAt } : {}) };
@@ -260,4 +261,4 @@ function workDataHandlers(db, config = {}) {
     },
   };
 }
-module.exports = { workDataHandlers, projectJob, projectCustomer, projectCompany, JOB_FIELDS, CUSTOMER_FIELDS, APPLICATION_FIELDS };
+module.exports = { workDataHandlers, projectJob, projectCustomer, projectCompany, customerVersion, JOB_FIELDS, CUSTOMER_FIELDS, APPLICATION_FIELDS };

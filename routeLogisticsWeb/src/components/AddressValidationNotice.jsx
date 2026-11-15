@@ -1,6 +1,6 @@
 import React from 'react';
 
-export default function AddressValidationNotice({ validation, onAccept, disabled = false }) {
+export default function AddressValidationNotice({ validation, onAccept, disabled = false, children }) {
   if (!validation) return null;
   const unavailable = validation.status === 'unavailable';
   const suggestion = validation.status === 'confirmation-required' && typeof validation.suggestedAddress === 'string' ? validation.suggestedAddress.trim() : '';
@@ -10,6 +10,7 @@ export default function AddressValidationNotice({ validation, onAccept, disabled
     <p>{message}</p>
     {suggestion && <div className="space-y-3">
       <p><span className="font-medium">Suggested address: </span>{suggestion}</p>
+      {children}
       {onAccept && <button type="button" disabled={disabled} className="rounded-lg bg-primary-700 px-4 py-2 font-medium text-white hover:bg-primary-800 disabled:opacity-50" onClick={() => { if (!disabled) onAccept(suggestion); }}>Use suggested address</button>}
       <p className="text-xs">Review the filled-in address, then save the form. Choosing the suggestion does not save it automatically.</p>
     </div>}

@@ -122,6 +122,13 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
     setForm((f) => ({ ...f, [field]: value }));
   };
 
+  const enableAddressEditing = () => {
+    if (savingRef.current || addressEditing || !form.customerId) return;
+    initialCustomerPending.current = false;
+    addressEditCustomer.current = { id: form.customerId, version: customerVersion(selectedCustomer) };
+    setAddressEditing(true);
+  };
+
   const timeChanged = !isEdit || form.date !== job.date || form.time !== job.time;
   const isPast = timeChanged && !!form.date && !!form.time && new Date(`${form.date}T${form.time}`) < new Date();
 
@@ -255,16 +262,17 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
             />
           </div>}
           <div className="rounded-lg border border-gray-200 p-3">
-            {!addressEditing ? <button type="button" disabled={saving || !form.customerId} className="text-sm font-medium text-primary-700 underline disabled:opacity-50" onClick={() => { initialCustomerPending.current = false; addressEditCustomer.current = { id: form.customerId, version: customerVersion(selectedCustomer) }; setAddressEditing(true); }}>Enable Editing</button> : <p className="text-sm font-medium text-gray-700">Address editing enabled for this job.</p>}
+            {!addressEditing ? <button type="button" disabled={saving || !form.customerId} className="text-sm font-medium text-primary-700 underline disabled:opacity-50" onClick={enableAddressEditing}>Enable Editing</button> : <p className="text-sm font-medium text-gray-700">Address editing enabled for this job.</p>}
             {addressEditing && canSaveCustomerAddress && <label className="mt-3 flex items-start gap-2 text-sm"><input type="checkbox" aria-label="Update customer's saved address" checked={saveCustomerAddress} disabled={saving} onChange={event => setSaveCustomerAddress(event.target.checked)} /><span>Update customer's saved address<span className="mt-1 block text-xs text-gray-600">New jobs will default to this address. Recorded job and service-plan addresses will not be rewritten.</span></span></label>}
           </div>
           {company?.id && <>
             {isEdit && job.address && !job.serviceProperty && <p className="text-sm text-gray-600">Recorded service address: {typeof job.address === 'string' ? job.address : customerAddress({ address: job.address })}. Normal edits preserve this appointment; enter a service property only when changing its location.</p>}
             {!!selectedCustomerAddress && property.address === selectedCustomerAddress && <p className="text-sm text-gray-600">Using the customer's saved address. Change the service property below if this visit is at a different location.</p>}
-            <ServicePropertyEligibility key={form.customerId} companyId={company.id} serviceCategories={company.serviceCategories || []} value={property} purpose="scheduling" existing={isEdit} disabled={saving} addressReadOnly={!addressEditing} billingAddress={selectedCustomerAddress} onPolicyLoaded={setServiceAreaPolicy} onChange={next => { if (savingRef.current || !addressEditing && next.address !== property.address) return; initialCustomerPending.current = false; if (next.address.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false); if (next.address !== property.address) setAddressValidation(null); setProperty(next); if (next.address !== property.address) setForm(previous => ({ ...previous, address: next.address })); }} />
+            <ServicePropertyEligibility key={form.customerId} companyId={company.id} serviceCategories={company.serviceCategories || []} value={property} validation={addressValidation} purpose="scheduling" existing={isEdit} disabled={saving} addressReadOnly={!addressEditing} onEnableAddressEditing={enableAddressEditing} billingAddress={selectedCustomerAddress} onPolicyLoaded={setServiceAreaPolicy} onChange={next => { if (savingRef.current || !addressEditing && next.address !== property.address) return; initialCustomerPending.current = false; if (next.address.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false); if (next.address !== property.address) setAddressValidation(null); setProperty(next); if (next.address !== property.address) setForm(previous => ({ ...previous, address: next.address })); }} />
           </>}
-          <AddressValidationNotice validation={addressValidation} disabled={saving || !addressEditing} onAccept={address => { if (savingRef.current || !addressEditing) return; initialCustomerPending.current = false; setAddressValidation(null); if (address.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false); setForm(previous => ({ ...previous, address })); if (company?.id) setProperty(previous => ({ ...previous, address, exceptionId: null, confirmed: false })); }} />
-          {addressValidation?.suggestedAddress && !addressEditing && <p className="text-sm text-gray-600">Choose Enable Editing to use Google's suggested address.</p>}
+          {!company?.id && <AddressValidationNotice validation={addressValidation} disabled={saving} onAccept={!addressEditing ? undefined : address => { if (savingRef.current) return; initialCustomerPending.current = false; setAddressValidation(null); if (address.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false); setForm(previous => ({ ...previous, address })); }}>
+            {!addressEditing && <div className="space-y-2"><p>The saved address is locked. Enable Editing, then use the suggested address.</p><button type="button" aria-label="Enable Editing for suggested address" disabled={saving || !form.customerId} className="rounded-lg bg-primary-700 px-4 py-2 font-medium text-white hover:bg-primary-800 disabled:opacity-50" onClick={enableAddressEditing}>Enable Editing</button></div>}
+          </AddressValidationNotice>}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>

@@ -66,6 +66,17 @@ until explicitly changed; recorded timestamps and durations are not rounded.
 Tests use synthetic emulator records. No real customer address is edited during
 development acceptance.
 
+Correction prompts on locked job addresses now include **Enable Editing** beside
+the suggestion. Checking a saved address does not unlock it automatically.
+After explicit unlocking, **Use suggested address** fills the draft and clears
+the old eligibility/exception; a separate Save is still required. Both unlock
+locations capture the same customer revision and cannot silently rebase an
+existing permanent edit. Fixed approved-estimate properties show revision
+guidance instead of an unusable correction button. Company save errors and
+preflight checks use one correction notice, without a duplicate eligibility error.
+The follow-up web suite passed **293/293**, including six new lock/correction
+regressions; lint/build passed with the two existing hook warnings.
+
 November 15 validation: web unit/UI **287/287**, mobile **224/224**, Functions
 **144 passed / one existing skip**, focused emulator **125/125**, and the final
 affected-file emulator rerun **28/28**. The broader integration/rules run passed

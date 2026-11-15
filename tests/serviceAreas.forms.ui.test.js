@@ -125,6 +125,14 @@ test('saved service addresses stay locked until Enable Editing and reject a forg
  await enableAddressEditing();assert.equal(checker.addressReadOnly,false);assert.equal(propertyInput().props.readOnly,false);assert.equal(permanentCheckbox(),undefined);
  await changeProperty('An explicitly edited service address');assert.ok(permanentCheckbox());assert.equal(permanentCheckbox().props.checked,false);
 });
+
+test('the suggested-address unlock action uses the original customer revision and never changes the draft by itself',async()=>{
+ await renderJob();assert.equal(checker.addressReadOnly,true);assert.equal(typeof checker.onEnableAddressEditing,'function');
+ await act(async()=>checker.onEnableAddressEditing());assert.equal(checker.addressReadOnly,false);assert.equal(propertyInput().props.value,savedAddress);assert.equal(writes.length,0);assert.equal(permanentCheckbox(),undefined);
+ await refreshCustomers([{...customer,updatedAt:'2026-11-15T16:00:00.000Z'},other,missing]);
+ await changeProperty('A Google-confirmed corrected service property');assert.equal(permanentCheckbox().props.checked,false);await choosePermanent(true);await submit();
+ assert.equal(writes.length,1);assert.deepEqual(writes[0].options,{saveCustomerAddress:true,expectedCustomerVersion:customer.updatedAt});
+});
 test('editing a job address defaults to a one-off change and does not request a permanent customer write',async()=>{
  const created=[];await renderJob(undefined,{onCreated:(...args)=>created.push(args)});await changeProperty('One-off service visit address');
  assert.equal(permanentCheckbox().props.checked,false);await submit();assert.equal(writes.length,1);assert.equal(writes[0].value.address,'One-off service visit address');assert.equal(writes[0].options,undefined);

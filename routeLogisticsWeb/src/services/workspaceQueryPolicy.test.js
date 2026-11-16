@@ -22,6 +22,9 @@ test('only successful writes invalidate affected controls; reads, provider work 
   assert.ok(mutationResources('rlManageJob').includes('jobs'));
   for (const name of ['rlReadWorkspace', 'rlCheckAvailability', 'rlGetTeamLocations', 'rlUpdateWorkLocation', 'rlQuickBooksOptions', 'rlQuickBooksSync', 'rlCreateInvoicePayment', 'rlRequestCustomerOTP']) assert.deepEqual(mutationResources(name), []);
   assert.deepEqual(mutationResources('rlJobVisit', { action: 'list' }), []);
+  assert.deepEqual(mutationResources('rlJobException', { action: 'list' }), []);
+  assert.deepEqual(mutationResources('rlJobException', { action: 'resolve' }), ['jobs', 'job', 'job-exceptions']);
+  assert.deepEqual(mutationResources('rlJobVisit', { action: 'record' }), ['job-visits', 'job', 'jobs']);
   assert.deepEqual(mutationResources('rlSmsCustomerConsent', { action: 'status' }), []);
   assert.deepEqual(mutationResources('rlApplyJobOperation', {}, { status: 'conflict' }), []);
   assert.deepEqual(mutationResources('rlManageJob', {}, { success: false }), []);

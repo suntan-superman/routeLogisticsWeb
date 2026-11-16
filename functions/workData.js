@@ -7,6 +7,7 @@ const { version } = require('./offline');
 const { serviceAreaWorkflow, servicePropertySite, propertyAddress } = require('./serviceAreaWorkflows');
 const { schedulingHandlers } = require('./scheduling');
 const { buildInitialPlan } = require('./recurring');
+const { prepareAssignmentException, commitAssignmentException, summary: exceptionSummary } = require('./jobExceptions');
 
 const JOB_FIELDS = ['userId', 'companyId', 'customerId', 'customerName', 'customerPhone', 'serviceType', 'serviceCategory', 'title', 'address', 'city', 'state', 'zipCode', 'serviceArea', 'date', 'time', 'windowStart', 'windowEnd', 'estimatedDuration', 'duration', 'priority', 'status', 'assignedTo', 'assignedToUid', 'assignedToName', 'assignmentNeedsAttention', 'assignmentReview', 'servicePlanId', 'servicePlanDate', 'workNotes', 'actualWorkDone', 'actualHours', 'completionNotes', 'completedAt', 'createdAt', 'updatedAt'];
 const PRICING_FIELDS = ['totalCost', 'estimatedCost', 'laborRate', 'laborHours', 'materialCost', 'materials', 'scopeOfWork', 'notes', 'description', 'servicePlanId'];
@@ -37,10 +38,11 @@ function projectJob(id, data, role) {
   // Keep the editable technician work log separate; legacy mobile clients still
   // receive their workNotes through the notes alias below.
   const dispatchNotes = typeof data.notes === 'string' ? data.notes : '';
-  if (hasCapability(role, 'reports.financial')) return { ...data, dispatchNotes, id, updatedAt: version(data.updatedAt) };
+  const operational = { reassignmentRequest: exceptionSummary(data.reassignmentRequest), ...(data.visitEvidence && typeof data.visitEvidence === 'object' ? { visitEvidence: pick(data.visitEvidence, ['arrivedAt','departedAt','accessBlockedAt','lastEventAt','lastEventType']) } : {}) };
+  if (hasCapability(role, 'reports.financial')) return { ...data, ...operational, dispatchNotes, id, updatedAt: version(data.updatedAt) };
   const property = data.serviceProperty && typeof data.serviceProperty === 'object' ? { serviceProperty: pick(data.serviceProperty, ['address', 'formattedAddress', 'postalCode', 'latitude', 'longitude', 'validated', 'source']) } : {};
   const area = hasCapability(role, 'jobs.schedule') && data.serviceAreaEligibility ? { serviceAreaEligibility: pick(data.serviceAreaEligibility, ['status', 'settingsRevision', 'serviceCategory', 'purpose', 'checkedAt', 'exceptionId', 'continuedFromServicePlan']) } : {};
-  return { id, ...pick(data, JOB_FIELDS), dispatchNotes, ...coordinates(data), ...property, ...area, ...(hasCapability(role, 'jobs.pricing') ? pick(data, PRICING_FIELDS) : { notes: typeof data.workNotes === 'string' ? data.workNotes : '' }) };
+  return { id, ...pick(data, JOB_FIELDS), ...operational, dispatchNotes, ...coordinates(data), ...property, ...area, ...(hasCapability(role, 'jobs.pricing') ? pick(data, PRICING_FIELDS) : { notes: typeof data.workNotes === 'string' ? data.workNotes : '' }) };
 }
 function projectCustomer(id, data, role) {
   if (hasCapability(role, 'reports.financial')) return { ...data, id, updatedAt: customerVersion(data.updatedAt) };
@@ -230,8 +232,10 @@ function workDataHandlers(db, config = {}) {
         }
         await serviceAreas.assertCurrent(tx, area);
         const before = existing.data() || {};
-        const slot = await scheduling.prepare(tx, scope, action === 'delete' ? null : { ...before, ...patch }, { before, jobId: ref.id });
+        const slot = await scheduling.prepare(tx, scope, action === 'delete' ? null : { ...before, ...patch }, { before, jobId: ref.id, reviewStartedWork: data.reviewStartedWork === true });
         if (action !== 'delete' && (!slot.skipped || action === 'create' || action === 'assign')) Object.assign(patch, { assignedTo: slot.assignedTo || null, assignedToName: slot.assignedToName || null, assignedToUid: slot.assignedToUid || null, assignmentNeedsAttention: !slot.assignedTo, assignmentReview: slot.assignedTo ? null : 'This visit needs a technician assignment.' });
+        const exceptionChange = action !== 'delete' ? await prepareAssignmentException(tx, db, scope, ref.id, before, { ...before, ...patch }) : null;
+        if (exceptionChange) patch.reassignmentRequest = null;
         let plan;
         if (recurring) {
           plan = buildInitialPlan(scope, { ...patch, customerName: customer?.get('name') || patch.customerName, customerPhone: customer?.get('phone') || customer?.get('phoneNumber') || patch.customerPhone }, recurring);
@@ -244,6 +248,7 @@ function workDataHandlers(db, config = {}) {
         }
         const updatedAt = new Date(Math.max(Date.now(), Date.parse(version(existing.get('updatedAt'))) + 1 || 0, saveCustomerAddress ? Date.parse(customerVersion(customer.get('updatedAt'))) + 1 || 0 : 0)).toISOString();
         scheduling.commit(tx, slot);
+        commitAssignmentException(tx, exceptionChange, updatedAt);
         if (action === 'delete') tx.delete(ref);
         else if (action === 'create') tx.create(ref, { ...patch, userId: scope.uid, ...(scope.companyId ? { companyId: scope.companyId } : {}), status: patch.status || 'scheduled', createdAt: updatedAt, updatedAt });
         else {

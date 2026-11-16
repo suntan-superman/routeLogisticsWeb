@@ -6,7 +6,8 @@ function writeResources(name, data = {}, result) {
   if (name === 'rlManageCustomer' && ['create', 'update', 'delete'].includes(data.action)) return ['customers', 'jobs'];
   if (name === 'rlRecordApplication') return ['applications'];
   if (name === 'rlJobPhoto' && ['upload', 'delete'].includes(data.action)) return ['photos', 'service-form'];
-  if (name === 'rlJobVisit' && data.action === 'record') return ['visits'];
+  if (name === 'rlJobVisit' && data.action === 'record') return ['visits', 'jobs'];
+  if (name === 'rlJobException' && ['request', 'resolve', 'dismiss'].includes(data.action)) return ['jobs'];
   if (name === 'rlServiceForms' && ['assign', 'save'].includes(data.action)) return ['service-form'];
   if (name === 'rlManageStaffAvailability') return ['team', 'locations', 'jobs'];
   if (name === 'rlWorkShift' && ['start', 'end'].includes(data.action)) return ['team', 'locations', 'shift'];

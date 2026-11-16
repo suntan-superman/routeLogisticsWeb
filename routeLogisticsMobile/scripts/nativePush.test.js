@@ -133,6 +133,34 @@ test('transient notification reads retain pending navigation for an explicit ret
   await env.api.receivePushResponse(response(data())); assert.equal(opened, 0); assert.ok([...env.store.keys()].some(item => item.endsWith(':open')));
   env.readFailure = null; await env.api.retryNativePushOpen(); assert.equal(opened, 1); assert.equal(env.readCalls, 2);
 });
+
+for (const platform of ['ios', 'android']) test(`${platform} removal taps refresh once without opening or reading the revoked job`, async () => {
+  const env = fixture(); env.platform = platform; await ready(env); let opened = 0, updates = 0;
+  env.api.subscribePushJobOpen(() => { opened++; }); env.api.subscribePushUpdates(() => { updates++; });
+  const removal = response(data({ type: 'job-removal', notificationId: 'removed-work' }));
+  await env.api.receivePushResponse(removal); await env.api.receivePushResponse(removal);
+  assert.equal(opened, 0); assert.equal(env.readCalls, 0); assert.equal(updates, 1);
+  assert.match(env.api.nativePushSnapshot().message, /assignment was removed/i);
+  assert.equal(env.user.companyId, 'acme');
+});
+
+test('management request taps use an authorized job read and never trust a payload from another tenant', async () => {
+  const env = fixture(); env.user.role = env.claims.role = 'manager'; await ready(env); let opened = 0;
+  env.api.subscribePushJobOpen(() => { opened++; return true; });
+  await env.api.receivePushResponse(response(data({ type: 'job-reassignment-request', role: 'manager', notificationId: 'review-request' })));
+  assert.equal(opened, 1); assert.equal(env.readCalls, 1);
+  await env.api.receivePushResponse(response(data({ type: 'job-reassignment-request', role: 'manager', companyId: 'foreign', notificationId: 'foreign-request' })));
+  assert.equal(opened, 1); assert.equal(env.readCalls, 1);
+});
+
+test('removal and request foreground alerts respect their existing notification categories', async () => {
+  const env = fixture(); env.api.initializeNativePush(); await ready(env);
+  await env.api.saveNativePushPreferences({ assignments: false, status: true });
+  assert.equal((await env.handler.handleNotification(response(data({ type: 'job-removal' })).notification)).shouldShowBanner, false);
+  assert.equal((await env.handler.handleNotification(response(data({ type: 'job-reassignment-request' })).notification)).shouldShowBanner, true);
+  await env.api.saveNativePushPreferences({ status: false });
+  assert.equal((await env.handler.handleNotification(response(data({ type: 'job-reassignment-request' })).notification)).shouldShowBanner, false);
+});
 for (const platform of ['ios', 'android']) test(`${platform} foreground presentation is scoped, honors category preferences and never shows a stale-account banner`, async () => {
   const env = fixture(); env.platform = platform; env.api.initializeNativePush(); await ready(env);
   assert.equal((await env.handler.handleNotification(response(data()).notification)).shouldShowBanner, true);

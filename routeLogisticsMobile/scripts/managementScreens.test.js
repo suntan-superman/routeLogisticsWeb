@@ -17,6 +17,7 @@ function load(relative){
   if(name.includes('contexts/WorkQueryProvider'))return{useWorkQueryScope:()=>context};
   if(name.endsWith('/useManagementQueries'))return{useManagementData:(date,options)=>{calls.push(['query',date,options]);return data;},useManagementRoute:(memberId,date,options)=>{calls.push(['route',memberId,date,options]);return routeData;}};
   if(name.endsWith('/managementOperations'))return{checkManagementAssignment:(...args)=>operations.check(...args),saveManagementAssignment:(...args)=>operations.assign(...args),saveStaffAvailability:(...args)=>operations.availability(...args)};
+  if(name.endsWith('/jobExceptionOperations'))return{newExceptionOperationId:()=> 'review-operation-12345',reviewJobReassignment:async(...args)=>{calls.push(['request-review',...args]);return operations.review?.(...args)||{};}};
   if(name.startsWith('.')){const resolved=path.resolve(path.dirname(file),name);return load(path.relative(root,resolved)+(path.extname(resolved)?'':'.js'));}return require(name);
  };
  const result=babel.transformSync(fs.readFileSync(file,'utf8'),{filename:file,babelrc:false,configFile:false,presets:[[require.resolve(path.join(root,'node_modules/@babel/preset-react')),{runtime:'classic'}]],plugins:[require.resolve(path.join(root,'node_modules/@babel/plugin-transform-modules-commonjs'))]});
@@ -173,4 +174,25 @@ test('polling can revoke assignment eligibility after preflight without discardi
 test('a manager can explicitly change field eligibility without triggering assignment, shift or location actions',async()=>{
  user.role='manager';view='team';await render();await press('Details for Luis');await press('Change staff availability');await press('Can be assigned field work');await press('Save field work setting');assert.equal(calls.some(row=>row[0]==='availability'),false);
  await press('Confirm field work setting');const saved=calls.find(row=>row[0]==='availability');assert.equal(saved[1].action,'set-field-work');assert.equal(saved[1].fieldWorkEnabled,false);assert.match(texts(),/Field work setting saved/);assert.equal(calls.some(row=>row[0]==='assign'),false);assert.equal(interactions.at(-1).hasDraft,false);
+});
+
+test('exception filter retains assignments and management dismissal does not invoke reassignment',async()=>{
+ view='schedule';data.jobs.data.jobs[1]={...data.jobs.data.jobs[1],reassignmentRequest:{id:'request-1',status:'pending',revision:1,reason:'vehicle',notes:'Synthetic vehicle issue'}};
+ await render();await press('Reassignment requested');assert.match(texts(),/Customer tech/);assert.doesNotMatch(texts(),/Customer done/);
+ await press('Review reassignment request tech');assert.match(texts(),/Synthetic vehicle issue/);assert.equal(interactions.at(-1).hasDraft,true);
+ const field=tree.root.findByProps({accessibilityLabel:'Management explanation (optional)'});await act(async()=>field.props.onChangeText('Office reviewed the test request'));
+ await press('Dismiss request');const action=calls.find(row=>row[0]==='request-review');assert.equal(action[1].id,'tech');assert.equal(action[2].action,'dismiss');assert.equal(action[2].explanation,'Office reviewed the test request');
+ assert.equal(calls.some(row=>row[0]==='assign'),false);assert.equal(data.jobs.data.jobs[1].assignedTo,'tech');assert.equal(interactions.at(-1).hasDraft,false);
+});
+
+test('polling a newer request cannot silently redirect an open management decision',async()=>{
+ view='schedule';data.jobs.data.jobs[1]={...data.jobs.data.jobs[1],reassignmentRequest:{id:'request-1',status:'pending',revision:1,reason:'equipment'}};
+ await render();await press('Review reassignment request tech');data.jobs.data.jobs[1]={...data.jobs.data.jobs[1],reassignmentRequest:{id:'request-2',status:'pending',revision:2,reason:'other'}};
+ await act(async()=>tree.update(React.createElement(App)));await settle();assert.match(texts(),/request or job changed/);assert.equal(button('Dismiss request'),undefined);assert.equal(calls.some(row=>row[0]==='request-review'),false);
+});
+
+test('in-progress assignment requires explicit work review after ordinary availability checks',async()=>{
+ view='schedule';data.jobs.data.jobs[1]={...data.jobs.data.jobs[1],status:'in-progress'};await render();await press('Assign job tech');await press('Assign to Manager');await press('Check assignment availability');
+ assert.equal(button('Confirm job assignment').props.disabled,true);await press('I reviewed the work already started');await press('Confirm job assignment');
+ const saved=calls.find(row=>row[0]==='assign');assert.deepEqual(saved[3],{reviewStartedWork:true});assert.equal(saved[1].status,'in-progress');
 });

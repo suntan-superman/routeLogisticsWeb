@@ -15,6 +15,11 @@ import { addressKey, createDispatchAddressResolver, mapPoint } from '../utils/di
 import { useConfirmUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
 import { workspaceAccessError } from '../services/workspaceQueryPolicy';
+import { deriveJobExceptions, REASSIGNMENT_REASONS } from '../utils/jobExceptions';
+import { useConfirm } from '../components/ConfirmProvider';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useInvalidateWorkspace } from '../hooks/useWorkspaceQuery';
+import toast from 'react-hot-toast';
 
 const today = () => new Date().toLocaleDateString('en-CA');
 const locationLabels = LOCATION_LABELS;
@@ -22,6 +27,7 @@ const EMPTY_ROWS = [];
 export default function DispatchPage() {
   const { company, can, role } = useAuth();
   const confirmDiscard = useConfirmUnsavedChanges();
+  const confirm = useConfirm(), invalidate = useInvalidateWorkspace();
   const [date, setDate] = useState(today), [nearbyJob, setNearbyJob] = useState(null);
   const jobsQuery = useWorkspaceQuery(['jobs', date, 500], () => readWorkspace('jobs', { date, limit: 500 }));
   const teamQuery = useWorkspaceQuery(['team'], () => callWorkspace('rlGetRoutingTeam'));
@@ -30,6 +36,7 @@ export default function DispatchPage() {
   const roster = locationsQuery.data?.roster || [], policy = locationsQuery.data?.policy || { intervalMinutes: 3, freshAfterSeconds: 300 };
   const more = jobsQuery.data?.hasMore === true;
   const [member, setMember] = useState('all'), [status, setStatus] = useState('all'), [area, setArea] = useState('');
+  const [exceptionFilter, setExceptionFilter] = useState('all');
   const [error, setError] = useState(''), [busy, setBusy] = useState(false), [selected, setSelected] = useState(null), [routeMember, setRouteMember] = useState('');
   const [mapReady, setMapReady] = useState(false), [resolved, setResolved] = useState({}), [now, setNow] = useState(() => new Date());
   const [mapBusy, setMapBusy] = useState(false), [mapError, setMapError] = useState(''), [markerCount, setMarkerCount] = useState(0), [lookupRequest, setLookupRequest] = useState({ id: 0, retry: false });
@@ -59,7 +66,10 @@ export default function DispatchPage() {
     if ([jobsQuery.error, teamQuery.error, locationsQuery.error].some(workspaceAccessError)) { setSelected(null); setNearbyJob(null); }
   }, [jobsQuery.error, teamQuery.error, locationsQuery.error]);
   useEffect(() => { const timer = setInterval(() => setNow(new Date()), 60000); return () => clearInterval(timer); }, []);
-  const filtered = useMemo(() => jobs.filter(job => (member === 'all' || (member === 'unassigned' ? !job.assignedTo : job.assignedTo === member)) && (status === 'all' || job.status === status) && (!area || `${job.serviceArea || ''} ${job.city || ''} ${job.zipCode || ''}`.toLowerCase().includes(area.toLowerCase()))), [jobs, member, status, area]);
+  const baseFiltered = useMemo(() => jobs.filter(job => (member === 'all' || (member === 'unassigned' ? !job.assignedTo : job.assignedTo === member)) && (status === 'all' || job.status === status) && (!area || `${job.serviceArea || ''} ${job.city || ''} ${job.zipCode || ''}`.toLowerCase().includes(area.toLowerCase()))), [jobs, member, status, area]);
+  const exceptions = useMemo(() => new Map(jobs.map(job => [job.id, deriveJobExceptions(job, { now, timeZone: company?.timeZone })])), [jobs, now, company?.timeZone]);
+  const exceptionCounts = useMemo(() => ({ late: baseFiltered.filter(job => exceptions.get(job.id).potentiallyLate).length, overdue: baseFiltered.filter(job => exceptions.get(job.id).overdue).length, requests: baseFiltered.filter(job => exceptions.get(job.id).reassignmentRequested).length }), [baseFiltered, exceptions]);
+  const filtered = useMemo(() => baseFiltered.filter(job => exceptionFilter === 'all' || exceptions.get(job.id)[exceptionFilter]), [baseFiltered, exceptionFilter, exceptions]);
   const assignableTeam = useMemo(() => team.filter(row => ['owner', 'manager', 'technician'].includes(row.role) && row.fieldWorkEnabled !== false && row.availability?.fieldWorkEnabled !== false), [team]);
   const position = job => jobPosition(job) || resolved[addressKey(jobAddress(job))];
   mapJobs.current = filtered;
@@ -120,10 +130,21 @@ export default function DispatchPage() {
     finally { mapOpening.current = false; if (lifetime === mapLifetime.current) setMapBusy(false); }
   };
   const assign = async (job, memberId) => {
-    if (!can('jobs.assign')) return;
+    if (!can('jobs.assign') || busy) return;
+    const changed = (job.assignedTo || '') !== (memberId || '');
+    if (!changed) return;
+    const reviewStartedWork = job.status === 'in-progress';
+    if (reviewStartedWork && !(await confirm({ title: 'Review in-progress reassignment', message: 'Review existing work, photos, visit evidence and any unsynchronized technician work before reassigning. Existing evidence is retained; pending offline changes may require reconciliation.', confirmText: 'Reassign after review' }))) return;
     setBusy(true); setError('');
-    try { await callWorkspace('rlManageJob', { action: 'assign', id: job.id, memberId: memberId || null, expectedVersion: job.updatedAt || null }); await jobsQuery.refetch(); }
-    catch (e) { setError(e.message); } finally { setBusy(false); }
+    try { await callWorkspace('rlManageJob', { action: 'assign', id: job.id, memberId: memberId || null, expectedVersion: job.updatedAt || null, ...(reviewStartedWork ? { reviewStartedWork: true } : {}) }); await jobsQuery.refetch(); toast.success('Job assignment updated.'); return { success: true }; }
+    catch (e) { setError(e.message); return { error: e.message }; } finally { setBusy(false); }
+  };
+  const exceptionChanged = result => {
+    const request = result.request?.status === 'pending' ? result.request : null;
+    const update = job => job?.id === result.jobId && (!job.reassignmentRequest || job.reassignmentRequest.id === result.request?.id) ? { ...job, reassignmentRequest: request } : job;
+    jobsQuery.setData(previous => previous && ({ ...previous, jobs: previous.jobs.map(update) }));
+    setSelected(update);
+    return invalidate(['jobs', 'job', 'job-exceptions']);
   };
   const currentSelection = selected && (jobs.find(job => job.id === selected.id) || selected);
   if (!can('dispatch.manage')) return <p role="alert">Dispatch access is required.</p>;
@@ -137,6 +158,7 @@ export default function DispatchPage() {
       <button className="rounded border px-4 py-2" onClick={load} disabled={busy}>Refresh</button>
     </div>
     {(error || jobsQuery.error || teamQuery.error || locationsQuery.error) && <p role="alert" className="text-red-700">{error || (jobsQuery.error || teamQuery.error || locationsQuery.error).message}</p>}
+    <section aria-label="Operational exceptions" className="space-y-2 rounded border bg-white p-3"><div className="flex flex-wrap gap-2">{[['all', `All jobs (${baseFiltered.length})`], ['potentiallyLate', `Potentially late (${exceptionCounts.late})`], ['overdue', `Overdue (${exceptionCounts.overdue})`], ['reassignmentRequested', `Reassignment requested (${exceptionCounts.requests})`]].map(([value, label]) => <button key={value} type="button" aria-pressed={exceptionFilter === value} onClick={() => setExceptionFilter(value)} className={`rounded-full border px-3 py-1 text-sm ${exceptionFilter === value ? 'border-primary-700 bg-primary-50 font-semibold text-primary-900' : 'border-gray-300'}`}>{label}</button>)}</div><p className="text-xs text-gray-600">Potential lateness uses a 30-minute grace period in the company time zone. No arrival confirmed does not prove absence; the technician may be working offline. These indicators do not change assignments or appointments.</p></section>
     <div className="rounded border bg-white p-4 space-y-3">
       <div className="flex flex-wrap items-center gap-3">{!mapReady && <button className="rounded bg-primary-600 px-4 py-2 text-white" disabled={mapBusy} onClick={openMap}>{mapBusy ? 'Opening dispatch map…' : 'Show dispatch map'}</button>}{mapReady && lookup.pending > 0 && <button className="rounded border px-4 py-2" disabled={mapBusy} onClick={() => setLookupRequest(previous => ({ id: previous.id + 1, retry: false }))}>Locate next 25 service addresses</button>}{mapReady && lookup.failed > 0 && <button className="rounded border px-4 py-2" disabled={mapBusy} onClick={() => setLookupRequest(previous => ({ id: previous.id + 1, retry: true }))}>Retry unresolved addresses</button>}<span className="whitespace-nowrap">{filtered.length} jobs · {jobs.filter(job => !job.assignedTo).length} unassigned</span></div>
       {mapError && <p role="alert" className="text-red-700">{mapError}</p>}
@@ -152,7 +174,8 @@ export default function DispatchPage() {
       {filtered.map(job => <article key={job.id} className="rounded border bg-white p-4 space-y-2" style={{ borderLeft: `5px solid ${STATUS_COLORS[job.status] || '#6b7280'}` }}>
         <button className="font-semibold underline" onClick={event => openDetails(job, event.currentTarget)}>{job.customerName || 'Customer'} · {job.serviceType}</button><p>{job.time || 'Time not set'} · {job.status} · {jobAddress(job) || 'Service address not set'}</p>
         {scheduleWarning(job, now, company?.timeZone) && <p className="text-amber-800">{scheduleWarning(job, now, company?.timeZone)} · schedule-based, not a traffic prediction</p>}
-        <label>Assigned to <SelectControl aria-label={`Assign ${job.customerName || job.id}`} className="rounded border-gray-300" value={job.assignedTo || ''} disabled={busy} onChange={e => assign(job, e.target.value)}><option value="">Unassigned</option>{job.assignedTo && !assignableTeam.some(row => row.id === job.assignedTo) && <option value={job.assignedTo} disabled>{job.assignedToName || team.find(row => row.id === job.assignedTo)?.name || 'Previously assigned technician'} (review assignment)</option>}{assignableTeam.map(row => <option value={row.id} key={row.id}>{row.name}</option>)}</SelectControl></label>
+        <ExceptionIndicators value={exceptions.get(job.id)} />
+        <label>Assigned to <SelectControl aria-label={`Assign ${job.customerName || job.id}`} className="rounded border-gray-300" value={job.assignedTo || ''} disabled={busy || !can('jobs.assign')} onChange={e => assign(job, e.target.value)}><option value="">Unassigned</option>{job.assignedTo && !assignableTeam.some(row => row.id === job.assignedTo) && <option value={job.assignedTo} disabled>{job.assignedToName || team.find(row => row.id === job.assignedTo)?.name || 'Previously assigned technician'} (review assignment)</option>}{assignableTeam.map(row => <option value={row.id} key={row.id}>{row.name}</option>)}</SelectControl></label>
         {job.assignmentNeedsAttention && <p role="status" className="text-sm font-medium text-amber-800">{job.assignmentReview || 'A dispatcher needs to assign this visit.'}</p>}
         {(jobAddress(job) || position(job)) && <a className="ml-3 underline" href={googleNavigation([{ ...job, address: jobAddress(job), location: position(job) }])} target="_blank" rel="noreferrer">Navigate</a>}
         <button className="ml-3 underline" onClick={() => setNearbyJob(job)}>Find nearby on-duty staff</button>
@@ -168,10 +191,48 @@ export default function DispatchPage() {
       {team.map(row => { const staff = { ...row, ...(roster.find(item => item.memberId === row.id) || { memberId: row.id, dutyStatus: 'unknown', location: locations.find(item => item.memberId === row.id) }) }; return <div key={row.id} className="space-y-2 rounded border bg-white p-3"><strong>{row.name}</strong><TeamLocationStatus member={staff} now={now} freshAfterSeconds={policy.freshAfterSeconds} /><button className="underline" onClick={() => changeRoute(row.id)}>Open daily route</button><StaffAvailabilityEditor companyId={company?.id} member={staff} allowed={['owner', 'manager'].includes(role)} onChanged={load} /></div>; })}
     </aside></div>
     {routeMember && <section className="rounded border bg-white p-5"><button className="mb-4 underline" onClick={() => changeRoute('')}>Close route planner</button><RoutesPage key={`${date}:${routeMember}`} initialDate={date} initialMemberId={routeMember} /></section>}
-  </div>{currentSelection && <DispatchJobDetails job={currentSelection} onClose={closeDetails} returnFocus={opener.current} fallbackFocus={heading.current} destination={position(currentSelection)} />}</>;
+  </div>{currentSelection && <DispatchJobDetails job={currentSelection} onClose={closeDetails} returnFocus={opener.current} fallbackFocus={heading.current} destination={position(currentSelection)} exceptionState={exceptions.get(currentSelection.id) || deriveJobExceptions(currentSelection, { now, timeZone: company?.timeZone })} canManageRequests={can('jobs.assign')} onExceptionChanged={exceptionChanged} onAssign={assign} assignmentTeam={assignableTeam} assigning={busy} />}</>;
 }
 
-function DispatchJobDetails({ job, onClose, returnFocus, fallbackFocus, destination }) {
+function ExceptionIndicators({ value }) {
+  if (!value?.indicators.length) return null;
+  return <ul aria-label="Job exceptions" className="flex flex-wrap gap-2">{value.indicators.map(indicator => <li key={indicator.code} title={indicator.detail} className="rounded bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-900">{indicator.label}</li>)}</ul>;
+}
+
+function JobExceptionReview({ job, value, allowed, onChanged, onAssign, assignmentTeam, assigning }) {
+  const [retained, setRetained] = useState(job.reassignmentRequest), [explanation, setExplanation] = useState(''), [error, setError] = useState(''), [message, setMessage] = useState(''), [busy, setBusy] = useState(false);
+  const locked = useRef(false), attempts = useRef(new Map()), generation = useRef(0), mounted = useRef(false);
+  const pending = job.reassignmentRequest?.status === 'pending' ? job.reassignmentRequest : null;
+  const dirty = !!explanation.trim(), request = dirty && retained ? retained : pending || retained;
+  const changedRequest = !!(dirty && pending && retained && (pending.id !== retained.id || pending.revision !== retained.revision));
+  const { confirmDiscard } = useUnsavedChanges(dirty, { scope: `job:${job.id}`, message: 'Your reassignment review explanation has not been saved. Leave without saving it?' });
+  useEffect(() => { mounted.current = true; const lifecycle = generation, sequence = ++lifecycle.current; return () => { mounted.current = false; if (sequence === lifecycle.current) lifecycle.current++; }; }, [job.id]);
+  useEffect(() => { if (!dirty && !locked.current) { setRetained(pending); setError(''); } }, [pending, dirty]);
+  const act = async action => {
+    if (!allowed || !pending || changedRequest || locked.current) return;
+    locked.current = true; setBusy(true); setError(''); setMessage(''); const ticket = generation.current;
+    const fingerprint = JSON.stringify([action, job.id, pending.id, pending.revision, job.updatedAt, explanation.trim()]);
+    if (!attempts.current.has(fingerprint)) attempts.current.set(fingerprint, crypto.randomUUID());
+    try {
+      const result = await callWorkspace('rlJobException', { action, jobId: job.id, requestId: pending.id, operationId: attempts.current.get(fingerprint), expectedVersion: job.updatedAt || null, expectedRevision: pending.revision, explanation: explanation.trim() });
+      if (!mounted.current || ticket !== generation.current) return;
+      setExplanation(''); setRetained(null); setMessage(action === 'resolve' ? 'Reassignment request resolved. The assignment is unchanged.' : 'Reassignment request dismissed. The assignment is unchanged.'); toast.success(action === 'resolve' ? 'Reassignment request resolved.' : 'Reassignment request dismissed.');
+      try { await onChanged(result); } catch { if (mounted.current && ticket === generation.current) setError('The request was saved, but the board could not refresh. Refresh dispatch to see current requests.'); }
+    } catch (failure) { if (mounted.current && ticket === generation.current) { setError(failure.message || 'This request could not be updated. Review the latest job and retry.'); toast.error(failure.message || 'Request update failed.'); } }
+    finally { locked.current = false; if (mounted.current && ticket === generation.current) setBusy(false); }
+  };
+  if (!value?.needsAttention && !request && !message && !dirty) return null;
+  return <section aria-label="Operational exception review" className="space-y-3 rounded border border-amber-200 bg-amber-50 p-4"><h3 className="font-semibold">Operational attention</h3><ExceptionIndicators value={value} />{value?.indicators.filter(indicator => indicator.code !== 'reassignment-requested').map(indicator => <p key={indicator.code} className="text-sm">{indicator.detail}</p>)}
+    {request && <div className="space-y-2"><h4 className="font-semibold">Reassignment request</h4><p>{REASSIGNMENT_REASONS[request.reason] || 'Management review requested'}</p>{request.requestedAt && <p className="text-sm">Requested {new Date(request.requestedAt).toLocaleString()}</p>}{request.notes && <p className="whitespace-pre-wrap break-words">{request.notes}</p>}{!pending && <p role="status">This request is no longer pending. Any unfinished explanation is retained here for review.</p>}
+      {changedRequest && <p role="alert">A newer reassignment request is available. Your unfinished explanation is retained; review the latest request before resolving it.</p>}
+      {allowed && <><label className="block text-sm font-medium">Resolution explanation (optional)<textarea aria-label="Reassignment resolution explanation" maxLength={2000} value={explanation} disabled={busy} onChange={event => setExplanation(event.target.value)} className="input-field mt-1 block w-full" /></label><div className="flex flex-wrap gap-2"><button className="btn-secondary" disabled={busy || !pending || changedRequest} onClick={() => act('resolve')}>Resolve request</button><button className="btn-secondary" disabled={busy || !pending || changedRequest} onClick={() => act('dismiss')}>Dismiss request</button>{changedRequest && <button className="btn-secondary" disabled={busy} onClick={async () => { if (await confirmDiscard()) { setExplanation(''); setRetained(pending); setError(''); } }}>Review latest request</button>}</div></>}
+    </div>}
+    {allowed && <div className="space-y-2 border-t border-amber-200 pt-3"><label className="block text-sm font-medium">Reassign through checked scheduling<SelectControl aria-label="Reassign selected job" className="input-field mt-1 block w-full" value={job.assignedTo || ''} disabled={busy || assigning} onChange={async event => { const result = await onAssign(job, event.target.value); if (mounted.current && result?.error) setError(result.error); else if (mounted.current && result?.success) { setError(''); setMessage('Job assignment updated. Existing work is retained.'); } }}><option value="">Unassigned</option>{job.assignedTo && !assignmentTeam.some(row => row.id === job.assignedTo) && <option value={job.assignedTo} disabled>Current assignee (review assignment)</option>}{assignmentTeam.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</SelectControl></label><p className="text-xs">Availability and the latest assignment are checked on save. Reassigning resolves a pending request and preserves existing work.</p>{job.status === 'in-progress' && <p className="text-sm font-medium">Work is in progress. An explicit management review is required before changing assignment.</p>}</div>}
+    {error && <p role="alert" className="text-red-800">{error}</p>}{message && <p role="status">{message}</p>}
+  </section>;
+}
+
+function DispatchJobDetails({ job, onClose, returnFocus, fallbackFocus, destination, exceptionState, canManageRequests, onExceptionChanged, onAssign, assignmentTeam, assigning }) {
   const panel = useRef(null), close = useRef(null);
   const visitsQuery = useWorkspaceQuery(['job-visits', job.id], () => callWorkspace('rlJobVisit', { action: 'list', jobId: job.id }));
   const visits = visitsQuery.data?.events || [], error = visitsQuery.error?.message || '', loading = visitsQuery.isPending;
@@ -198,6 +259,7 @@ function DispatchJobDetails({ job, onClose, returnFocus, fallbackFocus, destinat
     <section ref={panel} role="dialog" aria-modal="true" aria-labelledby="dispatch-job-title" tabIndex={-1} className="h-[100dvh] w-full max-w-lg overflow-y-auto bg-white p-5 shadow-2xl sm:p-6">
       <div className="mb-5 flex items-start justify-between gap-4"><div><p className="text-sm text-gray-500">Job details</p><h2 id="dispatch-job-title" className="text-xl font-bold">{job.customerName || 'Customer'} · {job.serviceType || 'Service visit'}</h2></div><button ref={close} className="min-h-11 rounded border px-3 py-2" onClick={onClose}>Close details</button></div>
       <div className="space-y-5"><div className="space-y-2 rounded border p-4"><p className="font-semibold" style={{ color: STATUS_COLORS[job.status] || '#374151' }}>Status: {job.status || 'Not set'}</p><p>{job.date} · {job.time || 'Time not set'}</p><p>{jobAddress(job) || 'Service address not set'}</p>{(destination || jobAddress(job)) && <a className="inline-block underline" href={googleNavigation([{ ...job, address: jobAddress(job), location: destination }])} target="_blank" rel="noreferrer">Navigate to service location</a>}</div>
+        <JobExceptionReview key={'exception-' + job.id} job={job} value={exceptionState} allowed={canManageRequests} onChanged={onExceptionChanged} onAssign={onAssign} assignmentTeam={assignmentTeam} assigning={assigning} />
         {!!(job.workNotes || job.notes) && <section><h3 className="mb-2 font-semibold">Work notes</h3><p className="whitespace-pre-wrap">{job.workNotes || job.notes}</p></section>}
         {!!(job.actualWorkDone || job.completionNotes) && <section><h3 className="mb-2 font-semibold">Completed work</h3><p className="whitespace-pre-wrap">{job.actualWorkDone}</p><p className="whitespace-pre-wrap">{job.completionNotes}</p></section>}
         <section><h3 className="mb-2 font-semibold">Visit record</h3><p className="mb-2 text-xs text-gray-600">Manual reports and GPS evidence do not independently verify access to the property.</p>{loading && <p role="status">Loading visit records…</p>}{error && <div><p role="alert" className="text-red-700">{error}</p><button className="mt-2 underline" onClick={() => visitsQuery.refetch()}>Retry visit records</button></div>}{!loading && !error && !visits.length && <p>No visit events recorded.</p>}

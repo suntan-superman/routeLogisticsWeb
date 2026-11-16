@@ -9,9 +9,11 @@ const preferenceId = scope => hash([scope.uid, scope.companyId, scope.membership
 function jobEvents(before, after) {
   if (!after?.companyId) return [];
   const events = [];
+  if (before?.assignedTo && before.assignedTo !== after.assignedTo) events.push('removal');
   if (after.assignedTo && before?.assignedTo !== after.assignedTo) events.push('assignment');
   else if (after.assignedTo && before && ['date', 'time', 'address'].some(key => String(before[key] || '') !== String(after[key] || ''))) events.push('schedule');
   if (before && before.status !== after.status && ['en-route', 'in-progress', 'completed', 'cancelled'].includes(after.status)) events.push('status');
+  if (after.reassignmentRequest?.status === 'pending' && before?.reassignmentRequest?.id !== after.reassignmentRequest.id) events.push('reassignment-request');
   return events;
 }
 function validatedRegistration(data) {
@@ -26,18 +28,20 @@ function nativePushHandlers(db, { enabled = () => false, fetcher = fetch, access
     const { uid, token } = requireAuth(request, true), staff = await requireStaff(db, request, token.companyId);
     return { uid, companyId: staff.company.id, membershipId: staff.memberId || null, role: staff.role };
   }
-  async function currentRecipient(scope, job) {
+  async function currentRecipient(scope, job, kind) {
     if (job.companyId !== scope.companyId) return false;
     const company = await db.collection('companies').doc(scope.companyId).get();
-    if (!company.exists) return false;
+    if (!company.exists || company.get('isActive') === false || company.get('deletedAt')) return false;
     if (scope.role === 'owner') { if (company.get('ownerId') !== scope.uid) return false; }
     else {
       if (!scope.membershipId) return false;
       const member = await db.collection('teamMembers').doc(scope.membershipId).get();
       if (member.get('uid') !== scope.uid || member.get('companyId') !== scope.companyId || member.get('status') !== 'active' || member.get('role') !== scope.role) return false;
-      if (scope.role === 'technician' && job.assignedTo !== scope.membershipId) return false;
+      if (scope.role === 'technician' && kind !== 'removal' && job.assignedTo !== scope.membershipId) return false;
       if (!['technician', 'manager', 'admin'].includes(scope.role)) return false;
     }
+    if (kind === 'reassignment-request' && !['owner','admin','manager'].includes(scope.role)) return false;
+    if (kind === 'removal' && (job.assignedTo === (scope.membershipId || scope.uid) || job.assignedToUid === scope.uid)) return false;
     if (getUser) { const account = await getUser(scope.uid).catch(() => null); if (!account || account.disabled || !account.emailVerified) return false; }
     return true;
   }
@@ -90,26 +94,32 @@ function nativePushHandlers(db, { enabled = () => false, fetcher = fetch, access
     const company = await db.collection('companies').doc(after.companyId).get(); if (!company.exists) return { queued: 0 };
     const recipients = new Map();
     if (after.assignedTo === company.get('ownerId')) recipients.set(company.get('ownerId'), { uid: company.get('ownerId'), companyId: after.companyId, membershipId: null, role: 'owner' });
-    if (after.assignedTo) {
+    if (after.assignedTo && after.assignedTo !== company.get('ownerId')) {
       const member = await db.collection('teamMembers').doc(documentId(after.assignedTo)).get();
       if (member.get('status') === 'active' && member.get('companyId') === after.companyId && member.get('uid')) recipients.set(member.get('uid'), { uid: member.get('uid'), companyId: after.companyId, membershipId: member.id, role: member.get('role') });
     }
-    if (kinds.includes('status')) {
+    if (kinds.includes('removal')) {
+      if (before.assignedTo === company.get('ownerId')) recipients.set(company.get('ownerId'), { uid: company.get('ownerId'), companyId: after.companyId, membershipId: null, role: 'owner' });
+      else { const old = await db.collection('teamMembers').doc(documentId(before.assignedTo)).get(); if (old.get('status') === 'active' && old.get('companyId') === after.companyId && old.get('uid') && (!before.assignedToUid || before.assignedToUid === old.get('uid'))) recipients.set(old.get('uid'), { uid: old.get('uid'), companyId: after.companyId, membershipId: old.id, role: old.get('role') }); }
+    }
+    if (kinds.includes('status') || kinds.includes('reassignment-request')) {
       if (company.get('ownerId')) recipients.set(company.get('ownerId'), { uid: company.get('ownerId'), companyId: after.companyId, membershipId: null, role: 'owner' });
       const managers = await db.collection('teamMembers').where('companyId', '==', after.companyId).get();
-      managers.docs.filter(member => member.get('status') === 'active' && ['manager', 'admin'].includes(member.get('role')) && member.get('uid')).slice(0, 100).forEach(member => recipients.set(member.get('uid'), { uid: member.get('uid'), companyId: after.companyId, membershipId: member.id, role: member.get('role') }));
+      managers.docs.filter(member => member.get('status') === 'active' && ['manager', 'admin'].includes(member.get('role')) && member.get('uid') && member.get('uid') !== company.get('ownerId')).slice(0, 100).forEach(member => recipients.set(member.get('uid'), { uid: member.get('uid'), companyId: after.companyId, membershipId: member.id, role: member.get('role') }));
     }
     let queued = 0;
     for (const scope of recipients.values()) {
-      if (!(await currentRecipient(scope, after))) continue;
+      if (!(await currentRecipient(scope, after, kinds.includes('removal') && (scope.membershipId || scope.uid) === before.assignedTo ? 'removal' : undefined))) continue;
       const pref = await preferences.doc(preferenceId(scope)).get(), settings = { ...defaultPreferences, ...(pref.data()?.preferences || {}) };
       if (!settings.enabled) continue;
       const registered = await devices.where('uid', '==', scope.uid).get();
       for (const kind of kinds) {
-        if ((kind !== 'status' && scope.membershipId !== after.assignedTo && !(scope.role === 'owner' && scope.uid === after.assignedTo)) || !settings[kind === 'assignment' ? 'assignments' : kind]) continue;
+        const category = ['assignment','removal'].includes(kind) ? 'assignments' : kind === 'reassignment-request' ? 'status' : kind;
+        if (!(await currentRecipient(scope, after, kind)) || kind === 'removal' && (scope.membershipId || scope.uid) !== before?.assignedTo || !['status','removal','reassignment-request'].includes(kind) && scope.membershipId !== after.assignedTo && !(scope.role === 'owner' && scope.uid === after.assignedTo) || !settings[category]) continue;
         for (const device of registered.docs.filter(record => record.get('active') === true && scopeMatches(record.data(), scope))) {
-          const id = hash(`${eventId}:${kind}:${device.id}`), ref = deliveries.doc(id);
-          await db.runTransaction(async tx => { if ((await tx.get(ref)).exists) return; tx.create(ref, { ...scope, deviceId: device.id, registrationSequence: device.get('registrationSequence'), jobId, kind, notificationId: id, eventId, state: 'pending', attempts: 0, dueAt: new Date(now()), createdAt: new Date(now()) }); queued++; });
+          const stableEvent = kind === 'reassignment-request' ? `job-exception:${after.reassignmentRequest.id}` : eventId;
+          const id = hash(`${stableEvent}:${kind}:${device.id}`), ref = deliveries.doc(id);
+          await db.runTransaction(async tx => { if ((await tx.get(ref)).exists) return; tx.create(ref, { ...scope, deviceId: device.id, registrationSequence: device.get('registrationSequence'), jobId, kind, notificationId: id, eventId: stableEvent, ...(kind === 'reassignment-request' ? { requestId: after.reassignmentRequest.id } : {}), state: 'pending', attempts: 0, dueAt: new Date(now()), createdAt: new Date(now()) }); queued++; });
         }
       }
     }
@@ -141,7 +151,7 @@ function nativePushHandlers(db, { enabled = () => false, fetcher = fetch, access
       if (now() - delivery.createdAt.toMillis() > 86400000) { await finish(ref, 'expired'); return; }
       const [device, job, pref] = await Promise.all([deviceRef.get(), db.collection('jobs').doc(delivery.jobId).get(), preferences.doc(preferenceId(delivery)).get()]);
       const settings = { ...defaultPreferences, ...(pref.data()?.preferences || {}) };
-      if (!device.exists || device.get('active') !== true || !device.get('expiresAt') || device.get('expiresAt').toMillis() <= now() || !scopeMatches(device.data(), delivery) || !job.exists || !(await currentRecipient(delivery, job.data())) || !settings.enabled || !settings[delivery.kind === 'assignment' ? 'assignments' : delivery.kind]) { await finish(ref, 'superseded'); return; }
+      if (!device.exists || device.get('active') !== true || !device.get('expiresAt') || device.get('expiresAt').toMillis() <= now() || !scopeMatches(device.data(), delivery) || !job.exists || !(await currentRecipient(delivery, job.data(), delivery.kind)) || delivery.kind === 'reassignment-request' && (job.get('reassignmentRequest')?.status !== 'pending' || job.get('reassignmentRequest')?.id !== delivery.requestId) || !settings.enabled || !settings[['assignment','removal'].includes(delivery.kind) ? 'assignments' : delivery.kind === 'reassignment-request' ? 'status' : delivery.kind]) { await finish(ref, 'superseded'); return; }
       if (delivery.ticketId) {
         const receipts = await requestExpo('getReceipts', { ids: [delivery.ticketId] }), receipt = receipts[delivery.ticketId];
         if (!receipt) { await ref.update({ state: 'receipt', leaseUntil: FieldValue.delete(), dueAt: new Date(now() + 900000) }); return; }
@@ -150,8 +160,8 @@ function nativePushHandlers(db, { enabled = () => false, fetcher = fetch, access
         if (['MessageRateExceeded', 'ExpoServerError'].includes(receipt.details?.error)) { delivery.ticketId = null; await ref.update({ ticketId: FieldValue.delete() }); throw new Error('Expo reported a temporary delivery failure.'); }
         await finish(ref, 'failed', { errorCode: receipt.details?.error || 'receipt-error' }); return;
       }
-      const title = { assignment: 'New job assigned', schedule: 'Job schedule changed', status: 'Important job update' }[delivery.kind];
-      const tickets = await requestExpo('send', [{ to: device.get('token'), title, body: 'Open Route Logistics to view the authorized work order.', sound: 'default', channelId: 'work-updates', priority: 'high', ttl: 3600, data: { type: `job-${delivery.kind}`, notificationId: delivery.notificationId, jobId: delivery.jobId, companyId: delivery.companyId, recipientUid: delivery.uid, membershipId: delivery.membershipId || '', role: delivery.role } }]);
+      const title = { assignment: 'New job assigned', schedule: 'Job schedule changed', status: 'Important job update', removal: 'Job reassigned', 'reassignment-request': 'Reassignment requested' }[delivery.kind];
+      const tickets = await requestExpo('send', [{ to: device.get('token'), title, body: delivery.kind === 'removal' ? 'Open Route Logistics to refresh your assigned schedule.' : 'Open Route Logistics to view the authorized work order.', sound: 'default', channelId: 'work-updates', priority: 'high', ttl: 3600, data: { type: `job-${delivery.kind}`, notificationId: delivery.notificationId, jobId: delivery.jobId, companyId: delivery.companyId, recipientUid: delivery.uid, membershipId: delivery.membershipId || '', role: delivery.role } }]);
       const ticket = Array.isArray(tickets) ? tickets[0] : tickets;
       if (ticket?.status === 'ok' && ticket.id) await ref.update({ state: 'receipt', ticketId: ticket.id, attempts: delivery.attempts + 1, leaseUntil: FieldValue.delete(), dueAt: new Date(now() + 900000) });
       else if (ticket?.details?.error === 'DeviceNotRegistered') { await invalidateDevice(deviceRef, delivery); await finish(ref, 'failed', { errorCode: 'DeviceNotRegistered' }); }

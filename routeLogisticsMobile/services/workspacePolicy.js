@@ -22,6 +22,7 @@ function companyProfile(company) {
   const address = company.address;
   return {
     companyName: company.name || company.businessName || '',
+    companyTimeZone: typeof company.timeZone === 'string' ? company.timeZone : 'America/Los_Angeles',
     companyLogo: typeof company.logo === 'string' ? company.logo : '',
     businessName: company.name || company.businessName || '',
     businessPhone: company.phone || company.phoneNumber || '',

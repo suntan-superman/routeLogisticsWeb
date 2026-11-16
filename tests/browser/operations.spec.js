@@ -1,5 +1,6 @@
 import { selectValue, selectOptions, expectSelectValue } from './support/select.js';
 import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { test, expect, signIn } from './support/fixtures.js';
 
 // These scenarios use the real Auth/Firestore/Functions emulators. No network
@@ -14,6 +15,43 @@ const laterDate = () => {
 const annotate = (...ids) => test.info().annotations.push({ type: 'acceptance', description: ids.join(', ') });
 const customerRow = (page, name) => page.getByRole('row').filter({ has: page.getByText(name, { exact: true }) });
 const estimateCard = (page, title) => page.locator('article').filter({ has: page.getByRole('heading', { name: title, exact: true }) });
+
+test('PW-OPS-22 technician request reaches dispatch and manager resolution preserves the appointment', async ({ page, scenario }) => {
+  annotate('DSP-003', 'SEC-002', 'SEC-003');
+  const original = await scenario.read('jobs', scenario.ids.jobId), foreign = await scenario.read('jobs', scenario.ids.foreignJobId);
+  await signIn(page, scenario.accounts.technician);
+  const readRequest = page.waitForRequest(request => request.url().includes('/rlReadWorkspace') && request.method() === 'POST');
+  await page.goto('/my-work');
+  const authorization = await (await readRequest).headerValue('authorization');
+  expect(Boolean(authorization?.startsWith('Bearer '))).toBe(true);
+  const endpoint = scenario.functionUrl('rlJobException');
+  expect(new URL(endpoint).origin).toBe('http://127.0.0.1:5001');
+  const payload = { action: 'request', jobId: scenario.ids.jobId, operationId: randomUUID(), expectedVersion: original.updatedAt, reason: 'vehicle', notes: 'Synthetic vehicle issue; management review only.' };
+  const response = await page.request.post(endpoint, { headers: { authorization }, data: { data: payload } });
+  expect(response.ok()).toBe(true);
+  const requested = await response.json(); expect(requested.result.request.status).toBe('pending');
+  const replay = await page.request.post(endpoint, { headers: { authorization }, data: { data: payload } });
+  expect(replay.ok()).toBe(true); expect((await replay.json()).result.replayed).toBe(true);
+  const afterRequest = await scenario.read('jobs', scenario.ids.jobId);
+  for (const field of ['status', 'assignedTo', 'updatedAt', 'date', 'time']) expect(afterRequest[field]).toEqual(original[field]);
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await signIn(page, scenario.accounts.manager);
+  await page.goto('/dispatch'); await page.getByLabel('Service date', { exact: true }).fill(scenario.jobDate);
+  await page.getByRole('button', { name: 'Reassignment requested (1)', exact: true }).click();
+  await page.getByRole('button', { name: `${scenario.customerName} · ${scenario.jobTitle}`, exact: true }).click();
+  const review = page.getByRole('region', { name: 'Operational exception review', exact: true });
+  await expect(review.getByText('Vehicle problem', { exact: true })).toBeVisible();
+  await expect(review.getByText(payload.notes, { exact: true })).toBeVisible();
+  await review.getByRole('textbox', { name: 'Reassignment resolution explanation', exact: true }).fill('Synthetic review: current assignment retained.');
+  await review.getByRole('button', { name: 'Resolve request', exact: true }).click();
+  await expect(review.getByText('Reassignment request resolved. The assignment is unchanged.', { exact: true })).toBeVisible();
+  const after = await scenario.read('jobs', scenario.ids.jobId);
+  expect(after.reassignmentRequest).toBeNull();
+  for (const field of ['status', 'assignedTo', 'updatedAt', 'date', 'time']) expect(after[field]).toEqual(original[field]);
+  const requests = (await scenario.list('rlJobExceptions')).filter(row => row.companyId === scenario.ids.companyId && row.jobId === scenario.ids.jobId);
+  expect(requests).toHaveLength(1); expect(requests[0].status).toBe('resolved');
+  expect(await scenario.read('jobs', scenario.ids.foreignJobId)).toEqual(foreign);
+});
 const timeOptionLabel = value => { const [hour, minute] = value.split(':').map(Number); return `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`; };
 
 async function chooseCustomer(scope, name) {

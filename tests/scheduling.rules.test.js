@@ -5,7 +5,7 @@ const path = require('node:path');
 const { initializeTestEnvironment, assertFails, assertSucceeds } = require('@firebase/rules-unit-testing');
 const { doc, setDoc, updateDoc, getDoc, getDocs, deleteDoc, collection, query, where, writeBatch, setLogLevel } = require('firebase/firestore');
 const prefix = `scheduling-rules-${process.pid}`, company = `${prefix}-company`, owner = `${prefix}-owner`, solo = `${prefix}-solo`;
-const privateCollections = ['rlScheduleLocks', 'rlScheduleOperations', 'rlScheduleReconciliations', 'rlStaffAvailability'];
+const privateCollections = ['rlScheduleLocks', 'rlScheduleOperations', 'rlScheduleReconciliations', 'rlStaffAvailability', 'rlJobExceptions', 'rlJobExceptionOperations', 'rlJobExceptionAudit'];
 const paths = new Set();
 let env;
 const ref = (db, documentPath) => { paths.add(documentPath); return doc(db, documentPath); };
@@ -83,5 +83,14 @@ test('all clients are denied direct reads, queries and writes to private schedul
     await assertFails(getDoc(target)); await assertFails(getDocs(query(collection(db, name), where('companyId', '==', company))));
     await assertFails(updateDoc(target, { revision: 999, result: { id: 'forged-job' } })); await assertFails(deleteDoc(target));
     await assertFails(setDoc(ref(db, `${name}/${prefix}-forged`), { companyId: company, userId: owner, actorId: owner, revision: 999 }));
+  }
+});
+
+
+test('exception summaries and confirmed visit evidence are server-only even for company owners and administrators', async () => {
+  for (const role of ['owner', 'admin', 'manager', 'technician']) {
+    const target = ref(client(role), history('jobs', 'owner'));
+    await assertFails(updateDoc(target, { reassignmentRequest: { id: 'forged-request', status: 'pending', requestedBy: owner } }));
+    await assertFails(updateDoc(target, { visitEvidence: { arrivedAt: '2035-01-04T09:00:00.000Z' } }));
   }
 });

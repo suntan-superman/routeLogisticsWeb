@@ -416,6 +416,18 @@ test('a confirmed job write replaces an older in-flight poll and cannot restore 
   assert.equal(observedJobs.jobs[0].status, 'completed');
 });
 
+test('visit evidence and reassignment decisions refresh scoped job queries without a page reload', async t => {
+  await mount(t, { route: false });
+  for (const [name, action] of [['rlJobVisit', 'record'], ['rlJobException', 'request'], ['rlJobException', 'resolve'], ['rlJobException', 'dismiss']]) {
+    const before = jobRequests.length;
+    await act(async () => publishWorkWrite({ scope: observedScope.scope, resources: writeResources(name, { action }, {}), jobId: 'job' }));
+    await settle(t); assert.equal(jobRequests.length, before + 1, `${name} ${action} refreshes the job control`);
+  }
+  const before = jobRequests.length;
+  await act(async () => publishWorkWrite({ scope: observedScope.scope, resources: writeResources('rlJobException', { action: 'request' }, { status: 'conflict' }), jobId: 'job' }));
+  await settle(t); assert.equal(jobRequests.length, before);
+});
+
 test('a confirmed child-resource write replaces an older poll without discarding its local draft', async t => {
   await mount(t, { resourceOnly: true });
   await act(async () => setResourceDraft('Unsaved caption'));

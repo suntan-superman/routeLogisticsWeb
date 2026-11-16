@@ -35,6 +35,9 @@ function load(filename) {
   const module = { exports: {} }; modules.set(filename, module);
   const requireMock = name => {
     if (name === 'react') return React;
+    if (name.endsWith('/utils/jobExceptions')) return webRequire('../../../functions/shared/jobExceptions');
+    if (name.endsWith('/components/ConfirmProvider')) return { useConfirm: () => async () => true };
+    if (name === 'react-hot-toast') return { __esModule: true, default: { success() {}, error() {} } };
     if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
     if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
     if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found'].includes(String(error?.code||'').split('/').pop())};

@@ -37,6 +37,7 @@ function load(relative) {
     if (specifier === 'react-native-safe-area-context') return { SafeAreaView: 'SafeAreaView', SafeAreaProvider: pass };
     if (specifier === 'expo-status-bar') return { StatusBar: 'StatusBar' };
     if (specifier === 'expo-application') return nativeApplication;
+    if (specifier === 'expo-crypto') return { randomUUID: require('node:crypto').randomUUID };
     if (specifier === 'expo-constants') return { executionEnvironment: 'standalone', expoConfig: { version: '0.8.0', ios: { buildNumber: '1' } } };
     if (specifier === 'expo-blur') return { BlurView: 'BlurView' };
     if (specifier === 'expo-linear-gradient') return { LinearGradient: 'LinearGradient' };
@@ -46,6 +47,7 @@ function load(relative) {
     if (specifier === '@react-native-community/netinfo') return { addEventListener: listener => { networkListeners.add(listener); listener({ isConnected: true, isInternetReachable: true }); return () => networkListeners.delete(listener); } };
     if (specifier === '@react-native-async-storage/async-storage') return { getItem: async key => stored.get(key) || null, setItem: async (key, value) => stored.set(key, value), removeItem: async key => stored.delete(key) };
     if (specifier.endsWith('/services/workspacePolicy')) return require('../services/workspacePolicy');
+    if (specifier.endsWith('/shared/jobExceptions')) return require('../../functions/shared/jobExceptions');
     if (specifier === './AuthContext' || specifier.endsWith('/contexts/AuthContext')) return { AuthContext, AuthProvider: pass, useAuth: () => currentAuth };
     if (specifier.endsWith('/contexts/LanguageContext')) return { LanguageProvider: pass, useLanguage: () => ({ t: key => key, language: 'en', changeLanguage() {} }) };
     if (specifier.endsWith('/theme/ThemeProvider')) return { ThemeProvider: pass, useTheme: () => ({ palette, colors: load('constants/colors.js').COLORS, isDark: true, ready: true, mode: 'dark', changeMode: async value => changes.push(value), reduceTransparency: false }) };

@@ -7,7 +7,7 @@ const babel = require('@babel/core');
 const root = path.resolve(__dirname, '..');
 
 function fixture() {
-  const storage = new Map(), copies = [], calls = [], operations = new Map(), modules = new Map();
+  const storage = new Map(), copies = [], calls = [], operations = new Map(), visitOperations=new Map(), modules = new Map();
   let online = true, nextId = 0, syncError = null, hold = null, storageError = null, serviceResult = {status:'synced',version:1};
   const claims = { companyId: 'acme', role: 'technician', membershipId: 'member' };
   const auth = { currentUser: { uid: 'tech', emailVerified: true }, app: { options: { projectId: 'mi-factotum-field-service' } } };
@@ -18,7 +18,14 @@ function fixture() {
   };
   const workspace = {
     readWorkspace: async (resource, data) => { assert.equal(resource, 'jobs'); assert.equal(data.id, job.id); assertAccess(); return { job: { ...job } }; },
-    callWorkspace: async (name, data) => { calls.push({ name, ...data }); if(name==='rlApplyJobOperation') return applyJob(data); assertAccess(); if (syncError) throw syncError; return name==='rlServiceForms'?serviceResult:{ status: 'synced' }; },
+    callWorkspace: async (name, data) => { calls.push({ name, ...data }); if(name==='rlApplyJobOperation') return applyJob(data); assertAccess(); if (syncError) throw syncError;
+      if(name==='rlJobVisit'){
+        if(visitOperations.has(data.operationId))return visitOperations.get(data.operationId);
+        if(data.expectedVersion!==job.updatedAt||data.expectedAssignee!==job.assignedTo)return{status:'conflict',version:job.updatedAt,server:{status:job.status}};
+        const version=new Date(Date.parse(job.updatedAt)+1).toISOString(),event={id:`server-${data.operationId}`,jobId:data.jobId,type:data.type,note:data.note,source:data.latitude==null?'manual':'manual-gps',occurredAt:data.occurredAt,recordedAt:new Date().toISOString(),capturedAt:data.capturedAt};
+        job.updatedAt=version;const result={status:'synced',version,event};visitOperations.set(data.operationId,result);return result;
+      }
+      return name==='rlServiceForms'?serviceResult:{ status: 'synced' }; },
   };
   async function applyJob(data) {
     if (hold) await hold;
@@ -58,10 +65,78 @@ function fixture() {
     return module.exports;
   }
   const offline = load('services/offline.js'), completion = load('services/jobCompletion.js');
-  return { ...offline, ...completion, job, claims, auth, copies, calls, operations,
+  return { ...offline, ...completion, job, claims, auth, copies, calls, operations, visitOperations, storage, restartOffline:()=>{modules.delete(path.resolve(root,'services/offline.js'));return load('services/offline.js');},
     online: value => { online = value; }, failSync: value => { syncError = value; }, holdSync: value => { hold = value; }, failStorage: value => { storageError = value; }, serviceResult:value=>{serviceResult=value;} };
 }
 const draft = { actualWorkDone: 'Applied treatment', actualHours: '1.5', completionNotes: 'Work documented.' };
+const visit = (type='arrived',extra={})=>({operationId:`offline-visit-${type}-00000001`,type,note:type==='access-blocked'?'Gate locked; attempted customer contact.':'Field evidence',occurredAt:new Date().toISOString(),...extra});
+
+for(const type of ['arrived','departed','access-blocked'])test(`offline ${type} evidence persists its identity/time before acknowledgement and survives a process restart`,async()=>{
+  const f=fixture();f.online(false);const original=visit(type);
+  const receipt=await f.saveVisitOffline({...f.job},original);assert.equal(receipt.operationId,original.operationId);assert.equal(f.calls.length,0);
+  const restarted=f.restartOffline(),[row]=await restarted.queuedWork();assert.equal(row.kind,'visit');assert.equal(row.state,'pending');assert.equal(row.attribution.userId,'tech');assert.equal(row.attribution.companyId,'acme');assert.equal(row.record.occurredAt,original.occurredAt);assert.equal(row.record.latitude,undefined);
+  f.online(true);await restarted.flushOffline();await restarted.flushOffline();const saved=await restarted.getQueuedOperation(original.operationId);
+  assert.equal(saved.state,'synced');assert.equal(saved.event.occurredAt,original.occurredAt);assert.equal(f.visitOperations.size,1);assert.equal(f.calls.filter(call=>call.name==='rlJobVisit').length,1);
+});
+
+test('visit storage failure retains the unsaved event and cannot report or send a durable operation',async()=>{
+ const f=fixture();f.online(false);f.failStorage(new Error('Storage full.'));await assert.rejects(f.saveVisitOffline({...f.job},visit()),/Storage full/);f.failStorage(null);assert.equal((await f.queuedWork()).length,0);assert.equal(f.calls.length,0);
+});
+
+test('arrival, work notes, departure and completion inherit only their explicit acknowledged revision chain',async()=>{
+ const f=fixture();f.online(false);await f.writeCache('job-bases',{job:{...f.job}});
+ await f.saveVisitOffline({...f.job},visit());await f.saveJobOffline('job',{notes:'Preserved offline observations'});await f.saveVisitOffline({...f.job},visit('departed'));
+ const result=await f.completeJob({...f.job},draft);assert.equal(result.status,'queued');const before=await f.queuedWork();assert.equal(before.length,4);
+ f.online(true);await f.flushOffline();const after=await f.queuedWork();assert.ok(after.every(row=>row.state==='synced'));assert.equal(f.job.status,'completed');assert.equal(f.visitOperations.size,2);
+ const revisionCalls=f.calls.filter(call=>['rlJobVisit','rlApplyJobOperation'].includes(call.name));
+ assert.deepEqual(revisionCalls.map(call=>call.name),['rlJobVisit','rlApplyJobOperation','rlJobVisit','rlApplyJobOperation']);
+ for(let index=1;index<after.length;index++)assert.equal(revisionCalls[index].expectedVersion,after[index-1].serverVersion);
+});
+
+test('reassigned or changed jobs retain visit conflicts and block dependent completion without rebasing the evidence',async()=>{
+ for(const reassign of [false,true]){
+  const f=fixture();f.online(false);const original=visit();await f.saveVisitOffline({...f.job},original);await f.completeJob({...f.job},draft);
+  if(reassign)f.job.assignedTo='another-member';else f.job.updatedAt='2026-11-13T10:30:00.000Z';
+  f.online(true);await f.flushOffline();const [event,completion]=await f.queuedWork();assert.equal(event.state,'conflict');assert.equal(completion.state,'pending');assert.equal(f.job.status,'in-progress');assert.equal(f.calls.some(call=>call.name==='rlApplyJobOperation'),false);
+  const pinned=event.expectedVersion;await f.resolveOffline(event.id,'retry');await f.flushOffline();const retained=await f.getQueuedOperation(event.id);assert.equal(retained.id,original.operationId);assert.equal(retained.expectedVersion,pinned);assert.equal(retained.record.occurredAt,original.occurredAt);
+  await assert.rejects(f.resolveOffline(event.id,'discard'),/retained for management/);
+ }
+});
+
+test('a previously acknowledged visit replay returns its original identity once and does not create another record',async()=>{
+ const f=fixture();f.online(false);const original=visit('arrived',{latitude:35,longitude:-119,accuracy:15,capturedAt:new Date().toISOString()});await f.saveVisitOffline({...f.job},original);f.online(true);await f.flushOffline();
+ const row=await f.getQueuedOperation(original.operationId),key=[...f.storage.keys()].find(key=>key.endsWith(':queue'));
+ const rows=JSON.parse(f.storage.get(key));rows[0].state='syncing';f.storage.set(key,JSON.stringify(rows));
+ const restarted=f.restartOffline();await restarted.flushOffline();assert.equal(f.visitOperations.size,1);assert.equal((await restarted.getQueuedOperation(original.operationId)).event.id,row.event.id);
+ assert.equal(f.calls.filter(call=>call.name==='rlJobVisit').length,2);
+});
+
+test('lost visit acknowledgement cannot rebase dependent evidence onto an unrelated later server revision',async()=>{
+ const f=fixture();f.online(false);const arrival=visit(),departure=visit('departed');await f.saveVisitOffline({...f.job},arrival);await f.saveVisitOffline({...f.job},departure);
+ // Simulate the server having committed the first event before the device died,
+ // then a separate dispatcher edit. Only its original receipt may advance the chain.
+ const firstVersion='2026-11-13T10:00:00.001Z';
+ f.visitOperations.set(arrival.operationId,{status:'synced',version:firstVersion,event:{id:'saved-arrival',jobId:'job',type:'arrived',source:'manual',occurredAt:arrival.occurredAt,recordedAt:new Date().toISOString()}});
+ f.job.updatedAt='2026-11-13T12:00:00.000Z';f.online(true);await f.flushOffline();const rows=await f.queuedWork();
+ assert.equal(rows[0].state,'synced');assert.equal(rows[1].expectedVersion,firstVersion);assert.equal(rows[1].state,'conflict');assert.equal(f.visitOperations.size,1);assert.equal(f.job.updatedAt,'2026-11-13T12:00:00.000Z');
+});
+
+test('an upgrade preserves the previous release unsent same-baseline notes/completion chain without rebasing attempted changes',async()=>{
+ const f=fixture();f.online(false);await f.writeCache('job-bases',{job:{...f.job}});
+ await f.saveJobOffline('job',{notes:'Legacy offline observations'});await f.completeJob({...f.job},draft);
+ const key=[...f.storage.keys()].find(key=>key.endsWith(':queue')),rows=JSON.parse(f.storage.get(key));
+ for(const row of rows){delete row.baseVersion;delete row.versionDependency;delete row.submittedAt;}
+ f.storage.set(key,JSON.stringify(rows));const restarted=f.restartOffline();f.online(true);await restarted.flushOffline();
+ const saved=await restarted.queuedWork();assert.ok(saved.every(row=>row.state==='synced'));assert.equal(f.job.status,'completed');assert.equal(f.job.notes,'Legacy offline observations');
+ const core=require('../services/offlineQueueCore'),attempted=[{id:'first',kind:'job',jobId:'job',expectedVersion:'baseline',state:'pending',attempts:0},{id:'already-sent',kind:'job',jobId:'job',expectedVersion:'baseline',state:'pending',attempts:1}];
+ core.restoreLegacyDependencies(attempted);assert.equal(attempted[1].versionDependency,undefined);assert.equal(attempted[1].expectedVersion,'baseline');
+});
+
+test('visit queues are isolated by UID/company and malformed optional GPS is never fabricated',async()=>{
+ const f=fixture();f.online(false);await f.saveVisitOffline({...f.job},visit());f.auth.currentUser.uid='another-user';assert.equal((await f.queuedWork()).length,0);f.auth.currentUser.uid='tech';f.claims.companyId='other';assert.equal((await f.queuedWork()).length,0);f.claims.companyId='acme';assert.equal((await f.queuedWork()).length,1);
+ await assert.rejects(f.saveVisitOffline({...f.job},visit('departed',{latitude:35,longitude:-119,accuracy:null,capturedAt:new Date().toISOString()})),/GPS sample/);
+ assert.equal((await f.queuedWork()).length,1);
+});
 
 test('offline work-note overlays and cached jobs preserve separate dispatcher access instructions', async () => {
   const f = fixture(), instructions = 'Synthetic gate code 2468\nUse the side entrance.';

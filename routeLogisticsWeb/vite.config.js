@@ -5,6 +5,9 @@ import process from 'node:process'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  // One pure JavaScript policy is shared by Functions, Metro and the web app.
+  optimizeDeps: { include: ['../functions/shared/jobExceptions.js'] },
+  build: { commonjsOptions: { include: [/node_modules/, /functions[\\/]shared[\\/]jobExceptions\.js$/] } },
   // Browser acceptance only: native CSP blocks external traffic without
   // intercepting/replaying Firestore streams in WebKit. Netlify never uses preview.
   ...(process.env.VITE_FIREBASE_EMULATORS === 'true' ? {

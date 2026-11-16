@@ -31,6 +31,8 @@ test('company object services and business information are displayed without mut
   const before = JSON.stringify(company), profile = companyProfile(company);
   assert.equal(profile.businessName, 'Acme'); assert.equal(profile.businessPhone, '555-0100');
   assert.equal(profile.businessAddress, '1 Main St, Town');
+  assert.equal(profile.companyTimeZone, 'America/Los_Angeles');
+  assert.equal(companyProfile({ ...company, timeZone: 'America/New_York' }).companyTimeZone, 'America/New_York');
   assert.deepEqual(profile.services, ['Termite Inspection', 'Rodent Control']);
   assert.equal(JSON.stringify(company), before);
 });

@@ -61,6 +61,7 @@ const mock = name => {
   if(name.endsWith('/services/workspaceApi'))return{readWorkspace:async()=>({jobs:env.jobs,hasMore:false}),callWorkspace:async(name,data)=>{env.calls.push({name,data});if(name==='rlGetRoutingTeam')return{team:[{id:'tech-1',name:'First tech'},{id:'tech-2',name:'Second tech'}]};if(name==='rlGetTeamLocations')return{locations:[],roster:[],policy:{intervalMinutes:3,freshAfterSeconds:300}};if(name==='rlJobVisit')return{events:[]};if(name==='rlManageJob')return{};throw Error('Unexpected workspace operation');}};
   if(name.endsWith('/services/maps'))return{loadMaps:async()=>{throw Error('Maps should not be requested in these tests');}};
   if(name.endsWith('/utils/dispatch'))return{STATUS_COLORS:{scheduled:'blue',completed:'green'},scheduleWarning:()=>'',jobPosition:job=>job.location||null,jobAddress:job=>job.address||''};
+  if(name.endsWith('/utils/jobExceptions'))return require('../functions/shared/jobExceptions');
   if(name.endsWith('/utils/calendarDate'))return calendarDate;
   if(name.endsWith('/utils/jobSummary')){const module={exports:{}};new Function('require','module','exports',transformSync(fs.readFileSync(path.resolve(__dirname,'../routeLogisticsWeb/src/utils/jobSummary.js'),'utf8'),{format:'cjs'}).code)(mock,module,module.exports);return module.exports;}
   if(name.endsWith('/services/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found'].includes(String(error?.code||'').replace(/^functions\//,''))};

@@ -4,6 +4,7 @@ const fs = require('node:fs'), path = require('node:path'), React = require('rea
 const { create, act } = require('react-test-renderer'), babel = require('@babel/core');
 global.IS_REACT_ACT_ENVIRONMENT = true;
 let tree, data, queue, listeners, writes, failure, workDrafts, busyStates, changes, update, visits, visitRequests, visitRecord, visitList, visitCache, cachedVisits, offline, gpsPermission, gpsFix, gpsRequests, permissionRequests, operationSequence, actionsRef;
+async function flushVisits(){if(offline)return;for(const row of queue.filter(row=>row.kind==='visit'&&row.state==='pending')){row.state='syncing';try{const payload={...row.record,jobId:row.jobId,operationId:row.id};visitRequests.push(payload);const result=await visitRecord(payload);if(!result.event?.id||!['manual','manual-gps'].includes(result.event.source))throw new Error('The server did not confirm a saved manual visit report.');row.event=result.event;row.state='synced';row.error='';}catch(error){row.state=String(error.code||'').endsWith('permission-denied')?'conflict':'failed';row.error=error.message;}}listeners.forEach(listener=>listener());}
 const panel = ({ children, title, subtitle }) => React.createElement('View', null, title && React.createElement('Text', null, title), subtitle && React.createElement('Text', null, subtitle), children);
 const button = ({ title, onPress, busy, disabled }) => React.createElement('Pressable', { accessibilityLabel: title, onPress, disabled: !!busy || !!disabled }, React.createElement('Text', null, title));
 const filename = path.resolve(__dirname, '../components/FieldWorkTools.js'), moduleUnderTest = { exports: {} };
@@ -25,6 +26,8 @@ const requireMock = name => {
     cachedRead: async(key, loader) => {if(key.startsWith('visits:')&&visitCache)return cachedVisits||{events:[],hasMore:false};const result=await loader();if(key.startsWith('visits:'))cachedVisits=result;return result;}, queuedWork: async () => queue, isOffline: async () => offline,
     subscribeOffline: listener => { listeners.add(listener); return () => listeners.delete(listener); },
     saveApplicationOffline: async (jobId, record) => { if (failure) throw failure; queue.push({ id: 'local-record', kind: 'application', jobId, record, state: 'pending' }); listeners.forEach(listener => listener()); },
+    saveVisitOffline:async(job,record)=>{if(failure)throw failure;if(!queue.some(row=>row.id===record.operationId))queue.push({id:record.operationId,kind:'visit',jobId:job.id,record:{...record},state:'pending'});listeners.forEach(listener=>listener());return{success:true,queued:true,operationId:record.operationId};},
+    flushOffline:flushVisits,getQueuedOperation:async id=>queue.find(row=>row.id===id),resolveOffline:async id=>{const row=queue.find(row=>row.id===id);if(row)row.state='pending';await flushVisits();return{operationId:id};},
   };
   if (name === './MobileUI') return { Card: panel, SectionHeader: panel, PrimaryButton: button, SecondaryButton: button,
     FormField: ({ label, ...props }) => React.createElement('TextInput', { accessibilityLabel: label, ...props }),
@@ -81,18 +84,18 @@ test('completed visits retain documentation and application history without muta
   for (const label of ['Save work notes', 'Record product application', 'Start work', 'Mark en route', 'Record arrival', 'Record departure', "Couldn't access property"]) assert.equal(control(label), undefined);
 });
 
-test('manual visit reports require an access-blocked reason and preserve notes offline without queuing', async () => {
+test('manual access-blocked reports require a reason, persist offline and retain unrelated work-note drafts', async () => {
   await render(); await press("Couldn't access property"); assert.equal(workDrafts.at(-1), true);
   await press('Save visit record'); assert.match(text(), /Describe why the property could not be accessed/); assert.equal(visitRequests.length, 0);
-  await input('Visit note', 'Gate locked; called customer.'); offline = true;
-  await press('Save visit record'); assert.match(text(), /require a connection and have not been queued/);
-  assert.equal(tree.root.findByProps({ accessibilityLabel: 'Visit note' }).props.value, 'Gate locked; called customer.');
-  assert.equal(workDrafts.at(-1), true); assert.equal(queue.length, 0); assert.equal(visitRequests.length, 0);
-  offline = false; await press('Save visit record');
+  await input('Work notes','Keep these separate observations.');await input('Visit note', 'Gate locked; called customer.'); offline = true;
+  await press('Save visit record'); assert.match(text(), /Saved on device.*waiting to sync/);
+  assert.equal(queue[0].record.note,'Gate locked; called customer.');assert.equal(tree.root.findByProps({accessibilityLabel:'Work notes'}).props.value,'Keep these separate observations.');
+  assert.equal(workDrafts.at(-1), true); assert.equal(queue.length, 1); assert.equal(visitRequests.length, 0);
+  offline = false; await act(async()=>flushVisits());await press('Refresh visit record');
   assert.equal(visitRequests.length, 1); assert.equal(visitRequests[0].jobId, 'job'); assert.equal(visitRequests[0].type, 'access-blocked');
   assert.equal(visitRequests[0].note, 'Gate locked; called customer.'); assert.equal(visitRequests[0].latitude, undefined);
-  assert.match(text(), /Reported manually/); assert.match(text(), /does not change the job status or verify property access/);
-  assert.equal(workDrafts.at(-1), false); assert.equal(writes.length, 0); assert.equal(gpsRequests, 0); assert.equal(permissionRequests, 0);
+  assert.match(text(), /Reported manually/);assert.equal(queue[0].state,'synced');
+  assert.equal(workDrafts.at(-1), true); assert.equal(writes.length, 0); assert.equal(gpsRequests, 0); assert.equal(permissionRequests, 0);
 });
 
 test('optional visit GPS uses existing foreground permission and reports source and accuracy', async () => {
@@ -102,22 +105,21 @@ test('optional visit GPS uses existing foreground permission and reports source 
   gpsPermission = { granted: true }; await press('Save visit record');
   assert.equal(gpsRequests, 1); assert.equal(visitRequests[0].latitude, 35); assert.equal(visitRequests[0].longitude, -119); assert.equal(visitRequests[0].accuracy, 15);
   assert.match(text(), /Reported manually with GPS evidence/); assert.match(text(), /GPS accuracy: ±/); assert.match(text(), /15/);
-  assert.equal(writes.length, 0); assert.equal(queue.length, 0);
+  assert.equal(writes.length, 0); assert.equal(queue.length, 1);assert.equal(queue[0].state,'synced');
 });
 
-test('visit authorization/network failures retain a safely retryable event and duplicate taps send once', async () => {
+test('visit authorization/network failures retain durable evidence and explicit retries keep the same operation identity', async () => {
   await render(); await press('Record departure'); await input('Visit note', 'Departing after treatment.');
   visitRecord = async () => { throw Object.assign(new Error('The current assignment could not be authorized.'), { code: 'functions/permission-denied' }); };
-  await press('Save visit record'); assert.match(text(), /current assignment could not be authorized/); assert.equal(workDrafts.at(-1), true);
-  assert.equal(tree.root.findByProps({ accessibilityLabel: 'Visit note' }).props.value, 'Departing after treatment.');
-  assert.equal(tree.root.findByProps({ accessibilityLabel: 'Visit note' }).props.editable, false);
+  await press('Save visit record'); assert.match(text(), /current assignment could not be authorized/); assert.equal(workDrafts.at(-1), false);
+  assert.equal(queue[0].record.note,'Departing after treatment.');assert.equal(queue[0].state,'conflict');
   const original = { ...visitRequests[0] }; let resolve;
   visitRecord = () => new Promise(done => { resolve = done; });
-  const action = control('Retry visit record').props.onPress; let first, duplicate;
+  const action = control('Retry saved departed event').props.onPress; let first, duplicate;
   await act(async () => { first = action(); duplicate = action(); await Promise.resolve(); });
   assert.equal(visitRequests.length, 2); assert.deepEqual(visitRequests[1], original);
   await act(async () => { resolve({ event: { id: original.operationId, type: 'departed', note: original.note, source: 'manual', recordedAt: new Date().toISOString() }, duplicate: true }); await Promise.all([first, duplicate]); });
-  assert.match(text(), /already recorded/); assert.equal(workDrafts.at(-1), false); assert.equal(busyStates.at(-1), false);
+  assert.match(text(), /Saved to server/); assert.equal(queue.length,1);assert.equal(workDrafts.at(-1), false); assert.equal(busyStates.at(-1), false);
 });
 
 test('visit history labels inferred GPS as evidence and remains readable after completion', async () => {
@@ -159,17 +161,17 @@ test('GPS proximity alone cannot turn a manual button green and distant manual G
  await press('Record arrival');await press('Include current GPS');await press('Save visit record');assert.equal(actionFor('arrived').props.style.backgroundColor,'#D1FAE5');assert.match(text(),/approximately 10000 m/);assert.match(text(),/GPS evidence does not verify property access/);
 });
 
-test('a failed visit save stays amber with local feedback and cannot discard an unconfirmed attempt',async()=>{
+test('a failed synchronization stays amber and retained evidence cannot be removed by discarding unrelated drafts',async()=>{
  await render();await press('Record arrival');await input('Visit note','At the gate.');visitRecord=async()=>{throw new Error('Network timed out; retry this event.');};
  await press('Save visit record');assert.equal(actionFor('arrived').props.style.backgroundColor,'#FEF3C7');assert.equal(control('Arrival recorded'),undefined);assert.match(text(),/Network timed out/);
- assert.equal(control('Cancel visit record').props.disabled,true);const result=actionsRef.current.discardDrafts();assert.equal(result.success,false);assert.equal(result.unconfirmed,true);
- assert.equal(actionsRef.current.getDrafts().visitAttempted,true);const original=visitRequests[0].operationId;
- visitRecord=async payload=>({event:manual('server-id','arrived',new Date().toISOString()),duplicate:true});await press('Retry visit record');assert.equal(visitRequests[1].operationId,original);assert.equal(actionFor('arrived').props.style.backgroundColor,'#D1FAE5');
+ assert.equal(control('Cancel visit record'),undefined);let result;await act(async()=>{result=actionsRef.current.discardDrafts();});assert.equal(result.success,true);assert.equal(queue.length,1);assert.equal(queue[0].state,'failed');
+ assert.equal(actionsRef.current.getDrafts().visitAttempted,false);const original=visitRequests[0].operationId;
+ visitRecord=async payload=>({event:manual('server-id','arrived',new Date().toISOString()),duplicate:true});await press('Retry saved arrived event');assert.equal(visitRequests[1].operationId,original);assert.equal(actionFor('arrived').props.style.backgroundColor,'#D1FAE5');
 });
 
 test('a missing or inferred event acknowledgement never becomes a green saved manual report',async()=>{
  await render();await press('Record departure');visitRecord=async()=>({event:manual('wrong-source','departed',new Date().toISOString(),{source:'gps-evidence'})});await press('Save visit record');
- assert.equal(actionFor('departed').props.style.backgroundColor,'#FEF3C7');assert.match(text(),/server did not confirm a saved manual visit report/);assert.equal(actionsRef.current.getDrafts().visitAttempted,true);
+ assert.equal(actionFor('departed').props.style.backgroundColor,'#FEF3C7');assert.match(text(),/server did not confirm a saved manual visit report/);assert.equal(actionsRef.current.getDrafts().visitAttempted,false);assert.equal(queue.length,1);assert.equal(queue[0].state,'failed');
 });
 
 test('a confirmed new arrival resets only the current departure indicator and preserves append-only prior visits',async()=>{
@@ -184,6 +186,12 @@ test('saved acknowledgements survive stale/failed list refreshes but permission 
  visitList=async()=>{throw Object.assign(new Error('This job was reassigned.'),{code:'functions/permission-denied'});};await press('Refresh visit record');assert.equal(actionFor('arrived').props.style.backgroundColor,'#FEF3C7');assert.match(text(),/This job was reassigned/);
 });
 
+test('a temporary history refresh failure retains previously authorized server evidence without fabricating a new event',async()=>{
+ visits=[manual('existing-history','arrived','2026-11-15T18:00:00Z')];await render();assert.equal(actionFor('arrived').props.style.backgroundColor,'#D1FAE5');
+ visitList=async()=>{throw new Error('Temporary history connection failure.');};await press('Refresh visit record');
+ assert.equal(actionFor('arrived').props.style.backgroundColor,'#D1FAE5');assert.match(text(),/Temporary history connection failure/);assert.equal(queue.length,0);assert.equal(visitRequests.length,0);
+});
+
 test('draft API reads synchronous notes and optional product state and saves without requiring an empty optional log',async()=>{
  await render();assert.equal(actionsRef.current.getDrafts().hasDraft,false);await press('Record product application');assert.equal(actionsRef.current.getDrafts().application,false);assert.equal(workDrafts.at(-1),false);
  await input('Work notes','Saved through completion guard.');assert.equal(actionsRef.current.getDrafts().notes,true);let result;await act(async()=>{result=await actionsRef.current.saveDrafts();});
@@ -192,11 +200,10 @@ test('draft API reads synchronous notes and optional product state and saves wit
  await act(async()=>{result=actionsRef.current.discardDrafts();});assert.equal(result.success,true);assert.equal(actionsRef.current.getDrafts().hasDraft,false);assert.equal(queue.length,0);
 });
 
-test('draft API keeps visit errors visible and preserves one operation ID until a safe retry succeeds',async()=>{
- await render();await press('Record departure');visitRecord=async()=>{throw new Error('Visit save offline');};let result;
- await act(async()=>{result=await actionsRef.current.saveDrafts();});assert.equal(result.success,false);assert.equal(result.unconfirmed,true);assert.match(result.message,/Visit save offline/);assert.match(text(),/Visit save offline/);assert.equal(actionsRef.current.getDrafts().visitType,'departed');
- const original=visitRequests[0].operationId;visitRecord=async()=>({event:manual('confirmed','departed',new Date().toISOString()),duplicate:true});
- await act(async()=>{result=await actionsRef.current.saveDrafts();});assert.equal(result.success,true);assert.equal(actionsRef.current.getDrafts().hasDraft,false);assert.equal(visitRequests[1].operationId,original);
+test('draft API retains a visit until durable storage succeeds, then completion can continue with queued evidence',async()=>{
+ await render();await press('Record departure');failure=new Error('Visit storage unavailable');let result;
+ await act(async()=>{result=await actionsRef.current.saveDrafts();});assert.equal(result.success,false);assert.match(result.message,/Visit storage unavailable/);assert.match(text(),/Visit storage unavailable/);assert.equal(actionsRef.current.getDrafts().visitType,'departed');assert.equal(queue.length,0);
+ failure=null;offline=true;await act(async()=>{result=await actionsRef.current.saveDrafts();});assert.equal(result.success,true);assert.equal(actionsRef.current.getDrafts().hasDraft,false);assert.equal(queue.length,1);assert.equal(queue[0].state,'pending');assert.equal(visitRequests.length,0);
 });
 
 test('switching jobs suppresses old acknowledgements and cannot release a newer job save lock',async()=>{

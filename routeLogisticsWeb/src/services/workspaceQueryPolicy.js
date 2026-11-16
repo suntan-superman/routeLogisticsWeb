@@ -31,7 +31,8 @@ export function mutationResources(name, data = {}, result = {}) {
   if (['rlCreateCompany', 'rlSetLocationPolicy', 'rlSetLocationRetention'].includes(name)) return ['company', 'team-locations'];
   if (name === 'rlWorkShift' && ['start', 'end'].includes(data.action)) return ['work-shift', 'team-locations'];
   if (name === 'rlSaveDailyRoute') return ['route'];
-  if (name === 'rlJobVisit' && data.action === 'record') return ['job-visits', 'job'];
+  if (name === 'rlJobVisit' && data.action === 'record') return ['job-visits', 'job', 'jobs'];
+  if (name === 'rlJobException' && ['request', 'resolve', 'dismiss'].includes(data.action)) return ['jobs', 'job', 'job-exceptions'];
   if (name === 'rlJobPhoto' && ['upload', 'delete', 'update'].includes(data.action)) return ['job-photos', 'job'];
   if (name === 'rlRecordApplication') return ['service-logs', 'job'];
   if (name === 'rlServiceForms' && ['save', 'assign'].includes(data.action)) return ['service-forms', 'job'];

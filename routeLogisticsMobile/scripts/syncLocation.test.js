@@ -81,6 +81,14 @@ test('retry and discard require explicit confirmation and preserve other queued 
   assert.equal(rows[1].state, 'pending'); assert.equal(rows[1].localUri, 'file:///kept.jpg');
 });
 
+test('visit conflicts display original evidence and offer only an unchanged-identity synchronization retry',async()=>{
+ rows=[{id:'original-visit',kind:'visit',state:'conflict',jobId:'first',expectedVersion:'opened-job-revision',record:{type:'access-blocked',occurredAt:'2026-11-16T09:00:00.000Z',note:'Gate locked; original device evidence.'},error:'Assignment changed; management attention is required.'},{id:'photo',kind:'photo',state:'pending',localUri:'file:///kept.jpg'}];
+ const original=JSON.stringify(rows[0].record);await render(Offline);await expandSync();assert.match(text(),/Access-blocked evidence/);assert.match(text(),/Original visit/);assert.match(text(),/Gate locked; original device evidence/);assert.match(text(),/management attention/i);
+ assert.equal(button('Discard this local change'),undefined);assert.equal(button('Retry after review'),undefined);
+ await press('Retry unchanged visit evidence');assert.equal(resolutions.length,0);await press('Confirm retry');
+ assert.deepEqual(resolutions,[{id:'original-visit',action:'retry'}]);assert.equal(rows[0].id,'original-visit');assert.equal(rows[0].expectedVersion,'opened-job-revision');assert.equal(JSON.stringify(rows[0].record),original);assert.equal(rows[1].localUri,'file:///kept.jpg');
+});
+
 test('synced transitions invalidate work once and account changes clear prior displayed rows', async () => {
   rows = [{ id: 'one', kind: 'job', state: 'pending' }]; await render(Offline, { onSynced: () => refreshed++ });
   rows[0].state = 'synced'; await notifyQueue(); assert.equal(refreshed, 1);

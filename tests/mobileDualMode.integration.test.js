@@ -71,9 +71,11 @@ for (const role of ['owner', 'manager']) {
     const chemical = await f.work.application(f.request(applicationPayload)); assert.deepEqual(await f.work.application(f.request(applicationPayload)), chemical);
     const logs = await f.work.read(f.request({ resource: 'serviceLogs', jobId })); assert.equal(logs.logs.length, 1); assert.equal(logs.logs[0].product, 'Synthetic test product'); assert.equal(logs.logs[0].totalCost, undefined);
 
+    let workRevision = notes.version;
     for (const type of ['arrived', 'access-blocked', 'departed']) {
       const payload = { action: 'record', jobId, type, operationId: `dual-field-visit-${type}`, note: type === 'access-blocked' ? 'Synthetic locked gate; no visit performed' : 'Synthetic visit evidence' };
       const event = await f.locations.visit(f.request(payload)); assert.equal(event.event.source, 'manual'); assert.equal(event.event.verifiedAccess, false); assert.equal((await f.locations.visit(f.request(payload))).duplicate, true);
+      assert.equal(event.status, 'synced'); assert.notEqual(event.version, workRevision); workRevision = event.version;
     }
     assert.equal((await f.locations.visit(f.request({ action: 'list', jobId }))).events.length, 3);
 
@@ -83,7 +85,7 @@ for (const role of ['owner', 'manager']) {
     assert.equal((await f.locations.update(f.request({ action: 'position', sessionId: session.sessionId, latitude: 35, longitude: -119, accuracy: 10, capturedAt: '2030-01-03T18:00:00.000Z' }))).accepted, true);
     assert.equal((await f.locations.shift(f.request({ action: 'end', shiftId: shift.id }))).shift.status, 'off-duty');
 
-    const completePayload = { jobId, operationId: 'dual-field-completion-operation-01', expectedVersion: notes.version, patch: { status: 'completed', completionNotes: 'Synthetic completion only', completedAt: '2030-01-03T18:00:00.000Z' } };
+    const completePayload = { jobId, operationId: 'dual-field-completion-operation-01', expectedVersion: workRevision, patch: { status: 'completed', completionNotes: 'Synthetic completion only', completedAt: '2030-01-03T18:00:00.000Z' } };
     const completion = await f.apply(f.request(completePayload)); assert.equal(completion.status, 'synced'); assert.deepEqual(await f.apply(f.request(completePayload)), completion);
     const completed = (await f.work.read(f.request({ resource: 'jobs', assignedTo: 'self', id: jobId }))).job; assert.equal(completed.status, 'completed'); assert.equal(completed.workNotes, 'Synthetic offline field notes');
   });

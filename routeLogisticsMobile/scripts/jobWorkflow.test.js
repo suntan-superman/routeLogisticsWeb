@@ -7,7 +7,7 @@ const { create, act } = require('react-test-renderer');
 const babel = require('@babel/core');
 const { workspacePermissions } = require('../services/workspacePolicy');
 global.IS_REACT_ACT_ENVIRONMENT = true;
-let account, tree, photoProps, workProps, checklistProps, photoMounts, photoUnmounts, calls, loader, savedRead, reads, changes, closes, interactions, discarded, navigationCalls;
+let account, tree, photoProps, workProps, checklistProps, requestProps, photoMounts, photoUnmounts, calls, loader, savedRead, reads, changes, closes, interactions, discarded, navigationCalls;
 let workDrafts, checklistDrafts, savedDraftCalls, discardedDraftCalls, saveWorkDrafts, saveChecklistDrafts, discardWorkDrafts;
 const saved = new Map();
 const native = Object.fromEntries(['View', 'Text', 'ScrollView', 'ActivityIndicator'].map(name => [name, name]));
@@ -35,6 +35,7 @@ function load() {
       return { Card: panel, ScreenHeader: panel, SectionHeader: panel, InlineNotice: panel, ConfirmationPanel: panel, ActionDialog: panel, StatusBadge: ({ status, syncState }) => React.createElement('Text', null, status || syncState) };
     }
     if (specifier === './JobPhotos') return Photos;
+    if (specifier === './JobReassignmentRequest') return props => {requestProps=props;return null;};
     if (specifier === './FieldWorkTools') return props => {
       workProps = props;
       if (props.draftActionsRef) props.draftActionsRef.current = { getDrafts: () => workDrafts, saveDrafts: () => saveWorkDrafts(), discardDrafts: () => discardWorkDrafts() };
@@ -66,7 +67,7 @@ async function draft() { await press('Complete'); await input('Work completed', 
 beforeEach(() => {
   const user = { id: 'technician', companyId: 'acme', membershipId: 'member', role: 'technician', emailVerified: true, workspace: { status: 'company' } };
   account = { user, permissions: workspacePermissions(user.workspace, user) };
-  tree = null; photoProps = workProps = null; navigationCalls = []; photoMounts = photoUnmounts = changes = closes = 0; calls = []; interactions = []; discarded = []; reads = []; saved.clear(); savedRead = async id => saved.get(id);
+  tree = null; photoProps = workProps = requestProps = null; navigationCalls = []; photoMounts = photoUnmounts = changes = closes = 0; calls = []; interactions = []; discarded = []; reads = []; saved.clear(); savedRead = async id => saved.get(id);
   loader = async selected => ({ status: 'synced', operationId: 'operation', jobId: selected.id, message: 'Job completed and synchronized.' });
   workDrafts = checklistDrafts = undefined; savedDraftCalls = []; discardedDraftCalls = []; checklistProps = null;
   saveWorkDrafts = async () => { savedDraftCalls.push('work'); workDrafts = { notes: false, application: false, visit: false, hasDraft: false }; workProps.onDraftChange(false); return { success: true }; };
@@ -74,6 +75,19 @@ beforeEach(() => {
   discardWorkDrafts = () => { discardedDraftCalls.push('work'); workDrafts = { notes: false, application: false, visit: false, hasDraft: false }; workProps.onDraftChange(false); return { success: true }; };
 });
 afterEach(async () => { if (tree) await act(async () => tree.unmount()); });
+
+test('an open reassignment request cannot be silently discarded by job close or completion',async()=>{
+ await render();assert.equal(requestProps.active,true);await act(async()=>requestProps.onDraftChange(true));assert.equal(interactions.at(-1).hasDraft,true);
+ await press('Complete');assert.match(text(),/Finish submitting or explicitly cancel the reassignment request/);assert.equal(control('Save drafts and continue').props.disabled,true);assert.equal(control('Discard unsaved drafts and continue').props.disabled,true);assert.equal(calls.length,0);
+ await press('Keep editing');await press('Close job details');assert.equal(closes,0);assert.match(text(),/before closing this work order/);
+ await press('Keep editing');await act(async()=>requestProps.onDraftChange(false));await press('Complete');assert.ok(control('Review completion'));assert.equal(requestProps.active,false);assert.equal(photoMounts,1);
+});
+
+test('reassignment request submission participates in the existing work-order busy guard',async()=>{
+ await render();await act(async()=>requestProps.onBusyChange(true));assert.equal(interactions.at(-1).busy,true);assert.equal(control('Complete').props.disabled,true);
+ const close=control('Close job details');await act(async()=>close.props.onPress());assert.equal(closes,0);
+ await act(async()=>requestProps.onBusyChange(false));await press('Close job details');assert.equal(closes,1);assert.equal(calls.length,0);
+});
 
 test('job workflow uses exclusive inline pages and preserves one photo owner through child navigation', async () => {
   await render(); assert.equal(photoMounts, 1); assert.equal(tree.root.findAllByType('Modal').length, 0);
@@ -336,7 +350,7 @@ test('save-and-continue names and saves pending work and checklist drafts before
   checklistDrafts = { checklist: true, hasDraft: true };
   await act(async () => { workProps.onDraftChange(true); checklistProps.onDraftChange(true); });
   await press('Complete');
-  assert.match(text(), /Work notes have unsaved changes/); assert.match(text(), /An arrival record has not been confirmed as saved/); assert.match(text(), /service checklist has unsaved answers/);
+  assert.match(text(), /Work notes have unsaved changes/); assert.match(text(), /An arrival record has not been saved on this device/); assert.match(text(), /service checklist has unsaved answers/);
   await press('Save drafts and continue');
   assert.deepEqual(savedDraftCalls, ['work', 'checklist']); assert.deepEqual(discardedDraftCalls, []);
   assert.equal(calls.length, 0); assert.equal(photoMounts, 1);

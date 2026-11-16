@@ -93,6 +93,7 @@ function eventView(row) {
     type: data.type,
     source: data.source,
     recordedAt: iso(data.recordedAt),
+    occurredAt: iso(data.occurredAt || data.capturedAt || data.recordedAt),
     capturedAt: iso(data.capturedAt),
     note: data.note || '',
     evidenceOnly: true,
@@ -104,6 +105,13 @@ function eventView(row) {
       distanceMeters: data.distanceMeters
     } : {})
   };
+}
+function visitSummary(previous, type, occurredAt) {
+  const fields = { arrived:'arrivedAt', departed:'departedAt', 'access-blocked':'accessBlockedAt' }, next = { ...(previous || {}) }, at=Date.parse(occurredAt);
+  const field=fields[type];
+  if (field && (!Number.isFinite(Date.parse(next[field])) || at>Date.parse(next[field]))) next[field]=occurredAt;
+  if (!Number.isFinite(Date.parse(next.lastEventAt)) || at>=Date.parse(next.lastEventAt)) { next.lastEventAt=occurredAt; next.lastEventType=type; }
+  return next;
 }
 function checkJob(job, staff, assigned = false) {
   if (!job.exists || job.get('companyId') !== staff.company.id || (assigned || staff.role === 'technician') && job.get('assignedTo') !== (staff.memberId || staff.uid)) throw new HttpsError('permission-denied', 'This job is no longer assigned to your company workspace.');
@@ -211,6 +219,9 @@ function workTrackingHandlers(db, legacy, {
           evidenceOnly: true,
           verifiedAccess: false
         });
+        // A read-only operational summary does not advance the work revision;
+        // automatic GPS observations must not invalidate unrelated work drafts.
+        tx.update(job.ref,{visitEvidence:visitSummary(job.get('visitEvidence'),type,new Date(at).toISOString())});
         return 1;
       });
     }
@@ -504,10 +515,16 @@ function workTrackingHandlers(db, legacy, {
         note = typeof request.data.note === 'string' ? request.data.note.trim() : '';
       if (!['arrived', 'departed', 'access-blocked'].includes(type) || operationId.length > 100 || note.length > 1000 || type === 'access-blocked' && !note) throw new HttpsError('invalid-argument', 'Choose a visit event and include a reason when access is blocked (up to 1000 characters).');
       const gps = request.data.latitude != null || request.data.longitude != null || request.data.accuracy != null;
+      const durable = request.data.evidenceVersion === 1;
+      if (request.data.evidenceVersion != null && !durable) throw new HttpsError('invalid-argument','Unsupported visit evidence version.');
+      const expectedVersion = request.data.expectedVersion ?? null;
+      if (durable && (!Object.hasOwn(request.data,'expectedVersion') || expectedVersion !== null && (typeof expectedVersion !== 'string' || !Number.isFinite(Date.parse(expectedVersion)))
+        || !Object.hasOwn(request.data,'expectedAssignee') || request.data.expectedAssignee !== null && typeof request.data.expectedAssignee !== 'string')) throw new HttpsError('invalid-argument','The saved job revision and assignment are required for visit replay.');
       const payload = {
           jobId,
           type,
           note,
+          ...(durable ? { occurredAt:request.data.occurredAt, expectedVersion, expectedAssignee:request.data.expectedAssignee } : {}),
           ...(gps ? {
             latitude: request.data.latitude ?? null,
             longitude: request.data.longitude ?? null,
@@ -520,25 +537,32 @@ function workTrackingHandlers(db, legacy, {
         eventRef = db.doc(`rlJobVisits/${id}`),
         time = now();
       return db.runTransaction(async tx => {
+        await currentStaff(tx,staff);
         const [job, existing] = await Promise.all([tx.get(jobRef), tx.get(eventRef)]);
         checkJob(job, staff);
+        if (staff.role === 'technician' && job.get('assignedToUid') && job.get('assignedToUid') !== staff.uid) throw new HttpsError('permission-denied','The current job assignment changed. Saved evidence must be reviewed by management.');
         if (existing.exists) {
           if (existing.get('fingerprint') !== fingerprint) throw new HttpsError('already-exists', 'This visit operation was already used for a different event.');
           return {
             event: eventView(existing),
+            status:'synced', version:existing.get('jobVersionAfter') || iso(job.get('updatedAt')) || job.get('updatedAt') || null,
             duplicate: true
           };
         }
-        if (['completed', 'cancelled'].includes(job.get('status'))) fail('job-closed', 'This job is closed. Its history is available, but new events cannot be added.');
-        let at = time,
+        if (['completed', 'cancelled','canceled'].includes(job.get('status'))) fail('job-closed', 'This job is closed. Its history is available, but new events cannot be added.');
+        const currentVersion=iso(job.get('updatedAt')) || job.get('updatedAt') || null;
+        if (durable && (currentVersion !== expectedVersion || (job.get('assignedTo') || null) !== payload.expectedAssignee)) return {status:'conflict',version:currentVersion,server:{status:job.get('status'),updatedAt:currentVersion},message:'The job revision or assignment changed while this evidence was saved. Management attention is required; the original event remains on the device.'};
+        const occurred = durable ? typeof payload.occurredAt === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(payload.occurredAt) ? Date.parse(payload.occurredAt) : NaN : time;
+        if (!Number.isFinite(occurred) || occurred>time+120000 || occurred<time-30*86400000) throw new HttpsError('invalid-argument','The original visit time is invalid or older than the supported 30-day offline evidence window. Retain it for management review.');
+        let at = occurred,
           accuracy,
           distance;
         if (gps) {
           const point = validFix(payload);
           accuracy = payload.accuracy;
           if (!point) throw new HttpsError('invalid-argument', 'The optional GPS fix requires numeric coordinates and known numeric accuracy.');
-          at = captureTime(payload.capturedAt, time, time - 300000, 1);
-          if (time - at > 300000) throw new HttpsError('invalid-argument', 'Use a GPS fix captured within the last five minutes.');
+          at = durable ? Date.parse(payload.capturedAt) : captureTime(payload.capturedAt, time, time - 300000, 1);
+          if (!Number.isFinite(at) || Math.abs(occurred-at)>300000 || at>time+120000) throw new HttpsError('invalid-argument', 'The GPS sample must have been captured within five minutes of the original visit.');
           let target = jobPoint(job.data());
           if (!target && !servicePropertySite(job.data()) && job.get('customerId')) {
             const customer = await tx.get(db.doc(`customers/${documentId(job.get('customerId'), 'customer')}`));
@@ -555,6 +579,7 @@ function workTrackingHandlers(db, legacy, {
           type,
           note,
           source: gps ? 'manual-gps' : 'manual',
+          occurredAt:new Date(occurred),
           recordedAt: new Date(time),
           capturedAt: new Date(at),
           fingerprint,
@@ -568,9 +593,13 @@ function workTrackingHandlers(db, legacy, {
           } : {})
         };
         // Evidence retains time/proximity without creating another raw GPS history.
+        const updatedAt=new Date(Math.max(time,(Date.parse(currentVersion)||0)+1)).toISOString();
+        event.jobVersionAfter=updatedAt;
         tx.create(eventRef, event);
+        tx.update(jobRef,{visitEvidence:visitSummary(job.get('visitEvidence'),type,new Date(occurred).toISOString()),updatedAt});
         return {
           event: eventView(event),
+          status:'synced',version:updatedAt,
           duplicate: false
         };
       });
@@ -605,5 +634,6 @@ module.exports = {
   captureTime,
   distanceMeters,
   transition,
-  jobPoint
+  jobPoint,
+  visitSummary
 };

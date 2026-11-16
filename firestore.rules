@@ -195,6 +195,7 @@ service cloud.firestore {
       allow read: if financeAccess(resource.data);
       allow create: if false; // rlManageJob serializes assignment and schedule-conflict checks.
       allow update: if tenancyUnchanged() && statusOk()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['reassignmentRequest', 'visitEvidence'])
         && !(resource.data.get('status', 'scheduled') in ['completed', 'cancelled']
           && !(request.resource.data.get('status', resource.data.get('status', 'scheduled')) in ['completed', 'cancelled']))
         && geographicUpdate()

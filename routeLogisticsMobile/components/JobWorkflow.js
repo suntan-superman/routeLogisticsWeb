@@ -7,6 +7,7 @@ import { Card, ScreenHeader, SectionHeader, StatusBadge, InlineNotice, Confirmat
 import JobPhotos from './JobPhotos';
 import FieldWorkTools from './FieldWorkTools';
 import ServiceChecklist from './ServiceChecklist';
+import JobReassignmentRequest from './JobReassignmentRequest';
 import { completeJob } from '../services/jobCompletion';
 import { getQueuedOperation, resolveOffline } from '../services/offline';
 
@@ -28,16 +29,18 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
   const [saving, setSaving] = useState(false), [reviewing, setReviewing] = useState(false), [photoBusy, setPhotoBusy] = useState(false), [photoDraft, setPhotoDraft] = useState(false);
   const [workBusy, setWorkBusy] = useState(false), [workDraft, setWorkDraft] = useState(false);
   const [serviceBusy, setServiceBusy] = useState(false), [serviceDraft, setServiceDraft] = useState(false);
+  const [requestBusy,setRequestBusy]=useState(false),[requestDraft,setRequestDraft]=useState(false);
   const [retryOperationId, setRetryOperationId] = useState(null), [savedChange, setSavedChange] = useState(null);
   const [submitted, setSubmitted] = useState(null), [closeRequested, setCloseRequested] = useState(false);
   const [completionDialog, setCompletionDialog] = useState(null), [resolvingDrafts, setResolvingDrafts] = useState(false);
   const mounted = useRef(true), generation = useRef(0), submitting = useRef(null), reviewPending = useRef(null), photoBusyRef = useRef(false), photoDraftRef = useRef(false);
   const workBusyRef = useRef(false), workDraftRef = useRef(false);
   const serviceBusyRef = useRef(false), serviceDraftRef = useRef(false);
+  const requestBusyRef=useRef(false),requestDraftRef=useRef(false);
   const workActionsRef = useRef(null), checklistActionsRef = useRef(null), draftAction = useRef(null);
   const notify = useRef(onInteractionChange); notify.current = onInteractionChange;
   const hasCompletionDraft = Object.values(draft).some(value => String(value).trim());
-  const hasDraft = photoDraft || workDraft || serviceDraft || hasCompletionDraft || !!completionDialog, busy = saving || reviewing || photoBusy || workBusy || serviceBusy || resolvingDrafts;
+  const hasDraft = photoDraft || workDraft || serviceDraft || requestDraft || hasCompletionDraft || !!completionDialog, busy = saving || reviewing || photoBusy || workBusy || serviceBusy || requestBusy || resolvingDrafts;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; generation.current++; notify.current?.({ busy: false, hasDraft: false }); }; }, []);
   useEffect(() => { notify.current?.({ busy, hasDraft }); }, [busy, hasDraft]);
   useEffect(() => {
@@ -46,6 +49,7 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
     setPhotoBusy(false); setPhotoDraft(false); photoBusyRef.current = false; photoDraftRef.current = false;
     setWorkBusy(false); setWorkDraft(false); workBusyRef.current = false; workDraftRef.current = false;
     setServiceBusy(false); setServiceDraft(false); serviceBusyRef.current = false; serviceDraftRef.current = false;
+    setRequestBusy(false);setRequestDraft(false);requestBusyRef.current=false;requestDraftRef.current=false;
     setRetryOperationId(null); setSavedChange(null); setSubmitted(null); setCloseRequested(false);
     draftAction.current = null; setCompletionDialog(null); setResolvingDrafts(false);
   }, [job?.id]);
@@ -72,6 +76,8 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
   const updateWorkDraft = useCallback(value => { workDraftRef.current = value; if (mounted.current) setWorkDraft(value); }, []);
   const updateServiceBusy = useCallback(value => { serviceBusyRef.current = value; if (mounted.current) setServiceBusy(value); }, []);
   const updateServiceDraft = useCallback(value => { serviceDraftRef.current = value; if (mounted.current) setServiceDraft(value); }, []);
+  const updateRequestBusy=useCallback(value=>{requestBusyRef.current=value;if(mounted.current)setRequestBusy(value);},[]);
+  const updateRequestDraft=useCallback(value=>{requestDraftRef.current=value;if(mounted.current)setRequestDraft(value);},[]);
   const accessReason = workAccessReason(job, user, permissions);
   const displayJob = submitted?.jobId === job?.id ? { ...job, ...submitted.draft, status: 'completed' } : job;
   const canComplete = !accessReason && ['scheduled', 'en-route', 'in-progress'].includes(displayJob?.status);
@@ -82,7 +88,8 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
   };
   const close = () => {
     if (completionDialog) { if (!busy) setCompletionDialog(null); return; }
-    if (submitting.current !== null || reviewPending.current !== null || workBusyRef.current || serviceBusyRef.current || explainBlockedPhoto()) return;
+    if (submitting.current !== null || reviewPending.current !== null || workBusyRef.current || serviceBusyRef.current || requestBusyRef.current || explainBlockedPhoto()) return;
+    if(requestDraftRef.current){showCompletionProblem('Finish submitting or explicitly cancel the reassignment request before closing this work order. Its notes remain in the request section.');return;}
     if (hasCompletionDraft || workDraftRef.current || serviceDraftRef.current || retryOperationId) { setCloseRequested(true); return; }
     onClose?.();
   };
@@ -93,15 +100,16 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
     if (photoDraftRef.current) messages.push('A selected photo has not been saved. Save or discard it in Visit photos before completing this visit.');
     if (work?.notes) messages.push('Work notes have unsaved changes.');
     if (work?.application) messages.push('An optional product application is open and has not been saved.');
-    if (work?.visit) messages.push(`${({ arrived: 'An arrival', departed: 'A departure', 'access-blocked': 'An access-blocked' })[work.visitType] || 'A visit'} record has not been confirmed as saved.`);
+    if (work?.visit) messages.push(`${({ arrived: 'An arrival', departed: 'A departure', 'access-blocked': 'An access-blocked' })[work.visitType] || 'A visit'} record has not been saved on this device. Save its evidence or explicitly cancel the unsaved entry.`);
     if (hasWork && !work?.notes && !work?.application && !work?.visit) messages.push('Work notes, a product application or a visit record has unsaved changes.');
     if (hasChecklist) messages.push('The service checklist has unsaved answers.');
+    if(requestDraftRef.current)messages.push('Finish submitting or explicitly cancel the reassignment request in its section before completing this work order. Request notes cannot be discarded by completion.');
     if (work?.visitAttempted) messages.push('The visit may already have reached the server. Retry its saved operation to confirm it; it cannot be discarded here.');
     const workReady = !hasWork || !!workActionsRef.current?.saveDrafts && !!workActionsRef.current?.discardDrafts;
     const checklistReady = !hasChecklist || !!checklistActionsRef.current?.saveDrafts && !!checklistActionsRef.current?.discardDrafts;
-    return { work, hasWork, hasChecklist, hasDraft: photoDraftRef.current || hasWork || hasChecklist,
-      canSave: !photoDraftRef.current && workReady && checklistReady,
-      canDiscard: !photoDraftRef.current && !work?.visitAttempted && workReady && checklistReady, messages };
+    return { work, hasWork, hasChecklist, hasDraft: photoDraftRef.current || hasWork || hasChecklist || requestDraftRef.current,
+      canSave: !requestDraftRef.current && !photoDraftRef.current && workReady && checklistReady,
+      canDiscard: !requestDraftRef.current && !photoDraftRef.current && !work?.visitAttempted && workReady && checklistReady, messages };
   };
   const blockedCompletionReason = () => accessReason || (['cancelled', 'canceled'].includes(displayJob?.status)
     ? 'This job was cancelled. A manager must reopen it before it can be completed.'
@@ -200,7 +208,7 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
     } catch (failure) { if (mounted.current && generation.current === ticket) showCompletionProblem(failure.message || 'Could not discard this saved completion. Keep this screen open and retry.'); }
     finally { if (submitting.current === ticket) submitting.current = null; if (mounted.current && generation.current === ticket) setSaving(false); }
   };
-  const edit = () => { if (explainBlockedPhoto() || workBusyRef.current || workDraftRef.current || serviceBusyRef.current || serviceDraftRef.current || hasCompletionDraft || retryOperationId) { if (!photoBusyRef.current && !photoDraftRef.current) setError('Save or discard your work draft before editing the job.'); return; } onEdit?.(job); };
+  const edit = () => { if (explainBlockedPhoto() || workBusyRef.current || workDraftRef.current || serviceBusyRef.current || serviceDraftRef.current || requestBusyRef.current || requestDraftRef.current || hasCompletionDraft || retryOperationId) { if (!photoBusyRef.current && !photoDraftRef.current) setError('Finish the reassignment request or save/discard your work draft before editing the job.'); return; } onEdit?.(job); };
   if (!job?.id) return <View><InlineNotice tone="error" message="Reopen the job from your job list." /><GlassButton title="Return to jobs" onPress={onClose} /></View>;
   // Dispatch instructions are projected separately from editable work notes.
   // Offline work-note patches deliberately use the legacy `notes` field.
@@ -250,6 +258,9 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
       </View>
       <View style={{ display: mode === 'details' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details'} importantForAccessibility={mode === 'details' ? 'auto' : 'no-hide-descendants'} pointerEvents={mode === 'details' ? 'auto' : 'none'}>
         <ServiceChecklist key={job.id} job={job} active={mode === 'details' && !completionDialog} draftActionsRef={checklistActionsRef} readOnly={!!accessReason || ['completed','cancelled','canceled'].includes(displayJob.status)} onBusyChange={updateServiceBusy} onDraftChange={updateServiceDraft} />
+      </View>
+      <View style={{display:mode==='details'?'flex':'none'}} accessibilityElementsHidden={mode!=='details'} importantForAccessibility={mode==='details'?'auto':'no-hide-descendants'} pointerEvents={mode==='details'?'auto':'none'}>
+        <JobReassignmentRequest key={job.id} job={job} user={user} permissions={permissions} active={mode==='details'&&!completionDialog} readOnly={!!accessReason||['completed','cancelled','canceled'].includes(displayJob.status)} onChanged={onChanged} onBusyChange={updateRequestBusy} onDraftChange={updateRequestDraft}/>
       </View>
       {mode === 'details' && (displayJob.actualWorkDone || displayJob.completedAt || displayJob.completionNotes) && <Card><SectionHeader title="Completion summary" />
         {!!displayJob.actualWorkDone && <Text style={{ color: palette.text, fontSize: 15, lineHeight: 23 }}>Work completed: {displayJob.actualWorkDone}</Text>}

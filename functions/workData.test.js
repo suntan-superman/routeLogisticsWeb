@@ -24,3 +24,9 @@ test('customer service instructions remain available while private customer note
   const view = projectCustomer('test-customer', { name: 'Synthetic customer', notes: 'PRIVATE BILLING', serviceInstructions: 'Keep the gate closed', invoiceBalance: 50, history: ['PRIVATE'] }, 'technician');
   assert.equal(view.serviceInstructions, 'Keep the gate closed'); assert.equal(view.notes, undefined); assert.equal(view.invoiceBalance, undefined); assert.equal(view.history, undefined);
 });
+
+
+test('safe reassignment and original visit-time summaries reach field and management without private metadata',()=>{
+  const data={reassignmentRequest:{id:'request',status:'pending',revision:1,reason:'vehicle',notes:'Cannot travel',requestedAt:'2030-01-01T00:00:00Z',requestedBy:'tech',assignmentUid:'private-identity'},visitEvidence:{arrivedAt:'2030-01-01T00:00:00Z',lastEventType:'arrival',latitude:35,privateNote:'PRIVATE'}};
+  for(const role of ['owner','admin','manager','technician']){const view=projectJob('job',data,role);assert.equal(view.reassignmentRequest.id,'request');assert.equal(view.reassignmentRequest.revision,1);assert.equal(view.reassignmentRequest.assignmentUid,undefined);assert.equal(view.visitEvidence.arrivedAt,data.visitEvidence.arrivedAt);assert.equal(view.visitEvidence.latitude,undefined);assert.equal(view.visitEvidence.privateNote,undefined);}
+});

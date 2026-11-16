@@ -210,6 +210,7 @@ function schedulingHandlers(db) {
   }
   async function prepare(tx, scope, next, options = {}) {
     const before = options.before || {}, context = await actor(tx, scope), changed = options.force === true || changedSchedule(before, next);
+    if (next && before.status === 'in-progress' && String(before.assignedTo || '') !== String(next.assignedTo || '') && options.reviewStartedWork !== true) throw new HttpsError('failed-precondition', 'Review the work already started and explicitly acknowledge it before changing this assignment.', { reviewStartedWorkRequired: true });
     if (!changed) return { assignedTo: next?.assignedTo || null, assignedToUid: next?.assignedTo ? before.assignedToUid || null : null, assignedToName: next?.assignedTo ? before.assignedToName || '' : '', available: true, locks: [], skipped: true, scope };
     let old;
     if (before.assignedTo) try { old = await resolve(tx, scope, before.assignedTo, { ...context, allowLegacy: true, relaxed: true }); } catch { old = { uid: before.assignedTo }; }

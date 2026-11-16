@@ -68,7 +68,7 @@ test('busy preferred visits remain on their appointment date for dispatcher revi
 test('departed technicians cannot inherit generated visits and current active replacements are used only under the stored policy', async () => {
   const f = await fixture(); await db.doc(`teamMembers/${f.tech1}`).update({ status: 'removed' });
   const reviewPlan = await f.save('departed-review'), reviewed = await generateVisit(db, reviewPlan.id, DATE), review = await get(`jobs/${reviewed.jobId}`);
-  assert.equal(review.assignedTo, null); assert.equal(review.assignmentNeedsAttention, true); assert.match(review.assignmentReview, /no longer active/i);
+  assert.equal(review.assignedTo, null); assert.equal(review.assignmentNeedsAttention, true); assert.match(review.assignmentReview, /not eligible.*field assignments|no longer active/i);
   const autoPlan = await f.save('departed-auto', { assignmentFallback: 'auto' }), generated = await generateVisit(db, autoPlan.id, DATE);
   assert.equal((await get(`jobs/${generated.jobId}`)).assignedTo, f.tech2);
   const original = (await reviewPlan.get()).data();

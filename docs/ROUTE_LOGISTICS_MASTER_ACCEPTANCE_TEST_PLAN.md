@@ -8,7 +8,40 @@ Use the existing production site, Firebase project and corporate TestFlight app 
 
 Route Logistics has a tested field-work foundation suitable for a **controlled pilot after the short physical core workflow passes**. It is not yet certified across every browser, device, optional commercial feature or integration delivery path. Current automated results are recorded below; the original source/function inventory remains a dated acceptance baseline. Physical-device and genuine provider delivery acceptance remain separate.
 
-Current browser coverage is **33 scenarios** (99 configured executions across Chromium, Firefox and WebKit). See the November 15 addenda below for execution evidence. Earlier evidence for the original 25 scenarios is retained, including the later clean 75/75 Jobs-date run. Physical iPhone/Android and genuine provider acceptance remain separate.
+Previously recorded browser coverage is **33 scenarios** (99 configured executions across Chromium, Firefox and WebKit). See the November 15 addenda below for execution evidence. Earlier evidence for the original 25 scenarios is retained, including the later clean 75/75 Jobs-date run. Newly added scenarios are not implied to have run by that baseline. Physical iPhone/Android and genuine provider acceptance remain separate.
+
+### November 16 — field reliability and job exceptions
+
+Arrival, departure and access-blocked evidence now use the existing durable,
+workspace-scoped offline queue. Local acknowledgement follows storage success;
+restart/replay preserves the original event time and operation identity. Current
+membership, assignment and job revision remain server-checked. Conflicting work
+is retained for reconciliation, not silently rebased or discarded.
+
+Web Dispatch and mobile Management derive potentially-late/overdue indicators
+without changing appointment status, time or assignment. Technician reassignment
+requests retain their reason/notes and require explicit confirmation. Authorized
+management can resolve, dismiss or use the existing checked reassignment flow;
+in-progress reassignment requires review of started/offline work. Polling retains
+drafts and cannot retarget a decision to another request. Request alerts use the
+existing tenant-scoped push outbox with generic text and stable deduplication.
+
+See [Field reliability and job exceptions](FIELD_RELIABILITY_AND_JOB_EXCEPTIONS.md)
+for data flow, conflict handling, rebuild instructions and the Android/iOS
+physical procedure. FR-001 through FR-006 below are narrowly scoped automated
+Pass results: focused visit/location integration **20/20**, request/rules
+integration **19/19**, scoped root mobile regressions **89/89**, full web
+**412/412**, and Expo Doctor **18/18**. These overlapping suites are not summed
+as distinct acceptance cases. The final full regression results are **367/367
+mobile**, **412/412 web**, **198 Functions/operator unit passes** (one
+emulator-only skip), and a clean **492/492 Firestore/Storage integration run**.
+These results do not assert new provider delivery or physical-device acceptance.
+
+The new real-emulator browser scenario **PW-OPS-22** (technician request → manager
+Dispatch review → resolution with unchanged appointment) passed **3/3** on
+Chromium, Firefox and WebKit against local emulators. FR-007 and FR-008 remain **Not Run** until their rebuilt
+physical Android/iOS procedures are executed. No additional email, SMS, push or
+financial-provider test is claimed here.
 
 ### November 15 — visible visit recording and completion feedback
 
@@ -221,9 +254,9 @@ versus explicitly permanent changes. No address-editing physical/manual case is 
 
 | Cases | Pass | Fail | Blocked | Not Run | Dated historical live/provider Pass |
 | --- | --- | --- | --- | --- | --- |
-| 161 | 46 | 0 | 5 | 110 | 10 |
+| 169 | 52 | 0 | 5 | 112 | 10 |
 
-The 46 Pass results include current automated/read-only checks (including newly automated DSP-009) and **ten dated provider/live checks**, including the November 16 Android background assignment receipt/tap (MSG-10). A dated Pass proves only the named scenario. The 110 Not Run cases still require manual/operator execution; five Blocked entries are scoped feature/prerequisite gaps. The Android FCM configuration blocker is resolved, while the broader native workflow in DEV-004 remains Not Run. Case counts are acceptance scenarios, not individual automated test counts.
+The 52 Pass results include current automated/read-only checks (including DSP-009 and the six scoped field-reliability cases) and **ten dated provider/live checks**, including the November 16 Android background assignment receipt/tap (MSG-10). A dated Pass proves only the named scenario. The 112 Not Run cases still require manual/operator execution; five Blocked entries are scoped feature/prerequisite gaps. The Android FCM configuration blocker is resolved, while the broader native workflow in DEV-004 remains Not Run. Case counts are acceptance scenarios, not individual automated test counts.
 
 | Classification | Current evidence | Acceptance limit |
 | --- | --- | --- |
@@ -454,7 +487,7 @@ Exact paths below are relative to https://route-logistics.com unless a native or
 | Phase 4 — Onboarding and company settings | 9 | 1 | 0 | 1 | 7 |
 | Phase 5 — Geographic service areas | 9 | 3 | 0 | 0 | 6 |
 | Phase 6 — Customer CRM | 7 | 1 | 0 | 0 | 6 |
-| Phase 7 — Scheduling, dispatch and routes | 11 | 0 | 0 | 1 | 10 |
+| Phase 7 — Scheduling, dispatch and routes | 11 | 1 | 0 | 0 | 10 |
 | Phase 8 — Native iOS work execution | 16 | 1 | 0 | 1 | 14 |
 | Phase 9 — Offline durability and recovery | 9 | 1 | 0 | 0 | 8 |
 | Phase 10 — Multi-provider customer portal | 10 | 4 | 0 | 0 | 6 |
@@ -462,9 +495,12 @@ Exact paths below are relative to https://route-logistics.com unless a native or
 | Phase 12 — Estimates, approval and PDFs | 11 | 1 | 0 | 1 | 9 |
 | Phase 13 — Invoices and Stripe test payments | 9 | 4 | 0 | 0 | 5 |
 | Phase 14 — QuickBooks sandbox | 8 | 4 | 0 | 1 | 3 |
-| Phase 15 — SMS and push integrations | 10 | 6 | 0 | 1 | 3 |
+| Phase 15 — SMS and push integrations | 10 | 7 | 0 | 0 | 3 |
 | Phase 16 — Security and access control | 10 | 7 | 0 | 0 | 3 |
-| Phase 17 — Browser and device coverage | 13 | 0 | 0 | 1 | 12 |
+| Phase 17 — Browser and device coverage | 13 | 0 | 0 | 0 | 13 |
+| Phase 18 — Dual-mode native operations | 6 | 0 | 0 | 0 | 6 |
+| Phase 19 — Field reliability and job exceptions | 8 | 6 | 0 | 0 | 2 |
+| **Total** | **169** | **52** | **0** | **5** | **112** |
 
 ### Environment and identity baseline
 
@@ -3885,7 +3921,193 @@ Exact paths below are relative to https://route-logistics.com unless a native or
 - **Status:** **Not Run**
 - **Evidence reference:** docs/mobile-dual-mode-operations.md; scripts/mobileMode/workspaceNavigation/managementScreens tests; tests/mobileDualMode.integration.test.js; tests/staffAvailability.integration.test.js.
 
+### Phase 19 — Field reliability and job exceptions
+
+#### FR-001 — Durable visit queue, restart and original-time replay
+
+- **Test ID:** FR-001
+- **Feature/module:** Offline arrival, departure and access-blocked evidence
+- **Preconditions:** Local JavaScript test harness; isolated synthetic job, workspace, storage and callable transport. No physical device or production/provider access.
+- **User role:** Assigned verified technician fixture
+- **Exact navigation path:** Local `routeLogisticsMobile/scripts/jobCompletion.test.js` → offline visit save → simulated process restart → queue drain
+- **Execution / evidence class:** automated; Local persistence/transport harness, not handset acceptance
+- **Hands-on estimate:** 0 minutes
+- **Test steps:**
+
+1. Queue each supported visit type while offline; verify storage acknowledgement precedes any successful local-save result.
+2. Reload the offline module from the persisted queue, reconnect the simulated transport and drain twice.
+3. Compare original operation ID, occurrence time and attribution; inspect one acknowledged event per operation. Exercise storage failure and related notes/departure/completion dependency ordering.
+
+- **Expected result:** Evidence survives restart and retains original time, with no fabricated GPS or duplicate event. Failed persistence retains editable input; unrelated work drafts remain independent. Completion cannot skip unresolved earlier visit evidence.
+- **Actual result:** November 16 automated harness assertions passed for all three visit types, process restart, stable retry identity, exactly-once acknowledged event, storage failure, dependent completion ordering and lost-acknowledgement recovery. The scoped mobile root batch passed 89/89; physical process/OS storage behavior was not exercised.
+- **Status:** **Pass**
+- **Evidence reference:** `routeLogisticsMobile/scripts/jobCompletion.test.js`; `routeLogisticsMobile/scripts/fieldWorkTools.test.js`; `.migration/field-reliability-mobile-root.log`; [implementation and physical procedure](FIELD_RELIABILITY_AND_JOB_EXCEPTIONS.md)
+- **Cleanup instructions:** Release the local harness/storage fixtures. Do not clear an installed app's pending queue or remove production visit history.
+
+#### FR-002 — Visit replay authorization, version conflicts and evidence validation
+
+- **Test ID:** FR-002
+- **Feature/module:** Server authorization and original-time evidence reconciliation
+- **Preconditions:** Existing `demo-routelogistics` Firestore emulator; synthetic company/member/job fixtures only. Real provider features disabled; no production reads or writes.
+- **User role:** Assigned technician, owner and denied foreign/revoked/unverified fixtures
+- **Exact navigation path:** Local `tests/visitOffline.integration.test.js` and `tests/locations.integration.test.js` → visit handler record/replay
+- **Execution / evidence class:** automated; Focused emulator integration
+- **Hands-on estimate:** 0 minutes
+- **Test steps:**
+
+1. Submit delayed arrival/departure/access-blocked evidence; compare original occurrence time, server reception time and optional GPS validation against the original event time.
+2. Replay accepted evidence; attempt altered-payload reuse, stale job revision, assignment change, revoked membership, foreign tenant and unverified actor.
+3. Verify transaction-time membership changes, required access-blocked explanations, malformed/future evidence rejection and explicit acknowledged revision chaining through completion.
+
+- **Expected result:** Only a current authorized actor can record/replay evidence. Duplicate replay returns the original receipt; conflicts retain evidence and cannot overwrite current work or adopt a newer assignment. GPS is neither required nor invented.
+- **Actual result:** November 16 focused visit/location emulator batch passed 20/20. Assertions verified original-time summaries, separate reception timestamps, replay identity, authorization/tenant isolation, transaction-time revocation, conflict outcomes and unchanged unrelated work. This is focused integration evidence, not a clean full rules-run or real GPS-device claim.
+- **Status:** **Pass**
+- **Evidence reference:** `tests/visitOffline.integration.test.js`; `tests/locations.integration.test.js`; `.migration/offline-visit-emulator-focused.log`
+- **Cleanup instructions:** Stop the existing local emulator after the coordinated test batch; discard only its synthetic fixtures. Preserve production/customer records and local conflict evidence.
+
+#### FR-003 — Deterministic late/overdue indicators and timezone boundaries
+
+- **Test ID:** FR-003
+- **Feature/module:** Shared operational exception derivation
+- **Preconditions:** Pure JavaScript synthetic jobs and fixed clocks; no database, Maps, messages or provider calls.
+- **User role:** Dispatch/management read-only interpretation
+- **Exact navigation path:** Local `functions/shared/jobExceptions.test.js` → shared `deriveJobExceptions`
+- **Execution / evidence class:** automated; Pure deterministic unit tests
+- **Hands-on estimate:** 0 minutes
+- **Test steps:**
+
+1. Evaluate immediately before/at the default 30-minute grace boundary and after appointment end; compare scheduled, in-progress, completed and cancelled jobs.
+2. Apply confirmed original-time arrival/work-start evidence, prior-date/future evidence, pending/resolved request summaries and invalid schedules.
+3. Exercise company timezone, Pacific fallback, configurable utility grace, overnight/duration end times and daylight-saving gaps/repeated times; compare the unchanged input object afterward.
+
+- **Expected result:** Potential lateness requires no confirmed arrival/work start; overdue may include unfinished started work. Invalid time data does not invent an incident. Terminal jobs are excluded. Derived attention never changes canonical status, assignment or appointment times.
+- **Actual result:** November 16 all eight shared-utility tests passed, including timezone/DST boundaries, original-evidence handling and input nonmutation. The function is shared by Dispatch and native Management; no physical clock/device or genuine arrival was certified.
+- **Status:** **Pass**
+- **Evidence reference:** `functions/shared/jobExceptions.js`; `functions/shared/jobExceptions.test.js`; `.migration/job-exceptions-unit.log`
+- **Cleanup instructions:** None; pure synthetic inputs only.
+
+#### FR-004 — Authorized reassignment requests, deduplication and checked management decisions
+
+- **Test ID:** FR-004
+- **Feature/module:** Technician request and management resolve/dismiss/reassign
+- **Preconditions:** Existing local Firestore emulator with isolated synthetic staff/jobs/availability, private request records and scheduling rules. No production assignment or notification delivery.
+- **User role:** Assigned technician; authorized manager/owner; denied anonymous, foreign, revoked and unassigned fixtures
+- **Exact navigation path:** Local `tests/jobExceptions.integration.test.js` → `rlJobException` handler; existing checked `rlManageJob` assignment handler; `tests/scheduling.rules.test.js`
+- **Execution / evidence class:** automated; Focused handler/rules integration
+- **Hands-on estimate:** 0 minutes
+- **Test steps:**
+
+1. Create a valid request; replay the same operation and race distinct operations. Check one pending record and unchanged job work revision, status, time, assignment and existing evidence.
+2. Attempt unauthorized requests/management decisions, invalid reasons/notes, altered operation reuse and stale job/request revisions. Deny direct client mutation of request/evidence summaries.
+3. Resolve/dismiss with optional explanation; submit a new permitted request after closure. Reassign through availability/conflict/field-work checks, including explicit started-work acknowledgement and concurrent assignment attempts.
+
+- **Expected result:** Request metadata cannot cancel/unassign work or elevate permission. One pending request exists for the assigned actor; replay is idempotent. Management resolution is tenant-scoped and revision-checked; successful checked reassignment resolves the request atomically while retaining work history.
+- **Actual result:** November 16 focused request and scheduling-rules batch passed 19/19. It verified authorization/tenant isolation, concurrent deduplication, server-only summaries, metadata-only resolution/dismissal, conflict/office-only rejection and explicit review before in-progress reassignment. PW-OPS-22 passed 3/3 across Chromium, Firefox and WebKit: a technician's authenticated request/replay appeared in manager Dispatch and resolved without changing assignment/status/time or another tenant's job. The final broad rules/integration suite passed 492/492. No physical-device or real-provider delivery claim is made.
+- **Status:** **Pass**
+- **Evidence reference:** `tests/jobExceptions.integration.test.js`; `tests/scheduling.rules.test.js`; `.migration/job-exceptions-emulator-final.log`; `tests/browser/operations.spec.js` (PW-OPS-22 — Not Run)
+- **Cleanup instructions:** Remove only isolated emulator fixtures after testing. Preserve legitimate memberships, assignments, prior work and request/audit history in production.
+
+#### FR-005 — Mock-transport notification privacy, routing and duplicate suppression
+
+- **Test ID:** FR-005
+- **Feature/module:** Reassignment-request/removal native notification behavior
+- **Preconditions:** Existing native-push unit/client harnesses with synthetic device registrations and mocked Expo transport. Do not supply real device tokens or send notifications.
+- **User role:** Current tenant management recipients, previous/new assignees and denied foreign/stale-account fixtures
+- **Exact navigation path:** Local `functions/nativePush.test.js` → outbox enqueue/drain; `routeLogisticsMobile/scripts/nativePush.test.js` → notification receive/tap
+- **Execution / evidence class:** automated; Mock provider/client transport only
+- **Hands-on estimate:** 0 minutes
+- **Test steps:**
+
+1. Enqueue/replay the same pending request event; inspect stable request identity, current management recipients and generic payload without private explanation.
+2. Resolve before drain and verify supersession; exercise status and assignment preferences plus old-assignee removal/new-assignee assignment.
+3. Open a management request through the normal authorized job read; reject foreign/stale-account payloads. Verify a removal tap refreshes the schedule instead of reading the now-unassigned job.
+
+- **Expected result:** One scoped outbox delivery per request/device, no private notes in push text, no stale resolved request send, respected preferences and no cross-tenant navigation. Late/overdue polling does not generate repeated alerts.
+- **Actual result:** November 16 backend/client mock assertions passed for management-only routing, stable deduplication, payload privacy, supersession, preferences, authorized tap and safe assignment-removal refresh. These assertions do not establish Expo/carrier acceptance, handset display/tap or a new live notification delivery; the ten dated provider/live Pass cases remain unchanged.
+- **Status:** **Pass**
+- **Evidence reference:** `functions/nativePush.test.js`; `routeLogisticsMobile/scripts/nativePush.test.js`; `.migration/job-exceptions-unit.log`; `.migration/field-reliability-mobile-root.log`
+- **Cleanup instructions:** Release mock registrations/outbox/storage fixtures only. Do not send another real push or replace credentials as part of this case.
+
+#### FR-006 — Exception UI, targeted query refresh and retained draft guards
+
+- **Test ID:** FR-006
+- **Feature/module:** Dispatch/native request review and scoped synchronization
+- **Preconditions:** Local React/native-renderer harnesses with synthetic jobs and scoped query caches. No live browser, customer writes or provider activity.
+- **User role:** Technician and authorized dispatch/management fixtures
+- **Exact navigation path:** Web Dispatch → Operational exceptions → job drawer → Operational exception review; native Job Details → Assignment support; native Management → Schedule → request review
+- **Execution / evidence class:** automated; Renderer/query regressions, not physical or live-browser acceptance
+- **Hands-on estimate:** 0 minutes
+- **Test steps:**
+
+1. Filter/count potentially-late, overdue and pending requests; review reason/notes and save an explanation using current request/job revisions.
+2. Simulate failure, duplicate taps, a newer polled request and in-progress assignment review; verify retained context, visible actionable errors and no silent draft retargeting.
+3. Publish successful visit/request/resolve/dismiss writes; verify only scoped affected jobs/resources refresh without a page reload. Check child draft guards and separately retained work/photo/checklist drafts.
+
+- **Expected result:** Counts are derived, checked assignment failures remain visible in the drawer, drafts survive refresh/errors and a newer request cannot inherit an earlier explanation. Unconfirmed operations retain immutable retry identity. Successful writes refresh the authorized views without a forced page reload.
+- **Actual result:** November 16 full web suite passed 412/412, including six focused Dispatch exception cases and targeted query policy assertions. The scoped root mobile batch passed 89/89 for the executed native UI/query behaviors; later root-owned request draft regressions are tracked in final release validation. None of these harnesses certifies hardware, a real browser journey or provider delivery.
+- **Status:** **Pass**
+- **Evidence reference:** `tests/dispatch-exceptions.ui.test.js`; `routeLogisticsWeb/src/services/workspaceQueryPolicy.test.js`; `routeLogisticsMobile/scripts/jobExceptionRequests.test.js`; `routeLogisticsMobile/scripts/managementScreens.test.js`; `routeLogisticsMobile/scripts/workQueries.test.js`; `.migration/dispatch-exceptions-ui.log`; `.migration/job-exceptions-web-full-final.log`; `.migration/field-reliability-mobile-root.log`
+- **Cleanup instructions:** Unmount harnesses and release scoped test caches. Preserve installed-app drafts, saved evidence and production request history.
+
+#### FR-007 — Rebuilt physical Android offline evidence and exception review
+
+- **Test ID:** FR-007
+- **Feature/module:** Android field reliability end-to-end
+- **Preconditions:** Rebuilt Android app with retained app data; dedicated synthetic assigned job and authorized technician/manager identities; desktop Dispatch available. A new real push requires separate explicit authorization; this procedure sends none by default.
+- **User role:** Assigned technician and authorized owner/manager
+- **Exact navigation path:** Android Field → assigned job → visit controls/Assignment support; web /dispatch; Android Management → Schedule
+- **Execution / evidence class:** manual; Physical Android — not executed
+- **Hands-on estimate:** 20 minutes
+- **Test steps:**
+
+1. Follow the [physical Android/iOS procedure](FIELD_RELIABILITY_AND_JOB_EXCEPTIONS.md#physical-android-and-ios-acceptance--not-yet-executed), recording Android model/OS/build and original visit times; preserve existing app data.
+2. Save offline arrival/departure/access-blocked evidence, a note and photo; restart while offline, reconnect and verify each original event once. Run a separate synthetic assignment/version conflict and retain its evidence for review.
+3. Request reassignment; inspect the unchanged appointment in Dispatch/Management, resolve or perform checked reassignment, and confirm in-progress review plus late/overdue filters. Test actual push only under a separate explicit recipient/count budget.
+
+- **Expected result:** Durable independent drafts/evidence survive Android process restart; synchronization is authorized and idempotent, conflicts are actionable, request review changes only its intended metadata/assignment and no invisible navigation guard remains. No automatic repeated late/overdue notifications occur.
+- **Actual result:** Not executed on a rebuilt physical Android device. Earlier Android background assignment display/tap in MSG-10 does not certify these new offline/exception workflows.
+- **Status:** **Not Run**
+- **Evidence reference:** [physical procedure and rebuild steps](FIELD_RELIABILITY_AND_JOB_EXCEPTIONS.md#physical-android-and-ios-acceptance--not-yet-executed); FR-001–006 supporting automated evidence only
+- **Cleanup instructions:** Synchronize/reconcile all synthetic pending evidence, restore only the recorded synthetic assignments and end test shifts. Do not uninstall/clear app storage or delete legitimate history.
+
+#### FR-008 — Rebuilt physical iOS offline evidence and exception review
+
+- **Test ID:** FR-008
+- **Feature/module:** iOS field reliability end-to-end
+- **Preconditions:** Rebuilt corporate iOS app `com.worksidesoftware.routelogisticsapp`, existing EAS project/team and retained app data; dedicated synthetic assigned job and authorized technician/manager identities. No real messages without a separate explicit budget.
+- **User role:** Assigned technician and authorized owner/manager
+- **Exact navigation path:** iPhone Field → assigned job → visit controls/Assignment support; web /dispatch; iPhone Management → Schedule
+- **Execution / evidence class:** manual; Physical iOS — not executed
+- **Hands-on estimate:** 20 minutes
+- **Test steps:**
+
+1. Follow the [physical Android/iOS procedure](FIELD_RELIABILITY_AND_JOB_EXCEPTIONS.md#physical-android-and-ios-acceptance--not-yet-executed), recording iPhone/iOS/build and original visit times; preserve existing app data.
+2. Save offline visit evidence with GPS unavailable and, if permitted, a valid sample; retain independent work/photo drafts through backgrounding and process restart. Reconnect and compare original versus server reception time and exactly one record per operation.
+3. Exercise a synthetic conflict, completion draft handling and request/review/reassign cycle; verify close/reopen and newer-request guards. Treat any separately authorized push display/tap as its own physical observation.
+
+- **Expected result:** iOS permission/background/modal lifecycle does not lose saved evidence, fabricate GPS, duplicate replay or bypass assignment/version checks. Draft cancellation remains reachable and authorized management review preserves prior work.
+- **Actual result:** Not executed on a rebuilt physical iPhone. Expo Doctor/bundle validation and previous iOS push receipt/tap are supporting or historical evidence, not acceptance of this changed workflow.
+- **Status:** **Not Run**
+- **Evidence reference:** [physical procedure and Mac rebuild steps](FIELD_RELIABILITY_AND_JOB_EXCEPTIONS.md#physical-android-and-ios-acceptance--not-yet-executed); FR-001–006 supporting automated evidence only
+- **Cleanup instructions:** Synchronize/reconcile synthetic queued work, restore recorded synthetic settings and end shifts. Preserve pending app data, existing production records and audit history.
+
 ## E. Automated test evidence
+
+### November 16 — scoped field-reliability follow-up
+
+| Scope | Actual result | Evidence / limit |
+| --- | --- | --- |
+| Visit/location emulator integration | 20/20 passed | `.migration/offline-visit-emulator-focused.log`; focused integration only |
+| Reassignment/request scheduling-rules integration | 19/19 passed | `.migration/job-exceptions-emulator-final.log`; not a clean full rules-run claim |
+| Root-scoped native regressions | 89/89 passed | `.migration/field-reliability-mobile-root.log`; mocked native hardware/provider transport |
+| Full web regressions | 412/412 passed | `.migration/job-exceptions-web-full-final.log`; includes Dispatch exception renderer/query cases |
+| Expo Doctor | 18/18 passed | Local compatibility check; no physical workflow acceptance |
+| PW-OPS-22 real-emulator browser scenario | Not Run at this update | `tests/browser/operations.spec.js`; root records coordinated execution separately |
+| FR-007/008 Android/iOS procedures | Not Run | Rebuilt physical devices required; no new provider delivery claimed |
+
+These follow-up scopes overlap and are not summed into a new global test count.
+Final full-suite/build/deployment receipts are recorded separately when complete.
+The table below preserves the dated original acceptance-run evidence.
 
 These are completed current-run local checks against existing isolated **demo-routelogistics emulators**, not a deployed staging environment or a new Firebase project. The Auth E2E wrapper applied sanitized configuration guards: provider features disabled, dummy local secret values and SMTP restricted to localhost; it restored the local files afterward. This wrapper is **not a network firewall**. See `.migration/acceptance-auth-safety.json`. No production message or provider financial/accounting action was generated by these suites.
 
@@ -3904,7 +4126,7 @@ These are completed current-run local checks against existing isolated **demo-ro
 | npm run test:browser:all -- --grep=PW-POR-04 --repeat-each=3 | 9 executions:9 pass (3 repeats each in Chromium,Firefox,WebKit) | Pass after explicit feedback readiness and native invoice-details-open check; no API/UI authorization weakened | .migration/playwright-invoice-regression.log |
 | npm run test:browser:smoke | 9 Chromium smoke executions: 9 pass in 1.2 minutes | Pass for the exact routine CI command locally, with final CSP/ADC/transport guards and isolated browser build; no remote CI run claimed | .migration/playwright-ci-smoke.log |
 
-Combined current individual automated test cases before Playwright: **875 tests: 874 pass, 0 fail, 1 skip**, including the final full web 232 rerun (five emulator opt-in/transport guard test cases counted once) and corrected full mobile168 rerun. Do not sum these with the 155 acceptance cases as though they were the same measurement. The initial mobile failure is retained as resolved test-harness history, not erased or described as an application fix.
+Combined original-run individual automated test cases before Playwright: **875 tests: 874 pass, 0 fail, 1 skip**, including the final full web 232 rerun (five emulator opt-in/transport guard test cases counted once) and corrected full mobile168 rerun. Do not sum these with the current 169 acceptance cases as though they were the same measurement. The initial mobile failure is retained as resolved test-harness history, not erased or described as an application fix.
 
 Safe repeat commands for the completed non-Auth suites:
 
@@ -4073,6 +4295,8 @@ Executed checks: 406/406 web tests, including seven saved-warning/canonical-ID/r
 | Android browser | BRO-004; DEV-003 | Physical Chrome portal/back/files/keyboard; not satisfied by desktop emulation |
 | Android native and FCM v1 | DEV-004; MSG-10 | November 16 credential/permission checks and one background assignment receipt/drawer/tap passed; broader camera/offline/location/OS-state checks remain |
 | Native accessibility and return navigation | DEV-005; BRO-006 | Large text, labels/focus, usable touch targets, no clipping or trapped overlay |
+| Android offline visits and exception review | FR-007 | Rebuilt app; durable arrival/departure/access-blocked evidence, restart/replay/conflict, request/review/reassign and unchanged appointment metadata |
+| iOS offline visits and exception review | FR-008 | Rebuilt corporate app; independent drafts/GPS labels, original-time replay, completion/navigation and management decision guards |
 
 Batch work with one operator: keep desktop dispatch open while the iPhone runs the assigned work. Perform the short background waits while checking portal/history/CMS. Record actual app foreground/background state for every push, since prior receipt did not identify all OS states. A local acceptance harness can verify UI transitions but cannot certify camera hardware, battery policy or native permission prompts.
 

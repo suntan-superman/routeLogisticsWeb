@@ -178,3 +178,27 @@ test('Android token rotation and installation release preserve iOS, foreign-tena
   assert.equal((await db.collection('rlPushDevices').doc(ios.deviceId).get()).get('active'), true); assert.equal((await db.collection('rlPushDevices').doc(foreign.deviceId).get()).get('active'), true);
   assert.deepEqual((await db.collection('jobs').doc('job').get()).data(), original); assert.deepEqual((await db.collection('jobs').doc('next-job').get()).data(), next);
 });
+
+test('reassignment requests notify only management with stable deduplication and no private explanation in push',async()=>{
+ const {db,env,api,register}=await setup();await register();
+ await db.doc('teamMembers/legacy-owner').set({uid:'owner',companyId:'acme',status:'active',role:'admin'});
+ const manager=await register('manager','manager','manager','ExpoPushToken[synthetic-manager-123456789]',androidInstallation,'android');
+ const owner=await register('owner',null,'owner','ExpoPushToken[synthetic-owner-123456789]','44444444-4444-4444-8444-444444444444');
+ const before=(await db.doc('jobs/job').get()).data(),after={...before,reassignmentRequest:{id:'request-one',status:'pending',reason:'vehicle',notes:'PRIVATE vehicle and medical explanation'}};await db.doc('jobs/job').set(after);
+ await api.enqueue(before,after,'job','event-request');await api.enqueue(before,after,'job','redelivered-event-with-different-id');
+ const rows=(await db.collection('rlPushDeliveries').get()).docs;assert.equal(rows.length,2);assert.deepEqual(new Set(rows.map(row=>row.get('deviceId'))),new Set([manager.deviceId,owner.deviceId]));assert.ok(rows.every(row=>row.get('kind')==='reassignment-request'&&row.get('eventId')==='job-exception:request-one'));
+ await api.drain();assert.equal(env.requests.length,2);for(const message of env.requests.map(row=>row.body[0])){assert.equal(message.data.type,'job-reassignment-request');assert.equal(message.title,'Reassignment requested');assert.doesNotMatch(JSON.stringify(message),/PRIVATE|medical|vehicle/);}
+});
+
+test('resolved reassignment requests are superseded before send and status preference disables request alerts',async()=>{
+ const {db,env,api,register}=await setup();await register('manager','manager','manager','ExpoPushToken[synthetic-manager-123456789]',androidInstallation,'android');
+ const before=(await db.doc('jobs/job').get()).data(),after={...before,reassignmentRequest:{id:'pending-request',status:'pending'}};await db.doc('jobs/job').set(after);await api.enqueue(before,after,'job','request-event');await db.doc('jobs/job').update({reassignmentRequest:null});await api.drain();assert.equal(env.requests.length,0);assert.equal((await db.collection('rlPushDeliveries').get()).docs[0].get('state'),'superseded');
+ await api.manage(request({action:'preferences',preferences:{status:false}},'manager','manager','manager'));await db.doc('jobs/job').set(after);await api.enqueue(before,{...after,reassignmentRequest:{id:'next-request',status:'pending'}},'job','next-event');assert.equal((await db.collection('rlPushDeliveries').get()).size,1);
+});
+
+test('reassignment sends old assignee a removal and new assignee an assignment without leaking work notes',async()=>{
+ const {db,env,api,register}=await setup();const old=await register(),next=await register('manager','manager','manager','ExpoPushToken[synthetic-manager-123456789]',androidInstallation,'android');
+ const before=(await db.doc('jobs/job').get()).data(),after={...before,assignedTo:'manager',assignedToUid:'manager',workNotes:'PRIVATE observations'};await db.doc('jobs/job').set(after);assert.deepEqual(jobEvents(before,after),['removal','assignment']);await api.enqueue(before,after,'job','reassignment-event');await api.drain();
+ const rows=(await db.collection('rlPushDeliveries').get()).docs;assert.equal(rows.length,2);assert.equal(rows.find(row=>row.get('deviceId')===old.deviceId).get('kind'),'removal');assert.equal(rows.find(row=>row.get('deviceId')===next.deviceId).get('kind'),'assignment');
+ const messages=env.requests.map(row=>row.body[0]);assert.ok(messages.some(message=>message.data.type==='job-removal'&&message.data.recipientUid==='tech'));assert.ok(messages.some(message=>message.data.type==='job-assignment'&&message.data.recipientUid==='manager'));assert.doesNotMatch(JSON.stringify(messages),/PRIVATE|observations/);
+});

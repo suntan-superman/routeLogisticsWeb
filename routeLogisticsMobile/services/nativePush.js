@@ -21,7 +21,7 @@ export const nativePushSnapshot = () => ({ ...state });
 export const subscribeNativePush = listener => { listeners.add(listener); listener(nativePushSnapshot()); return () => listeners.delete(listener); };
 const current = (user, ticket) => ticket === generation && key(user) === key(context) && auth.currentUser?.uid === user?.id;
 const belongs = data => !!context && data.recipientUid === context.id && data.companyId === context.companyId && data.role === context.role && (data.membershipId || '') === (context.membershipId || '');
-const categoryEnabled = data => state.preferences.enabled && state.preferences[data.type === 'job-assignment' ? 'assignments' : data.type === 'job-schedule' ? 'schedule' : 'status'];
+const categoryEnabled = data => state.preferences.enabled && state.preferences[['job-assignment', 'job-removal'].includes(data.type) ? 'assignments' : data.type === 'job-schedule' ? 'schedule' : 'status'];
 async function load() {
   if (loaded) return;
   if (!loading) loading = (async () => {
@@ -42,7 +42,7 @@ async function assertAccount(user) {
 }
 const granted = permission => permission.granted === true || permission.ios?.status === Notifications.IosAuthorizationStatus?.PROVISIONAL;
 function safeData(value) {
-  if (!value || !['job-assignment', 'job-schedule', 'job-status'].includes(value.type)) return null;
+  if (!value || !['job-assignment', 'job-schedule', 'job-status', 'job-removal', 'job-reassignment-request'].includes(value.type)) return null;
   if (['jobId', 'notificationId', 'companyId', 'recipientUid', 'role'].some(field => typeof value[field] !== 'string' || !value[field] || value[field].length > 200 || value[field].includes('/'))) return null;
   if (!['owner', 'admin', 'manager', 'technician'].includes(value.role) || typeof value.membershipId !== 'string') return null;
   return Object.fromEntries(['type', 'jobId', 'notificationId', 'companyId', 'recipientUid', 'membershipId', 'role'].map(field => [field, value[field]]));
@@ -60,6 +60,15 @@ export async function retryNativePushOpen() {
     if (handled.includes(data.notificationId)) { await completeOpen(data.notificationId); return; }
     if (!belongs(data)) { await completeOpen(data.notificationId); update({ error: 'This notification belongs to a different work account.' }); return; }
     await assertAccount(user); if (!current(user, ticket)) return;
+    if (data.type === 'job-removal') {
+      // Removal is a scoped refresh, never an attempt to reopen a job whose
+      // previous assignee may no longer have permission to read it.
+      await Promise.allSettled([...receivedListeners].map(listener => Promise.resolve().then(() => listener(data))));
+      if (!current(user, ticket) || accessStatus !== 'ready' || pending?.notificationId !== data.notificationId) return;
+      await completeOpen(data.notificationId);
+      update({ error: '', message: 'An assignment was removed. Your schedule is refreshing; saved offline work remains available for review.' });
+      return;
+    }
     const result = await readWorkspace('jobs', { id: data.jobId });
     if (!current(user, ticket) || accessStatus !== 'ready' || pending?.notificationId !== data.notificationId) return;
     const job = result.job;

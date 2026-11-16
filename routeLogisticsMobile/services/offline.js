@@ -6,7 +6,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { auth } from '../constants/firebase';
 import { AppState } from 'react-native';
 import { getClaims, tenantFields, requireWorkspace } from './tenancy';
-import { createQueue, retryDelay } from './offlineQueueCore';
+import { createQueue, retryDelay, revisionOperation, linkRevision, advanceRevision, restoreLegacyDependencies } from './offlineQueueCore';
 
 const queues = new Map(), draining = new Map(), listeners = new Set();
 const pausedAccounts = new Set(), writing = new Map();
@@ -23,7 +23,7 @@ function saveWork(change) {
   const task = Promise.resolve().then(change);
   return trackWrite(uid, task);
 }
-export const offlineVersion = (v) => v?.toDate ? v.toDate().toISOString() : v?.seconds != null ? new Date(v.seconds * 1000 + (v.nanoseconds || 0) / 1e6).toISOString() : v || null;
+export const offlineVersion = (v) => v instanceof Date ? v.toISOString() : v?.toDate ? v.toDate().toISOString() : v?.seconds != null ? new Date(v.seconds * 1000 + (v.nanoseconds || 0) / 1e6).toISOString() : v || null;
 export const isOffline = async () => { const net = await NetInfo.fetch(); return net.isConnected === false || net.isInternetReachable === false; };
 export function offlineScope() {
   requireWorkspace();
@@ -66,7 +66,7 @@ export const saveJobOffline = (jobId, patch, options = {}) => saveWork(async () 
       if (existing.kind !== 'job' || existing.jobId !== jobId || JSON.stringify(existing.patch) !== JSON.stringify(patch)) throw new Error('This saved operation belongs to a different change. Reopen the job.');
       return;
     }
-    rows.push({ id, kind: 'job', jobId, patch, expectedVersion: offlineVersion(base.updatedAt), createdAt: Date.now(), state: 'pending', attempts: 0, nextAttempt: 0 });
+    rows.push(linkRevision(rows, { id, kind: 'job', jobId, patch, expectedVersion: offlineVersion(base.updatedAt), createdAt: Date.now(), state: 'pending', attempts: 0, nextAttempt: 0 }));
   });
   void flushOffline().catch(() => {});
   return { success: true, queued: true, operationId: id };
@@ -94,6 +94,30 @@ export const saveApplicationOffline = (jobId, record) => saveWork(async () => {
   const scope = offlineScope(), id = Crypto.randomUUID();
   await queue(scope).add({ id, kind: 'application', jobId, record, createdAt: Date.now() });
   void flushOffline().catch(() => {}); return { success: true, queued: true };
+});
+export const saveVisitOffline = (job, input) => saveWork(async () => {
+  const scope = offlineScope(), claims = getClaims(), attribution = tenantFields(), uid = auth.currentUser?.uid;
+  if (!auth.currentUser?.emailVerified || !claims?.companyId || !job?.id || job.companyId !== claims.companyId || ['completed','cancelled','canceled'].includes(job.status)
+    || claims.role === 'technician' && (job.assignedTo !== claims.membershipId || job.assignedToUid && job.assignedToUid !== uid)) throw new Error('Your verified current company and job assignment are required to save visit evidence.');
+  const id = input.operationId;
+  const note = String(input.note || '').trim(), at = Date.parse(input.occurredAt);
+  if (typeof id !== 'string' || !/^[A-Za-z0-9-]{16,100}$/.test(id) || !['arrived','departed','access-blocked'].includes(input.type) || note.length > 1000 || input.type === 'access-blocked' && !note
+    || !Number.isFinite(at) || at > Date.now() + 120000) throw new Error('A valid visit type, original time, operation ID and access-blocked reason are required.');
+  const record = { type: input.type, note, occurredAt: new Date(at).toISOString() };
+  if (['latitude','longitude','accuracy','capturedAt'].some(key => input[key] != null)) {
+    if (![input.latitude,input.longitude,input.accuracy].every(Number.isFinite) || Math.abs(input.latitude)>90 || Math.abs(input.longitude)>180 || input.accuracy<0 || input.accuracy>5000 || !Number.isFinite(Date.parse(input.capturedAt)) || Math.abs(Date.parse(input.capturedAt)-at)>300000) throw new Error('The optional GPS sample is invalid or was not captured near this visit. Record without GPS or retry with a valid sample.');
+    Object.assign(record, { latitude: input.latitude, longitude: input.longitude, accuracy: input.accuracy, capturedAt: input.capturedAt });
+  }
+  const bases = await readCache('job-bases', scope) || {}, base = bases[job.id] || job;
+  if (offlineScope() !== scope) throw new Error('Your workspace changed. Reopen this job before saving visit evidence.');
+  await queue(scope).edit(rows => {
+    const existing = rows.find(row => row.id === id);
+    if (existing) { if (existing.kind !== 'visit' || existing.jobId !== job.id || JSON.stringify(existing.record) !== JSON.stringify(record)) throw new Error('This visit operation belongs to different evidence. Retry the original saved event.'); return; }
+    rows.push(linkRevision(rows, { id, kind: 'visit', jobId: job.id, record, attribution: { ...attribution, userId: uid, memberId: claims.membershipId || uid, role: claims.role }, expectedAssignee: job.assignedTo || null,
+      expectedVersion: offlineVersion(base.updatedAt), createdAt: Date.now(), state: 'pending', attempts: 0, nextAttempt: 0 }));
+  });
+  void flushOffline().catch(() => {});
+  return { success: true, queued: true, operationId: id };
 });
 export const saveServiceFormOffline = (job, record) => saveWork(async () => {
   const scope = offlineScope(), claims = getClaims();
@@ -126,26 +150,30 @@ export function flushOffline() {
   const task = (async () => {
     if (await isOffline()) return;
     try {
-    await work.edit((rows) => rows.forEach((row) => { if (row.state === 'syncing') row.state = 'pending'; }));
+    await work.edit((rows) => { restoreLegacyDependencies(rows);rows.forEach((row) => { if (row.state === 'syncing') row.state = 'pending'; }); });
     for (const saved of await work.read()) {
       const row = (await work.read()).find((entry) => entry.id === saved.id);
       if (!row) continue;
       if (pausedScope(scope) || AppState.currentState !== 'active' || offlineScope() !== scope || await isOffline()) break;
       if (row.state !== 'pending' || row.nextAttempt > Date.now()) continue;
       const ordered = await work.read();
-      const earlier = ordered.slice(0, ordered.findIndex((entry) => entry.id === row.id)).find((other) => other.jobId === row.jobId && (other.kind === 'job' || row.patch?.status === 'completed' && other.kind === 'service-form') && !['synced', 'discarded'].includes(other.state));
-      if (row.kind === 'job' && earlier) continue;
-      await work.patch(row.id, { state: 'syncing' });
+      const earlier = ordered.slice(0, ordered.findIndex((entry) => entry.id === row.id)).find((other) => other.jobId === row.jobId && (revisionOperation(other) || row.patch?.status === 'completed' && other.kind === 'service-form') && !['synced', 'discarded'].includes(other.state));
+      if (revisionOperation(row) && earlier) continue;
+      if (row.versionDependency && !ordered.some(other => other.id === row.versionDependency && other.state === 'synced')) { await work.patch(row.id, { state:'conflict', error:'An earlier saved operation was changed or discarded. This evidence is retained for management review.', errorCode:'revision-chain-changed' }); continue; }
+      await work.patch(row.id, { state: 'syncing', submittedAt: row.submittedAt || Date.now() });
       try {
         const result = row.kind === 'job' ? await callWorkspace('rlApplyJobOperation', { operationId: row.id, jobId: row.jobId, patch: row.patch, expectedVersion: row.expectedVersion }) : row.kind === 'application' ? await callWorkspace('rlRecordApplication', { jobId: row.jobId, operationId: row.id, record: row.record }).then(() => ({ status: 'synced' }))
           : row.kind === 'service-form' ? await callWorkspace('rlServiceForms', { action: 'save', jobId: row.jobId, operationId: row.id, ...row.record })
+          : row.kind === 'visit' ? await callWorkspace('rlJobVisit', { action:'record', jobId:row.jobId, operationId:row.id, evidenceVersion:1, expectedVersion:row.expectedVersion, expectedAssignee:row.expectedAssignee, ...row.record })
           : row.kind === 'photo' ? await sendPhoto(row, scope) : (() => { throw new Error('Unsupported saved-work type. Retain this change for review.'); })();
+        if(row.kind==='visit'&&(!['synced','conflict'].includes(result?.status)||result.status==='synced'&&(!result.event?.id||result.event.type!==row.record.type||!['manual','manual-gps'].includes(result.event.source)||!Number.isFinite(Date.parse(result.event.recordedAt))))) throw Object.assign(new Error('The server did not confirm a saved manual visit report. The durable event remains available to retry with the same identity.'),{code:'functions/internal'});
         await work.edit((rows) => {
           const current = rows.find((entry) => entry.id === row.id);
-          Object.assign(current, { state: result.status, server: result.server || null, serverVersion: result.version || null, error: result.status === 'conflict' ? 'This job changed online. Review before retrying.' : '' });
-          if (result.status === 'synced' && row.kind === 'job') { const next = rows.find((entry) => entry.kind === 'job' && entry.jobId === row.jobId && entry.id !== row.id && entry.state === 'pending'); if (next) next.expectedVersion = result.version; }
+          Object.assign(current, { state: result.status, server: result.server || null, serverVersion: result.version || null, event:result.event || null, error: result.status === 'conflict' ? result.message || 'This job changed online. Evidence is retained; management attention is required.' : '' });
+          if (result.status === 'synced') advanceRevision(rows, row, result.version);
         });
         if (result.status === 'synced' && row.kind === 'job') { const bases = await readCache('job-bases', scope) || {}; bases[row.jobId] = { ...bases[row.jobId], ...row.patch, updatedAt: result.version }; await writeCache('job-bases', bases, scope); }
+        if (result.status === 'synced' && row.kind === 'visit') { const bases=await readCache('job-bases',scope)||{}; if(bases[row.jobId]) { bases[row.jobId]={...bases[row.jobId],updatedAt:result.version}; await writeCache('job-bases',bases,scope); } }
         if (result.status === 'synced' && row.kind === 'photo') await FileSystem.deleteAsync(row.localUri, { idempotent: true });
         if (result.status === 'synced' && row.kind === 'service-form') {
           const cached = await readCache(`service-form:${row.jobId}`, scope);
@@ -153,7 +181,8 @@ export function flushOffline() {
         }
       } catch (error) {
         const attempts = row.attempts + 1, retryable = ['functions/unavailable', 'functions/deadline-exceeded', 'functions/internal', 'functions/resource-exhausted', 'storage/retry-limit-exceeded', 'unavailable'].includes(error.code) || await isOffline();
-        await work.patch(row.id, { state: retryable && attempts < 5 ? 'pending' : 'failed', attempts, nextAttempt: Date.now() + retryDelay(attempts), error: error.message || 'Sync failed.', errorCode: error.code || null });
+        const conflict = row.kind === 'visit' && ['permission-denied','unauthenticated','aborted','failed-precondition'].includes(String(error.code || '').split('/').pop());
+        await work.patch(row.id, { state: conflict ? 'conflict' : retryable && attempts < 5 ? 'pending' : 'failed', attempts, nextAttempt: Date.now() + retryDelay(attempts), error: error.message || 'Sync failed.', errorCode: error.code || null });
       }
     }
     } finally { notify(); }
@@ -166,8 +195,9 @@ export const resolveOffline = (id, action) => saveWork(async () => {
   let operationId = id;
   await work.edit((rows) => {
     const row = rows.find((entry) => entry.id === id); if (!row) return;
+    if (row.kind === 'visit' && action === 'discard') throw new Error('Saved visit evidence is retained for management reconciliation. It cannot be discarded from the device queue.');
     if (action === 'discard') { row.state = 'discarded'; return; }
-    if (row.state === 'conflict') {
+    if (row.state === 'conflict' && row.kind !== 'visit') {
       if (row.kind === 'service-form' && row.server?.assignmentVersion !== row.record.assignmentVersion) throw new Error('The assigned service template changed. Review the saved answers and current template before discarding this old change.');
       row.id = Crypto.randomUUID(); row.expectedVersion = row.serverVersion;
       if (row.kind === 'service-form') row.record.expectedVersion = row.serverVersion;

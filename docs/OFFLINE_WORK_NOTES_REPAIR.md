@@ -87,7 +87,14 @@ Built using the existing local Gradle release/signing workflow. No paid EAS buil
 
 APK SHA-256: `F0E7EA08E62115C7370A1CFEE38EB71197F1698D5633010A6BB2B9618C6E09A4`. Ignored installation evidence is retained in `.migration/work-notes-install-result.json`. A fresh filtered offline backup was taken immediately before installation. Installation success does not verify note retention or synchronization on the handset.
 
-The related web display correction publishes through the existing GitHub/Netlify workflow. Backend runtime and security rules do not require deployment for this repair.
+The successful local PowerShell build command, from `routeLogisticsMobile/android`, was:
+
+```powershell
+$env:NODE_ENV = 'production'
+.\gradlew.bat :app:assembleRelease --no-daemon --max-workers=2 --console=plain '-PreactNativeArchitectures=arm64-v8a'
+```
+
+Implementation **`e5990b8377f026cced63e189f87811ec6b9db21c`** was committed and pushed to existing `main`. At **10:55 AM Pacific on November 16**, Netlify deployment `6afb5151c601ecaa11b12816` was **ready** for that exact commit. The production site and `assets/DispatchPage-B0dbL4GS.js` both returned HTTP 200; the served asset contains separate canonical work-note and job-instruction sections. This was a read-only publication check. Backend runtime and security rules did not require deployment for this repair.
 
 For iOS, pull `main` on the Mac, enter `routeLogisticsMobile`, run `npm ci` and `npm run ios:prepare`, then rebuild the existing Xcode workspace with corporate team `AXCZ2G99P6` and bundle `com.worksidesoftware.routelogisticsapp`. Existing installations need the new binary; pushing source alone does not update them.
 

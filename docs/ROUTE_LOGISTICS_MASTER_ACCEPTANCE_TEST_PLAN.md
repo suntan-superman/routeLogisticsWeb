@@ -26,6 +26,11 @@ at 10:50 AM Pacific on November 16; UID and airplane mode remained unchanged.
 Fresh physical restart plus synchronization acceptance remains outstanding.
 This update does not mark FR-007/FR-008 Pass or change case counts.
 
+Note-repair implementation `e5990b8` is pushed to `main` and published through
+Netlify (`6afb5151c601ecaa11b12816`, ready at 10:55 AM Pacific on November 16).
+The production Dispatch asset was verified read-only; no backend redeployment
+was necessary. Physical work-note restart/synchronization remains pending.
+
 Arrival, departure and access-blocked evidence now use the existing durable,
 workspace-scoped offline queue. Local acknowledgement follows storage success;
 restart/replay preserves the original event time and operation identity. Current

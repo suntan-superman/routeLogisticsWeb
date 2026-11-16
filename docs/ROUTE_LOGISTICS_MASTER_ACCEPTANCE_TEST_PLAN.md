@@ -8,7 +8,27 @@ Use the existing production site, Firebase project and corporate TestFlight app 
 
 Route Logistics has a tested field-work foundation suitable for a **controlled pilot after the short physical core workflow passes**. It is not yet certified across every browser, device, optional commercial feature or integration delivery path. Current automated results are recorded below; the original source/function inventory remains a dated acceptance baseline. Physical-device and genuine provider delivery acceptance remain separate.
 
-Current browser coverage is **31 scenarios** (93 configured executions across Chromium, Firefox and WebKit). See the November 15 addenda below for execution evidence. Earlier evidence for the original 25 scenarios is retained, including the later clean 75/75 Jobs-date run. Physical iPhone/Android and genuine provider acceptance remain separate.
+Current browser coverage is **32 scenarios** (96 configured executions across Chromium, Firefox and WebKit). See the November 15 addenda below for execution evidence. Earlier evidence for the original 25 scenarios is retained, including the later clean 75/75 Jobs-date run. Physical iPhone/Android and genuine provider acceptance remain separate.
+
+### November 15 — distinguishable scheduling staff
+
+The scheduling roster resolves missing membership names from the validated
+member's same-company user profile and returns a normalized email. Assignment
+options show `Name · email` and can be searched by either value. Missing names
+fall back to email; existing membership IDs and assignment authorization are
+preserved. No production membership or historical appointment is rewritten.
+
+PW-OPS-19 covers otherwise identical profile names, memberships without names,
+unique email search, selection of the correct membership, persisted assignment,
+and reopening the saved job. Its fixtures run only in local emulators and do
+not send messages or invoke external providers. This is browser verification,
+not new physical mobile-device or provider acceptance.
+
+Results: **337/337 web**, **176 Functions passes/one existing emulator-only
+skip**, **44/44 focused scheduling/availability/membership emulator cases**, and
+**3/3 PW-OPS-19 browser executions** (WebKit, Chromium, Firefox). Web build passed;
+lint has zero errors and the two existing Calendar/Reports hook warnings. The
+96 configured browser executions were not all rerun for this identity change.
 
 ### November 15 — Home duty button and shift dialog
 

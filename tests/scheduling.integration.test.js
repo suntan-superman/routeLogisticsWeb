@@ -226,3 +226,37 @@ test('force reserves unchanged plan slots so recurrence-rule edits participate i
   assert.equal(result.skipped, undefined); assert.equal(result.locks.length, 1);
   assert.ok((await db.collection('rlScheduleLocks').where('companyId', '==', f.id).get()).size);
 });
+test('active staff roster enriches missing membership names from bound profiles and preserves names, emails and distinct membership IDs', async () => {
+  const f = await fixture();
+  await set(`teamMembers/${f.tech}`, { companyId: f.id, uid: `${f.tech}-uid`, role: 'technician', status: 'active', email: ' TECH3@Example.test ' });
+  await set(`users/${f.tech}-uid`, { rlCompanyId: f.id, name: 'Luis Gonzales', email: 'other@example.test', privateNote: 'PRIVATE PROFILE FIELD' });
+  await set(`teamMembers/${f.tech2}`, { companyId: f.id, uid: `${f.tech2}-uid`, role: 'technician', status: 'active', name: 'Luis Gonzales', email: ' TECH4@Example.test ' });
+  await set(`users/${f.tech2}-uid`, { rlCompanyId: f.id, name: 'Stale alternate name' });
+  const result = await f.api.handle(f.request({ action: 'roster' }));
+  const people = result.technicians.filter(person => [f.tech, f.tech2].includes(person.id));
+  assert.equal(people.length, 2); assert.deepEqual(new Set(people.map(person => person.id)), new Set([f.tech, f.tech2]));
+  assert.equal(people.every(person => person.name === 'Luis Gonzales'), true);
+  assert.equal(people.find(person => person.id === f.tech).email, 'tech3@example.test'); assert.equal(people.find(person => person.id === f.tech2).email, 'tech4@example.test');
+  assert.equal(JSON.stringify(result).includes('PRIVATE'), false); assert.equal(people.some(person => Object.hasOwn(person, 'uid')), false);
+});
+test('missing staff names use distinguishing emails and owner roster returns its profile email without persisting identity changes', async () => {
+  const f = await fixture();
+  await set(`teamMembers/${f.tech}`, { companyId: f.id, uid: `${f.tech}-uid`, role: 'technician', status: 'active', email: ' TECH3@Example.test ' });
+  await set(`users/${f.tech}-uid`, { rlCompanyId: f.id });
+  await set(`users/${f.uid}`, { rlCompanyId: f.id, name: 'Working Owner', email: ' OWNER@Example.test ' });
+  const result = await f.api.handle(f.request({ action: 'roster' }));
+  assert.equal(result.technicians.find(person => person.id === f.tech).name, 'tech3@example.test');
+  assert.equal(result.technicians.find(person => person.id === f.uid).email, 'owner@example.test');
+  assert.equal((await get(`teamMembers/${f.tech}`)).name, undefined);
+});
+test('staff identity enrichment cannot use a foreign membership or a profile explicitly bound to another company', async () => {
+  const f = await fixture();
+  await set(`teamMembers/${f.id}-foreign-member`, { companyId: 'foreign-company', uid: 'foreign-profile-account', role: 'technician', status: 'active', email: 'private@example.test' });
+  await set('users/foreign-profile-account', { rlCompanyId: 'foreign-company', name: 'PRIVATE FOREIGN NAME', email: 'private@example.test' });
+  await set(`teamMembers/${f.tech}`, { companyId: f.id, uid: `${f.tech}-uid`, role: 'technician', status: 'active', email: 'tech3@example.test' });
+  await set(`users/${f.tech}-uid`, { rlCompanyId: 'foreign-company', name: 'PRIVATE FOREIGN PROFILE NAME', email: 'private-profile@example.test' });
+  const roster = await f.api.handle(f.request({ action: 'roster' }));
+  assert.equal(JSON.stringify(roster).includes('PRIVATE'), false); assert.equal(JSON.stringify(roster).includes('private@example.test'), false);
+  assert.equal(roster.technicians.find(person => person.id === f.tech).name, 'tech3@example.test');
+  const foreign = await f.api.handle(f.request({ memberId: `${f.id}-foreign-member`, date: '2030-01-03', time: '09:00', estimatedDuration: 1 })); assert.equal(foreign.available, false);
+});

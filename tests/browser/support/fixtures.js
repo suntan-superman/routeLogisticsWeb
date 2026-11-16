@@ -79,6 +79,24 @@ async function seed(info) {
     functionUrl: name => `http://127.0.0.1:5001/${PROJECT}/us-central1/${name}`,
     readDoc, read: (collection, key) => readDoc(`${collection}/${key}`),
     list: async collection => (await db.collection(collection).get()).docs.map(row => ({ id: row.id, ...row.data() })),
+    setSchedulingIdentity: async (accountKey, { name } = {}) => {
+      localAdmin();
+      if (!['manager', 'technician'].includes(accountKey) || !Object.hasOwn(accounts, accountKey)
+        || typeof name !== 'string' || !name.trim() || name.length > 100) {
+        throw new Error('Choose an existing synthetic staff account and a valid display name.');
+      }
+      const account = accounts[accountKey], memberRef = db.doc(`teamMembers/${account.membershipId}`), userRef = db.doc(`users/${account.uid}`);
+      const [member, profile] = await Promise.all([memberRef.get(), userRef.get()]);
+      if (!member.exists || member.get('uid') !== account.uid || member.get('companyId') !== ids.companyId
+        || !profile.exists || profile.get('companyId') !== ids.companyId) {
+        throw new Error('Scheduling identity fixtures must belong to this synthetic company.');
+      }
+      const batch = db.batch(), value = name.trim();
+      batch.update(userRef, { name: value, displayName: value, fullName: value, firstName: null, lastName: null });
+      batch.update(memberRef, { name: null, displayName: null, fullName: null, firstName: null, lastName: null });
+      await batch.commit();
+      return { name: value, email: account.email, uid: account.uid, membershipId: account.membershipId };
+    },
     getPortalCode: async () => {
       let code;
       await expect.poll(async () => {

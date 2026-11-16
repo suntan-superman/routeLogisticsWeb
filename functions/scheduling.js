@@ -1,5 +1,5 @@
 const { HttpsError } = require('firebase-functions/v2/https');
-const { documentId, hash, rateLimit } = require('./security');
+const { documentId, hash, rateLimit, normalizeEmail, validEmail } = require('./security');
 const { requireCapability, checkJob, hasCapability } = require('./access');
 const { availabilityRef, availabilityView, unavailableIntervals } = require('./staffAvailability');
 
@@ -10,6 +10,14 @@ const read = (tx, ref) => tx ? tx.get(ref) : ref.get();
 const scopeKey = scope => scope.companyId ? `company:${scope.companyId}` : `user:${scope.uid}`;
 const busy = job => !job.deletedAt && !TERMINAL.has(String(job.status || 'scheduled').toLowerCase());
 const failure = (message, result = {}) => new HttpsError('failed-precondition', message, { scheduling: { available: false, reason: message, conflicts: [], alternatives: [], ...result } });
+function staffIdentity(member = {}, profile = {}, fallback = 'Technician', companyId = null) {
+  const profileCompany = profile.rlCompanyId || profile.companyId;
+  const safeProfile = !profileCompany || profileCompany === companyId ? profile : {};
+  const text = value => typeof value === 'string' ? value.trim().slice(0, 200) : '';
+  const nameOf = data => text(data.name) || text(data.displayName) || text(data.fullName) || [text(data.firstName), text(data.lastName)].filter(Boolean).join(' ').slice(0, 200);
+  const email = [member.email, member.emailNormalized, safeProfile.email, safeProfile.emailNormalized].filter(value => typeof value === 'string').map(normalizeEmail).find(validEmail) || '';
+  return { name: nameOf(member) || nameOf(safeProfile) || email || fallback, email };
+}
 
 function dateDay(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new HttpsError('invalid-argument', 'Choose a valid appointment date.');
@@ -98,7 +106,6 @@ function schedulingHandlers(db) {
     }
     return { company, profile: null };
   }
-  const label = (data, fallback) => String(data.name || data.displayName || [data.firstName, data.lastName].filter(Boolean).join(' ') || fallback).slice(0, 200);
   async function resolve(tx, scope, id, { company, allowLegacy = false, relaxed = false } = {}) {
     if (!id) return null;
     documentId(id, 'technician');
@@ -108,7 +115,8 @@ function schedulingHandlers(db) {
       if (!relaxed && deleted.exists) throw failure('This technician is no longer active or available in this company. Choose another technician.');
       const memberships = scope.companyId ? await read(tx, scoped('teamMembers', scope).where('uid', '==', ownerId).limit(21)) : null;
       if (!relaxed && memberships?.size > 20) throw failure('This owner has memberships that need review before scheduling.');
-      return { id: ownerId, uid: ownerId, role: 'owner', name: label(profile.data() || {}, scope.companyId ? 'Company owner' : 'You'), aliases: [ownerId, ...(memberships?.docs || []).map(row => row.id)] };
+      const ownerMember = memberships?.docs.find(row => row.get('status') === 'active')?.data() || {};
+      return { id: ownerId, uid: ownerId, role: 'owner', ...staffIdentity(ownerMember, profile.data() || {}, scope.companyId ? 'Company owner' : 'You', scope.companyId), aliases: [ownerId, ...(memberships?.docs || []).map(row => row.id)] };
     }
     if (!scope.companyId) throw failure('Choose the owner of this independent workspace.');
     const member = await read(tx, db.doc(`teamMembers/${id}`));
@@ -123,9 +131,9 @@ function schedulingHandlers(db) {
     if (chosen && uid === ownerId) return resolve(tx, scope, ownerId, { company, allowLegacy, relaxed });
     if (!chosen || typeof uid !== 'string' || !uid || !relaxed && (chosen.get('status') !== 'active' || !['technician', 'manager'].includes(chosen.get('role')) && !(allowLegacy && chosen.get('role') === 'admin'))) throw failure('This technician is no longer active or available in this company. Choose another technician.');
     documentId(uid, 'technician account');
-    const [deleted, aliases] = await Promise.all([read(tx, db.doc(`rlAccountDeletions/${uid}`)), read(tx, scoped('teamMembers', scope).where('uid', '==', uid).limit(21))]);
+    const [deleted, aliases, profile] = await Promise.all([read(tx, db.doc(`rlAccountDeletions/${uid}`)), read(tx, scoped('teamMembers', scope).where('uid', '==', uid).limit(21)), read(tx, db.doc(`users/${uid}`))]);
     if (!relaxed && (deleted.exists || aliases.size > 20 || aliases.docs.filter(row => row.get('status') === 'active').length > 1)) throw failure('This technician is no longer active or has memberships that need review. Choose another technician.');
-    return { id: chosen.id, uid, role: chosen.get('role'), name: label(chosen.data(), 'Technician'), aliases: [...new Set([chosen.id, uid, ...aliases.docs.map(row => row.id)])] };
+    return { id: chosen.id, uid, role: chosen.get('role'), ...staffIdentity(chosen.data(), profile.data() || {}, 'Technician', scope.companyId), aliases: [...new Set([chosen.id, uid, ...aliases.docs.map(row => row.id)])] };
   }
   async function roster(tx, scope, context) {
     if (!scope.companyId) return [await resolve(tx, scope, scope.uid, context)];
@@ -242,7 +250,7 @@ function schedulingHandlers(db) {
       await rateLimit(db, 'schedule-check', scope.uid, 90);
       if (data.companyId !== undefined && (data.companyId || null) !== (scope.companyId || null)) throw new HttpsError('permission-denied', 'Choose this workspace’s schedule.');
       const context = await actor(null, scope), action = data.action || 'check';
-      if (action === 'roster') return { technicians: await Promise.all((await roster(null, scope, context)).map(async person => ({ id: person.id, name: person.name, role: person.role, availability: availabilityView((await withAvailability(null, scope, person))?.availability) }))), ...environment(context) };
+      if (action === 'roster') return { technicians: await Promise.all((await roster(null, scope, context)).map(async person => ({ id: person.id, name: person.name, email: person.email, role: person.role, availability: availabilityView((await withAvailability(null, scope, person))?.availability) }))), ...environment(context) };
       if (action !== 'check') throw new HttpsError('invalid-argument', 'Choose an availability check or technician roster.');
       const options = searchOptions(data), job = { date: data.date, time: data.time, estimatedDuration: data.estimatedDuration, assignedTo: data.memberId || null };
       const candidate = interval(job); let before;
@@ -261,4 +269,4 @@ function schedulingHandlers(db) {
     },
   };
 }
-module.exports = { schedulingHandlers, dateDay, dayDate, clockMinutes, clock, interval, overlaps, changedSchedule, conflictRows, alternatives, searchOptions };
+module.exports = { schedulingHandlers, staffIdentity, dateDay, dayDate, clockMinutes, clock, interval, overlaps, changedSchedule, conflictRows, alternatives, searchOptions };

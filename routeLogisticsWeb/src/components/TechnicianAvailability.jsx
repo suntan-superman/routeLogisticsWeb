@@ -26,7 +26,7 @@ export default function TechnicianAvailability({ companyId, memberId = '', membe
   const technicians = rosterCurrent ? roster.technicians : [];
   const selected = technicians.find(member => member.id === memberId);
   const legacy = !!memberId && rosterCurrent && !roster.loading && !roster.error && !selected;
-  const options = [{ value: '', label: 'Unassigned' }, ...technicians.map(member => ({ value: member.id, label: member.name }))];
+  const options = [{ value: '', label: 'Unassigned' }, ...technicians.map(member => ({ value: member.id, label: member.label }))];
   if (memberId && !selected) options.push({ value: memberId, label: `${labels.current.values.get(memberId) || memberName || 'Previously assigned staff member'} (${rosterLoading ? 'loading…' : roster.error ? 'not confirmed' : 'unavailable'})`, disabled: true });
   const slotValid = validDate(date) && validTime(time) && Number.isFinite(Number(estimatedDuration)) && Number(estimatedDuration) > 0;
   const mayCheck = !!memberId && !!selected && slotValid && !rosterLoading && !roster.error && !disabled;
@@ -37,9 +37,14 @@ export default function TechnicianAvailability({ companyId, memberId = '', membe
     setRoster({ scope, loading: true, technicians: [], error: '', metadata: null });
     getSchedulingRoster(companyId).then(result => {
       if (!active || !runtime.current.mounted || runtime.current.scope !== scope) return;
-      const rows = (Array.isArray(result?.technicians) ? result.technicians : []).filter(member => typeof member.id === 'string' && member.id && ['technician', 'owner', 'manager'].includes(member.role) && (!member.status || member.status === 'active')).map(member => ({ id: member.id, name: member.name || (member.role === 'owner' ? 'Company owner' : 'Technician'), role: member.role }));
+      const rows = (Array.isArray(result?.technicians) ? result.technicians : []).filter(member => typeof member.id === 'string' && member.id && ['technician', 'owner', 'manager'].includes(member.role) && (!member.status || member.status === 'active')).map(member => {
+        const email = typeof member.email === 'string' ? member.email.trim() : '';
+        const name = typeof member.name === 'string' && member.name.trim() ? member.name.trim() : email || (member.role === 'owner' ? 'Company owner' : 'Technician');
+        const label = email && email.toLocaleLowerCase() !== name.toLocaleLowerCase() ? `${name} · ${email}` : name;
+        return { id: member.id, name, email, label, role: member.role };
+      });
       const unique = [...new Map(rows.map(member => [member.id, member])).values()];
-      unique.forEach(member => labels.current.values.set(member.id, member.name));
+      unique.forEach(member => labels.current.values.set(member.id, member.label));
       setRoster({ scope, loading: false, technicians: unique, error: '', metadata: result });
     }).catch(error => { if (active && runtime.current.mounted && runtime.current.scope === scope) setRoster({ scope, loading: false, technicians: [], error: error.message || 'Technicians could not be loaded. Try again.', metadata: null }); });
     return () => { active = false; };

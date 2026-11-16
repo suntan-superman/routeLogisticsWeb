@@ -53,6 +53,37 @@ test('roster and automatic preflight use authorized endpoint payloads and only s
   assert.equal(env.calls.length, 2, 'Selecting a technician only asks the parent to update its draft');
 });
 
+test('matching technician names remain distinguishable by email while selections retain membership IDs', async () => {
+  const people = [
+    { id: 'luis-one', name: 'Luis Gonzales', email: 'tech3@example.test', role: 'technician' },
+    { id: 'luis-two', name: 'Luis Gonzales', email: 'other-tech@example.test', role: 'technician' },
+    { id: 'manager', name: 'Acme manager', email: 'manager@example.test', role: 'manager' },
+  ];
+  reset((_name, data) => data.action === 'roster' ? { technicians: people } : available);
+  await render({ memberId: '' });
+  assert.deepEqual(tree.root.findAllByType('option').map(option => option.children.join('')), ['Unassigned', 'Luis Gonzales · tech3@example.test', 'Luis Gonzales · other-tech@example.test', 'Acme manager · manager@example.test']);
+  await act(async () => select().props.onChange({ target: { value: 'luis-two' } }));
+  assert.deepEqual(env.members, ['luis-two']);
+  await update({ memberId: 'luis-two' });
+  assert.equal(env.calls.at(-1).data.memberId, 'luis-two');
+});
+
+test('missing names fall back to email without repeating it and retain that identity after roster refresh', async () => {
+  let attempts = 0;
+  reset((_name, data) => data.action === 'roster' ? { technicians: ++attempts === 1 ? [
+    { id: 'tech-1', email: 'tech-one@example.test', role: 'technician' },
+    { id: 'tech-2', name: 'tech-two@example.test', email: 'tech-two@example.test', role: 'technician' },
+  ] : [] } : available);
+  await render();
+  assert.deepEqual(tree.root.findAllByType('option').map(option => option.children.join('')), ['Unassigned', 'tech-one@example.test', 'tech-two@example.test']);
+  await click('Refresh technicians');
+  const previous = tree.root.findAllByType('option').find(option => option.props.value === 'tech-1');
+  assert.equal(previous.props.disabled, true);
+  assert.match(previous.children.join(''), /tech-one@example\.test.*unavailable/);
+  assert.equal(select().props.value, 'tech-1');
+  assert.deepEqual(env.members, []);
+});
+
 test('unassigned and solo owner flows keep assignment explicit without inventing schedule checks', async () => {
   reset(); await render({ companyId: null, memberId: '' });
   assert.deepEqual(env.calls.map(call => call.data.action), ['roster']); assert.equal(env.calls[0].data.companyId, null);

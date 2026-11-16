@@ -32,7 +32,9 @@ async function chooseTechnician(scope, name = 'Synthetic technician') {
   await expect(picker).toBeEnabled();
   await picker.click();
   await picker.fill(name);
-  await scope.getByRole('listbox').getByRole('option', { name, exact: true }).click();
+  const option = scope.getByRole('listbox').getByRole('option', { name });
+  await expect(option).toHaveCount(1);
+  await option.click();
 }
 
 async function openSeedEstimate(page, scenario) {
@@ -572,6 +574,53 @@ test('PW-OPS-16 weekly scheduling creates the first assigned visit and plan toge
   await expect(availability.getByRole('listitem').filter({ hasText: 'Recurring appointment' })).toBeVisible();
   await expect(availability.getByRole('group', { name: 'Available alternative times', exact: true }).getByRole('button').first()).toContainText('10:00 AM');
   expect((await scenario.list('jobs')).filter(job => job.serviceType === futureService)).toHaveLength(0);
+});
+
+test('PW-OPS-19 scheduling resolves profile names and selects the correct same-name staff member by email', async ({ page, scenario }) => {
+  annotate('DSP-002', 'DSP-003');
+  const sharedName = 'Shared Synthetic Technician';
+  const first = await scenario.setSchedulingIdentity('technician', { name: sharedName });
+  const selected = await scenario.setSchedulingIdentity('manager', { name: sharedName });
+  const originalJob = await scenario.read('jobs', scenario.ids.jobId);
+  for (const staff of [first, selected]) {
+    expect(await scenario.read('teamMembers', staff.membershipId)).toMatchObject({
+      companyId: scenario.ids.companyId, uid: staff.uid, email: staff.email, name: null, displayName: null, fullName: null, firstName: null, lastName: null, status: 'active',
+    });
+    expect(await scenario.read('users', staff.uid)).toMatchObject({ companyId: scenario.ids.companyId, name: sharedName });
+  }
+  await signIn(page, scenario.accounts.owner);
+  const service = `Identifiable staff browser visit ${scenario.ids.companyId}`;
+  const form = await openAddressJob(page, scenario, service);
+  await checkProperty(form, insideAddress(scenario), 'Property is inside coverage');
+  const picker = form.getByRole('combobox', { name: 'Assigned technician', exact: true });
+  await expect(picker).toBeEnabled();
+  await picker.click();
+  await picker.fill(sharedName);
+  const choices = form.getByRole('listbox');
+  const firstLabel = `${sharedName} · ${first.email}`, selectedLabel = `${sharedName} · ${selected.email}`;
+  await expect(choices.getByRole('option')).toHaveCount(2);
+  await expect(choices.getByRole('option', { name: firstLabel, exact: true })).toBeVisible();
+  await expect(choices.getByRole('option', { name: selectedLabel, exact: true })).toBeVisible();
+  // Searching a unique email must distinguish otherwise identical profile names.
+  await picker.fill(selected.email);
+  await expect(choices.getByRole('option')).toHaveCount(1);
+  await expect(choices.getByRole('option', { name: firstLabel, exact: true })).toHaveCount(0);
+  await choices.getByRole('option', { name: selectedLabel, exact: true }).click();
+  await expect(picker).toHaveValue(selectedLabel);
+  await expect(form.getByText('Available for this appointment', { exact: true })).toBeVisible();
+  await form.getByRole('button', { name: 'Schedule Job', exact: true }).click();
+  await expect(page.getByText('Job scheduled', { exact: true })).toBeVisible();
+  await expect(form).toHaveCount(0);
+  const visits = (await scenario.list('jobs')).filter(job => job.serviceType === service);
+  expect(visits).toHaveLength(1);
+  expect(visits[0]).toMatchObject({ companyId: scenario.ids.companyId, assignedTo: selected.membershipId, assignedToUid: selected.uid, assignedToName: sharedName });
+  expect(visits[0].assignedTo).not.toBe(first.membershipId);
+  expect(await scenario.read('jobs', scenario.ids.jobId)).toEqual(originalJob);
+  await page.reload();
+  const row = page.getByRole('row').filter({ has: page.getByText(service, { exact: true }) });
+  await row.getByRole('button', { name: 'Edit Job', exact: true }).click();
+  const edit = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Edit Job', exact: true }) });
+  await expect(edit.getByRole('combobox', { name: 'Assigned technician', exact: true })).toHaveValue(selectedLabel);
 });
 
 test.describe('Temporary staff availability', () => {

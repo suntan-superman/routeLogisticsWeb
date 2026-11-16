@@ -1,8 +1,20 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { schedulingHandlers, dateDay, dayDate, clockMinutes, clock, interval, overlaps, changedSchedule, conflictRows, alternatives, searchOptions } = require('./scheduling');
+const { schedulingHandlers, staffIdentity, dateDay, dayDate, clockMinutes, clock, interval, overlaps, changedSchedule, conflictRows, alternatives, searchOptions } = require('./scheduling');
 const appointment = { date: '2030-01-03', time: '09:00', estimatedDuration: 1, assignedTo: 'tech', status: 'scheduled' };
 const person = { id: 'tech', uid: 'tech-uid', aliases: ['tech', 'tech-uid', 'legacy-tech'] };
+
+test('staff labels prefer membership names then same-company profiles and use normalized email instead of duplicate generic labels', () => {
+  assert.deepEqual(staffIdentity({ name: '  Luis Gonzales  ', email: ' TECH3@Example.test ' }, { name: 'Old name', email: 'old@example.test', rlCompanyId: 'acme' }, 'Technician', 'acme'), { name: 'Luis Gonzales', email: 'tech3@example.test' });
+  assert.deepEqual(staffIdentity({ email: 'TECH3@Example.test' }, { displayName: 'Luis Gonzales', companyId: 'acme' }, 'Technician', 'acme'), { name: 'Luis Gonzales', email: 'tech3@example.test' });
+  assert.deepEqual(staffIdentity({ email: 'TECH4@Example.test', name: ' ' }, {}, 'Technician', 'acme'), { name: 'tech4@example.test', email: 'tech4@example.test' });
+  assert.deepEqual(staffIdentity({}, { firstName: 'Working', lastName: 'Owner', email: 'OWNER@Example.test', rlCompanyId: 'acme' }, 'Company owner', 'acme'), { name: 'Working Owner', email: 'owner@example.test' });
+});
+test('staff labels ignore profiles explicitly bound to another company and never project unrelated profile fields', () => {
+  assert.deepEqual(staffIdentity({ email: 'member@example.test' }, { name: 'PRIVATE FOREIGN NAME', email: 'private@example.test', rlCompanyId: 'other-company', bankAccount: 'PRIVATE' }, 'Technician', 'acme'), { name: 'member@example.test', email: 'member@example.test' });
+  assert.deepEqual(staffIdentity({ email: 'not-an-email' }, { fullName: 'Legacy unbound profile' }, 'Technician', 'acme'), { name: 'Legacy unbound profile', email: '' });
+  assert.deepEqual(staffIdentity({}, { companyId: 'other-company', name: 'PRIVATE' }, 'Company owner', 'acme'), { name: 'Company owner', email: '' });
+});
 
 test('schedule arithmetic keeps calendar-local days and strict dates without host timezone conversion', () => {
   assert.equal(dayDate(dateDay('2030-01-03')), '2030-01-03');

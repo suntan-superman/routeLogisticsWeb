@@ -97,6 +97,8 @@ Required unchanged deployed gates: Stripe mode=test/liveApproved=false; QuickBoo
 
 ## Test and release evidence
 
+Implementation commit: **`4821a11b682e79c1c0586ba89257dde0c7ea06d0`**. It was pushed with Netlify publication withheld until the dependent backend/rules were active. The production web uses the same existing site and branch.
+
 Suite counts below are separate and overlap; real-provider and physical acceptance are never implied by emulators.
 
 | Suite | Executed result |
@@ -115,9 +117,26 @@ Deployed identifiers are recorded in the release addendum after completion. Test
 
 ## Production preservation and historical review
 
+### Backend release — 12:07 PM Pacific, November 16
+
+Only these Route Logistics Functions were deployed and confirmed ACTIVE:
+
+| Function | Deployed revision |
+| --- | --- |
+| `rlManageInvoice` | `rlmanageinvoice-00001-zoj` |
+| `rlEstimate` | `rlestimate-00012-reh` |
+| `emailInvoice` | `emailinvoice-00014-nin` |
+| `rlQueueInvoiceReminders` | `rlqueueinvoicereminders-00014-kaj` |
+
+Firestore ruleset `23e00a1f-3c35-42b1-b8f3-7760bb38ef3e` exactly matches the tested source (normalized SHA-256 `825c78241bbd5ec6410181d282d3c100c38e8ca1558b3b07aa8bc11b6168fc93`). The new callable returned HTTP401/UNAUTHENTICATED for the non-mutating unauthenticated smoke request; it was not exercised against a production customer/job/invoice.
+
+All baseline record metadata hashes/counts matched after deployment. No unrelated function revision changed. All financial integration flags matched the baseline, including the new function's environment. QB processing remains PAUSED; the invoice reminder schedule retains its previous enabled state and schedule, without being invoked by this release. Public web publication follows this backend activation.
+
 Read-only pre-deployment baseline at **11:30 AM Pacific on November 16**: 518 customers, 17 jobs, one estimate, six invoices, one Stripe payment mapping, one Stripe reconciliation event, four QB mappings, three QB operations, three QB reconciliation receipts and two QB payment mappings. Document IDs/create/update timestamps were hashed privately for before/after comparison; no customer names, contact details, payment secrets or financial values were printed.
 
 The six legacy invoices have no source-job link and require financial-source review; some fields do not follow the current native invoice schema. A private identifier/category-only report is retained in ignored `.migration/invoice-integrity-historical-review.json`. No totals/records were corrected, linked, deleted or resent. Missing provenance does not itself prove a wrong charge.
+
+The baseline was refreshed immediately before deployment at **12:05 PM Pacific**, with the same record counts. The original metadata snapshot is also retained privately.
 
 The deployed Firestore rules were privately backed up and matched the pre-repair source before applying the narrow invoice-write restriction. Production verification is non-mutating: function state/config/rules/assets and unauthenticated denial, not an actual invoice/payment/export/email operation.
 
@@ -129,3 +148,12 @@ The deployed Firestore rules were privately backed up and matched the pre-repair
 - [ ] Physical mobile field/offline acceptance from the earlier work-note repair remains separate; this web/backend repair requires no native rebuild.
 
 No live billing, automatic invoicing, historical migration, partial-payment redesign, prospect intake or estimate-visit feature was introduced.
+
+## Changed files
+
+- Backend runtime: `functions/invoices.js`, `functions/shared/invoiceMath.js`, `functions/estimates.js`, `functions/invoiceEmail.js`, `functions/index.js`.
+- Web runtime: `routeLogisticsWeb/src/services/invoiceService.js`, `routeLogisticsWeb/src/services/workspaceQueryPolicy.js`, `routeLogisticsWeb/src/components/InvoiceCreationDialog.jsx`, `routeLogisticsWeb/src/pages/JobManagementPage.jsx`, `routeLogisticsWeb/src/pages/InvoicesPage.jsx`.
+- Authorization: `firestore.rules` (invoice write restriction only).
+- New regressions: `functions/invoices.test.js`, `tests/invoiceIntegrity.integration.test.js`, `tests/invoice-integrity.ui.test.js`, `tests/browser/invoice-integrity.spec.js`.
+- Existing test/runner updates: `package.json`, `tests/firestore.rules.test.js`, `tests/workflows.integration.test.js`, `tests/invoices-query.ui.test.js`, `tests/jobs-details.ui.test.js`, `tests/job-save-navigation.ui.test.js`, `routeLogisticsWeb/src/services/workspaceQueryPolicy.test.js`. Fixture/importer changes preserve existing assertions and provide valid terms/revisions to the stronger contract.
+- Documentation: this report, the workflow audit, master acceptance plan and documentation index. No dependency, mobile, Stripe or QuickBooks runtime files changed.

@@ -24,8 +24,8 @@ async function setup() {
   await db.collection('teamMembers').doc('member').set({ uid: 'tech', companyId: 'acme', status: 'active', role: 'technician' });
   await db.collection('teamMembers').doc('manager').set({ uid: 'manager', companyId: 'acme', status: 'active', role: 'manager' });
   await db.collection('jobs').doc('job').set({ companyId: 'acme', assignedTo: 'member', status: 'scheduled', date: '2026-11-15', time: '09:00' });
-  const api = nativePushHandlers(db, { enabled: () => env.enabled, now: () => env.now, getUser: async () => ({ emailVerified: true, disabled: false }), fetcher: async (url, options) => { env.requests.push({ url, body: JSON.parse(options.body) }); if (env.failure) throw env.failure; return { ok: env.httpStatus === 200, status: env.httpStatus, json: async () => ({ data: env.response }) }; } });
-  const register = async (uid = 'tech', member = 'member', role = 'technician', pushToken = token, install = installationId) => api.manage(request({ action: 'register', token: pushToken, platform: 'ios', projectId: EXPO_PROJECT_ID, installationId: install, registrationSequence: ++sequence }, uid, role, member));
+  const api = nativePushHandlers(db, { enabled: () => env.enabled, now: () => env.now, getUser: async () => ({ emailVerified: true, disabled: false }), fetcher: async (url, options) => { const body = JSON.parse(options.body); env.requests.push({ url, body }); if (env.failure) throw env.failure; return { ok: env.httpStatus === 200, status: env.httpStatus, json: async () => ({ data: typeof env.response === 'function' ? await env.response(url, body) : env.response }) }; } });
+  const register = async (uid = 'tech', member = 'member', role = 'technician', pushToken = token, install = installationId, platform = 'ios') => api.manage(request({ action: 'register', token: pushToken, platform, projectId: EXPO_PROJECT_ID, installationId: install, registrationSequence: ++sequence }, uid, role, member));
   return { db, env, api, register };
 }
 test('native event selection distinguishes assignment, schedule and important status changes', () => {
@@ -97,4 +97,84 @@ test('preferences are scoped to current role and tenant, and invalidation works 
   const { db, api, register } = await setup(), device = await register(); await api.manage(request({ action: 'preferences', preferences: { enabled: false } }));
   const scoped = await db.collection('rlPushPreferences').doc(preferenceId({ uid: 'tech', companyId: 'acme', membershipId: 'member', role: 'technician' })).get(); assert.equal(scoped.get('preferences').enabled, false);
   await db.collection('teamMembers').doc('member').update({ status: 'inactive' }); await api.manage(request({ action: 'invalidate', deviceId: device.deviceId, installationId, registrationSequence: device.registrationSequence })); assert.equal((await db.collection('rlPushDevices').doc(device.deviceId).get()).get('active'), false);
+});
+
+const androidToken = 'ExpoPushToken[synthetic-android-device-12345678]';
+const androidInstallation = '22222222-2222-4222-8222-222222222222';
+async function registerOtherTenant(db, api) {
+  await db.collection('companies').doc('other').set({ ownerId: 'other-owner' });
+  await db.collection('teamMembers').doc('other-member').set({ uid: 'tech', companyId: 'other', status: 'active', role: 'technician' });
+  // The same UID can leave a previous tenant's device record behind. Its exact
+  // company/member scope must still prevent an unrelated assignment delivery.
+  return api.manage(request({ action: 'register', token: 'ExpoPushToken[synthetic-other-tenant-12345678]', platform: 'android', projectId: EXPO_PROJECT_ID, installationId: '33333333-3333-4333-8333-333333333333', registrationSequence: 1 }, 'tech', 'technician', 'other-member', 'other'));
+}
+
+test('one assignment fans out once to iOS and Android in the exact member scope, excluding stale roles and other tenants', async () => {
+  const { db, env, api, register } = await setup();
+  const ios = await register(), android = await register('tech', 'member', 'technician', androidToken, androidInstallation, 'android');
+  const foreign = await registerOtherTenant(db, api);
+  await db.collection('rlPushDevices').doc('stale-role').set({ uid: 'tech', companyId: 'acme', membershipId: 'member', role: 'manager', platform: 'android', active: true, token: 'ExpoPushToken[synthetic-stale-role-12345678]' });
+  const job = (await db.collection('jobs').doc('job').get()).data();
+  await Promise.all([api.enqueue(null, job, 'job', 'mixed-event'), api.enqueue(null, job, 'job', 'mixed-event')]);
+  let rows = (await db.collection('rlPushDeliveries').get()).docs;
+  assert.equal(rows.length, 2); assert.deepEqual(new Set(rows.map(row => row.get('deviceId'))), new Set([ios.deviceId, android.deviceId]));
+  for (const row of rows) assert.deepEqual(['uid', 'companyId', 'membershipId', 'role'].map(key => row.get(key)), ['tech', 'acme', 'member', 'technician']);
+  assert.equal((await db.collection('rlPushDevices').doc(ios.deviceId).get()).get('platform'), 'ios');
+  assert.equal((await db.collection('rlPushDevices').doc(android.deviceId).get()).get('platform'), 'android');
+  env.response = (url, body) => url.endsWith('/send') ? [{ status: 'ok', id: body[0].to === androidToken ? 'android-ticket' : 'ios-ticket' }] : Object.fromEntries(body.ids.map(id => [id, { status: 'ok' }]));
+  await api.drain();
+  const sends = env.requests.filter(item => item.url.endsWith('/send'));
+  assert.equal(sends.length, 2); assert.deepEqual(new Set(sends.map(item => item.body[0].to)), new Set([token, androidToken]));
+  for (const { body: [message] } of sends) {
+    assert.equal(message.channelId, 'work-updates'); assert.equal(message.priority, 'high'); assert.equal(message.sound, 'default'); assert.equal(message.ttl, 3600);
+    assert.equal(message.data.recipientUid, 'tech'); assert.equal(message.data.companyId, 'acme'); assert.equal(message.data.membershipId, 'member'); assert.equal(message.data.role, 'technician');
+  }
+  await api.enqueue(null, job, 'job', 'mixed-event'); env.now += 900000; await api.drain();
+  rows = (await db.collection('rlPushDeliveries').get()).docs;
+  assert.equal(rows.length, 2); assert.ok(rows.every(row => row.get('state') === 'receipt-ok'));
+  assert.equal(env.requests.filter(item => item.url.endsWith('/send')).length, 2);
+  assert.equal((await db.collection('rlPushDevices').doc(foreign.deviceId).get()).get('active'), true);
+});
+
+for (const stage of ['ticket', 'receipt']) test(`Android InvalidCredentials at ${stage} is recorded without disabling or resending a working iOS device`, async () => {
+  const { db, env, api, register } = await setup();
+  const ios = await register(), android = await register('tech', 'member', 'technician', androidToken, androidInstallation, 'android');
+  const jobRef = db.collection('jobs').doc('job'), memberRef = db.collection('teamMembers').doc('member');
+  const jobBefore = (await jobRef.get()).data(), memberBefore = (await memberRef.get()).data();
+  env.response = (url, body) => {
+    if (url.endsWith('/send')) return body[0].to === androidToken && stage === 'ticket' ? [{ status: 'error', details: { error: 'InvalidCredentials' } }] : [{ status: 'ok', id: body[0].to === androidToken ? 'android-ticket' : 'ios-ticket' }];
+    return Object.fromEntries(body.ids.map(id => [id, id === 'android-ticket' ? { status: 'error', details: { error: 'InvalidCredentials' } } : { status: 'ok' }]));
+  };
+  await api.enqueue(null, jobBefore, 'job', `credentials-${stage}`); await api.drain(); env.now += 900000; await api.drain();
+  const rows = (await db.collection('rlPushDeliveries').get()).docs;
+  const androidDelivery = rows.find(row => row.get('deviceId') === android.deviceId), iosDelivery = rows.find(row => row.get('deviceId') === ios.deviceId);
+  assert.equal(androidDelivery.get('state'), stage === 'ticket' ? 'blocked' : 'failed'); assert.equal(androidDelivery.get('errorCode'), 'InvalidCredentials');
+  assert.equal(iosDelivery.get('state'), 'receipt-ok'); assert.equal(iosDelivery.get('errorCode'), undefined);
+  assert.equal((await db.collection('rlPushDevices').doc(ios.deviceId).get()).get('active'), true);
+  assert.equal((await db.collection('rlPushDevices').doc(android.deviceId).get()).get('active'), true);
+  env.now += 3600000; await api.enqueue(null, jobBefore, 'job', `credentials-${stage}`); await api.drain();
+  assert.equal(env.requests.filter(item => item.url.endsWith('/send')).length, 2); assert.equal((await db.collection('rlPushDeliveries').get()).size, 2);
+  assert.deepEqual((await jobRef.get()).data(), jobBefore); assert.deepEqual((await memberRef.get()).data(), memberBefore);
+});
+
+test('Android token rotation and installation release preserve iOS, foreign-tenant registrations and queued work', async () => {
+  const { db, env, api, register } = await setup();
+  const ios = await register(), oldAndroid = await register('tech', 'member', 'technician', androidToken, androidInstallation, 'android');
+  const foreign = await registerOtherTenant(db, api), original = (await db.collection('jobs').doc('job').get()).data();
+  await api.enqueue(null, original, 'job', 'before-rotation');
+  const rotatedToken = 'ExpoPushToken[synthetic-android-rotated-12345678]';
+  const latestAndroid = await register('tech', 'member', 'technician', rotatedToken, androidInstallation, 'android');
+  assert.equal((await db.collection('rlPushDevices').doc(oldAndroid.deviceId).get()).get('active'), false);
+  assert.equal((await db.collection('rlPushDevices').doc(ios.deviceId).get()).get('active'), true);
+  assert.equal((await db.collection('rlPushDevices').doc(foreign.deviceId).get()).get('active'), true);
+  const next = { ...original, time: '11:00' }; await db.collection('jobs').doc('next-job').set(next); await api.enqueue(null, next, 'next-job', 'after-rotation');
+  env.response = () => [{ status: 'ok', id: `ticket-${env.requests.length}` }]; await api.drain();
+  const sends = env.requests.filter(item => item.url.endsWith('/send'));
+  assert.equal(sends.length, 3); assert.equal(sends.filter(item => item.body[0].to === token).length, 2); assert.equal(sends.filter(item => item.body[0].to === rotatedToken).length, 1);
+  assert.equal(sends.some(item => item.body[0].to === androidToken), false); assert.ok(sends.every(item => item.body[0].data.companyId === 'acme'));
+  const prior = (await db.collection('rlPushDeliveries').get()).docs.find(row => row.get('deviceId') === oldAndroid.deviceId); assert.equal(prior.get('state'), 'superseded');
+  await api.manage(request({ action: 'invalidate-installation', installationId: androidInstallation, registrationSequence: latestAndroid.registrationSequence + 1 }));
+  assert.equal((await db.collection('rlPushDevices').doc(latestAndroid.deviceId).get()).get('active'), false);
+  assert.equal((await db.collection('rlPushDevices').doc(ios.deviceId).get()).get('active'), true); assert.equal((await db.collection('rlPushDevices').doc(foreign.deviceId).get()).get('active'), true);
+  assert.deepEqual((await db.collection('jobs').doc('job').get()).data(), original); assert.deepEqual((await db.collection('jobs').doc('next-job').get()).data(), next);
 });

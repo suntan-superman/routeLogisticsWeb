@@ -58,6 +58,7 @@ yarn dev
 ## Documentation Structure
 
 - [Recent development summary — November 13–15, 2026](./DEVELOPMENT_SUMMARY_2026-11-13_TO_2026-11-15.md) - Consolidated new features, data flows, integration status, deployment evidence and remaining acceptance work. Use this newer report when older feature/TODO snapshots below describe superseded behavior.
+- [Android push diagnosis and activation](./android-push-diagnosis.md) - November 16 device/credential findings, exact setup steps, regression evidence and controlled physical-test status.
 
 - [Migration progress and code review](./migration-progress.md) - Current implementation, Acme audit, verification, deployment status, and remaining work
 - [MF-to-RL migration plan](./mf-to-rl-migration-plan.md) - Migration scope and phase status

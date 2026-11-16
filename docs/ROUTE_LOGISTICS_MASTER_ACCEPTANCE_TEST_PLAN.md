@@ -29,8 +29,16 @@ financial isolation and historical preservation. They are **not physically
 performed** by local browser/emulator tests. The original 169-case baseline and
 its physical/provider statuses remain dated; this addendum supplies the Batch A
 acceptance procedure without copying automated results into manual Pass states.
-Native changes require updated Android/iOS installations. Executed final counts
-and deployment/build identifiers are recorded in the release report.
+Native changes require updated Android/iOS installations. Executed release
+checks: 564/564 broader emulator cases, 129/129 final focused cases (including
+legacy archive and owner-exception safeguards), 452/452 web, 417/417 mobile and
+42/42 browser smoke executions across Chromium/Firefox/WebKit. Counts overlap;
+the broader run preceded the final targeted backend refinements. Functions
+guards passed 28/28; full Functions units passed184 with one emulator-only skip.
+Expo Doctor18/18, iOS/Android exports and the local Android release build passed.
+Implementation `cd6dcab` has seven targeted Functions ACTIVE, tested rules
+deployed and both inquiry indexes READY. Both read-only empty query shapes passed
+in production. Web publication evidence is recorded in the release report.
 
 ### November 16 — invoice integrity repair
 

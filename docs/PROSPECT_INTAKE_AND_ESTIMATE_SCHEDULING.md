@@ -99,11 +99,27 @@ All automated mutations use the existing local Firebase emulators and synthetic 
 
 The final focused suite verifies retained exception references through actual manager scheduling, rejects forged/mismatched approvals and respects legacy archived/inactive status markers before provider work. It also verifies assigned offline estimate completion/outcome replay, source-property binding, snapshot retention, inquiry follow-up preservation and nonbillable invoice rejection. The browser client remained unchanged after its matrix; the final backend archive guard was subsequently verified by the focused suite and Functions tests. Existing arrival/photo/note/checklist/completion and payment/accounting suites remain separate from physical/provider acceptance. Browser configuration was restored, provider transports remained inert, and temporary emulator credentials were removed. Ignored `.migration/batch-a-*` files retain sanitized logs and private preservation evidence.
 
-### Production baseline and planned release
+### Production baseline and backend release
+
+Implementation commit: **`cd6dcabec37075de63c225a6860e439498db6eec`**, pushed on existing `main`. Netlify publication was withheld until backend/index readiness.
 
 Read-only metadata was captured at **12:41 PM Pacific** and refreshed at **1:06 PM Pacific** before deployment: **518 customers, 17 jobs, one estimate, six invoices**, one Stripe payment mapping, one payment event, four QB mappings, three QB operations, three QB reconciliation records and two QB payment mappings. New private intake collections contain zero records. Private document-ID/create/update-time hashes support post-release comparison; customer details, amounts and secret values are not printed.
 
-The targeted release consists of `rlManageInquiry`, `rlManageCustomer`, `rlManageJob`, `rlReadWorkspace`, `rlApplyJobOperation`, `rlEstimate` and `rlManageInvoice`; narrow Firestore rules; two additive tenant inquiry indexes; existing Netlify web assets; and the locally built mobile binary. Unrelated Functions, integrations and schedules are not redeployed. Deployment status/identifiers are recorded after release. Stripe must remain test-only; QB sandbox writes/production approval remain false and its processor stays PAUSED.
+At **1:12 PM Pacific**, all seven targeted Functions were confirmed ACTIVE:
+
+| Function | Deployed revision |
+| --- | --- |
+| `rlManageInquiry` | `rlmanageinquiry-00001-heg` |
+| `rlManageCustomer` | `rlmanagecustomer-00003-niv` |
+| `rlManageJob` | `rlmanagejob-00016-huc` |
+| `rlReadWorkspace` | `rlreadworkspace-00012-yil` |
+| `rlApplyJobOperation` | `rlapplyjoboperation-00013-vec` |
+| `rlEstimate` | `rlestimate-00013-loc` |
+| `rlManageInvoice` | `rlmanageinvoice-00002-gev` |
+
+Deployed Firestore ruleset **`e2a2b313-dad9-4cd3-ad00-6faafe352ec4`** matches tested source exactly (normalized SHA-256 `da66c7bcf286d513039b7e99e4f57c30a278344bfa00f9d8c7c559837038fd44`). The two additive `rlInquiries` indexes are **READY**: company/updatedAt `CICAgPi9-ZgK` and user/updatedAt `CICAgPjfkocK`. No unrelated index was removed or changed. At **1:17 PM Pacific**, both deployed query shapes returned HTTP200 and zero records using an operator-authorized read-only query for a nonexistent synthetic tenant, selecting document identity only. No customer values were read. Web publication follows this verified backend/index activation.
+
+Read-only post-deployment checks matched **every baseline record metadata hash/count**, including zero new production inquiry/operation/identity-lock records. No unrelated function revision changed. Deployed financial flags match baseline: Stripe enabled/test/liveApproved=false; QB enabled/sandbox/credentialEnvironment=sandbox/writes=false/productionApproved=false. The QB event processor remains **PAUSED**, and other captured schedule states are unchanged. The new callable returned **HTTP401 / UNAUTHENTICATED** before any customer/inquiry data operation. No authenticated production mutation or provider transaction was used for smoke verification.
 
 Executed mobile checks: **417/417 tests passed**, **Expo Doctor 18/18 passed**, and both iOS and Android production JavaScript exports succeeded. Native configuration, dependencies, identifiers and signing were not changed.
 

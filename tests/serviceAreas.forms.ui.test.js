@@ -68,7 +68,8 @@ test('an internal job saves with an address warning without requiring confirmed 
  const created=[];writeWarning='Google could not confirm this address. Job saved using the entered address; map placement and coverage remain unverified.';
  await renderJob(undefined,{onCreated:(...args)=>created.push(args)});assert.equal(checker.value.confirmed,false);
  await changeNotes('Authorized operator continues with this service address');await submit();
- assert.equal(writes.length,1);assert.equal(created.length,1);assert.equal(writes[0].value.serviceProperty.address,savedAddress);assert.equal(Object.hasOwn(writes[0].value,'eligible'),false);assert.match(toasts.at(-1),/unverified/);
+ assert.equal(writes.length,1);assert.equal(created.length,1);assert.equal(writes[0].value.serviceProperty.address,savedAddress);assert.equal(Object.hasOwn(writes[0].value,'eligible'),false);assert.equal(created[0][1].keepOpen,true);
+ assert.ok(tree.root.findByProps({'aria-label':'Saved job address warning'}));assert.match(JSON.stringify(tree.toJSON()),/unverified/);assert.ok(button('Done'));assert.equal(toasts.at(-1),'Job scheduled');
 });
 test('a customer list arriving after the job form opens fills its untouched initial property',async()=>{
  await renderJob(undefined,{customers:[]});assert.equal(checker.value.address,'');

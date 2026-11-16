@@ -4046,6 +4046,14 @@ The production read-only investigation found David's active, verified Acme manag
 
 The initial Netlify build compiled successfully but its scanner classified a redundant project-ID literal in the new query helper as an environment secret. The helper now takes the project exclusively from the initialized Firebase app, with no literal fallback. Secret scanning and all existing scan exclusions remain unchanged. All six affected backend functions were independently confirmed ACTIVE in the Route Logistics codebase after deployment.
 
+### Saved-address review and mobile scheduling shortcuts — November 15, 2026
+
+A job saved with an address-verification warning now remains open in the web editor. A visible footer confirms that the job is saved and offers **Edit address** or **Done**. Corrections update the same persisted job using its latest server revision; repeated warnings do not create another job or recurring plan. Jobs and Calendar refresh their data while retaining this editor. Closing without a correction leaves the saved appointment intact. Normal successful saves still close normally.
+
+Mobile Management already supported Team schedule → Reassign job → Check assignment availability → Confirm. **Scheduled jobs** and the other job-count cards now open the corresponding filtered schedule for the selected service date. The reassignment form appears in the shared JavaScript dialog, with errors and confirmation visible. Active membership, field-work eligibility, leave windows, calendar conflicts and server revision checks remain authoritative. Off-duty status alone does not prevent scheduling. Completed/cancelled cards show history without reassignment actions.
+
+Executed checks: 406/406 web tests, including seven saved-warning/canonical-ID/revision/navigation regressions; 332/332 mobile tests, including 31 focused management checks; web lint/build; and iOS/Android bundle exports pass. No production assignments were changed. PW-OPS-21 passes Chromium, Firefox and WebKit (3/3), covering warned save, same-job correction without duplicates, Done retention and unchanged customer addresses using local synthetic fixtures with no Google API calls. The initial test locator needed to account for the existing Modified badge; the corrected case passes in all engines. Its execution result is retained in the ignored release log. Physical testing of the new mobile card/dialog flow remains pending until rebuilt apps are installed. No backend redeployment is required for this interface change.
+
 ## F. Physical-device checklist
 
 | Operator action | Cases | Record / pass condition |

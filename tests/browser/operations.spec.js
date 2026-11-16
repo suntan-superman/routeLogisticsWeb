@@ -442,6 +442,51 @@ test('PW-OPS-12 owner can view invoice and payment history without changing invo
   expect(await scenario.read('invoices', scenario.ids.invoiceId)).toEqual(before);
 });
 
+test('PW-OPS-21 saved address warnings stay open for correction or Done without creating duplicate jobs',async({page,scenario})=>{
+  test.setTimeout(90000);annotate('DSP-002','CRM-002','DEF-ADDRESS-WARNING');
+  await signIn(page,scenario.accounts.owner);
+  const service=`Warned address correction ${scenario.ids.companyId}`,keepService=`Keep warned address ${scenario.ids.companyId}`;
+  const entered='Address pending';
+  const jobForm=()=>page.locator('form').filter({has:page.getByLabel('Service property address',{exact:true})});
+  const savedJobs=async title=>(await scenario.list('jobs')).filter(job=>job.serviceType===title);
+  await openAddressJob(page,scenario,service);let form=jobForm();
+  const customerBefore=await scenario.read('customers',scenario.ids.customerId);
+  await form.getByRole('button',{name:'Enable Editing',exact:true}).click();
+  // Safe incomplete text fails server-side shape validation before Google ADC
+  // or a paid Maps API request. The corrected address uses the fixture's exact
+  // tenant-private canonical cache entry; provider transports remain disabled.
+  await form.getByLabel('Service property address',{exact:true}).fill(entered);
+  await form.getByRole('button',{name:'Schedule Job',exact:true}).click();
+  let warning=form.getByRole('status',{name:'Saved job address warning',exact:true});
+  await expect(warning).toBeVisible();await expect(warning).toContainText('Job saved. Review the address if needed.');
+  await expect(form.getByRole('heading',{name:'Edit Job',exact:true})).toBeVisible();
+  await expect(form.getByRole('button',{name:'Save Changes',exact:true})).toBeDisabled();
+  const initiallySaved=await savedJobs(service);expect(initiallySaved).toHaveLength(1);const id=initiallySaved[0].id;
+  expect(initiallySaved[0]).toMatchObject({companyId:scenario.ids.companyId,customerId:scenario.ids.customerId,address:entered,status:'scheduled',serviceProperty:{address:entered,validated:false,source:'operator-entered'},serviceAreaEligibility:{status:'address-unverified',eligible:false}});
+  await form.getByRole('button',{name:'Edit address',exact:true}).click();
+  await form.getByLabel('Service property address',{exact:true}).fill(insideAddress(scenario));
+  await form.getByRole('button',{name:'Save Changes',exact:true}).click();await expect(form).toHaveCount(0);
+  const corrected=await savedJobs(service);expect(corrected).toHaveLength(1);expect(corrected[0].id).toBe(id);
+  expect(corrected[0]).toMatchObject({address:insideAddress(scenario),serviceProperty:{address:insideAddress(scenario),validated:true},serviceAreaEligibility:{status:'inside',eligible:true}});
+  expect(corrected[0].updatedAt).not.toBe(initiallySaved[0].updatedAt);
+  await expect(page.getByRole('row').filter({hasText:service})).toBeVisible();
+  // Exercise the separate Done choice: this leaves the explicitly saved job
+  // in place, with its unverified status, and does not ask to discard it.
+  await openAddressJob(page,scenario,keepService);form=jobForm();
+  await form.getByRole('button',{name:'Enable Editing',exact:true}).click();
+  await form.getByLabel('Service property address',{exact:true}).fill(entered);
+  await form.getByRole('button',{name:'Schedule Job',exact:true}).click();
+  warning=form.getByRole('status',{name:'Saved job address warning',exact:true});await expect(warning).toBeVisible();
+  const beforeDone=await savedJobs(keepService);expect(beforeDone).toHaveLength(1);
+  await form.getByRole('button',{name:'Done',exact:true}).click();await expect(form).toHaveCount(0);
+  await expect(page.getByRole('dialog',{name:'Leave without saving?',exact:true})).toHaveCount(0);
+  const afterDone=await savedJobs(keepService);expect(afterDone).toHaveLength(1);expect(afterDone[0].id).toBe(beforeDone[0].id);
+  expect(afterDone[0]).toMatchObject({address:entered,status:'scheduled',serviceProperty:{validated:false},serviceAreaEligibility:{status:'address-unverified',eligible:false}});
+  await expect(page.getByRole('row').filter({hasText:keepService})).toBeVisible();
+  const customerAfter=await scenario.read('customers',scenario.ids.customerId);
+  for(const key of ['companyId','userId','name','email','phone','address','city','state','zipCode'])expect(customerAfter[key],`${key} changed without permanent address approval`).toEqual(customerBefore[key]);
+});
+
 test('PW-OPS-13 saved job addresses are locked and an explicitly edited one-off visit leaves the customer unchanged', async ({ page, scenario }) => {
   annotate('DSP-002', 'CRM-002');
   const historyBefore = await scenario.read('jobs', scenario.ids.jobId);

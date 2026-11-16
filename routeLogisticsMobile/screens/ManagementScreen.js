@@ -8,11 +8,12 @@ import { checkManagementAssignment, saveManagementAssignment, saveStaffAvailabil
 import { localDay } from '../services/workQueryPolicy';
 import { mergeTeam, shiftDay, localDate, jobCounts, teamSummary, locationStatus, availabilityLabel, orderedRouteStops, apparentConflict } from '../services/managementPolicy';
 import { sortJobs, dayLabel } from '../services/workPresentation';
-import { ScreenHeader, SectionHeader, Card, InlineNotice, LoadingState, EmptyState, PrimaryButton, SecondaryButton, JobCard } from '../components/MobileUI';
+import { ScreenHeader, SectionHeader, Card, InlineNotice, LoadingState, EmptyState, PrimaryButton, SecondaryButton, JobCard, ActionDialog } from '../components/MobileUI';
 import ManagementTeamMap, { updatedLabel } from '../components/ManagementTeamMap';
 import StaffAvailabilityEditor from '../components/StaffAvailabilityEditor';
 
 const freshnessLabels={fresh:'Recent authorized position',stale:'Stale last-known position','off-duty':'Off duty · no current position','sharing-disabled':'Location sharing is off',unavailable:'No authorized position',expired:'Location retention expired · no position shown'};
+const statusChoices=[['all','All job statuses'],['scheduled','Scheduled'],['en-route','En route'],['in-progress','In progress'],['completed','Completed'],['cancelled','Cancelled']];
 function Choice({title,selected,onPress,disabled=false}){
   const {palette}=useTheme();
   return <Pressable accessibilityRole="radio" accessibilityLabel={title} accessibilityState={{checked:selected,disabled}} disabled={disabled} onPress={onPress}
@@ -23,6 +24,7 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
   const [selected,setSelected]=useState(null),[showRoute,setShowRoute]=useState(false),[assignment,setAssignment]=useState(null),[availability,setAvailability]=useState(null),[target,setTarget]=useState(null);
   const [busy,setBusy]=useState(false),[notice,setNotice]=useState(null),[check,setCheck]=useState(null),[checking,setChecking]=useState(false);
   const [now,setNow]=useState(Date.now);
+  const [jobStatus,setJobStatus]=useState('all');
   const lifetime=useRef({alive:true,sequence:0,scope:'',pending:null}),scope=JSON.stringify([user?.id,user?.companyId,user?.role,user?.membershipId]);
   lifetime.current.scope=scope;
   const allowed=!!user?.companyId&&permissions.can('dispatch.manage'),canLocations=permissions.can('locations.viewTeam'),canAssign=permissions.can('jobs.assign'),canOverride=['owner','manager'].includes(user?.role);
@@ -39,7 +41,7 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
   useEffect(()=>{if(active)onInteractionChange?.({busy:busy||checking,hasDraft});},[active,busy,checking,hasDraft,onInteractionChange]);
   useEffect(()=>{const state=lifetime.current;state.alive=true;return()=>{state.alive=false;state.sequence++;};},[]);
   useEffect(()=>{if(!active||!context.active)return;setNow(Date.now());const timer=setInterval(()=>setNow(Date.now()),30000);return()=>clearInterval(timer);},[active,context.active]);
-  useEffect(()=>{setSelected(null);setAssignment(null);setAvailability(null);setNotice(null);setCheck(null);setShowRoute(false);setMember('all');},[scope]);
+  useEffect(()=>{setSelected(null);setAssignment(null);setAvailability(null);setNotice(null);setCheck(null);setShowRoute(false);setMember('all');setJobStatus('all');},[scope]);
   useEffect(()=>{if(!readable){lifetime.current.sequence++;lifetime.current.pending=null;setBusy(false);setChecking(false);setAssignment(null);setAvailability(null);setCheck(null);}},[readable]);
   const isCurrent=(ticket,expected)=>lifetime.current.alive&&lifetime.current.sequence===ticket&&lifetime.current.scope===expected;
   const mutate=async(task,message)=>{
@@ -50,7 +52,7 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
     catch(error){if(isCurrent(ticket,expected))setNotice({tone:'error',message:`${error.message||'The change could not be saved. Refresh and try again.'}${availability&&String(error.code||'').endsWith('aborted')?' Cancel these changes and reopen the availability editor to use the latest revision.':''}`});}
     finally{if(isCurrent(ticket,expected)){lifetime.current.pending=null;setBusy(false);}}
   };
-  const openAssignment=job=>{if(!canAssign||busy||hasDraft)return;setShowDate(false);setAssignment(job);setTarget(job.assignedTo||null);setCheck(null);setNotice(null);};
+  const openAssignment=job=>{if(!canAssign||busy||checking||hasDraft||['completed','cancelled','canceled'].includes(job.status))return;setShowDate(false);setAssignment(job);setTarget(job.assignedTo||null);setCheck(null);setNotice(null);};
   const preflight=async()=>{
     if(!assignment||lifetime.current.pending||busy||checking||!readable||!context.online)return;
     if(!targetEligible){setCheck(null);setNotice({tone:'error',message:'This staff member is office only or no longer eligible for new field assignments. Choose another person or Unassigned.'});return;}
@@ -59,8 +61,9 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
     catch(error){if(isCurrent(ticket,expected))setNotice({tone:'error',message:error.message||'The assignment could not be checked. Retry while online.'});}
     finally{if(isCurrent(ticket,expected)){lifetime.current.pending=null;setChecking(false);}}
   };
-  const selectSchedule=id=>{if(busy||hasDraft)return;setMember(id);onViewChange?.('schedule');};
-  const visibleJobs=jobs.filter(job=>member==='all'||(member==='unassigned'?!job.assignedTo:job.assignedTo===member));
+  const openSchedule=(status='all',assignee='all')=>{if(busy||checking||hasDraft)return;setShowDate(false);setMember(assignee);setJobStatus(status);onViewChange?.('schedule');};
+  const selectSchedule=id=>openSchedule('all',id);
+  const visibleJobs=jobs.filter(job=>(member==='all'||(member==='unassigned'?!job.assignedTo:job.assignedTo===member))&&(jobStatus==='all'||(job.status==='canceled'?'cancelled':job.status)===jobStatus));
   const counts=teamSummary(jobs,team,{jobsReady:data.jobs.isSuccess&&!data.jobs.error,rosterReady:data.team.isSuccess&&!data.team.error&&data.positions.isSuccess&&!data.positions.error,truncated:!!data.jobs.data?.hasMore||!!data.positions.data?.truncated||!!data.team.data?.truncated});
   const refresh=async()=>{if(busy||checking)return;await data.refresh();if(showRoute&&selected)await route.refetch();};
   const openWeb=async()=>{try{await Linking.openURL('https://route-logistics.com/jobs');}catch{setNotice({tone:'error',message:'Open https://route-logistics.com/jobs in your browser to schedule new work.'});}};
@@ -83,11 +86,11 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
   </Card>;};
   if(!allowed)return <InlineNotice tone="error" message="Your current role does not permit management operations."/>;
   if(!readable)return <View style={{padding:20,gap:16}}><ScreenHeader title="Management"/>{context.accessStatus==='checking'?<LoadingState message="Checking management access…"/>:<InlineNotice tone="error" message={context.accessError?.message||context.accessError||'Your company access could not be verified.'}/>}<SecondaryButton title="Retry management access" onPress={context.refreshAccess}/></View>;
-  return <View style={{flex:1}}><ScreenHeader title={view==='overview'?'Operations':view==='team'?'Team':view==='map'?'Team map':'Team schedule'} subtitle={user.companyName||'Company operations'}/>
+  return <View style={{flex:1}}><View style={{flex:1}} pointerEvents={assignment?'none':'auto'} accessibilityElementsHidden={!!assignment} importantForAccessibility={assignment?'no-hide-descendants':'auto'}><ScreenHeader title={view==='overview'?'Operations':view==='team'?'Team':view==='map'?'Team map':'Team schedule'} subtitle={user.companyName||'Company operations'}/>
     <ScrollView testID="management-scroll" keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={active&&[data.jobs,data.team,data.positions].some(query=>query.isFetching&&!query.isLoading)} onRefresh={refresh} tintColor={palette.accent}/>}
       contentContainerStyle={{paddingHorizontal:20,paddingBottom:28,gap:16,width:'100%',maxWidth:760,alignSelf:'center'}}>
       {!context.online&&<InlineNotice message="Offline: showing previously loaded company information. Assignment and availability changes require a connection; your saved fieldwork remains in the same offline queue."/>}
-      {!!notice&&<InlineNotice {...notice}/>}
+      {!!notice&&!assignment&&<InlineNotice {...notice}/>}
       {!!availability&&!availabilityMember&&data.team.isSuccess&&<InlineNotice tone="error" message="This staff member is no longer in the active team. Availability cannot be changed for an inactive membership."><SecondaryButton title="Cancel unavailable staff changes" onPress={()=>{setAvailability(null);setSelected(null);}}/></InlineNotice>}
       {[data.jobs,data.team,...(canLocations?[data.positions]:[])].filter(query=>query.error).map((query,index)=><InlineNotice key={index} tone="error" message={query.error.message||'Company operations could not be loaded.'}><SecondaryButton title="Retry company data" onPress={refresh}/></InlineNotice>)}
       {[data.jobs,data.team].some(query=>query.isLoading)&&<LoadingState message="Loading company operations…"/>}
@@ -98,9 +101,13 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
         {showDate&&<><DateTimePicker value={localDate(date)} mode="date" display={Platform.OS==='ios'?'inline':'default'} onChange={(event,value)=>{if(event.type==='dismissed'){setShowDate(false);return;}if(value)setDate(localDay(value));if(Platform.OS!=='ios')setShowDate(false);}}/><SecondaryButton title="Done choosing service date" onPress={()=>setShowDate(false)}/></>}
       </View>
       {view==='overview'&&<><SectionHeader title={`Selected-day overview · ${dayLabel(date)}`} subtitle="Duty is based on recorded shifts, separately from location freshness."/>
-        <View style={{flexDirection:'row',flexWrap:'wrap',gap:10}}>{[['On duty now',counts.onDuty],['Off duty now',counts.offDuty],['Scheduled jobs',counts.scheduled],['Completed jobs',counts.completed],['In progress',counts.inProgress],['Unassigned jobs',counts.unassigned]].map(([label,count])=><View key={label} style={{flexBasis:'46%',flexGrow:1,padding:15,gap:8,borderRadius:16,borderWidth:1,borderColor:palette.border,backgroundColor:palette.surface}}><Text style={{color:palette.secondary,fontSize:13,lineHeight:20}}>{label}</Text><Text style={{color:palette.text,fontSize:26,fontWeight:'700'}}>{count==null?'—':`${count}${counts.truncated?'+':''}`}</Text></View>)}</View>
+        <View style={{flexDirection:'row',flexWrap:'wrap',gap:10}}>{[['On duty now',counts.onDuty],['Off duty now',counts.offDuty],['Scheduled jobs',counts.scheduled,'scheduled'],['Completed jobs',counts.completed,'completed'],['In progress',counts.inProgress,'in-progress'],['Unassigned jobs',counts.unassigned,'all','unassigned']].map(([label,count,status,assignee])=>{
+          const style={flexBasis:'46%',flexGrow:1,padding:15,gap:8,borderRadius:16,borderWidth:1,borderColor:palette.border,backgroundColor:palette.surface};
+          const content=<><Text style={{color:palette.secondary,fontSize:13,lineHeight:20}}>{label}</Text><Text style={{color:palette.text,fontSize:26,fontWeight:'700'}}>{count==null?'—':`${count}${counts.truncated?'+':''}`}</Text>{status&&<Text style={{color:palette.accent,fontSize:12,fontWeight:'600'}}>View jobs →</Text>}</>;
+          return status?<Pressable key={label} testID={`management-metric-${label.toLowerCase().replace(/ /g,'-')}`} accessibilityRole="button" accessibilityLabel={`View ${label.toLowerCase()}`} accessibilityHint="Open matching appointments for the selected service date" accessibilityState={{disabled:count==null||busy||checking||hasDraft}} disabled={count==null||busy||checking||hasDraft} onPress={()=>openSchedule(status,assignee||'all')} style={style}>{content}</Pressable>:<View key={label} style={style}>{content}</View>;
+        })}</View>
         {!!counts.unknownDuty&&<InlineNotice message={`${counts.unknownDuty} staff have no loaded duty status; they are not counted as off duty.`}/>}
-        <SecondaryButton title="Open team schedule" onPress={()=>onViewChange?.('schedule')}/><SecondaryButton title="Inspect team locations" disabled={!canLocations} onPress={()=>onViewChange?.('map')}/>
+        <SecondaryButton title="Open team schedule" onPress={()=>openSchedule()}/><SecondaryButton title="Inspect team locations" disabled={!canLocations} onPress={()=>onViewChange?.('map')}/>
         <InlineNotice message="Create new jobs and estimates on the web, where service-property validation and geographic eligibility are supported."/><SecondaryButton title="Schedule new work on web" onPress={openWeb}/>
       </>}
       {view==='team'&&!current&&<><SectionHeader title="Company field team" subtitle="Owners and managers can perform their own assigned fieldwork using the same account."/>{team.map(memberRow)}{data.team.isSuccess&&!team.length&&<EmptyState title="No active team members" message="Only active company staff are listed."/>}</>}
@@ -128,9 +135,15 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
       {view==='map'&&(canLocations?<>{data.positions.isLoading?<LoadingState message="Loading authorized team positions…"/>:data.positions.error?<InlineNotice tone="error" message="Team locations could not be retrieved. Retry to verify location access."/>:<ManagementTeamMap team={team} jobs={jobs} policy={policy} onOpenSchedule={selectSchedule}/>}</>:<InlineNotice tone="error" message="Your role does not permit team location access."/>)}
       {view==='schedule'&&<><SectionHeader title="Filter schedule"/>
         <ScrollView horizontal contentContainerStyle={{gap:8,paddingBottom:6}}><Choice title="All technicians" selected={member==='all'} disabled={hasDraft||busy} onPress={()=>setMember('all')}/><Choice title="Unassigned" selected={member==='unassigned'} disabled={hasDraft||busy} onPress={()=>setMember('unassigned')}/>{team.map(row=><Choice key={row.id} title={row.name} selected={member===row.id} disabled={hasDraft||busy} onPress={()=>setMember(row.id)}/>)}</ScrollView>
+        <ScrollView horizontal contentContainerStyle={{gap:8,paddingBottom:6}}>{statusChoices.map(([status,label])=><Choice key={status} title={label} selected={jobStatus===status} disabled={hasDraft||busy||checking} onPress={()=>setJobStatus(status)}/>)}</ScrollView>
+        <SectionHeader title={jobStatus==='all'?'Selected-day appointments':`${statusChoices.find(([status])=>status===jobStatus)?.[1]||'Selected'} jobs`} subtitle={canAssign?'Open a job for details, or use Reassign job to choose another available staff member.':dayLabel(date)}/>
         {data.jobs.isSuccess&&jobList(visibleJobs)}
       </>}
-      {assignment&&<Card><SectionHeader title="Review job assignment" subtitle={`${assignment.customerName||'Customer'} · ${dayLabel(assignment.date)} · ${assignment.time||'Time not set'}`}/>
+      <SecondaryButton title="Refresh company operations" disabled={busy||checking} onPress={refresh}/>
+    </ScrollView>
+    </View>
+      {assignment&&<ActionDialog title="Review job assignment" busy={busy||checking} onClose={()=>{setAssignment(null);setCheck(null);}} testID="management-assignment-dialog"><Card><SectionHeader title={assignment.customerName||'Customer'} subtitle={`${dayLabel(assignment.date)} · ${assignment.time||'Time not set'}`}/>
+        {!!notice&&<InlineNotice {...notice}/>}
         <Text style={{color:palette.secondary,lineHeight:22}}>Choose active company staff. The server checks current membership, availability and calendar conflicts again when saving.</Text>
         <Choice title="Leave job unassigned" selected={!target} disabled={busy||checking} onPress={()=>{setTarget(null);setCheck(null);}}/>
         {team.filter(row=>(['owner','manager','technician'].includes(row.role)||row.id===assignment.assignedTo)&&row.fieldWorkEnabled).map(row=><Choice key={row.id} title={`Assign to ${row.name}`} selected={target===row.id} disabled={busy||checking} onPress={()=>{setTarget(row.id);setCheck(null);}}/>)}
@@ -140,8 +153,6 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
         {check&&!check.available&&<InlineNotice tone="error" message={check.reason||'This staff member is unavailable or has a schedule conflict. Choose someone else or change the appointment on the web.'}/>}
         {check?.available&&targetEligible&&<><InlineNotice message={`Assign this appointment to ${team.find(row=>row.id===target)?.name||'Unassigned'}? Date, time and service property remain unchanged.`}/><PrimaryButton title="Confirm job assignment" busy={busy} onPress={()=>{if(targetEligible)mutate(()=>saveManagementAssignment(assignment,target),'Job assignment saved. The affected schedules have been refreshed.');}}/></>}
         <SecondaryButton title="Cancel assignment" disabled={busy||checking} onPress={()=>{setAssignment(null);setCheck(null);}}/>
-      </Card>}
-      <SecondaryButton title="Refresh company operations" disabled={busy||checking} onPress={refresh}/>
-    </ScrollView>
+      </Card></ActionDialog>}
   </View>;
 }

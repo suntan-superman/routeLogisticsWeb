@@ -38,8 +38,9 @@ function compile(relative) {
         if (name !== 'rlManageJob') throw Error('Unexpected scheduling operation ' + name);
         if (env.saveFailure) throw env.saveFailure;
         const id = data.id || 'created-job';
-        env.saved.set(id, { ...(env.saved.get(id) || {}), ...data.job, id });
-        return { id, ...(data.saveCustomerAddress ? { customerAddressUpdated: true } : {}), ...(data.recurring ? { servicePlanId: 'created-plan' } : {}) };
+        if(data.action==='update'&&data.expectedVersion!==env.saved.get(id)?.updatedAt)throw Object.assign(Error('The saved job revision changed. Refresh before saving.'),{code:'functions/aborted'});
+        env.saved.set(id, { ...(env.saved.get(id) || {}), ...data.job, id, status:'scheduled', updatedAt:`server-revision-${++env.revision}` });
+        return { id, ...(data.saveCustomerAddress ? { customerAddressUpdated: true } : {}), ...(data.recurring ? { servicePlanId: 'created-plan' } : {}), ...(env.addressWarning?{addressWarning:env.addressWarning}:{}) };
       },
       readWorkspace: async (resource, data) => {
         env.reads.push({ resource, data });
@@ -68,8 +69,8 @@ async function chooseCombobox(label, optionName) {
   assert.ok(option, optionName); await act(async () => option.props.onClick()); await act(settle);
 }
 async function render(overrides = {}) {
-  env = { calls: [], reads: [], capabilities: [], toasts: [], created: [], saved: new Map(), availability: available, saveFailure: null, dirty: false };
-  props = { customers: [customer], defaults: { customerId: customer.id, serviceType: 'Pest Control', date: '2030-01-10' }, onClose() {}, onCreated: (...args) => env.created.push(args), ...overrides };
+  env = { calls: [], reads: [], capabilities: [], toasts: [], created: [], saved: new Map(), availability: available, saveFailure: null, dirty: false, closed:0, addressWarning:'', revision:0 };
+  props = { customers: [customer], defaults: { customerId: customer.id, serviceType: 'Pest Control', date: '2030-01-10' }, onClose:()=>{env.closed++;}, onCreated: (...args) => env.created.push(args), ...overrides };
   if (props.job) env.saved.set(props.job.id, props.job);
   await act(async () => { tree = create(React.createElement(JobForm, props)); }); await act(settle);
 }
@@ -137,4 +138,43 @@ test('recurring retry reuses its operation ID and preserves explicit permanent-a
   assert.deepEqual(first.job.serviceProperty, { address: '200 Corrected Street, Example, CA 93312' }); assert.equal(first.job.saveCustomerAddress, undefined); assert.equal(first.job.expectedCustomerVersion, undefined);
   assert.equal(env.created.length, 0); env.saveFailure = null; await submit(); assert.equal(writes().length, 2); assert.deepEqual(writes()[1].data, first); assert.equal(env.created.length, 1);
   assert.match(env.toasts.join(' '), /Recurring appointment and customer address saved/);
+});
+
+const unverifiedAddressWarning='The job was saved, but Google could not confirm its address. Map placement and coverage remain unverified.';
+const savedWarning=()=>tree.root.findAll(node=>node.props.role==='status'&&node.props['aria-label']==='Saved job address warning')[0];
+
+test('a warning save keeps the new job open and address correction updates the same canonical job without creating another',async()=>{
+  await render();await chooseCombobox('Assigned technician','Technician One');env.addressWarning=unverifiedAddressWarning;
+  await submit();assert.equal(writes().length,1);assert.equal(writes()[0].data.action,'create');assert.equal(env.saved.size,1);assert.equal(env.closed,0);
+  assert.equal(env.created.length,1);assert.equal(env.created[0][0].id,'created-job');assert.equal(env.created[0][1].keepOpen,true);assert.ok(savedWarning());assert.match(textOf(savedWarning()),/Google could not confirm/);
+  assert.match(text(),/Edit Job/);assert.equal(button('Save Changes').props.disabled,true);
+  await click('Edit address');assert.notEqual(input('Service property address').props.readOnly,true);
+  await act(async()=>input('Service property address').props.onChange({target:{value:'200 Corrected Street, Example, CA 93312'}}));
+  env.addressWarning='';await submit();assert.equal(writes().filter(call=>call.data.action==='create').length,1);assert.equal(env.saved.size,1);
+  const updated=writes()[1].data;assert.equal(updated.action,'update');assert.equal(updated.id,'created-job');assert.equal(updated.expectedVersion,'server-revision-1');assert.deepEqual(updated.job.serviceProperty,{address:'200 Corrected Street, Example, CA 93312'});
+  assert.equal(env.created.length,2);assert.notEqual(env.created.at(-1)[1].keepOpen,true);assert.equal(env.saved.get('created-job').updatedAt,'server-revision-2');
+});
+
+test('repeated warning corrections use the latest saved revision and Done closes without another save or callback',async()=>{
+  const job={id:'existing-job',customerId:customer.id,customerName:customer.name,serviceType:'Pest Control',date:'2030-01-10',time:'09:00',estimatedDuration:1,assignedTo:'tech-1',address:customer.address,priority:'medium',notes:'Saved instructions',totalCost:0,updatedAt:'original-version'};
+  await render({job});await click('Enable Editing');await act(async()=>input('Service property address').props.onChange({target:{value:'201 Unverified Street, Example, CA 93312'}}));env.addressWarning=unverifiedAddressWarning;
+  await submit();assert.equal(writes()[0].data.expectedVersion,'original-version');assert.equal(env.created[0][1].keepOpen,true);assert.equal(button('Save Changes').props.disabled,true);
+  await click('Edit address');await act(async()=>input('Service property address').props.onChange({target:{value:'202 Still Unverified Street, Example, CA 93312'}}));
+  await submit();assert.equal(writes()[1].data.id,job.id);assert.equal(writes()[1].data.expectedVersion,'server-revision-1');assert.equal(writes().filter(call=>call.data.action==='create').length,0);assert.equal(env.saved.size,1);
+  assert.equal(env.saved.get(job.id).updatedAt,'server-revision-2');assert.ok(savedWarning());assert.equal(button('Save Changes').props.disabled,true);
+  const callbackCount=env.created.length,writeCount=writes().length;await click('Done');assert.equal(env.closed,1);assert.equal(writes().length,writeCount);assert.equal(env.created.length,callbackCount);
+});
+
+test('a failed warning correction retains its address and saved job context for an update retry',async()=>{
+  await render();await chooseCombobox('Assigned technician','Technician One');env.addressWarning=unverifiedAddressWarning;await submit();
+  await click('Edit address');const corrected='300 Retained Correction, Example, CA 93312';await act(async()=>input('Service property address').props.onChange({target:{value:corrected}}));
+  env.saveFailure=Error('Address correction could not be saved. Retry this job.');await submit();
+  assert.equal(input('Service property address').props.value,corrected);assert.equal(env.closed,0);assert.equal(env.created.length,1);assert.equal(env.saved.get('created-job').updatedAt,'server-revision-1');assert.equal(button('Save Changes').props.disabled,false);assert.match(env.toasts.at(-1),/correction could not be saved/);
+  env.saveFailure=null;await submit();const attempts=writes().filter(call=>call.data.action==='update');assert.equal(attempts.length,2);assert.ok(attempts.every(call=>call.data.id==='created-job'&&call.data.expectedVersion==='server-revision-1'));assert.equal(writes().filter(call=>call.data.action==='create').length,1);assert.equal(env.saved.size,1);
+});
+
+test('Done immediately after a warning save performs no write and does not notify the parent twice',async()=>{
+  await render();await chooseCombobox('Assigned technician','Technician One');env.addressWarning=unverifiedAddressWarning;await submit();
+  assert.equal(env.dirty,false);assert.equal(writes().length,1);assert.equal(env.created.length,1);await click('Done');
+  assert.equal(env.closed,1);assert.equal(writes().length,1);assert.equal(env.created.length,1);assert.equal(env.saved.size,1);
 });

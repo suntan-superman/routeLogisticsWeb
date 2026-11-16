@@ -381,8 +381,8 @@ const CalendarPage = () => {
           customers={customers}
           defaults={newJobDefaults}
           onClose={() => setShowNewJob(false)}
-          onCreated={() => {
-            setShowNewJob(false);
+          onCreated={(_saved, metadata) => {
+            if (!metadata?.keepOpen) setShowNewJob(false);
             invalidate(['jobs','job','customers','customer-stats']);
           }}
         />

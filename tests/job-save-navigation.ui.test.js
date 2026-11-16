@@ -18,6 +18,7 @@ const hasDirty = scope => [...env.dirty.values()].some(entry=>entry.dirty&&(scop
 const confirmDiscard = async scope => { if (!hasDirty(scope)) return true; env.confirmCalls++; return env.allowDiscard; };
 function useGuard(dirty,{scope}={}) { const key = React.useRef(Symbol()); React.useEffect(() => { const id=key.current; env.dirty.set(id,{dirty,scope}); return () => env.dirty.delete(id); },[dirty,scope]); return {confirmDiscard:scope===undefined?confirmDiscard:()=>confirmDiscard(scope)}; }
 function ChildDraft({job,initialMemberId,initialDate}) { const name=job?'Service draft '+job.id:'Route draft '+initialMemberId+':'+initialDate; const [value,setValue]=React.useState('');useGuard(!!value,{scope:job?`job:${job.id}`:'route-planner'});return React.createElement('input',{'aria-label':name,value,onChange:event=>setValue(event.target.value)}); }
+function JobEditorProbe(props){const[draft,setDraft]=React.useState('Open editor input');env.editor=props;return React.createElement('section',{'aria-label':'Scheduling editor probe'},React.createElement('input',{'aria-label':'Still-open scheduling draft',value:draft,onChange:event=>setDraft(event.target.value)}));}
 function reset(kind) {
   env={kind,dirty:new Map(),allowDiscard:true,confirmCalls:0,calls:[],toasts:[],failSave:false,throwSave:false,saved:false,failListAfterSave:false,savePending:null,foreignDialog:false,jobs:[{id:'job-1',customerName:'First customer',serviceType:'Pest service',status:'scheduled',date:'2026-11-14',createdAt:'2026-11-14T09:00:00Z',time:'09:00',address:'First address',companyId:'company-1'},{id:'job-2',customerName:'Second customer',serviceType:'Inspection',status:'scheduled',date:'2026-11-14',createdAt:'2026-11-14T09:00:00Z',time:'10:00',address:'Second address',companyId:'company-1'}]};
   global.window=new EventTarget(); global.document={body:{style:{overflow:'auto'}},activeElement:null,visibilityState:'visible',querySelectorAll:()=>env.foreignDialog?[{}]:[]};
@@ -52,7 +53,10 @@ const mock = name => {
   if(name==='@heroicons/react/24/outline')return new Proxy({}, {get:()=>()=>null});
   if(name.endsWith('/components/ServiceChecklist')||name==='./RoutesPage')return{__esModule:true,default:ChildDraft};
   if(name.endsWith('/components/JobChangeHistory'))return{__esModule:true,default:()=>null,ModifiedBadge:()=>null};
-  if(name.endsWith('/components/StaffAvailabilityEditor')||name.endsWith('/components/JobPhotos')||name.endsWith('/components/JobApplicationLog')||name.endsWith('/components/JobFormModal')||name.endsWith('/components/TeamLocationStatus'))return{__esModule:true,default:()=>null};
+  if(name.endsWith('/components/JobFormModal'))return{__esModule:true,default:env.kind==='warning-parent'?JobEditorProbe:()=>null};
+  if(name.endsWith('/components/StaffAvailabilityEditor')||name.endsWith('/components/JobPhotos')||name.endsWith('/components/JobApplicationLog')||name.endsWith('/components/TeamLocationStatus'))return{__esModule:true,default:()=>null};
+  if(name.endsWith('.css'))return{};
+  if(name==='@syncfusion/ej2-react-schedule')return new Proxy({ScheduleComponent:props=>React.createElement('section',{'aria-label':'Calendar probe','data-event-count':props.eventSettings.dataSource.length})},{get:(target,key)=>target[key]||(()=>null)});
   if(name.endsWith('/services/serviceLogService'))return{UNITS:['fl oz','oz'],listServiceLogsForJob:async()=>env.saved&&env.failListAfterSave?{success:false,error:'List unavailable'}:{success:true,logs:[]},addServiceLog:async data=>{env.calls.push({name:'application',data});if(env.savePending)await env.savePending.promise;if(env.throwSave)throw Error('Application request failed.');if(env.failSave)return{success:false,error:'Application could not be saved.'};env.saved=true;return{success:true,id:'application-1'};}};
   if(name.endsWith('/services/workspaceApi'))return{readWorkspace:async()=>({jobs:env.jobs,hasMore:false}),callWorkspace:async(name,data)=>{env.calls.push({name,data});if(name==='rlGetRoutingTeam')return{team:[{id:'tech-1',name:'First tech'},{id:'tech-2',name:'Second tech'}]};if(name==='rlGetTeamLocations')return{locations:[],roster:[],policy:{intervalMinutes:3,freshAfterSeconds:300}};if(name==='rlJobVisit')return{events:[]};if(name==='rlManageJob')return{};throw Error('Unexpected workspace operation');}};
   if(name.endsWith('/services/maps'))return{loadMaps:async()=>{throw Error('Maps should not be requested in these tests');}};
@@ -132,4 +136,29 @@ test('dispatch route remains mounted during read-only job viewing and dirty rout
   await act(async()=>button('First customer · Pest service').props.onClick({currentTarget:{focus(){},isConnected:true}}));await act(settle);assert.equal(env.confirmCalls,0);assert.equal(input(name).props.value,'Edited route');
   await click('Close details');assert.equal(env.confirmCalls,0);assert.equal(input(name).props.value,'Edited route');
   await click('Close route planner');assert.equal(input(name).props.value,'Edited route');const date=tree.root.findAll(node=>node.type==='input'&&node.props.type==='date')[0];const originalDate=date.props.value, attemptedDate=originalDate==='2026-11-15'?'2026-11-16':'2026-11-15';await act(async()=>date.props.onChange({target:{value:attemptedDate}}));assert.equal(date.props.value,originalDate);assert.equal(input(name).props.value,'Edited route');
+});
+
+const openNewJob=async()=>{const action=tree.root.findAll(node=>node.type==='button'&&node.children.some(child=>typeof child==='string'&&child.trim()==='New Job'))[0];assert.ok(action,'New Job action');await act(async()=>action.props.onClick());await act(settle);};
+test('Jobs refreshes its list after a warning save without closing or remounting the open create editor',async()=>{
+  reset('warning-parent');await render('pages/JobManagementPage.jsx');await openNewJob();await change('Still-open scheduling draft','Keep this editor after the save');
+  const saved={...env.jobs[0],id:'warning-created-job',serviceType:'Warning-saved service',updatedAt:'new-revision'};
+  await act(async()=>env.editor.onCreated(saved,{keepOpen:true}));await act(settle);
+  assert.equal(input('Still-open scheduling draft').props.value,'Keep this editor after the save');assert.match(JSON.stringify(tree.toJSON()),/Warning-saved service/);assert.ok(env.calls.some(row=>row.name==='invalidate'));
+  await act(async()=>env.editor.onCreated({...saved,updatedAt:'corrected-revision'},{keepOpen:false}));await act(settle);
+  assert.equal(tree.root.findAllByProps({'aria-label':'Scheduling editor probe'}).length,0);
+});
+
+test('Jobs preserves an existing editor and updates its list while an address warning remains',async()=>{
+  reset('warning-parent');await render('pages/JobManagementPage.jsx');
+  await act(async()=>tree.root.findAll(node=>node.type==='button'&&node.props.title==='Edit Job')[0].props.onClick());await act(settle);await change('Still-open scheduling draft','Keep edited address context');
+  const saved={...env.jobs[0],address:'Saved warning address',updatedAt:'server-latest'};await act(async()=>env.editor.onCreated(saved,{keepOpen:true}));await act(settle);
+  assert.equal(input('Still-open scheduling draft').props.value,'Keep edited address context');assert.equal(env.editor.job.id,saved.id);assert.match(JSON.stringify(tree.toJSON()),/Saved warning address/);
+  await act(async()=>env.editor.onClose());assert.equal(tree.root.findAllByProps({'aria-label':'Scheduling editor probe'}).length,0);
+});
+
+test('Calendar keeps its new-job editor mounted on warning saves and closes it after an ordinary successful correction',async()=>{
+  reset('warning-parent');await render('pages/CalendarPage.jsx');await openNewJob();await change('Still-open scheduling draft','Keep calendar editor state');
+  await act(async()=>env.editor.onCreated({...env.jobs[0],id:'calendar-warning-job'},{keepOpen:true}));await act(settle);
+  assert.equal(input('Still-open scheduling draft').props.value,'Keep calendar editor state');assert.ok(env.calls.some(row=>row.name==='invalidate'));
+  await act(async()=>env.editor.onCreated({...env.jobs[0],id:'calendar-warning-job'},{keepOpen:false}));await act(settle);assert.equal(tree.root.findAllByProps({'aria-label':'Scheduling editor probe'}).length,0);
 });

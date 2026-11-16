@@ -47,6 +47,47 @@ test('overview counts recorded shifts independently of GPS and links web creatio
  await press('Schedule new work on web');assert.equal(calls.find(row=>row[0]==='web')[1],'https://route-logistics.com/jobs');
  data.positions.error=new Error('Location access denied');await act(async()=>tree.update(React.createElement(App)));assert.match(texts(),/Location access denied/);assert.match(texts(),/—/);
 });
+
+test('manager scheduled metric opens matching jobs and reassigns through availability and explicit confirmation',async()=>{
+ user={...user,id:'manager',role:'manager',membershipId:'manager-member'};
+ data.team.data={team:[...data.team.data.team,{id:'other-tech',name:'Rosa',role:'technician'}]};
+ data.positions.data={...data.positions.data,roster:[...data.positions.data.roster,{memberId:'other-tech',dutyStatus:'off-duty',availability:{state:'normal',active:false}}]};
+ operations.assign=async(record,target)=>{calls.push(['assign',record,target]);data.jobs.data={...data.jobs.data,jobs:data.jobs.data.jobs.map(row=>row.id===record.id?{...row,assignedTo:target,updatedAt:'v2'}:row)};return{id:record.id,updatedAt:'v2'};};
+ await render();assert.equal(button('View scheduled jobs').props.accessibilityRole,'button');await press('View scheduled jobs');
+ assert.equal(button('Scheduled').props.accessibilityState.checked,true);
+ assert.ok(tree.root.findAll(node=>node.type==='Pressable'&&node.props.testID==='job-card-tech')[0]);
+ assert.equal(tree.root.findAll(node=>node.type==='Pressable'&&node.props.testID==='job-card-done').length,0);
+ await press('Assign job tech');
+ assert.ok(tree.root.findAll(node=>node.type==='View'&&node.props.testID==='management-assignment-dialog')[0]);
+ assert.ok(tree.root.findAll(node=>node.type==='View'&&node.props.accessibilityElementsHidden===true&&node.props.pointerEvents==='none')[0]);
+ assert.equal(button('Previous day').props.disabled,true);assert.equal(interactions.at(-1).hasDraft,true);
+ await press('Assign to Rosa');assert.equal(calls.some(row=>row[0]==='assign'),false,'selection alone cannot reassign a job');
+ await press('Check assignment availability');
+ const checked=calls.find(row=>row[0]==='check');assert.equal(checked[1].id,'tech');assert.equal(checked[2],'other-tech');
+ assert.equal(calls.some(row=>row[0]==='assign'),false,'preflight must still require explicit confirmation');
+ await press('Confirm job assignment');
+ const saved=calls.find(row=>row[0]==='assign');assert.equal(saved[1].id,'tech');assert.equal(saved[1].updatedAt,'v1');assert.equal(saved[2],'other-tech');
+ assert.equal(saved[1].date,'2026-11-15');assert.equal(saved[1].time,'09:00');assert.equal(saved[1].status,'scheduled');
+ assert.match(texts(),/Job assignment saved|Assigned: Rosa/);assert.equal(button('Cancel assignment'),undefined);assert.equal(interactions.at(-1).hasDraft,false);
+ assert.equal(calls.filter(row=>row[0]==='changed').length,1);assert.equal(user.role,'manager');
+});
+
+test('job metric drilldown preserves its selected service date and supports clearing the status filter',async()=>{
+ await render();await press('Next day');await press('View scheduled jobs');
+ assert.equal(calls.filter(row=>row[0]==='query').at(-1)[1],'2026-11-16');
+ assert.doesNotMatch(texts(),/Customer done/);await press('All job statuses');assert.match(texts(),/Customer done/);
+ await press('Completed');assert.match(texts(),/Customer done/);assert.doesNotMatch(texts(),/Customer own|Customer open/);
+ assert.equal(button('Assign job done'),undefined,'historical details must not gain a reassignment action');
+ const details=tree.root.findAll(node=>node.type==='Pressable'&&node.props.testID==='job-card-done')[0];
+ await act(async()=>details.props.onPress());assert.deepEqual(calls.find(row=>row[0]==='open'),['open','done']);
+});
+
+test('scheduled metric is disabled until its count is loaded and zero matching jobs have a clear empty state',async()=>{
+ data.jobs.isSuccess=false;data.jobs.isLoading=true;await render();assert.equal(button('View scheduled jobs').props.disabled,true);
+ data.jobs=q({jobs:[job('done','tech',{status:'completed'})]});await act(async()=>tree.update(React.createElement(App)));await settle();
+ assert.equal(button('View scheduled jobs').props.disabled,false);await press('View scheduled jobs');assert.match(texts(),/No jobs for this selection/);
+ assert.doesNotMatch(texts(),/Customer done/);assert.equal(calls.some(row=>row[0]==='assign'),false);
+});
 test('team schedule filters staff and handles previous next day without UTC shifts',async()=>{
  view='schedule';await render();assert.match(texts(),/Customer own|Customer tech|Customer open/);
  await press('Luis');assert.match(texts(),/Customer tech/);assert.doesNotMatch(texts(),/Customer own|Customer open/);
@@ -70,6 +111,8 @@ test('assignment checks availability, confirms intent, saves once and refreshes 
 test('conflicts and failed assignment retain context and actionable retry feedback',async()=>{
  view='schedule';operations.check=async()=>({available:false,reason:'Unavailable: vacation'});await render();await press('Assign job open');await press('Assign to Luis');await press('Check assignment availability');assert.match(texts(),/Unavailable: vacation/);assert.equal(button('Confirm job assignment'),undefined);await press('Cancel assignment');
  operations.check=async()=>({available:true});operations.assign=async()=>{throw new Error('Schedule changed. Refresh and retry.');};await press('Assign job open');await press('Assign to Manager');await press('Check assignment availability');await press('Confirm job assignment');assert.match(texts(),/Schedule changed.*Refresh and retry/);assert.ok(button('Cancel assignment'));assert.equal(interactions.at(-1).hasDraft,true);
+ const dialog=tree.root.findAll(node=>node.type==='View'&&node.props.testID==='management-assignment-dialog')[0];
+ assert.ok(dialog.findAllByType('Text').some(node=>node.children.join('').includes('Schedule changed. Refresh and retry.')),'assignment failure must be visible within the foreground dialog');
 });
 test('technicians cannot load management and revoked access hides prior private company data',async()=>{
  permissions={can:()=>false};user.role='technician';await render();assert.match(texts(),/does not permit management/);assert.equal(calls.find(row=>row[0]==='query')[2].enabled,false);assert.doesNotMatch(texts(),/Customer own/);

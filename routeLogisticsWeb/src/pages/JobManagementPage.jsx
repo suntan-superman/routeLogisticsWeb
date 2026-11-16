@@ -883,8 +883,7 @@ const JobManagementPage = () => {
           onClose={() => { setShowEditModal(false); setSelectedJob(null); }}
           onCreated={async (saved, metadata) => {
             await refreshSavedCustomer(saved, metadata);
-            setShowEditModal(false);
-            setSelectedJob(null);
+            if (!metadata?.keepOpen) { setShowEditModal(false); setSelectedJob(null); }
             if(saved?.id)setJobs(previous=>[saved,...previous.filter(row=>row.id!==saved.id)]);
             invalidate(['jobs','job','customers','customer-stats']);
           }}
@@ -897,7 +896,7 @@ const JobManagementPage = () => {
           onClose={() => setShowNewJob(false)}
           onCreated={async (saved, metadata) => {
             await refreshSavedCustomer(saved, metadata);
-            setShowNewJob(false);
+            if (!metadata?.keepOpen) setShowNewJob(false);
             if(saved?.id)setJobs(previous=>[saved,...previous.filter(row=>row.id!==saved.id)]);
             invalidate(['jobs','job','customers','customer-stats']);
           }}

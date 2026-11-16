@@ -72,8 +72,12 @@ const propertySnapshot = property => JSON.stringify([property.address.trim(), pr
 const customerVersion = customer => typeof customer?.updatedAt === 'string' ? customer.updatedAt : legacyDate(customer?.updatedAt)?.toISOString() || null;
 const savedAddressWarning = response => response?.addressWarning || (response?.job?.serviceAreaEligibility?.status === 'address-unverified' ? response.job.serviceAreaEligibility.warning || 'The job was saved with the entered address. Google could not verify it; map placement and coverage remain unconfirmed.' : '');
 
-const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
+const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated }) => {
   const { company, can } = useAuth();
+  // A saved create becomes an edit of that exact record if its warning stays open.
+  const [job, setPersistedJob] = useState(initialJob || null);
+  const [savedWarning, setSavedWarning] = useState('');
+  const warningPanel = useRef(null), propertyPanel = useRef(null);
   const isEdit = !!job;
   const initialCustomer = !job && customers.find(customer => customer.id === defaults?.customerId);
   const [form, setForm] = useState(() => emptyForm(defaults, job));
@@ -107,6 +111,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
   const requestClose = useCallback(async()=>{if(savingRef.current||closing.current)return;closing.current=true;try{if(!warnDirty||await confirmDiscard())onClose();}finally{closing.current=false;}},[warnDirty,confirmDiscard,onClose]);
 
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
+  useEffect(() => { if (savedWarning) { warningPanel.current?.focus(); warningPanel.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }); } }, [savedWarning, job?.updatedAt]);
 
   useEffect(() => {
     if (!initialCustomerPending.current || savingRef.current) return;
@@ -143,6 +148,10 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
     initialCustomerPending.current = false;
     addressEditCustomer.current = { id: form.customerId, version: customerVersion(selectedCustomer) };
     setAddressEditing(true);
+  };
+  const editSavedAddress = () => {
+    enableAddressEditing();
+    propertyPanel.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
   };
 
   const timeChanged = !isEdit || form.date !== job.date || form.time !== job.time;
@@ -194,8 +203,8 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
       notes: form.notes.trim()
     };
 
-    if (repeatSelection && !bookingOperation.current) bookingOperation.current = globalThis.crypto.randomUUID();
-    const options = saveCustomerAddress || repeatSelection ? { ...(saveCustomerAddress ? { saveCustomerAddress: true, expectedCustomerVersion: addressEditCustomer.current?.version ?? null } : {}), ...(repeatSelection ? { operationId: bookingOperation.current, recurring: { recurrence, preferredTechnicianId: form.assignedTo || null, assignmentFallback } } : {}) } : undefined;
+    if (!isEdit && repeatSelection && !bookingOperation.current) bookingOperation.current = globalThis.crypto.randomUUID();
+    const options = saveCustomerAddress || !isEdit && repeatSelection ? { ...(saveCustomerAddress ? { saveCustomerAddress: true, expectedCustomerVersion: addressEditCustomer.current?.version ?? null } : {}), ...(!isEdit && repeatSelection ? { operationId: bookingOperation.current, recurring: { recurrence, preferredTechnicianId: form.assignedTo || null, assignmentFallback } } : {}) } : undefined;
     const requestedSchedule = schedulingFingerprint({ companyId: company?.id, memberId: form.assignedTo, date: form.date, time: form.time, estimatedDuration: duration, jobId: job?.id });
     setSchedulingError(null);
     if (saveCustomerAddress && (!addressEditing || addressEditCustomer.current?.id !== customer.id || !canSaveCustomerAddress)) { savingRef.current = false; setSaving(false); return toast.error('Review the customer address before saving it permanently.'); }
@@ -225,8 +234,12 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
       setSavedForm(formSnapshot(form));setSavedProperty(propertySnapshot(property));setSavedRepeat(repeatSnapshot);setReason('');setSaveCustomerAddress(false);customerAddressUpdated = result.customerAddressUpdated === true;savedCustomer=result.customer;toast.success(repeatSelection ? customerAddressUpdated ? 'Recurring appointment and customer address saved.' : 'Recurring appointment scheduled.' : customerAddressUpdated ? 'Job scheduled and customer address updated.' : 'Job scheduled');saved=result.job;
     } } catch(error) { if(alive.current) { setAddressValidation(error.addressValidation || null); if (error.scheduling) setSchedulingError({ fingerprint: requestedSchedule, result: error.scheduling }); toast.error(error.message || 'Unable to save this job. Your changes are available to retry.'); }return; }
     finally { savingRef.current=false;if(alive.current)setSaving(false); }
-    if (addressWarning) toast(addressWarning, { icon: '⚠️', duration: 7000 });
-    try { await onCreated(saved, { customerAddressUpdated, ...(savedCustomer ? { customer: customerView(savedCustomer.id, savedCustomer) } : {}) }); } catch { if(alive.current)toast.error('The job was saved, but the job list could not refresh. Refresh the page to see it.'); }
+    const keepOpen = !!addressWarning && !!saved?.id;
+    if (saved?.id) setPersistedJob(saved);
+    setPastAck(false); setAddressEditing(false); addressEditCustomer.current = null;
+    setSavedWarning(keepOpen ? addressWarning : '');
+    // Refresh the list immediately, while leaving a warned save open for review.
+    try { await onCreated(saved, { customerAddressUpdated, ...(savedCustomer ? { customer: customerView(savedCustomer.id, savedCustomer) } : {}), ...(keepOpen ? { keepOpen: true } : {}) }); } catch { if(alive.current)toast.error('The job was saved, but the job list could not refresh. Retry refreshing the job list.'); }
   };
 
   return (
@@ -279,6 +292,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
           {!isEdit && <AppointmentRepeatOptions value={repeatSelection} onChange={value => { if (!savingRef.current) { setRepeatSelection(value); setSchedulingError(null); } }} date={form.date} assignmentFallback={assignmentFallback} onFallbackChange={setAssignmentFallback} disabled={saving} company={!!company?.id} />}
           {isEdit && job.servicePlanId && <p className="text-sm text-gray-600">This is a recurring visit. Changes here apply to this visit only; the service plan controls later visits.</p>}
 
+          <div ref={propertyPanel}>
           {!company?.id && <div>
             <label className={label}>Service address</label>
             <input
@@ -301,6 +315,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
           {!company?.id && <AddressValidationNotice validation={addressValidation} disabled={saving} onAccept={!addressEditing ? undefined : address => { if (savingRef.current) return; initialCustomerPending.current = false; setAddressValidation(null); if (address.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false); setForm(previous => ({ ...previous, address })); }}>
             {!addressEditing && <div className="space-y-2"><p>The saved address is locked. Enable Editing, then use the suggested address.</p><button type="button" aria-label="Enable Editing for suggested address" disabled={saving || !form.customerId} className="rounded-lg bg-primary-700 px-4 py-2 font-medium text-white hover:bg-primary-800 disabled:opacity-50" onClick={enableAddressEditing}>Enable Editing</button></div>}
           </AddressValidationNotice>}
+          </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
@@ -362,12 +377,19 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
           </div>
         )}
 
-        <div className="flex justify-end gap-3 border-t border-gray-200 bg-gray-50 px-6 py-4 rounded-b-xl">
+        <div className="sticky bottom-0 space-y-3 border-t border-gray-200 bg-gray-50 px-6 py-4 rounded-b-xl">
+          {savedWarning && <section ref={warningPanel} tabIndex={-1} role="status" aria-label="Saved job address warning" className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 focus:outline-none focus:ring-2 focus:ring-amber-400">
+            <p className="font-semibold">Job saved. Review the address if needed.</p>
+            <p>{savedWarning.replace('You can save this internal job using the entered address.', 'The job is saved using the entered address.')}</p>
+            <p>Choose Edit address to make a correction here, or Done to keep the saved address.</p>
+          </section>}
+          <div className="flex flex-wrap justify-end gap-3">
+          {savedWarning && <button type="button" disabled={saving} onClick={editSavedAddress} className="rounded-lg border border-primary-300 bg-white px-4 py-2 text-sm font-medium text-primary-700 hover:bg-primary-50">Edit address</button>}
           <button
             type="button" disabled={saving} onClick={requestClose}
             className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
-            Cancel
+            {savedWarning ? 'Done' : 'Cancel'}
           </button>
           <button
             type="submit" disabled={saving || !formDirty || !!company?.id && (!isEdit || locationChanged) && !serviceAreaPolicy}
@@ -375,6 +397,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
           >
             {saving ? 'Saving…' : pastAck ? 'Schedule anyway' : isEdit ? 'Save Changes' : 'Schedule Job'}
           </button>
+          </div>
         </div>
       </form>
     </div>

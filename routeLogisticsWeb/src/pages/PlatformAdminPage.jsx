@@ -1,3 +1,4 @@
+import ThemeControl from '../components/ThemeControl';
 import SelectControl from '../components/SelectControl';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -25,7 +26,7 @@ export default function PlatformAdminPage() {
   const checking = loading || !!uid && verified && accessQuery.isPending && !accessQuery.error;
   return <div className="min-h-screen bg-gray-50 text-gray-900">
     <Helmet><title>Platform administration | Route Logistics</title><meta name="robots" content="noindex,nofollow" /></Helmet>
-    <header className="border-b border-gray-200 bg-white"><div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-5 sm:px-8"><Link to="/" className="text-lg font-bold text-primary-700">Route Logistics</Link><span className="text-sm text-gray-600">Platform administration</span></div></header>
+    <header className="border-b border-gray-200 bg-white"><div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-5 sm:px-8"><Link to="/" className="text-lg font-bold text-primary-700">Route Logistics</Link><div className="flex flex-wrap items-center gap-4"><span className="text-sm text-gray-600">Platform administration</span><ThemeControl /></div></div></header>
     <main className="mx-auto max-w-7xl px-5 py-8 sm:px-8">
       {checking ? <p role="status" className="py-12">Checking platform access…</p> : !uid ? <section className="mx-auto max-w-xl space-y-5 rounded-2xl border border-gray-200 bg-white p-7"><h1 className="text-2xl font-bold">Platform administration</h1><p>Sign in with an account explicitly authorized to manage Route Logistics platform content.</p><Link className={primaryActionClass + ' inline-block'} to="/login?next=%2Fplatform-admin">Sign in</Link></section> : !verified ? <PlatformEmailVerification key={uid} user={currentUser} refreshSession={refreshSession} /> : access.authorized && access.uid === uid ? <PlatformAdminWorkspace key={uid} accountEmail={currentUser.email} /> : <section className="mx-auto max-w-xl space-y-5 rounded-2xl border border-gray-200 bg-white p-7"><h1 className="text-2xl font-bold">Platform access required</h1><p role="alert">{access.error}</p><p className="text-sm text-gray-600">Signed in as {currentUser.email || 'your account'}. Contact the platform operator if this account should be authorized.</p><button type="button" className="btn-secondary" onClick={() => accessQuery.refetch()}>Check access again</button><Link to="/" className="ml-4 text-primary-700 underline">Return to Route Logistics</Link></section>}
     </main>

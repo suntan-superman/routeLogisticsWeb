@@ -5,8 +5,23 @@ import { httpsCallable } from 'firebase/functions';
 import { functions } from '../services/firebase';
 import { stripePublishableKey as key, paymentMode, paymentsConfigured } from '../services/paymentConfig';
 import PaymentHistory from './PaymentHistory';
+import { useTheme } from '../contexts/ThemeContext';
 
 let stripePromise;
+// Stripe renders in its own iframe, so app CSS cannot theme its form fields.
+// Appearance is a mutable Elements option: changing theme preserves entered data.
+const paymentAppearance = {
+  light: {
+    theme: 'stripe',
+    variables: { colorPrimary: '#047857', colorBackground: '#ffffff', colorText: '#111827', colorTextSecondary: '#4b5563', colorDanger: '#b91c1c', borderRadius: '8px' },
+    rules: { '.Input': { borderColor: '#d1d5db' }, '.Tab': { borderColor: '#d1d5db' } },
+  },
+  dark: {
+    theme: 'night',
+    variables: { colorPrimary: '#34d399', colorBackground: '#10251d', colorText: '#edf8f3', colorTextSecondary: '#a9c3b7', colorDanger: '#fca5a5', borderRadius: '8px' },
+    rules: { '.Input': { borderColor: '#3b5b4d' }, '.Tab': { borderColor: '#3b5b4d' } },
+  },
+};
 function PaymentForm({ invoiceId, invoke, onRefresh }) {
   const stripe = useStripe(), elements = useElements();
   const [busy, setBusy] = useState(false), [message, setMessage] = useState('');
@@ -29,6 +44,7 @@ function PaymentForm({ invoiceId, invoke, onRefresh }) {
   return <form onSubmit={submit} className="space-y-4"><PaymentElement /><button disabled={busy || !stripe || !elements} className="rounded bg-primary-600 px-4 py-2 text-white disabled:opacity-50">{paymentMode === 'test' ? 'Submit test payment' : 'Pay invoice'}</button><button type="button" disabled={busy} className="ml-3 underline" onClick={refresh}>Check payment status</button>{message && <p role="status">{message}</p>}</form>;
 }
 export default function InvoicePayment({ invoiceId, functionClient = functions, onClose, onRefresh }) {
+  const { theme } = useTheme();
   const [payment, setPayment] = useState(null), [error, setError] = useState('');
   const invoke = (name, data) => httpsCallable(functionClient, name)(data).then((result) => result.data);
   useEffect(() => {
@@ -42,5 +58,5 @@ export default function InvoicePayment({ invoiceId, functionClient = functions, 
     }).catch((e) => { if (active) setError(e.message); });
     return () => { active = false; };
   }, [invoiceId, functionClient]);
-  return <div role="dialog" aria-modal="true" aria-label="Invoice payment" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6"><div className="mb-4 flex justify-between gap-4"><h2 className="text-xl font-bold">{paymentMode === 'test' ? 'Stripe test payment' : 'Secure invoice payment'}</h2><button onClick={onClose} aria-label="Close payment">Close</button></div><p className="mb-4 text-sm">{paymentMode === 'test' ? 'Use Stripe test card details. No real money is collected, and this test will not mark the invoice paid.' : 'Your payment is processed securely by Stripe.'}</p>{error ? <p role="alert" className="text-red-700">{error}</p> : payment ? <><p className="mb-3 font-semibold">${(payment.amount / 100).toFixed(2)} USD</p><Elements stripe={stripePromise} options={{ clientSecret: payment.clientSecret }}><PaymentForm invoiceId={invoiceId} invoke={invoke} onRefresh={onRefresh} /></Elements></> : <p role="status">Preparing secure payment…</p>}<PaymentHistory invoiceId={invoiceId} functionClient={functionClient} /></div></div>;
+  return <div role="dialog" aria-modal="true" aria-label="Invoice payment" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6"><div className="mb-4 flex justify-between gap-4"><h2 className="text-xl font-bold">{paymentMode === 'test' ? 'Stripe test payment' : 'Secure invoice payment'}</h2><button onClick={onClose} aria-label="Close payment">Close</button></div><p className="mb-4 text-sm">{paymentMode === 'test' ? 'Use Stripe test card details. No real money is collected, and this test will not mark the invoice paid.' : 'Your payment is processed securely by Stripe.'}</p>{error ? <p role="alert" className="text-red-700">{error}</p> : payment ? <><p className="mb-3 font-semibold">${(payment.amount / 100).toFixed(2)} USD</p><Elements stripe={stripePromise} options={{ clientSecret: payment.clientSecret, appearance: paymentAppearance[theme] || paymentAppearance.light }}><PaymentForm invoiceId={invoiceId} invoke={invoke} onRefresh={onRefresh} /></Elements></> : <p role="status">Preparing secure payment…</p>}<PaymentHistory invoiceId={invoiceId} functionClient={functionClient} /></div></div>;
 }

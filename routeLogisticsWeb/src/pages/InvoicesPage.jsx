@@ -32,7 +32,7 @@ function printInvoice(inv, businessName) {
     .map((i) => `<tr><td>${esc(i.description)}</td><td class="r">${esc(i.quantity)}</td><td class="r">${money(i.unitPrice)}</td><td class="r">${money(i.amount)}</td></tr>`)
     .join('');
   w.document.write(`<!doctype html><html><head><title>${esc(inv.invoiceNumber)}</title><style>
-    body{font-family:system-ui,Arial,sans-serif;margin:40px;color:#111}h1{margin:0}table{width:100%;border-collapse:collapse;margin-top:24px}
+    :root{color-scheme:light}body{font-family:system-ui,Arial,sans-serif;margin:40px;background:#fff;color:#111}h1{margin:0}table{width:100%;border-collapse:collapse;margin-top:24px}
     th,td{padding:8px;border-bottom:1px solid #ddd;text-align:left}.r{text-align:right}.tot{margin-top:16px;float:right;min-width:220px}
     .tot div{display:flex;justify-content:space-between;padding:4px 0}.big{font-weight:700;font-size:1.2em;border-top:2px solid #111}
   </style></head><body>

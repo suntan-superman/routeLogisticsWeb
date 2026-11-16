@@ -1,14 +1,14 @@
 /* Route Logistics overrides on top of the Syncfusion Tailwind theme. */
 .custom-schedule.e-schedule {
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--rl-border, #e5e7eb);
   border-radius: 12px;
   overflow: hidden;
   font-family: inherit;
 }
 
 .custom-schedule .e-schedule-toolbar {
-  background: #fff;
-  border-bottom: 1px solid #e5e7eb;
+  background: var(--rl-surface, #fff);
+  border-bottom: 1px solid var(--rl-border, #e5e7eb);
   min-height: 56px;
   padding: 0 8px;
 }
@@ -23,16 +23,16 @@
 }
 
 .custom-schedule .e-schedule-toolbar .e-tbar-btn:hover {
-  background: #ecfdf5;
+  background: var(--rl-accent-soft, #ecfdf5);
 }
 
 .custom-schedule .e-schedule-toolbar .e-tbar-btn:hover .e-tbar-btn-text,
 .custom-schedule .e-schedule-toolbar .e-tbar-btn:hover .e-icons {
-  color: #047857;
+  color: var(--rl-accent-ink, #047857);
 }
 
 .custom-schedule .e-schedule-toolbar .e-toolbar-item.e-active-view .e-tbar-btn {
-  background: #10b981;
+  background: #047857;
 }
 
 .custom-schedule .e-schedule-toolbar .e-toolbar-item.e-active-view .e-tbar-btn-text,
@@ -43,7 +43,7 @@
 .custom-schedule .e-schedule-toolbar .e-date-range .e-tbar-btn-text {
   font-weight: 600;
   font-size: 15px;
-  color: #111827;
+  color: var(--rl-text, #111827);
 }
 
 .custom-schedule .e-schedule-toolbar .e-new,
@@ -52,22 +52,22 @@
 }
 
 .custom-schedule .e-header-cells {
-  background: #f9fafb;
-  color: #374151;
+  background: var(--rl-surface-muted, #f9fafb);
+  color: var(--rl-text-muted, #374151);
   font-weight: 600;
 }
 
 .custom-schedule .e-current-day,
 .custom-schedule .e-current-date .e-date-header {
-  color: #059669;
+  color: var(--rl-accent-ink, #059669);
 }
 
 .custom-schedule .e-date-header-wrap table tbody td.e-current-day {
-  background: #ecfdf5;
+  background: var(--rl-accent-soft, #ecfdf5);
 }
 
 .custom-schedule .e-work-cells:hover {
-  background: #f0fdf4;
+  background: var(--rl-accent-soft, #f0fdf4);
   cursor: pointer;
 }
 
@@ -95,8 +95,8 @@
 /* Keep the embedded calendar's app-owned menu/selection states green too. */
 .custom-schedule.e-schedule .e-selected-cell,
 .custom-schedule .e-header-popup .e-calendar .e-content td.e-focused-date:not(.e-selected) span.e-day {
-  background-color: #dcfce7;
-  color: #065f46;
+  background-color: var(--rl-accent-soft, #dcfce7);
+  color: var(--rl-accent-ink, #065f46);
 }
 
 .custom-schedule .e-header-popup .e-calendar .e-content td.e-selected span.e-day,
@@ -107,10 +107,127 @@
 }
 
 .custom-schedule .e-header-popup .e-calendar .e-content td.e-today:not(.e-selected) span.e-day {
-  color: #047857;
-  border-color: #047857;
+  color: var(--rl-accent-ink, #047857);
+  border-color: var(--rl-accent-ink, #047857);
 }
 
 .custom-schedule .e-toolbar-pop .e-active-view .e-tbar-btn {
   background-color: #047857;
+}
+
+/* Vendor styles have their own surfaces; inherit the app palette without
+   rebuilding the scheduler, losing its current view or recoloring job statuses. */
+.custom-schedule.e-schedule,
+.custom-schedule.e-schedule :is(.e-table-container, .e-content-wrap, .e-header-popup, .e-calendar, .e-toolbar-pop, .e-agenda-view) {
+  background-color: var(--rl-surface, #fff);
+  color: var(--rl-text, #111827);
+  border-color: var(--rl-border, #e5e7eb);
+}
+
+.custom-schedule.e-schedule :is(.e-vertical-view, .e-month-view, .e-agenda-view) :is(.e-work-cells, .e-all-day-cells, .e-resource-cells, .e-agenda-cells, .e-date-header-wrap td, .e-day-date-header) {
+  background-color: var(--rl-surface-muted, #f9fafb);
+  color: var(--rl-text, #111827);
+  border-color: var(--rl-border, #e5e7eb);
+}
+
+.custom-schedule.e-schedule :is(.e-vertical-view, .e-month-view) :is(.e-work-hours, .e-work-days, .e-all-day-cells),
+.custom-schedule.e-schedule .e-agenda-view :is(.e-agenda-cells, .e-day-date-header) {
+  background-color: var(--rl-surface, #fff);
+}
+
+.custom-schedule.e-schedule :is(.e-vertical-view, .e-month-view, .e-agenda-view) :is(.e-time-cells-wrap td, .e-header-cells, .e-resource-left-td) {
+  background-color: var(--rl-surface-raised, #f3f4f6);
+  color: var(--rl-text-muted, #4b5563);
+  border-color: var(--rl-border, #e5e7eb);
+}
+
+.custom-schedule.e-schedule .e-month-view .e-other-month,
+.custom-schedule.e-schedule .e-agenda-view :is(.e-date-time, .e-location, .e-empty-event, .e-no-event) {
+  color: var(--rl-text-subtle, #6b7280);
+}
+
+.custom-schedule.e-schedule .e-agenda-view :is(.e-subject, .e-resource-name, .e-m-date, .e-m-day),
+.custom-schedule.e-schedule .e-schedule-toolbar :is(.e-tbar-btn-text, .e-icons),
+.custom-schedule.e-schedule .e-calendar :is(.e-title, .e-icons, .e-day, .e-week-header th) {
+  color: var(--rl-text, #111827);
+}
+
+.custom-schedule.e-schedule .e-schedule-toolbar :is(.e-tbar-btn, .e-hor-nav),
+.custom-schedule.e-schedule .e-calendar :is(.e-header, .e-content, .e-footer-container) {
+  background-color: var(--rl-surface, #fff);
+  border-color: var(--rl-border, #e5e7eb);
+}
+
+.custom-schedule.e-schedule :is(.e-vertical-view, .e-month-view) :is(.e-work-cells:hover, .e-selected-cell, .e-selected-cell:hover),
+.custom-schedule.e-schedule .e-schedule-toolbar :is(.e-tbar-btn:hover, .e-hor-nav:hover),
+.custom-schedule.e-schedule .e-calendar td:not(.e-selected):hover span.e-day,
+.custom-schedule.e-schedule .e-calendar td.e-focused-date:not(.e-selected) span.e-day {
+  background-color: var(--rl-accent-soft, #ecfdf5);
+  color: var(--rl-accent-ink, #047857);
+}
+
+.custom-schedule.e-schedule :is(.e-vertical-view, .e-month-view) .e-current-day,
+.custom-schedule.e-schedule .e-calendar td.e-today:not(.e-selected) span.e-day {
+  color: var(--rl-accent-ink, #047857);
+}
+
+.custom-schedule.e-schedule .e-schedule-toolbar .e-active-view .e-tbar-btn,
+.custom-schedule.e-schedule .e-calendar td.e-selected span.e-day,
+.custom-schedule.e-schedule .e-calendar td.e-selected:hover span.e-day {
+  background-color: #047857;
+  border-color: #047857;
+  color: #fff;
+}
+
+.custom-schedule.e-schedule .e-schedule-toolbar .e-active-view :is(.e-tbar-btn-text, .e-icons) {
+  color: #fff;
+}
+
+.custom-schedule.e-schedule .e-agenda-view :is(.e-appointment:hover, .e-appointment:focus, .e-appointment.e-appointment-border) {
+  background-color: var(--rl-surface-raised, #f3f4f6);
+}
+
+.custom-schedule.e-schedule .e-agenda-view :is(.e-date-border, .e-day-border, .e-resource-column) {
+  border-color: var(--rl-border, #e5e7eb);
+}
+
+.custom-schedule.e-schedule .e-agenda-view .e-month-header {
+  background-color: #047857;
+}
+
+.custom-schedule.e-schedule .e-more-indicator {
+  color: var(--rl-text-muted, #4b5563);
+}
+
+.custom-schedule.e-schedule .e-calendar .e-footer-container .e-btn.e-today.e-flat.e-primary {
+  background-color: #047857;
+  border-color: #047857;
+  color: #fff;
+}
+
+.custom-schedule.e-schedule .e-calendar .e-footer-container .e-btn.e-today.e-flat.e-primary:hover {
+  background-color: #065f46;
+}
+
+.custom-schedule.e-schedule .e-schedule-toolbar .e-tbar-btn:focus {
+  box-shadow: 0 0 0 1px var(--rl-focus, #047857);
+}
+
+.custom-schedule.e-schedule .e-calendar .e-content td.e-today span.e-day {
+  box-shadow: inset 0 0 0 1px var(--rl-focus, #047857);
+}
+
+/* Adaptive Syncfusion overflow popups are attached to body on small screens. */
+html[data-theme] :is(.custom-schedule .e-more-popup-wrapper, body > .e-more-popup-wrapper.e-device) {
+  background-color: var(--rl-surface, #fff);
+  color: var(--rl-text, #111827);
+  border-color: var(--rl-border, #e5e7eb);
+}
+
+html[data-theme] :is(.custom-schedule .e-more-popup-wrapper, body > .e-more-popup-wrapper.e-device) :is(.e-more-event-content, .e-header-day, .e-header-date, .e-more-event-close) {
+  color: var(--rl-text, #111827);
+}
+
+html[data-theme] :is(.custom-schedule .e-more-popup-wrapper, body > .e-more-popup-wrapper.e-device) .e-more-event-close:hover {
+  background-color: var(--rl-surface-raised, #f3f4f6);
 }

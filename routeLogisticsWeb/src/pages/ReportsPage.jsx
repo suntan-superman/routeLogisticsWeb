@@ -93,7 +93,8 @@ const ReportsPage = () => {
         <head>
           <title>${report.title}</title>
           <style>
-            body { font-family: Arial, sans-serif; margin: 20px; }
+            :root { color-scheme: light; }
+            body { font-family: Arial, sans-serif; margin: 20px; background: #fff; color: #111; }
             .header { text-align: center; margin-bottom: 30px; }
             .section { margin-bottom: 25px; }
             .section h3 { color: #10b981; border-bottom: 2px solid #10b981; padding-bottom: 5px; }

@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { returnPath } from '../utils/returnPath';
 import { motion as Motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
+import ThemeControl from '../components/ThemeControl';
 
 const SignupPage = () => {
   const { signup, refreshSession } = useAuth();
@@ -43,6 +44,7 @@ const SignupPage = () => {
         className="max-w-md w-full space-y-8"
       >
         <div>
+          <div className="mb-5 flex justify-end"><ThemeControl /></div>
           <Link to="/" className="mx-auto h-12 w-12 bg-primary-500 rounded-lg flex items-center justify-center">
             <span className="text-white font-bold text-xl">RL</span>
           </Link>

@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { mayOpenRoute } from '../utils/routeAccess';
 import NotificationToggle from './NotificationToggle';
+import ThemeControl from './ThemeControl';
 import { disablePush } from '../services/push';
 import EmailVerificationBanner from './EmailVerificationBanner';
 import ConnectionStatus from './ConnectionStatus';
@@ -63,7 +64,7 @@ const Layout = ({ children }) => {
       <div className={`fixed inset-0 z-50 lg:hidden ${sidebarOpen ? 'block' : 'hidden'}`}>
         <div className="fixed inset-0 bg-gray-600 bg-opacity-75" onClick={() => setSidebarOpen(false)} />
         <div className="fixed inset-y-0 left-0 flex w-64 flex-col bg-white shadow-xl">
-          <div className="flex h-16 items-center justify-between px-4">
+          <div className="flex h-16 shrink-0 items-center justify-between px-4">
             <div className="flex items-center">
               <div className="flex-shrink-0">
                 <div className="h-8 w-8 bg-primary-500 rounded-lg flex items-center justify-center">
@@ -82,7 +83,7 @@ const Layout = ({ children }) => {
               <XMarkIcon className="h-6 w-6" />
             </button>
           </div>
-          <nav className="flex-1 px-4 py-4 space-y-1">
+          <nav className="min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-1">
             {navigation.map((item) => {
               const Icon = item.icon;
               return (
@@ -102,7 +103,7 @@ const Layout = ({ children }) => {
               );
             })}
           </nav>
-          <div className="border-t border-gray-200 p-4">
+          <div className="shrink-0 border-t border-gray-200 p-4">
             <div className="flex items-center">
               <div className="flex-shrink-0">
                 <div className="h-8 w-8 bg-gray-300 rounded-full flex items-center justify-center">
@@ -128,8 +129,8 @@ const Layout = ({ children }) => {
 
       {/* Desktop sidebar */}
       <div className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col">
-        <div className="flex flex-col flex-grow bg-white border-r border-gray-200">
-          <div className="flex h-16 items-center px-4">
+        <div className="flex min-h-0 flex-col flex-grow bg-white border-r border-gray-200">
+          <div className="flex h-16 shrink-0 items-center px-4">
             <div className="flex items-center">
               <div className="flex-shrink-0">
                 <div className="h-8 w-8 bg-primary-500 rounded-lg flex items-center justify-center">
@@ -141,7 +142,7 @@ const Layout = ({ children }) => {
               </div>
             </div>
           </div>
-          <nav className="flex-1 px-4 py-4 space-y-1">
+          <nav className="min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-1">
             {navigation.map((item) => {
               const Icon = item.icon;
               return (
@@ -160,7 +161,7 @@ const Layout = ({ children }) => {
               );
             })}
           </nav>
-          <div className="border-t border-gray-200 p-4">
+          <div className="shrink-0 border-t border-gray-200 p-4">
             <div className="flex items-center">
               <div className="flex-shrink-0">
                 <div className="h-8 w-8 bg-gray-300 rounded-full flex items-center justify-center">
@@ -201,6 +202,7 @@ const Layout = ({ children }) => {
               <div className="min-w-0"><p className="truncate text-base font-semibold text-gray-900" title={company?.name}>{company?.name || 'Personal workspace'}</p><p className="text-xs text-gray-500">Route Logistics</p></div>
             </div>
             <div className="flex items-center gap-x-4 lg:gap-x-6">
+              <ThemeControl />
               <NotificationToggle />
               <div className="hidden lg:block lg:h-6 lg:w-px lg:bg-gray-200" />
               <div className="hidden xl:flex items-center gap-x-2">

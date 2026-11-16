@@ -1,3 +1,4 @@
+import ThemeControl from '../components/ThemeControl';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
@@ -27,7 +28,7 @@ export default function ReviewInvitationPage() {
   const invitation = data?.invitation;
   return <main className="mx-auto max-w-3xl space-y-6 p-5 py-10 sm:p-8">
     <Helmet><title>Service feedback | Route Logistics</title><meta name="robots" content="noindex,nofollow" /><meta name="referrer" content="no-referrer" /></Helmet>
-    <header><Link className="font-bold text-primary-700" to="/">Route Logistics</Link><h1 className="mt-6 text-3xl font-bold">Your service feedback</h1><p className="mt-2 text-gray-600">Share an honest review of your completed service. Feedback is welcome at every rating.</p></header>
+    <header><div className="flex flex-wrap items-center justify-between gap-3"><Link className="font-bold text-primary-700" to="/">Route Logistics</Link><ThemeControl /></div><h1 className="mt-6 text-3xl font-bold">Your service feedback</h1><p className="mt-2 text-gray-600">Share an honest review of your completed service. Feedback is welcome at every rating.</p></header>
     {busy && <p role="status">Checking your secure invitation…</p>}{error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-800">{error}</p>}
     {invitation?.synthetic && <p role="status" className="rounded-lg bg-amber-50 p-4 text-amber-900">This is an authorized Route Logistics test invitation. No actual service visit is represented, and test feedback cannot be published.</p>}
     {invitation && <section className="rounded-xl border bg-white p-5"><h2 className="text-xl font-semibold">{invitation.companyName || 'Your service provider'}</h2><p className="mt-2">{invitation.serviceType || 'Completed service'} · {invitation.serviceDate || ''}</p></section>}

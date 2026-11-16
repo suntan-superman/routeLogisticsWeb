@@ -1,3 +1,4 @@
+import ThemeControl from '../components/ThemeControl';
 import SelectControl from '../components/SelectControl';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -101,7 +102,7 @@ export default function CustomerPortalPage() {
   const activePayment = paymentInvoice?.accountId === selectedAccount?.id && selectedAccount?.invoices?.some(invoice => invoice.id === paymentInvoice.invoiceId) ? paymentInvoice.invoiceId : null;
   return <main className="mx-auto max-w-5xl p-5 sm:p-8">
     <Helmet><title>Customer portal | Route Logistics</title><meta name="robots" content="noindex,nofollow" /></Helmet>
-    <div className="mb-8 flex flex-wrap items-center justify-between gap-3"><Link className="font-bold text-primary-700" to="/">Route Logistics</Link>{(user || logoutFailed) && <button type="button" disabled={busy && !user} className="text-primary-700 underline" onClick={logout}>{logoutFailed ? 'Retry sign out' : 'Sign out'}</button>}</div>
+    <div className="mb-8 flex flex-wrap items-center justify-between gap-3"><Link className="font-bold text-primary-700" to="/">Route Logistics</Link><div className="flex items-center gap-4"><ThemeControl />{(user || logoutFailed) && <button type="button" disabled={busy && !user} className="text-primary-700 underline" onClick={logout}>{logoutFailed ? 'Retry sign out' : 'Sign out'}</button>}</div></div>
     <h1 className="mb-6 text-3xl font-bold">Customer portal</h1>
     {!user ? <form onSubmit={submit} aria-label="Customer email sign-in" className="max-w-md space-y-4 rounded-xl border bg-white p-6">
       <p>View your service visits and invoices using the email you gave your service provider.</p>

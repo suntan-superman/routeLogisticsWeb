@@ -1,9 +1,10 @@
+import ThemeControl from '../components/ThemeControl';
 import { Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 export default function PrivacyPage() {
   return <main className="mx-auto max-w-3xl space-y-5 p-6 py-12">
     <Helmet><title>Privacy notice | Route Logistics</title><meta name="description" content="How Route Logistics handles account, service and work-location information." /><link rel="canonical" href="https://route-logistics.com/privacy" /></Helmet>
-    <Link to="/" className="text-primary-700">Route Logistics</Link>
+    <div className="flex flex-wrap items-center justify-between gap-3"><Link to="/" className="text-primary-700">Route Logistics</Link><ThemeControl /></div>
     <h1 className="text-3xl font-bold">Privacy notice</h1>
     <p>Updated November 15, 2026. Route Logistics is provided by Workside Software LLC.</p>
     <p>Route Logistics stores account details and the service information entered by your provider, including customer contact details, appointments, job notes, service records, photos, and invoices. Your provider manages the records for its business.</p>

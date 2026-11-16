@@ -10,6 +10,48 @@ Route Logistics has a tested field-work foundation suitable for a **controlled p
 
 Previously recorded browser coverage is **33 scenarios** (99 configured executions across Chromium, Firefox and WebKit). See the November 15 addenda below for execution evidence. Earlier evidence for the original 25 scenarios is retained, including the later clean 75/75 Jobs-date run. Newly added scenarios are not implied to have run by that baseline. Physical iPhone/Android and genuine provider acceptance remain separate.
 
+### November 16 — web appearance
+
+The web **Appearance** selector offers System, Light and Dark in the workspace
+header and standalone sign-in, portal, administration and public-page headers.
+System is the default. Preferences are stored per browser/device, independently
+of account and company, and synchronize between tabs. Print styles retain light
+document output. This web-only feature does not change mobile appearance,
+authorization, records, provider integrations or financial operations and
+requires no mobile rebuild.
+
+Executed local checks: **465/465 web tests passed**, including theme-store and
+appearance-control regressions; web lint and production build passed. These
+results verify preference handling and control behavior separately from rendered
+browser acceptance. The targeted Chromium, Firefox and WebKit run passed
+**12/12 executions** (four scenarios in each engine, no skips):
+
+The existing fast Chromium regression suite also passed **16/16** cases,
+covering invoice integrity, green dropdowns, live job-count refresh with a retained
+scheduling draft, role restrictions, customer management, portal OTP/provider
+switching, CMS publication and prospect intake. Appearance smoke cases run
+through the existing GitHub Actions browser command.
+
+| Browser case | Verification | Execution status |
+| --- | --- | --- |
+| PW-THEME-01 | System/OS changes, explicit overrides, reload persistence and actual cross-tab synchronization | PASS in all three engines |
+| PW-THEME-02 | Authenticated Jobs/inquiry readability, green dropdowns, native date controls, narrow workspace header, light printing, sign-out persistence and unchanged roles/records | PASS in all three engines |
+| PW-THEME-03 | Narrow-screen Login readability and green Appearance menu in light/dark, retained input and no sign-in submission | PASS in all three engines |
+| PW-THEME-04 | Syncfusion calendar toolbar, time/day headings, work-cell surfaces and date-popup contrast in both themes without appointment changes | PASS in all three engines |
+
+Calendar browser coverage uses the existing authorized public Syncfusion client
+license from the normal local Vite environment or CI environment; an unconfigured
+environment reports this vendor case as skipped, never passed. The emulator-only
+build removes Google Fonts imports so the existing strict local-only CSP can
+remain in force. Production font loading and licensing are unchanged.
+
+The browser checks measure rendered text contrast and confirm light print output;
+they also preserve fixture jobs, customers and memberships. All provider transports
+and scheduled workers stayed disabled, and local emulator configuration was
+restored. Small-screen header spacing and a scrollable navigation area keep the
+appearance and account controls reachable. Existing physical-device and provider
+acceptance statuses remain unchanged.
+
 ### November 16 — Batch A: inquiry to assigned estimate visit
 
 [Prospect intake and estimate scheduling](PROSPECT_INTAKE_AND_ESTIMATE_SCHEDULING.md)

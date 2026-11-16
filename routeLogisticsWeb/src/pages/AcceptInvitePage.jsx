@@ -1,3 +1,4 @@
+import ThemeControl from '../components/ThemeControl';
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { httpsCallable } from 'firebase/functions';
@@ -24,7 +25,7 @@ export default function AcceptInvitePage() {
     finally { setBusy(false); }
   };
   return <main className="mx-auto max-w-lg p-6 pt-20">
-    <Link to="/" className="text-primary-700">Route Logistics</Link>
+    <div className="flex flex-wrap items-center justify-between gap-3"><Link to="/" className="text-primary-700">Route Logistics</Link><ThemeControl /></div>
     <h1 className="my-6 text-3xl font-bold">Join your company</h1>
     <p className="mb-6">Use the email address your company owner invited. Your owner has already selected your role and permissions.</p>
     {!currentUser && <>

@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { CONTENT_TYPES, readableDate } from '../utils/platformContent';
+import ThemeControl from './ThemeControl';
 
 export function PublicContentFrame({ children }) {
   return <div className="min-h-screen bg-white text-gray-900">
@@ -11,6 +12,7 @@ export function PublicContentFrame({ children }) {
           {Object.values(CONTENT_TYPES).map(item => <Link key={item.path} to={item.path} className="text-gray-700 underline-offset-4 hover:underline">{item.label}</Link>)}
           <Link to="/portal" className="text-primary-700 hover:underline">Customer portal</Link>
           <Link to="/login" className="font-semibold text-primary-700 hover:underline">Sign in</Link>
+          <ThemeControl />
         </nav>
       </div>
     </header>

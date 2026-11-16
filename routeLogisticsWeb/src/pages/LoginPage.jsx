@@ -8,6 +8,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { auth } from '../services/firebase';
 import { requestPasswordReset } from '../services/passwordReset';
 import { requestStaffCode, signInWithStaffCode } from '../services/staffLogin';
+import ThemeControl from '../components/ThemeControl';
 
 export default function LoginPage() {
   const [email, setEmail] = useState(rememberedEmail);
@@ -80,6 +81,7 @@ export default function LoginPage() {
 
   return <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6">
     <Motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }} className="w-full max-w-md">
+      <div className="mb-5 flex justify-end"><ThemeControl /></div>
       <div className="mb-7 text-center">
         <Link to="/" aria-label="Route Logistics home" className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-primary-600 text-xl font-bold text-white">RL</Link>
         <h1 className="mt-5 text-3xl font-bold tracking-tight text-gray-900">{resetMode ? 'Reset your password' : 'Welcome back'}</h1>

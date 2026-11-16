@@ -1,10 +1,11 @@
+import ThemeControl from '../components/ThemeControl';
 import { Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 
 export default function TermsPage() {
   return <main className="mx-auto max-w-3xl space-y-5 p-6 py-12">
     <Helmet><title>Terms of use | Route Logistics</title><meta name="description" content="Terms for using Route Logistics web and mobile applications." /><link rel="canonical" href="https://route-logistics.com/terms" /></Helmet>
-    <Link to="/" className="text-primary-700">Route Logistics</Link>
+    <div className="flex flex-wrap items-center justify-between gap-3"><Link to="/" className="text-primary-700">Route Logistics</Link><ThemeControl /></div>
     <h1 className="text-3xl font-bold">Terms of use</h1>
     <p>Updated November 15, 2026.</p>
     <p>These terms govern your use of the Route Logistics web and mobile applications provided by Workside Software LLC. By using Route Logistics, you agree to these terms and the <Link className="underline" to="/privacy">privacy notice</Link>.</p>

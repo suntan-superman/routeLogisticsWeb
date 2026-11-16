@@ -40,6 +40,7 @@ function load(relative) {
   const file = path.resolve(__dirname, '../routeLogisticsWeb/src', relative); if (cache.has(file)) return cache.get(file);
   const module = { exports: {} }, mocked = name => {
     if (name === 'react') return React;
+    if (name.endsWith('/ThemeControl')) return { __esModule: true, default: () => null };
     if (name.endsWith('/hooks/useWorkspaceQuery')) return queryMock;
     if (name.endsWith('/hooks/usePrincipalQuery')) return principalMock;
     if (name.endsWith('/services/portal')) return { portalAuth: { currentUser: { uid: 'portal-user' } } };

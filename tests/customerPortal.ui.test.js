@@ -25,6 +25,7 @@ const call = async (name, data, functionClient) => {
 };
 const mock = name => {
   if (name === 'react') return React;
+  if (name.endsWith('/ThemeControl')) return { __esModule: true, default: () => null };
     if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
     if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
     if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found','user-changed'].includes(String(error?.code||'').split('/').pop())};

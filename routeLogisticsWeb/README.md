@@ -25,6 +25,17 @@ yarn build
 - ✅ Comprehensive reporting and analytics
 - ✅ Team member management
 
+## Appearance
+
+Use the **Appearance** selector in the workspace header or on sign-in and public
+pages to choose **System**, **Light**, or **Dark**. System is the default and
+follows the device's appearance setting. An explicit choice is saved in this
+browser on this device, survives reloads and sign-out, and applies independently
+of the signed-in account or company. Other tabs in the same browser stay in sync.
+
+Printed documents use a light background. This feature changes only the web
+application; mobile appearance is unchanged and no mobile rebuild is required.
+
 ## Technology Stack
 
 - **Framework**: React 19 with Vite

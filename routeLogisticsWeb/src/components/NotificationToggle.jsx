@@ -49,8 +49,8 @@ const NotificationToggle = () => {
   };
 
   return (
-    <button onClick={toggle} disabled={busy} className="w-full text-left px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-md disabled:opacity-50">
-      {enabled ? '🔔 Notifications on' : '🔕 Enable notifications'}
+    <button onClick={toggle} disabled={busy} aria-label={enabled ? 'Notifications on' : 'Enable notifications'} title={enabled ? 'Notifications on' : 'Enable notifications'} className="shrink-0 whitespace-nowrap text-left px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-md disabled:opacity-50">
+      <span aria-hidden="true">{enabled ? '🔔' : '🔕'}</span><span className="hidden sm:inline"> {enabled ? 'Notifications on' : 'Enable notifications'}</span>
     </button>
   );
 };

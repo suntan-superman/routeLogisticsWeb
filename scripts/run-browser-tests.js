@@ -8,6 +8,20 @@ const root = path.resolve(__dirname, '..');
 delete process.env.DEBUG;
 delete process.env.GRPC_TRACE;
 
+// A calendar UI test needs the same legitimate public client license as the
+// normal Vite build. Read only this setting; provider credentials remain inert.
+function calendarLicense() {
+  if (process.env.VITE_SYNCFUSION_LICENSE_KEY) return process.env.VITE_SYNCFUSION_LICENSE_KEY;
+  let license = '';
+  for (const name of ['.env', '.env.local', '.env.production', '.env.production.local']) {
+    const file = path.join(root, 'routeLogisticsWeb', name);
+    if (!fs.existsSync(file)) continue;
+    const match = fs.readFileSync(file, 'utf8').match(/^\s*VITE_SYNCFUSION_LICENSE_KEY\s*=\s*([^\r\n]*)/m);
+    if (match) license = match[1].trim().replace(/^(['"])(.*)\1$/, '$2');
+  }
+  return /^(?:your|replace|placeholder)/i.test(license) ? '' : license;
+}
+
 async function freePort(port) {
   await new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -59,8 +73,9 @@ async function main() {
       VITE_FIREBASE_MEASUREMENT_ID: '', VITE_APPCHECK_SITE_KEY: '', VITE_APPCHECK_DEBUG_TOKEN: '',
       VITE_GOOGLE_MAPS_API_KEY: '', VITE_STRIPE_PUBLISHABLE_KEY: '', VITE_STRIPE_MODE: 'test', VITE_STRIPE_LIVE_APPROVED: 'false', VITE_SENTRY_DSN: '',
       VITE_FIREBASE_VAPID_KEY: '', VITE_FIREBASE_PERFORMANCE_ENABLED: 'false',
-      VITE_SYNCFUSION_LICENSE_KEY: '', VITE_GOOGLE_MAPS_MAP_ID: '',
+      VITE_SYNCFUSION_LICENSE_KEY: calendarLicense(), VITE_GOOGLE_MAPS_MAP_ID: '',
     };
+    env.RL_BROWSER_CALENDAR_LICENSE_CONFIGURED = String(!!env.VITE_SYNCFUSION_LICENSE_KEY);
     env.GOOGLE_APPLICATION_CREDENTIALS = adc;
     delete env.FIREBASE_TOKEN;
     const forwarded = args.filter(arg => arg !== '--all-browsers');

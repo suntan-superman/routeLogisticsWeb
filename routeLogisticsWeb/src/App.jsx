@@ -9,6 +9,7 @@ import { registerLicense } from '@syncfusion/ej2-base';
 
 // Contexts
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 
 // Pages
 const HomePage = lazy(() => import('./pages/HomePage'));
@@ -189,17 +190,17 @@ function AppContent() {
                 toastOptions={{
                   duration: 4000,
                   style: {
-                    background: '#363636',
-                    color: '#fff',
+                    background: 'var(--rl-toast-surface)',
+                    color: 'var(--rl-toast-text)',
                   },
                   success: {
                     style: {
-                      background: '#10b981',
+                      background: '#047857', color: '#fff',
                     },
                   },
                   error: {
                     style: {
-                      background: '#ef4444',
+                      background: '#b91c1c', color: '#fff',
                     },
                   },
                 }}
@@ -214,7 +215,7 @@ const router = createBrowserRouter([{ path: '*', element: <AppContent /> }]);
 
 function App() {
   return (
-    <HelmetProvider>
+    <ThemeProvider><HelmetProvider>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <WorkspaceQueryBoundary>
@@ -224,7 +225,7 @@ function App() {
           </WorkspaceQueryBoundary>
         </AuthProvider>
       </QueryClientProvider>
-    </HelmetProvider>
+    </HelmetProvider></ThemeProvider>
   );
 }
 

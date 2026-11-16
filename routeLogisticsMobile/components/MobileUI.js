@@ -3,6 +3,7 @@ import { View, Text, Pressable, ActivityIndicator, ScrollView, BackHandler, Keyb
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeProvider';
 import { GlassCard, GlassButton, GlassInput, IconButton } from './Glass';
+import { isEstimateVisit, estimateOutcomeLabel } from '../services/estimateVisitPolicy';
 
 export const SPACING = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, section: 28 };
 export const PrimaryButton = props => <GlassButton {...props} />;
@@ -44,12 +45,18 @@ export function StatusBadge({ status, syncState }) {
   </View>;
 }
 
+export function AppointmentBadge({ job }) {
+  const { palette } = useTheme();
+  if (!isEstimateVisit(job)) return null;
+  return <View accessibilityRole="text" accessibilityLabel="Estimate Visit" style={{ alignSelf: 'flex-start', borderRadius: 99, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: palette.glow, borderWidth: 1, borderColor: palette.accent }}><Text style={{ color: palette.text, fontWeight: '700', fontSize: 12, lineHeight: 18 }}>Estimate Visit</Text></View>;
+}
+
 export function JobCard({ job, onPress, featured = false, compact = false }) {
   const { palette } = useTheme();
   const title = job.customerName || 'Assigned customer';
-  const address = [job.address, job.city, job.state, job.zipCode].filter(value => typeof value === 'string' && value.trim()).join(', ');
+  const address = typeof job.serviceProperty?.address === 'string' && job.serviceProperty.address.trim() ? job.serviceProperty.address : [job.address, job.city, job.state, job.zipCode].filter(value => typeof value === 'string' && value.trim()).join(', ');
   const appointment = [job.date, job.time || 'Time not set'].filter(Boolean).join(' · ');
-  return <Pressable testID={`job-card-${job.id}`} accessibilityRole="button" accessibilityLabel={`Open job for ${title}, ${job.serviceType || 'Service'}, ${appointment}, ${statusLabels[job.status] || job.status || 'Status not set'}`}
+  return <Pressable testID={`job-card-${job.id}`} accessibilityRole="button" accessibilityLabel={`Open job for ${title}, ${job.serviceType || 'Service'}, ${appointment}, ${statusLabels[job.status] || job.status || 'Status not set'}${isEstimateVisit(job) ? ', Estimate Visit, ' + estimateOutcomeLabel(job) : ''}`}
     accessibilityHint="Opens the work order and job actions" onPress={onPress}
     style={({ pressed }) => ({ minHeight: 100, padding: featured ? 20 : 16, gap: 12, borderRadius: 20, borderWidth: 1, borderColor: featured ? palette.accent : palette.border, backgroundColor: palette.surface, opacity: pressed ? 0.86 : 1 })}>
     {featured && <Text style={{ color: palette.accent, fontSize: 12, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' }}>{job.status === 'in-progress' ? 'Active work order' : job.status === 'en-route' ? 'On your way' : 'Next work order'}</Text>}
@@ -60,7 +67,8 @@ export function JobCard({ job, onPress, featured = false, compact = false }) {
     </View>
     <Text style={{ color: palette.text, fontSize: 14, lineHeight: 21, fontWeight: '600' }}>{appointment}</Text>
     {!compact && !!address && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{address}</Text>}
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><StatusBadge status={job.status} />{!!job.syncState && <StatusBadge syncState={job.syncState} />}</View>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><AppointmentBadge job={job} /><StatusBadge status={job.status} />{!!job.syncState && <StatusBadge syncState={job.syncState} />}</View>
+    {isEstimateVisit(job) && <Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 20 }}>{estimateOutcomeLabel(job)}</Text>}
     {!!job.syncError && <Text accessibilityRole="alert" style={{ color: palette.danger, fontSize: 13, lineHeight: 20 }}>{job.syncError}</Text>}
   </Pressable>;
 }

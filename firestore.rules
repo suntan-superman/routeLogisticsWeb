@@ -166,11 +166,10 @@ service cloud.firestore {
     // ---------- customers ----------
     match /customers/{id} {
       allow read: if financeAccess(resource.data);
-      allow create: if validCreate(false) && addresslessCreate() && (financeAccess(request.resource.data)
-        || (request.resource.data.get('totalSpent', 0) == 0
-          && !request.resource.data.keys().hasAny(['balance', 'revenue', 'paymentStatus', 'invoiceBalance', 'quickbooksId', 'quickbooksCustomerId'])));
+      allow create: if false; // rlManageCustomer/rlManageInquiry enforce duplicate review and idempotent creation.
       allow update: if manageable(resource.data) && tenancyUnchanged()
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(physicalAddressFields())
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lifecycle', 'serviceProperties', 'primaryPropertyId'])
         && (financeAccess(resource.data) || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['totalSpent', 'balance', 'revenue', 'paymentStatus', 'invoiceBalance', 'quickbooksId', 'quickbooksCustomerId']));
       allow delete: if financeAccess(resource.data);
     }
@@ -195,13 +194,14 @@ service cloud.firestore {
       allow read: if financeAccess(resource.data);
       allow create: if false; // rlManageJob serializes assignment and schedule-conflict checks.
       allow update: if tenancyUnchanged() && statusOk()
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['reassignmentRequest', 'visitEvidence'])
+        && resource.data.get('appointmentKind', 'service') != 'estimate_visit'
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['reassignmentRequest', 'visitEvidence', 'appointmentKind', 'billable', 'estimateOutcome', 'inquiryId', 'servicePropertyId', 'propertyAccessInstructions'])
         && !(resource.data.get('status', 'scheduled') in ['completed', 'cancelled']
           && !(request.resource.data.get('status', resource.data.get('status', 'scheduled')) in ['completed', 'cancelled']))
         && geographicUpdate()
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(schedulingFields())
         && financeAccess(resource.data);
-      allow delete: if financeAccess(resource.data); // Managers use rlManageJob; technicians use rlApplyJobOperation.
+      allow delete: if financeAccess(resource.data) && resource.data.get('appointmentKind', 'service') != 'estimate_visit'; // Estimate visits are canceled, preserving inquiry/evidence history.
     }
 
     // ---------- appointments ----------

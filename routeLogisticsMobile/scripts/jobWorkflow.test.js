@@ -7,7 +7,7 @@ const { create, act } = require('react-test-renderer');
 const babel = require('@babel/core');
 const { workspacePermissions } = require('../services/workspacePolicy');
 global.IS_REACT_ACT_ENVIRONMENT = true;
-let account, tree, photoProps, workProps, checklistProps, requestProps, photoMounts, photoUnmounts, calls, loader, savedRead, reads, changes, closes, interactions, discarded, navigationCalls;
+let account, tree, photoProps, workProps, checklistProps, requestProps, outcomeProps, photoMounts, photoUnmounts, calls, loader, savedRead, reads, changes, closes, interactions, discarded, navigationCalls;
 let workDrafts, checklistDrafts, savedDraftCalls, discardedDraftCalls, saveWorkDrafts, saveChecklistDrafts, discardWorkDrafts;
 const saved = new Map();
 const native = Object.fromEntries(['View', 'Text', 'ScrollView', 'ActivityIndicator'].map(name => [name, name]));
@@ -36,6 +36,9 @@ function load() {
     }
     if (specifier === './JobPhotos') return Photos;
     if (specifier === './JobReassignmentRequest') return props => {requestProps=props;return null;};
+    if (specifier === './EstimateVisitOutcome') return props => {outcomeProps=props;return null;};
+    if (specifier.endsWith('/services/estimateVisitPolicy')) return require('../services/estimateVisitPolicy');
+    if (specifier.endsWith('/services/workPresentation')) return require('../services/workPresentation');
     if (specifier === './FieldWorkTools') return props => {
       workProps = props;
       if (props.draftActionsRef) props.draftActionsRef.current = { getDrafts: () => workDrafts, saveDrafts: () => saveWorkDrafts(), discardDrafts: () => discardWorkDrafts() };
@@ -67,7 +70,7 @@ async function draft() { await press('Complete'); await input('Work completed', 
 beforeEach(() => {
   const user = { id: 'technician', companyId: 'acme', membershipId: 'member', role: 'technician', emailVerified: true, workspace: { status: 'company' } };
   account = { user, permissions: workspacePermissions(user.workspace, user) };
-  tree = null; photoProps = workProps = requestProps = null; navigationCalls = []; photoMounts = photoUnmounts = changes = closes = 0; calls = []; interactions = []; discarded = []; reads = []; saved.clear(); savedRead = async id => saved.get(id);
+  tree = null; photoProps = workProps = requestProps = outcomeProps = null; navigationCalls = []; photoMounts = photoUnmounts = changes = closes = 0; calls = []; interactions = []; discarded = []; reads = []; saved.clear(); savedRead = async id => saved.get(id);
   loader = async selected => ({ status: 'synced', operationId: 'operation', jobId: selected.id, message: 'Job completed and synchronized.' });
   workDrafts = checklistDrafts = undefined; savedDraftCalls = []; discardedDraftCalls = []; checklistProps = null;
   saveWorkDrafts = async () => { savedDraftCalls.push('work'); workDrafts = { notes: false, application: false, visit: false, hasDraft: false }; workProps.onDraftChange(false); return { success: true }; };
@@ -75,6 +78,18 @@ beforeEach(() => {
   discardWorkDrafts = () => { discardedDraftCalls.push('work'); workDrafts = { notes: false, application: false, visit: false, hasDraft: false }; workProps.onDraftChange(false); return { success: true }; };
 });
 afterEach(async () => { if (tree) await act(async () => tree.unmount()); });
+
+test('estimate details retain property access and dispatcher notes and completion offers quote-needed outcome',async()=>{
+ await render(job({appointmentKind:'estimate_visit',billable:false,estimateOutcome:'estimate_pending',inquiryId:'inquiry-one',serviceProperty:{address:'22 Rental Road',label:'Rental',unit:'B'},address:'Old billing street',propertyAccessInstructions:'Gate 2468',dispatchNotes:'Inspect exterior only'}));
+ assert.match(text(),/Estimate Visit/);assert.match(text(),/22 Rental Road/);assert.match(text(),/Gate 2468/);assert.match(text(),/Inspect exterior only/);assert.doesNotMatch(text(),/Old billing street/);assert.equal(outcomeProps.job.inquiryId,'inquiry-one');assert.equal(outcomeProps.readOnly,false);
+ await press('Complete');assert.match(text(),/Document estimate visit/);assert.ok(control('Completion outcome: Visit completed — quote needed'));await input('Work completed','Inspected for a quote');await press('Completion outcome: Customer declined');await press('Review completion');assert.match(text(),/Customer declined/);await press('Confirm completion');assert.equal(calls[0].draft.estimateOutcome,'customer_declined');assert.equal(calls[0].job.billable,false);assert.equal(photoMounts,1);
+});
+
+test('unfinished estimate outcome participates in close, completion and mode-switch guards without discarding other work',async()=>{
+ await render(job({appointmentKind:'estimate_visit',billable:false,estimateOutcome:'estimate_pending'}));await act(async()=>outcomeProps.onDraftChange(true));assert.equal(interactions.at(-1).hasDraft,true);
+ await press('Complete');assert.match(text(),/Save the selected estimate outcome/);assert.equal(control('Save drafts and continue').props.disabled,true);assert.equal(control('Discard unsaved drafts and continue').props.disabled,true);assert.equal(calls.length,0);
+ await press('Keep editing');await press('Close job details');assert.equal(closes,0);assert.match(text(),/Keep current outcome/);await press('Keep editing');await act(async()=>outcomeProps.onDraftChange(false));await press('Close job details');assert.equal(closes,1);assert.equal(photoMounts,1);
+});
 
 test('an open reassignment request cannot be silently discarded by job close or completion',async()=>{
  await render();assert.equal(requestProps.active,true);await act(async()=>requestProps.onDraftChange(true));assert.equal(interactions.at(-1).hasDraft,true);

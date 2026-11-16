@@ -10,6 +10,28 @@ Route Logistics has a tested field-work foundation suitable for a **controlled p
 
 Previously recorded browser coverage is **33 scenarios** (99 configured executions across Chromium, Firefox and WebKit). See the November 15 addenda below for execution evidence. Earlier evidence for the original 25 scenarios is retained, including the later clean 75/75 Jobs-date run. Newly added scenarios are not implied to have run by that baseline. Physical iPhone/Android and genuine provider acceptance remain separate.
 
+### November 16 — Batch A: inquiry to assigned estimate visit
+
+[Prospect intake and estimate scheduling](PROSPECT_INTAKE_AND_ESTIMATE_SCHEDULING.md)
+extends Customers with New Inquiry, explicit customer reuse/duplicate review,
+prospect/active/inactive lifecycle, a versioned service-property directory and
+follow-up queue. The existing checked job scheduler handles explicitly
+classified free estimate visits with assigned field staff, conflicts and
+quarter-hour alternatives. Historical jobs remain service jobs without a rewrite.
+Field/Management schedules show Estimate Visit and outcome; existing durable
+arrival/photo/note/job operations remain in use. Completion records quote needed
+without implying paid-work approval or creating an invoice. `rlManageInvoice`
+rejects estimate classification independently of a forged billable flag.
+
+Operator scenarios A–F in the linked report cover new prospect, existing contact
+with another property, unavailable estimator, actual offline mobile visit,
+financial isolation and historical preservation. They are **not physically
+performed** by local browser/emulator tests. The original 169-case baseline and
+its physical/provider statuses remain dated; this addendum supplies the Batch A
+acceptance procedure without copying automated results into manual Pass states.
+Native changes require updated Android/iOS installations. Executed final counts
+and deployment/build identifiers are recorded in the release report.
+
 ### November 16 — invoice integrity repair
 
 [Invoice integrity repair](INVOICE_INTEGRITY_REPAIR.md) adds the authoritative

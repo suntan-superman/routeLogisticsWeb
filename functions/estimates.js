@@ -27,6 +27,7 @@ const { serviceAreaWorkflow, storedGeometry, propertyAddress } = require('./serv
 const { serviceAreaHandlers } = require('./serviceAreas');
 const { validatedCustomerAddress } = require('./customerAddresses');
 const { approvedBillingSnapshot } = require('./shared/invoiceMath');
+const { lifecycleFor } = require('./shared/customerLifecycle');
 const PHOTO_LIMIT = 1572864,
   PDF_LIMIT = 10 * 1024 * 1024;
 const timestamp = value => value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : Date.parse(value || '');
@@ -629,7 +630,7 @@ function estimateHandlers(db, config = {}) {
             const newId = `rl_estimate_${id}_customer`, destination = ref('customers', newId);
             const [existingCustomer, matches] = await Promise.all([tx.get(destination), tx.get(db.collection('customers').where(scope.companyId ? 'companyId' : 'userId','==',scope.companyId || scope.uid).where('email','==',source.recipient.email).limit(2))]);
             if (existingCustomer.exists || !matches.empty) fail('failed-precondition', 'A customer already uses this approved email. Select the matching company customer explicitly.');
-            newCustomer = {userId:current.get('userId'),...(scope.companyId ? {companyId:scope.companyId} : {}),name:source.recipient.name,email:source.recipient.email,emailNormalized:source.recipient.email,phone:source.recipient.phone,address:source.recipient.address,city:'',state:'',zipCode:'',...(newCustomerAddress || {}),isActive:true,totalSpent:0,totalJobs:0,lastServiceDate:null,source:'rl-approved-estimate',createdFromEstimateId:id,createdAt:new Date(now()).toISOString(),updatedAt:new Date(now()).toISOString()};
+            newCustomer = {userId:current.get('userId'),...(scope.companyId ? {companyId:scope.companyId} : {}),name:source.recipient.name,email:source.recipient.email,emailNormalized:source.recipient.email,phone:source.recipient.phone,address:source.recipient.address,city:'',state:'',zipCode:'',...(newCustomerAddress || {}),isActive:true,lifecycle:'active',totalSpent:0,totalJobs:0,lastServiceDate:null,source:'rl-approved-estimate',createdFromEstimateId:id,createdAt:new Date(now()).toISOString(),updatedAt:new Date(now()).toISOString()};
             customer = {id:newId,ref:destination,get:key=>newCustomer[key]};
           } else fail('failed-precondition', 'Select a matching company customer or explicitly create one from this approved prospect.');
           const billingSnapshot = approvedBillingSnapshot(source, { estimateId: id, estimateVersion: source.version, customerId: customer.id });
@@ -668,6 +669,10 @@ function estimateHandlers(db, config = {}) {
           Object.assign(job, { assignedTo: reserved.assignedTo || null, assignedToName: reserved.assignedToName || null, assignedToUid: reserved.assignedToUid || null });
           scheduling.commit(tx, reserved);
           if (newCustomer) tx.create(customer.ref, newCustomer);
+          else if (lifecycleFor(customer.data()) === 'prospect') {
+            tx.update(customer.ref, { lifecycle: 'active', updatedAt: new Date(now()).toISOString() });
+            tx.create(ref('rlAudit', `estimate_${id}_customer_active`), { action: 'customer.lifecycle', companyId: scope.companyId || null, customerId: customer.id, actorId: scope.uid, fromLifecycle: 'prospect', toLifecycle: 'active', reason: 'approved-estimate-conversion', estimateId: id, estimateVersion: source.version, createdAt: new Date(now()) });
+          }
           tx.create(jobRef, job);
           tx.update(target, {
             status: 'converted',

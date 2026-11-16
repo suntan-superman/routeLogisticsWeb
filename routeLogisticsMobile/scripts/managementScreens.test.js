@@ -49,6 +49,12 @@ test('overview counts recorded shifts independently of GPS and links web creatio
  data.positions.error=new Error('Location access denied');await act(async()=>tree.update(React.createElement(App)));assert.match(texts(),/Location access denied/);assert.match(texts(),/—/);
 });
 
+test('management schedule and reassignment show estimate kind, outcome and inquiry without adding financial actions',async()=>{
+ view='schedule';data.jobs.data.jobs=[job('estimate','tech',{appointmentKind:'estimate_visit',billable:false,estimateOutcome:'quote_needed',inquiryId:'inquiry-one',servicePropertyId:'rental'})];
+ await render();assert.match(texts(),/Estimate Visit/);assert.match(texts(),/quote needed/);assert.match(texts(),/Inquiry reference: inquiry-one/);assert.doesNotMatch(texts(),/Create Invoice|Approve estimate/);
+ await press('Assign job estimate');assert.match(texts(),/Estimate Visit/);assert.match(texts(),/Inquiry inquiry-one/);await press('Assign to Manager');await press('Check assignment availability');await press('Confirm job assignment');const saved=calls.find(row=>row[0]==='assign');assert.equal(saved[1].appointmentKind,'estimate_visit');assert.equal(saved[1].billable,false);assert.equal(saved[1].inquiryId,'inquiry-one');assert.equal(saved[2],'manager');
+});
+
 test('manager scheduled metric opens matching jobs and reassigns through availability and explicit confirmation',async()=>{
  user={...user,id:'manager',role:'manager',membershipId:'manager-member'};
  data.team.data={team:[...data.team.data.team,{id:'other-tech',name:'Rosa',role:'technician'}]};

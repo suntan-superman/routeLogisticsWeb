@@ -35,6 +35,10 @@ function cleanCustomerPatch(input = {}, create = false) {
     if (typeof input[field] !== 'boolean') throw new HttpsError('invalid-argument', 'Choose valid customer preferences.');
     patch[field] = input[field];
   }
+  if (input.lifecycle !== undefined) {
+    if (!['prospect', 'active', 'inactive'].includes(input.lifecycle)) throw new HttpsError('invalid-argument', 'Choose Prospect, Active or Inactive for this customer.');
+    patch.lifecycle = input.lifecycle;
+  }
   if (create && !patch.name) patch.name = [patch.firstName, patch.lastName].filter(Boolean).join(' ');
   if ((create || Object.hasOwn(patch, 'name')) && (!patch.name || patch.name.length > 200)) throw new HttpsError('invalid-argument', 'Enter a customer name (200 characters maximum).');
   return patch;
@@ -64,10 +68,13 @@ function customerAddressHandlers(db, config = {}) {
       if (data.companyId !== undefined && data.companyId !== scope.companyId) throw new HttpsError('permission-denied', 'Choose this workspace’s customer.');
       if (data.action === 'validate') return { property: await validator.validateAddress(scope, data.address) };
       if (!['create', 'update'].includes(data.action)) throw new HttpsError('invalid-argument', 'Choose a customer create or update operation.');
+      if (data.action === 'create') return require('./customerIntake').createManagedCustomer(db, request, config, scope);
       const create = data.action === 'create', ref = create ? db.collection('customers').doc() : db.doc(`customers/${documentId(data.id, 'customer')}`);
       const initial = create ? null : await ref.get();
       if (initial && !inScope(initial, scope)) throw new HttpsError('permission-denied', 'Customer unavailable in this workspace.');
       const patch = cleanCustomerPatch(data.customer, create), before = initial?.data() || {};
+      const previousLifecycle = require('./shared/customerLifecycle').lifecycleFor(before), changedLifecycle = patch.lifecycle !== undefined && patch.lifecycle !== previousLifecycle;
+      if (changedLifecycle && !Object.hasOwn(data, 'expectedVersion')) throw new HttpsError('invalid-argument', 'Refresh the customer before changing its lifecycle.');
       const nextAddress = customerAddress({ ...before, ...patch });
       const changedAddress = ADDRESS_FIELDS.some(field => Object.hasOwn(patch, field)) && normalized(nextAddress) !== normalized(customerAddress(before));
       if (!create && changedAddress && (!Object.hasOwn(data, 'expectedVersion') || data.expectedVersion !== null && (typeof data.expectedVersion !== 'string' || data.expectedVersion.length > 128))) throw new HttpsError('invalid-argument', 'Refresh the customer before changing its saved address.');
@@ -83,7 +90,7 @@ function customerAddressHandlers(db, config = {}) {
         const updatedAt = new Date(Math.max(Date.now(), Date.parse(customerVersion(current.get('updatedAt'))) + 1 || 0)).toISOString();
         const customer = { ...(current.data() || {}), ...patch, updatedAt, ...(create ? { userId: scope.uid, ...(scope.companyId ? { companyId: scope.companyId } : {}), createdAt: updatedAt, isActive: patch.isActive !== false, totalJobs: 0, totalSpent: 0, lastServiceDate: null } : {}) };
         if (create) tx.create(ref, customer); else tx.update(ref, { ...patch, updatedAt });
-        tx.create(db.collection('rlAudit').doc(), { action: create ? 'customer.create' : changedAddress ? 'customer.address.update' : 'customer.update', companyId: scope.companyId, customerId: ref.id, actorId: scope.uid, createdAt: updatedAt, ...(changedAddress ? { original: Object.fromEntries(ADDRESS_FIELDS.filter(key => before[key] !== undefined).map(key => [key, before[key]])), changes: Object.fromEntries(ADDRESS_FIELDS.filter(key => patch[key] !== undefined).map(key => [key, patch[key]])) } : {}) });
+        tx.create(db.collection('rlAudit').doc(), { action: create ? 'customer.create' : changedAddress ? 'customer.address.update' : changedLifecycle ? 'customer.lifecycle' : 'customer.update', companyId: scope.companyId || null, customerId: ref.id, actorId: scope.uid, createdAt: updatedAt, ...(changedLifecycle ? { fromLifecycle: previousLifecycle, toLifecycle: patch.lifecycle } : {}), ...(changedAddress ? { original: Object.fromEntries(ADDRESS_FIELDS.filter(key => before[key] !== undefined).map(key => [key, before[key]])), changes: Object.fromEntries(ADDRESS_FIELDS.filter(key => patch[key] !== undefined).map(key => [key, patch[key]])) } : {}) });
         return { id: ref.id, customer: projectCustomer(ref.id, customer, scope.role), updatedAt };
       });
     },

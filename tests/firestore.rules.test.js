@@ -202,6 +202,35 @@ test('technician cannot edit customers', async () => {
   await assertSucceeds(updateDoc(doc(manager(), 'customers/cu1'), { name: 'Bob' }));
 });
 
+test('customer creation, lifecycle and property directory cannot bypass authoritative intake', async () => {
+  for (const client of [owner(), manager(), tech(), as('solo1')]) {
+    await assertFails(setDoc(doc(client, 'customers/raw-prospect'), { userId: 'owner1', companyId: 'c1', name: 'Duplicate bypass', address: '' }));
+    for (const patch of [{ lifecycle: 'active' }, { serviceProperties: [{ id: 'forged', address: 'Other property' }] }, { primaryPropertyId: 'forged' }]) await assertFails(updateDoc(doc(client, 'customers/cu1'), patch));
+  }
+  await assertSucceeds(updateDoc(doc(manager(), 'customers/cu1'), { isActive: false }));
+});
+
+test('estimate kind, inquiry/property linkage and outcome are server-controlled while legacy service edits remain compatible', async () => {
+  await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), 'jobs/estimate-visit'), { companyId: 'c1', userId: 'owner1', appointmentKind: 'estimate_visit', billable: false, status: 'scheduled', estimateOutcome: 'estimate_pending' }));
+  for (const client of [owner(), manager(), tech()]) {
+    for (const patch of [{ appointmentKind: 'service' }, { billable: true }, { status: 'completed' }, { estimateOutcome: 'quote_prepared' }, { inquiryId: 'foreign' }]) await assertFails(updateDoc(doc(client, 'jobs/estimate-visit'), patch));
+    await assertFails(deleteDoc(doc(client, 'jobs/estimate-visit')));
+  }
+  for (const patch of [{ appointmentKind: 'estimate_visit' }, { billable: false }, { servicePropertyId: 'foreign' }, { propertyAccessInstructions: 'Forged access' }]) await assertFails(updateDoc(doc(owner(), 'jobs/j1'), patch));
+  await assertSucceeds(updateDoc(doc(owner(), 'jobs/j1'), { notes: 'Historical service instruction edit' }));
+});
+
+test('inquiries, intake operation receipts and identity locks remain private across staff and portal sessions', async () => {
+  for (const name of ['rlInquiries', 'rlIntakeOperations', 'rlCustomerIdentityLocks']) {
+    await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), `${name}/private-intake`), { companyId: 'c1', customerId: 'cu1', notes: 'Private intake' }));
+    for (const client of [owner(), manager(), tech(), as('portal-customer', { rlCustomer: true }), as('solo1')]) {
+      await assertFails(getDoc(doc(client, `${name}/private-intake`)));
+      await assertFails(setDoc(doc(client, `${name}/raw`), { companyId: 'c1' }));
+      await assertFails(deleteDoc(doc(client, `${name}/private-intake`)));
+    }
+  }
+});
+
 // ---- job status lifecycle ----
 test('invalid status values are rejected', async () => {
   await assertFails(updateDoc(doc(owner(), 'jobs/j1'), { status: 'bogus' }));

@@ -64,12 +64,65 @@ function fixture() {
     new Function('require','module','exports',code)(mockRequire, module, module.exports);
     return module.exports;
   }
-  const offline = load('services/offline.js'), completion = load('services/jobCompletion.js');
-  return { ...offline, ...completion, job, claims, auth, copies, calls, operations, visitOperations, storage, restartOffline:()=>{modules.delete(path.resolve(root,'services/offline.js'));return load('services/offline.js');},
+  const offline = load('services/offline.js'), completion = load('services/jobCompletion.js'), estimateVisits = load('services/estimateVisitOperations.js');
+  return { ...offline, ...completion, ...estimateVisits, job, claims, auth, copies, calls, operations, visitOperations, storage, restartOffline:()=>{modules.delete(path.resolve(root,'services/offline.js'));return load('services/offline.js');},
     online: value => { online = value; }, failSync: value => { syncError = value; }, holdSync: value => { hold = value; }, failStorage: value => { storageError = value; }, holdStorageRead:value=>{storageReadHold=value;},serviceResult:value=>{serviceResult=value;} };
 }
 const draft = { actualWorkDone: 'Applied treatment', actualHours: '1.5', completionNotes: 'Work documented.' };
 const visit = (type='arrived',extra={})=>({operationId:`offline-visit-${type}-00000001`,type,note:type==='access-blocked'?'Gate locked; attempted customer contact.':'Field evidence',occurredAt:new Date().toISOString(),...extra});
+
+test('estimate outcome uses the existing durable job queue, deduplicates taps and survives offline restart', async () => {
+ const f=fixture();f.online(false);Object.assign(f.job,{appointmentKind:'estimate_visit',billable:false,estimateOutcome:'estimate_pending',inquiryId:'inquiry-1',servicePropertyId:'property-1'});
+ const [first,second]=await Promise.all([f.saveEstimateVisitOutcome({...f.job},'quote_needed'),f.saveEstimateVisitOutcome({...f.job},'quote_needed')]);
+ assert.equal(first.operationId,second.operationId);assert.equal(first.status,'queued');assert.equal(f.calls.length,0);
+ const restarted=f.restartOffline(),rows=await restarted.queuedWork();assert.equal(rows.length,1);assert.equal(rows[0].kind,'job');assert.deepEqual(rows[0].patch,{estimateOutcome:'quote_needed'});assert.equal(rows[0].id,first.operationId);
+ const [restored]=await restarted.overlayJobs([{...f.job}]);assert.equal(restored.estimateOutcome,'quote_needed');assert.equal(restored.appointmentKind,'estimate_visit');assert.equal(restored.billable,false);assert.equal(restored.inquiryId,'inquiry-1');
+});
+
+test('estimate outcome acknowledgement updates both offline caches without losing property, instructions or nonbillable kind', async () => {
+ const f=fixture();f.online(false);Object.assign(f.job,{appointmentKind:'estimate_visit',billable:false,estimateOutcome:'estimate_pending',serviceProperty:{address:'22 Rental Street',label:'Rental',unit:'B'},propertyAccessInstructions:'Gate 1234',dispatchNotes:'Inspect exterior only'});
+ const stale={...f.job};await f.writeCache('job-bases',{job:stale});await f.writeCache('job-detail:job',{job:stale,customer:{id:'customer'}});
+ const saved=await f.saveEstimateVisitOutcome(stale,'quote_prepared');f.online(true);await f.flushOffline();assert.equal((await f.getQueuedOperation(saved.operationId)).state,'synced');
+ const restarted=f.restartOffline(),detail=(await restarted.readCache('job-detail:job')).job,[overlaid]=await restarted.overlayJobs([stale]);
+ for(const value of [detail,overlaid]){assert.equal(value.estimateOutcome,'quote_prepared');assert.equal(value.appointmentKind,'estimate_visit');assert.equal(value.billable,false);assert.equal(value.propertyAccessInstructions,'Gate 1234');assert.equal(value.dispatchNotes,'Inspect exterior only');assert.equal(value.serviceProperty.unit,'B');}
+ assert.equal(f.operations.size,1);
+});
+
+test('separate acknowledged notes and outcomes both restore over an old snapshot without overwriting newer server work',async()=>{
+ const f=fixture();f.online(false);Object.assign(f.job,{appointmentKind:'estimate_visit',billable:false,estimateOutcome:'estimate_pending',workNotes:'Old note',notes:'Old note'});const stale={...f.job};
+ await f.persistWorkNoteDraft(stale,'Retained estimate observations');await f.saveWorkNoteDraft('job');await f.saveEstimateVisitOutcome(stale,'quote_needed');f.online(true);await f.flushOffline();
+ const restarted=f.restartOffline(),[restored]=await restarted.overlayJobs([stale]);assert.equal(restored.workNotes,'Retained estimate observations');assert.equal(restored.estimateOutcome,'quote_needed');
+ const [newer]=await restarted.overlayJobs([{...stale,workNotes:'Newer server notes',notes:'Newer server notes',estimateOutcome:'quote_prepared',updatedAt:'2026-11-13T11:00:00.000Z'}]);assert.equal(newer.workNotes,'Newer server notes');assert.equal(newer.estimateOutcome,'quote_prepared');
+});
+
+test('estimate completion defaults to quote needed and preserves an explicitly selected outcome without invoicing or activation', async () => {
+ for(const selected of [undefined,'customer_declined']){
+  const f=fixture();f.online(false);Object.assign(f.job,{appointmentKind:'estimate_visit',billable:false,estimateOutcome:'estimate_pending'});
+  const result=await f.completeJob({...f.job},{...draft,...(selected?{estimateOutcome:selected}:{})}),row=await f.getQueuedOperation(result.operationId);
+  assert.equal(row.patch.estimateOutcome,selected||'quote_needed');assert.equal(row.patch.status,'completed');assert.equal(row.patch.billable,undefined);assert.equal(row.patch.totalCost,undefined);
+  f.online(true);await f.flushOffline();assert.equal(f.job.status,'completed');assert.equal(f.job.estimateOutcome,selected||'quote_needed');assert.equal(f.job.billable,false);assert.equal(f.operations.size,1);assert.ok(f.calls.every(call=>call.name==='rlApplyJobOperation'));
+ }
+});
+
+test('selected offline estimate outcome and later completion retain the existing revision dependency chain', async()=>{
+ const f=fixture();f.online(false);Object.assign(f.job,{appointmentKind:'estimate_visit',billable:false,estimateOutcome:'estimate_pending'});
+ const outcome=await f.saveEstimateVisitOutcome({...f.job},'quote_prepared'),[current]=await f.overlayJobs([{...f.job}]);
+ const completion=await f.completeJob(current,draft),rows=await f.queuedWork();assert.equal(rows.find(row=>row.id===completion.operationId).versionDependency,outcome.operationId);assert.equal(rows.find(row=>row.id===completion.operationId).patch.estimateOutcome,'quote_prepared');
+ f.online(true);await f.flushOffline();assert.equal(f.job.status,'completed');assert.equal(f.job.estimateOutcome,'quote_prepared');assert.equal(f.operations.size,2);assert.ok((await f.queuedWork()).every(row=>row.state==='synced'));
+});
+
+test('estimate outcome rejects service, cross-company, foreign-assignment and unverified attempts before queueing',async()=>{
+ for(const change of [()=>{},f=>Object.assign(f.job,{appointmentKind:'estimate_visit',companyId:'foreign'}),f=>Object.assign(f.job,{appointmentKind:'estimate_visit',assignedTo:'other'}),f=>{f.job.appointmentKind='estimate_visit';f.auth.currentUser.emailVerified=false;}]){
+  const f=fixture();f.online(false);change(f);await assert.rejects(f.saveEstimateVisitOutcome({...f.job},'quote_needed'));assert.equal((await f.queuedWork()).length,0);assert.equal(f.calls.length,0);
+ }
+});
+
+test('failed estimate outcome retains the same saved choice for an explicit retry without another queue',async()=>{
+ const f=fixture();Object.assign(f.job,{appointmentKind:'estimate_visit',billable:false,estimateOutcome:'estimate_pending'});f.failSync(Object.assign(new Error('Outcome authorization needs review.'),{code:'functions/permission-denied'}));
+ let operationId;await assert.rejects(f.saveEstimateVisitOutcome({...f.job},'customer_declined'),error=>{operationId=error.operationId;return /authorization needs review/.test(error.message);});
+ const row=await f.getQueuedOperation(operationId);assert.equal(row.state,'failed');assert.deepEqual(row.patch,{estimateOutcome:'customer_declined'});assert.equal((await f.queuedWork()).length,1);
+ f.failSync(null);const retried=await f.saveEstimateVisitOutcome({...f.job},'customer_declined',{retryOperationId:operationId});assert.equal(retried.status,'synced');assert.equal(f.job.estimateOutcome,'customer_declined');assert.equal(f.operations.size,1);assert.equal((await f.queuedWork()).filter(row=>row.state!=='discarded').length,1);
+});
 
 test('typed work notes persist immediately, retain Unicode and edit time on restart, and never auto-publish',async()=>{
  const f=fixture();f.online(false);const text='Árbol junto a la puerta.\nCustomer not home; gate locked.',editedAt=1700000000123;

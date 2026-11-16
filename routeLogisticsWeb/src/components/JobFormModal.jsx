@@ -15,6 +15,8 @@ import AppointmentRepeatOptions from './AppointmentRepeatOptions';
 import { schedulingFingerprint } from '../services/schedulingService';
 import { appointmentRecurrence, isDateOnAppointmentRecurrence } from '../utils/appointmentRecurrence';
 import { customerAddress, customerView, legacyDate } from '../utils/legacyCustomer';
+import ServicePropertyDirectory from './ServicePropertyDirectory';
+import { estimateOutcomes } from '../utils/appointmentKind';
 
 const SERVICE_TYPES = [
   'General Pest Control',
@@ -44,6 +46,10 @@ const label = 'block text-sm font-medium text-gray-700';
 
 const emptyForm = (defaults, job) => (job ? {
   customerId: job.customerId || '',
+  appointmentKind: job.appointmentKind || 'service',
+  estimateOutcome: job.estimateOutcome || 'estimate_pending',
+  inquiryId: job.inquiryId || '',
+  servicePropertyId: job.servicePropertyId || '',
   serviceType: job.serviceType || '',
   date: job.date || todayStr(),
   time: job.time || '09:00',
@@ -55,6 +61,10 @@ const emptyForm = (defaults, job) => (job ? {
   notes: job.notes || ''
 } : {
   customerId: '',
+  appointmentKind: 'service',
+  estimateOutcome: 'estimate_pending',
+  inquiryId: '',
+  servicePropertyId: '',
   serviceType: '',
   date: todayStr(),
   time: '09:00',
@@ -91,7 +101,7 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
   const [pastAck, setPastAck] = useState(false);
   const [repeatSelection, setRepeatSelection] = useState(null), [assignmentFallback, setAssignmentFallback] = useState('unassigned');
   const [savedRepeat, setSavedRepeat] = useState('null'), [schedulingError, setSchedulingError] = useState(null);
-  const bookingOperation = useRef(null);
+  const bookingOperation = useRef(defaults?.operationId || null);
   const recurrence = useMemo(() => appointmentRecurrence(repeatSelection, form.date), [repeatSelection, form.date]);
   const allowedWeekdays = useMemo(() => recurrence && (recurrence.frequency === 'weekly' || recurrence.monthlyMode === 'weekday') ? [recurrence.weekday] : undefined, [recurrence]);
   const allowAlternative = useCallback(slot => isDateOnAppointmentRecurrence(recurrence, slot.date), [recurrence]);
@@ -100,6 +110,8 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
   const selectedCustomer = customers.find(customer => customer.id === form.customerId);
   const selectedCustomerAddress = customerAddress(selectedCustomer);
   const currentAddress = company?.id ? property.address : form.address;
+  const estimateVisit = form.appointmentKind === 'estimate_visit';
+  const inquiryLinked = !!form.inquiryId;
   const canSaveCustomerAddress = !!can?.('customers.manage') && !!selectedCustomer && !!currentAddress.trim() && currentAddress.trim() !== selectedCustomerAddress.trim();
   const alive = useRef(false), savingRef = useRef(false), closing = useRef(false);
   const addressEditCustomer = useRef(null);
@@ -107,6 +119,7 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
   const locationChanged = propertyChanged || isEdit && form.customerId !== job.customerId;
   const formDirty = formSnapshot(form) !== savedForm || propertyChanged || saveCustomerAddress || repeatSnapshot !== savedRepeat;
   const warnDirty = formDirty || !!reason.trim();
+  const canSubmit = formDirty || !isEdit && inquiryLinked;
   const {confirmDiscard} = useUnsavedChanges(warnDirty,{message:'You have unsaved job details. Leave without saving them?'});
   const requestClose = useCallback(async()=>{if(savingRef.current||closing.current)return;closing.current=true;try{if(!warnDirty||await confirmDiscard())onClose();}finally{closing.current=false;}},[warnDirty,confirmDiscard,onClose]);
 
@@ -137,14 +150,15 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
     if (field === 'address' && !addressEditing) return;
     if (field === 'address') initialCustomerPending.current = false;
     if (field === 'address') setAddressValidation(null);
+    if (field === 'appointmentKind') { setRepeatSelection(null); setSchedulingError(null); }
     if (['assignedTo', 'date', 'time', 'estimatedDuration'].includes(field)) setSchedulingError(null);
     if (field === 'address' && value.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false);
     setPastAck(false);
-    setForm((f) => ({ ...f, [field]: value }));
+    setForm((f) => ({ ...f, [field]: value, ...(field === 'appointmentKind' && value === 'estimate_visit' ? { totalCost: '0' } : {}), ...(field === 'address' ? { servicePropertyId: '' } : {}) }));
   };
 
   const enableAddressEditing = () => {
-    if (savingRef.current || addressEditing || !form.customerId) return;
+    if (savingRef.current || addressEditing || !form.customerId || inquiryLinked) return;
     initialCustomerPending.current = false;
     addressEditCustomer.current = { id: form.customerId, version: customerVersion(selectedCustomer) };
     setAddressEditing(true);
@@ -164,13 +178,13 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
     setAddressValidation(null);
     const c = customers.find((x) => x.id === id);
     const address = customerAddress(c);
-    setForm((f) => ({ ...f, customerId: id, address: company?.id ? address : c && !f.address ? address : f.address }));
+    setForm((f) => ({ ...f, customerId: id, servicePropertyId: '', address: company?.id ? address : c && !f.address ? address : f.address }));
     if (company?.id) setProperty(previous => ({ ...previous, address, exceptionId: null, confirmed: false }));
   };
 
   const submit = async (e) => {
     e.preventDefault();
-    if(savingRef.current || !formDirty)return;
+    if(savingRef.current || !canSubmit)return;
     const customer = customers.find((c) => c.id === form.customerId);
     if (!customer) return toast.error('Select a customer');
     if (!form.serviceType.trim()) return toast.error('Enter a service type');
@@ -178,7 +192,7 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
     if (repeatSelection && !recurrence) return toast.error('Choose a valid first service date for this recurring appointment.');
     if (company?.id && (!isEdit || locationChanged) && !serviceAreaPolicy) return toast.error('Wait for the service-area settings to load, or retry the property check.');
     if (company?.id && (serviceAreaPolicy?.settings?.configured || locationChanged) && (!isEdit || locationChanged) && !property.address.trim()) return toast.error('Enter the service property address explicitly before saving this job.');
-    const cost = form.totalCost === '' ? 0 : Number(form.totalCost);
+    const cost = estimateVisit ? 0 : form.totalCost === '' ? 0 : Number(form.totalCost);
     const duration = Number(form.estimatedDuration);
     if (!(cost >= 0) || !(duration > 0)) return toast.error('Cost and duration must be valid numbers');
     if (isPast && !pastAck) {
@@ -189,6 +203,10 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
     savingRef.current=true;setSaving(true);
     const details = {
       customerId: customer.id,
+      ...(!isEdit || job.appointmentKind ? { appointmentKind: form.appointmentKind } : {}),
+      ...(estimateVisit ? { billable: false, estimateOutcome: form.estimateOutcome } : {}),
+      ...(form.inquiryId ? { inquiryId: form.inquiryId } : {}),
+      ...(form.servicePropertyId || job?.servicePropertyId ? { servicePropertyId: form.servicePropertyId || null } : {}),
       customerName: customer.name,
       customerPhone: customer.phone || '',
       serviceType: form.serviceType.trim(),
@@ -203,8 +221,8 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
       notes: form.notes.trim()
     };
 
-    if (!isEdit && repeatSelection && !bookingOperation.current) bookingOperation.current = globalThis.crypto.randomUUID();
-    const options = saveCustomerAddress || !isEdit && repeatSelection ? { ...(saveCustomerAddress ? { saveCustomerAddress: true, expectedCustomerVersion: addressEditCustomer.current?.version ?? null } : {}), ...(!isEdit && repeatSelection ? { operationId: bookingOperation.current, recurring: { recurrence, preferredTechnicianId: form.assignedTo || null, assignmentFallback } } : {}) } : undefined;
+    if (!isEdit && !bookingOperation.current) bookingOperation.current = globalThis.crypto.randomUUID();
+    const options = saveCustomerAddress || !isEdit ? { ...(saveCustomerAddress ? { saveCustomerAddress: true, expectedCustomerVersion: addressEditCustomer.current?.version ?? null } : {}), ...(!isEdit ? { operationId: bookingOperation.current } : {}), ...(!isEdit && repeatSelection ? { recurring: { recurrence, preferredTechnicianId: form.assignedTo || null, assignmentFallback } } : {}) } : undefined;
     const requestedSchedule = schedulingFingerprint({ companyId: company?.id, memberId: form.assignedTo, date: form.date, time: form.time, estimatedDuration: duration, jobId: job?.id });
     setSchedulingError(null);
     if (saveCustomerAddress && (!addressEditing || addressEditCustomer.current?.id !== customer.id || !canSaveCustomerAddress)) { savingRef.current = false; setSaving(false); return toast.error('Review the customer address before saving it permanently.'); }
@@ -255,7 +273,10 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
         </div>
 
         <div className="space-y-4 px-6 py-5">
-          <ThemedSelect label="Customer" required value={form.customerId} options={[{ value: '', label: 'Select a customer…' }, ...customers.map(customer => ({ value: customer.id, label: customer.name }))]} onChange={pickCustomer} disabled={saving} placeholder={customers.length ? 'Select a customer…' : 'No customers yet – add one first'} autoFocus />
+          <ThemedSelect label="Customer" required value={form.customerId} options={[{ value: '', label: 'Select a customer…' }, ...customers.map(customer => ({ value: customer.id, label: customer.name }))]} onChange={pickCustomer} disabled={saving || inquiryLinked} placeholder={customers.length ? 'Select a customer…' : 'No customers yet – add one first'} autoFocus />
+          <label className={label}>Appointment kind<SelectControl aria-label="Appointment kind" className={input} value={form.appointmentKind} disabled={saving || isEdit || inquiryLinked} onChange={event => set('appointmentKind', event.target.value)}><option value="service">Service job</option><option value="estimate_visit">Estimate visit</option></SelectControl></label>
+          {estimateVisit && <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">Free estimate visit — nonbillable. Completing this visit does not approve work or create an invoice. Quote preparation follows separately.</p>}
+          {isEdit && estimateVisit && <label className={label}>Estimate outcome<SelectControl aria-label="Estimate outcome" className={input} value={form.estimateOutcome} disabled={saving} onChange={event => set('estimateOutcome', event.target.value)}>{estimateOutcomes.map(row => <option key={row.value} value={row.value}>{row.label}</option>)}</SelectControl></label>}
 
           <div>
             <label className={label}>Service type *</label>
@@ -289,10 +310,16 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
           </div>
 
           <TechnicianAvailability companyId={company?.id} memberId={form.assignedTo} memberName={job?.assignedToName} date={form.date} time={form.time} estimatedDuration={form.estimatedDuration} jobId={job?.id} disabled={saving} allowedWeekdays={allowedWeekdays} isAlternativeAllowed={allowAlternative} schedulingError={schedulingError} onMemberChange={id => set('assignedTo', id)} onSelectAlternative={slot => { if (savingRef.current) return; setSchedulingError(null); setPastAck(false); setForm(previous => ({ ...previous, date: slot.date, time: slot.time })); }} />
-          {!isEdit && <AppointmentRepeatOptions value={repeatSelection} onChange={value => { if (!savingRef.current) { setRepeatSelection(value); setSchedulingError(null); } }} date={form.date} assignmentFallback={assignmentFallback} onFallbackChange={setAssignmentFallback} disabled={saving} company={!!company?.id} />}
+          {!isEdit && !estimateVisit && <AppointmentRepeatOptions value={repeatSelection} onChange={value => { if (!savingRef.current) { setRepeatSelection(value); setSchedulingError(null); } }} date={form.date} assignmentFallback={assignmentFallback} onFallbackChange={setAssignmentFallback} disabled={saving} company={!!company?.id} />}
           {isEdit && job.servicePlanId && <p className="text-sm text-gray-600">This is a recurring visit. Changes here apply to this visit only; the service plan controls later visits.</p>}
 
           <div ref={propertyPanel}>
+          {company?.id && form.customerId && <ServicePropertyDirectory key={form.customerId} customerId={form.customerId} value={form.servicePropertyId} disabled={saving} locked={inquiryLinked} onSelect={saved => {
+            if (savingRef.current || !saved) return;
+            initialCustomerPending.current = false; setAddressEditing(false); setSaveCustomerAddress(false); setAddressValidation(null);
+            setProperty(previous => ({ ...previous, address: saved.address, serviceCategory: saved.serviceCategory || previous.serviceCategory, exceptionId: saved.serviceAreaExceptionId || null, confirmed: false }));
+            setForm(previous => ({ ...previous, servicePropertyId: saved.id, address: saved.address }));
+          }} />}
           {!company?.id && <div>
             <label className={label}>Service address</label>
             <input
@@ -304,13 +331,13 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
             />
           </div>}
           <div className="rounded-lg border border-gray-200 p-3">
-            {!addressEditing ? <button type="button" disabled={saving || !form.customerId} className="text-sm font-medium text-primary-700 underline disabled:opacity-50" onClick={enableAddressEditing}>Enable Editing</button> : <p className="text-sm font-medium text-gray-700">Address editing enabled for this job.</p>}
+            {!addressEditing ? <button type="button" disabled={saving || !form.customerId || inquiryLinked} className="text-sm font-medium text-primary-700 underline disabled:opacity-50" onClick={enableAddressEditing}>Enable Editing</button> : <p className="text-sm font-medium text-gray-700">Address editing enabled for this job.</p>}
             {addressEditing && canSaveCustomerAddress && <label className="mt-3 flex items-start gap-2 text-sm"><input type="checkbox" aria-label="Update customer's saved address" checked={saveCustomerAddress} disabled={saving} onChange={event => setSaveCustomerAddress(event.target.checked)} /><span>Update customer's saved address<span className="mt-1 block text-xs text-gray-600">New jobs will default to this address. Recorded job and service-plan addresses will not be rewritten.</span></span></label>}
           </div>
           {company?.id && <>
             {isEdit && job.address && !job.serviceProperty && <p className="text-sm text-gray-600">Recorded service address: {typeof job.address === 'string' ? job.address : customerAddress({ address: job.address })}. Normal edits preserve this appointment; enter a service property only when changing its location.</p>}
             {!!selectedCustomerAddress && property.address === selectedCustomerAddress && <p className="text-sm text-gray-600">Using the customer's saved address. Change the service property below if this visit is at a different location.</p>}
-            <ServicePropertyEligibility key={form.customerId} companyId={company.id} serviceCategories={company.serviceCategories || []} value={property} validation={addressValidation} purpose="scheduling" existing={isEdit} disabled={saving} addressReadOnly={!addressEditing} onEnableAddressEditing={enableAddressEditing} billingAddress={selectedCustomerAddress} onPolicyLoaded={setServiceAreaPolicy} onChange={next => { if (savingRef.current || !addressEditing && next.address !== property.address) return; initialCustomerPending.current = false; if (next.address.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false); if (next.address !== property.address) setAddressValidation(null); setProperty(next); if (next.address !== property.address) setForm(previous => ({ ...previous, address: next.address })); }} />
+            <ServicePropertyEligibility key={form.customerId} companyId={company.id} serviceCategories={company.serviceCategories || []} value={property} validation={addressValidation} purpose="scheduling" existing={isEdit} disabled={saving} fixedProperty={inquiryLinked} addressReadOnly={!addressEditing} onEnableAddressEditing={enableAddressEditing} billingAddress={selectedCustomerAddress} onPolicyLoaded={setServiceAreaPolicy} onChange={next => { if (savingRef.current || !addressEditing && next.address !== property.address) return; initialCustomerPending.current = false; if (next.address.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false); if (next.address !== property.address) setAddressValidation(null); setProperty(next); if (next.address !== property.address) setForm(previous => ({ ...previous, address: next.address, servicePropertyId: '' })); }} />
           </>}
           {!company?.id && <AddressValidationNotice validation={addressValidation} disabled={saving} onAccept={!addressEditing ? undefined : address => { if (savingRef.current) return; initialCustomerPending.current = false; setAddressValidation(null); if (address.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false); setForm(previous => ({ ...previous, address })); }}>
             {!addressEditing && <div className="space-y-2"><p>The saved address is locked. Enable Editing, then use the suggested address.</p><button type="button" aria-label="Enable Editing for suggested address" disabled={saving || !form.customerId} className="rounded-lg bg-primary-700 px-4 py-2 font-medium text-white hover:bg-primary-800 disabled:opacity-50" onClick={enableAddressEditing}>Enable Editing</button></div>}
@@ -323,6 +350,7 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
               <input
                 type="number" min="0" step="0.01"
                 value={form.totalCost}
+                disabled={saving || estimateVisit}
                 onChange={(e) => set('totalCost', e.target.value)}
                 className={input}
                 placeholder="0.00"
@@ -392,7 +420,7 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
             {savedWarning ? 'Done' : 'Cancel'}
           </button>
           <button
-            type="submit" disabled={saving || !formDirty || !!company?.id && (!isEdit || locationChanged) && !serviceAreaPolicy}
+            type="submit" disabled={saving || !canSubmit || !!company?.id && (!isEdit || locationChanged) && !serviceAreaPolicy}
             className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
           >
             {saving ? 'Saving…' : pastAck ? 'Schedule anyway' : isEdit ? 'Save Changes' : 'Schedule Job'}

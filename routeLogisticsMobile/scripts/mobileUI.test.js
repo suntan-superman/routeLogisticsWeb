@@ -39,6 +39,12 @@ test('job cards expose clear accessible actions and statuses without financial f
  assert.match(JSON.stringify(tree.toJSON()),/In progress/);
 });
 
+test('estimate visits use the normal job card with a distinct badge and outcome while historical service cards stay unchanged',async()=>{
+ const record={id:'estimate',customerName:'Prospect',serviceType:'Pest assessment',appointmentKind:'estimate_visit',billable:false,estimateOutcome:'quote_needed',address:'Old billing address',serviceProperty:{address:'Selected rental property'},date:'2026-11-16',time:'09:00',status:'completed'};
+ await render(UI.JobCard,{job:record,onPress(){}});const text=JSON.stringify(tree.toJSON());assert.match(text,/Estimate Visit/);assert.match(text,/quote needed/);assert.match(text,/Selected rental property/);assert.doesNotMatch(text,/Old billing address/);assert.match(tree.root.findByType('Pressable').props.accessibilityLabel,/Estimate Visit/);
+ await act(async()=>tree.unmount());tree=null;await render(UI.JobCard,{job:{...record,appointmentKind:undefined,estimateOutcome:undefined},onPress(){}});assert.doesNotMatch(JSON.stringify(tree.toJSON()),/Estimate Visit|quote needed/);
+});
+
 test('buttons and fields provide accessible targets and solid readable surfaces in either appearance',async()=>{
  for(const isDark of [false,true]){
   dark=isDark;await render(UI.PrimaryButton,{title:'Start work'});

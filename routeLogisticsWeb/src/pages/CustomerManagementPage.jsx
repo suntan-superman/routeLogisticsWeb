@@ -1,6 +1,6 @@
 import SelectControl from '../components/SelectControl';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { formatCustomerDate, legacyDate } from '../utils/legacyCustomer';
+import { formatCustomerDate, legacyDate, customerView } from '../utils/legacyCustomer';
 import { motion as Motion } from 'framer-motion';
 import CustomerService from '../services/customerService';
 import { useConfirm } from '../components/ConfirmProvider';
@@ -24,6 +24,9 @@ import { canManage, can } from '../services/tenancy';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useWorkspaceQuery, useInvalidateWorkspace } from '../hooks/useWorkspaceQuery';
 import { workspaceAccessError } from '../services/workspaceQueryPolicy';
+import InquiryWorkspace from '../components/InquiryWorkspace';
+import CustomerLifecycleControl from '../components/CustomerLifecycleControl';
+import { lifecycleLabel } from '../services/inquiryService';
 
 const customerForm = (customer = {}) => ({name:customer.name || '',email:customer.email || '',phone:formatPhone(customer.phone || ''),address:customer.address || '',city:customer.city || '',state:customer.state || '',zipCode:customer.zipCode || '',notes:customer.notes || '',isActive:customer.isActive !== false,emailConsent:customer.emailConsent === true});
 const customerSnapshot = data => JSON.stringify(customerForm(data));
@@ -70,6 +73,8 @@ const CustomerManagementPage = () => {
   const [customerData, setCustomerData] = useState(customerForm);
   const [savedCustomer, setSavedCustomer] = useState(() => customerSnapshot(customerForm()));
   const [addressValidation, setAddressValidation] = useState(null);
+  const [duplicateMatches, setDuplicateMatches] = useState([]), [separateCustomer, setSeparateCustomer] = useState(false), [separateReason, setSeparateReason] = useState('');
+  const customerOperation = useRef(null);
   const editingCustomerVersion = useRef(null);
   const closing = useRef(false), saving = useRef(false);
   const formDirty = (showAddModal || showEditModal) && canManage() && customerSnapshot(customerData) !== savedCustomer;
@@ -140,6 +145,7 @@ const CustomerManagementPage = () => {
 
   const handleInputChange = (field, value) => {
     if (saving.current) return;
+    customerOperation.current = null;
     setAddressValidation(null);
     setCustomerData(prev => ({
       ...prev,
@@ -149,6 +155,7 @@ const CustomerManagementPage = () => {
 
   const resetForm = () => {
     setAddressValidation(null);editingCustomerVersion.current=null;
+    setDuplicateMatches([]); setSeparateCustomer(false); setSeparateReason(''); customerOperation.current = null;
     const empty=customerForm();setCustomerData(empty);setSavedCustomer(customerSnapshot(empty));
   };
 
@@ -168,7 +175,8 @@ const CustomerManagementPage = () => {
 
     saving.current=true;setIsLoading(true);setAddressValidation(null);
     try {
-      const result = await CustomerService.createCustomer(customerData);
+      customerOperation.current ||= crypto.randomUUID();
+      const result = await CustomerService.createCustomer(customerData, { operationId: customerOperation.current, ...(separateCustomer ? { duplicateDecision: 'separate', duplicateReason: separateReason.trim() } : {}) });
       if (result.success) {
         setCustomers(prev => [result.customer, ...prev]);
         setShowAddModal(false);
@@ -177,6 +185,7 @@ const CustomerManagementPage = () => {
         toast.success('Customer added successfully!');
       } else {
         setAddressValidation(result.addressValidation || null);
+        setDuplicateMatches(result.matches || []);
         toast.error(result.error);
       }
     } catch (error) {
@@ -277,6 +286,8 @@ const CustomerManagementPage = () => {
     setSelectedCustomer(customer);
     setShowViewModal(true);
   };
+  const closeCustomerView = async () => { if (await confirmDiscard()) { setShowViewModal(false); setSelectedCustomer(null); } };
+  const retainCustomer = customer => { const updated = customerView(customer.id, customer); setCustomers(previous => previous.some(row => row.id === updated.id) ? previous.map(row => row.id === updated.id ? { ...row, ...updated } : row) : [updated, ...previous]); if (selectedCustomer?.id === updated.id) setSelectedCustomer(previous => ({ ...previous, ...updated })); };
 
   const exportCustomers = async () => {
     try {
@@ -349,6 +360,8 @@ const CustomerManagementPage = () => {
         </div>
       </div>
 
+      {can('customers.manage') && <InquiryWorkspace customers={customers} onCustomerSaved={retainCustomer} />}
+
       {/* Stats Cards */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
         <div className="bg-white overflow-hidden shadow-sm rounded-lg border border-gray-200">
@@ -375,7 +388,7 @@ const CustomerManagementPage = () => {
               </div>
               <div className="ml-5 w-0 flex-1">
                 <dl>
-                  <dt className="text-sm font-medium text-gray-500 truncate">Active Customers</dt>
+                  <dt className="text-sm font-medium text-gray-500 truncate">Unarchived customers</dt>
                   <dd className="text-lg font-medium text-gray-900">{stats.activeCustomers}</dd>
                 </dl>
               </div>
@@ -391,7 +404,7 @@ const CustomerManagementPage = () => {
               </div>
               <div className="ml-5 w-0 flex-1">
                 <dl>
-                  <dt className="text-sm font-medium text-gray-500 truncate">Inactive Customers</dt>
+                  <dt className="text-sm font-medium text-gray-500 truncate">Archived customers</dt>
                   <dd className="text-lg font-medium text-gray-900">{stats.inactiveCustomers}</dd>
                 </dl>
               </div>
@@ -440,8 +453,8 @@ const CustomerManagementPage = () => {
               className="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
             >
               <option value="all">All Customers</option>
-              <option value="active">Active Only</option>
-              <option value="inactive">Inactive Only</option>
+              <option value="active">Unarchived only</option>
+              <option value="inactive">Archived only</option>
             </SelectControl>
             
             <SelectControl
@@ -516,6 +529,7 @@ const CustomerManagementPage = () => {
                         </div>
                         <div className="ml-4">
                           <div className="text-sm font-medium text-gray-900">{customer.name || 'Name not provided'}</div>
+                          <div className="text-xs text-primary-800">{lifecycleLabel(customer)}</div>
                           <div className="text-sm text-gray-500">Added {formatDate(customer.createdAt)}</div>
                         </div>
                       </div>
@@ -538,7 +552,7 @@ const CustomerManagementPage = () => {
                           ? 'bg-green-100 text-green-800' 
                           : 'bg-gray-100 text-gray-800'
                       }`}>
-                        {customer.isActive ? 'Active' : 'Inactive'}
+                        {customer.isActive ? 'Unarchived' : 'Archived'}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
@@ -691,6 +705,7 @@ const CustomerManagementPage = () => {
               </fieldset>
               
               <AddressValidationNotice validation={addressValidation} onAccept={useSuggestedAddress} disabled={isLoading} />
+              {!!duplicateMatches.length && <section aria-label="Possible duplicate customers" className="mt-4 space-y-3 rounded-lg bg-amber-50 p-4"><p className="font-medium">Possible matching customers exist. Reuse one, or explicitly record why this is a separate contact.</p>{duplicateMatches.map(match => { const customer = match.customer || match; return <div key={customer.id} className="rounded border bg-white p-3"><p>{customer.name} · {customer.email || customer.phone || customer.address}</p><button type="button" disabled={isLoading || customer.isActive === false} className="text-primary-700 underline" onClick={() => { setShowAddModal(false); resetForm(); openViewModal(customer); }}>Use existing customer</button></div>; })}<label className="flex gap-2 text-sm"><input type="checkbox" checked={separateCustomer} disabled={isLoading} onChange={event => { setSeparateCustomer(event.target.checked); customerOperation.current = null; }} />Create an intentionally separate customer</label>{separateCustomer && <label className="block text-sm">Reason for separate record<input aria-label="Separate customer record reason" className="input-field mt-1 w-full" minLength={3} maxLength={500} value={separateReason} disabled={isLoading} onChange={event => { setSeparateReason(event.target.value); customerOperation.current = null; }} /></label>}</section>}
               <div className="flex justify-end space-x-3 mt-6">
                 <button
                   onClick={closeEditor}
@@ -700,7 +715,7 @@ const CustomerManagementPage = () => {
                 </button>
                 <button
                   onClick={handleAddCustomer}
-                  disabled={isLoading || !formDirty}
+                  disabled={isLoading || !formDirty || !!duplicateMatches.length && (!separateCustomer || separateReason.trim().length < 3)}
                   className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isLoading ? 'Adding...' : 'Add Customer'}
@@ -829,7 +844,7 @@ const CustomerManagementPage = () => {
                     className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
                   />
                   <label htmlFor="isActive" className="ml-2 block text-sm text-gray-900">
-                    Active customer
+                    Customer is not archived
                   </label>
                 </div>
               </fieldset>
@@ -863,10 +878,7 @@ const CustomerManagementPage = () => {
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium text-gray-900">Customer Details</h3>
                 <button
-                  onClick={() => {
-                    setShowViewModal(false);
-                    setSelectedCustomer(null);
-                  }}
+                  onClick={closeCustomerView}
                   className="text-gray-400 hover:text-gray-600"
                 >
                   <span className="sr-only">Close</span>
@@ -887,6 +899,7 @@ const CustomerManagementPage = () => {
                   </div>
                   <div className="ml-4">
                     <h4 className="text-lg font-medium text-gray-900">{selectedCustomer.name || 'Name not provided'}</h4>
+                    <p className="text-xs font-medium text-primary-800">{lifecycleLabel(selectedCustomer)}</p>
                     <p className="text-sm text-gray-500">Customer since {formatDate(selectedCustomer.createdAt)}</p>
                   </div>
                 </div>
@@ -919,14 +932,14 @@ const CustomerManagementPage = () => {
                       <dd className="text-sm text-gray-900">{selectedCustomer.totalJobs || 0}</dd>
                     </div>
                     <div>
-                      <dt className="text-sm font-medium text-gray-500">Status</dt>
+                      <dt className="text-sm font-medium text-gray-500">Archive status</dt>
                       <dd className="text-sm">
                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                           selectedCustomer.isActive 
                             ? 'bg-green-100 text-green-800' 
                             : 'bg-gray-100 text-gray-800'
                         }`}>
-                          {selectedCustomer.isActive ? 'Active' : 'Inactive'}
+                          {selectedCustomer.isActive ? 'Unarchived' : 'Archived'}
                         </span>
                       </dd>
                     </div>
@@ -940,22 +953,17 @@ const CustomerManagementPage = () => {
                 </div>
               </div>
               {canManage() && <CustomerSmsConsent key={selectedCustomer.id} customer={selectedCustomer} />}
+              {can('customers.manage') && <CustomerLifecycleControl key={selectedCustomer.id} customer={selectedCustomer} onSaved={retainCustomer} />}
               
               <div className="flex justify-end space-x-3 mt-6">
                 <button
-                  onClick={() => {
-                    setShowViewModal(false);
-                    setSelectedCustomer(null);
-                  }}
+                  onClick={closeCustomerView}
                   className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                 >
                   Close
                 </button>
                 {canManage() && <button
-                  onClick={() => {
-                    setShowViewModal(false);
-                    openEditModal(selectedCustomer);
-                  }}
+                  onClick={async () => { if (await confirmDiscard()) { setShowViewModal(false); openEditModal(selectedCustomer); } }}
                   className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
                   Edit Customer

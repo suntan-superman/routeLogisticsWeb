@@ -1,5 +1,5 @@
 import SelectControl from '../components/SelectControl';
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion as Motion } from 'framer-motion';
 import JobManagementService from '../services/jobManagementService';
 import CustomerService from '../services/customerService';
@@ -31,6 +31,8 @@ import ServiceChecklist from '../components/ServiceChecklist';
 import JobApplicationLog from '../components/JobApplicationLog';
 import JobWorkDetails from '../components/JobWorkDetails';
 import InvoiceCreationDialog from '../components/InvoiceCreationDialog';
+import AppointmentKindBadge from '../components/AppointmentKindBadge';
+import { isEstimateVisit, estimateOutcomes } from '../utils/appointmentKind';
 import { canManage, can } from '../services/tenancy';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { formatCalendarDate } from '../utils/calendarDate';
@@ -38,7 +40,7 @@ import { useWorkspaceQuery, useInvalidateWorkspace } from '../hooks/useWorkspace
 import { summarizeJobs, inJobPeriod, calendarDay, jobDateRange } from '../utils/jobSummary';
 import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 
-const statusInput = job => ({ status: job?.status || '', actualWorkDone: job?.actualWorkDone || '', actualHours: String(job?.actualHours ?? ''), completionNotes: job?.completionNotes || '', cancellationReason: job?.cancellationReason || '' });
+const statusInput = job => ({ status: job?.status || '', actualWorkDone: job?.actualWorkDone || '', actualHours: String(job?.actualHours ?? ''), completionNotes: job?.completionNotes || '', cancellationReason: job?.cancellationReason || '', ...(isEstimateVisit(job) ? { estimateOutcome: job?.estimateOutcome || 'estimate_pending' } : {}) });
 const EMPTY=[];
 const unknownStats=Object.fromEntries(Object.keys(summarizeJobs([])).map(key=>[key,'—']));
 const deniedJobRead=error=>workspaceAccessError(error)||/job not found|not assigned to your workspace|unauthorized to access this job/i.test(error?.message||'');
@@ -71,7 +73,7 @@ const JobManagementPage = () => {
   const [invoiceSelection,setInvoiceSelection]=useState(null);
   const invoiceJob=jobsQuery.readable&&!deniedJobRead(jobsQuery.error)&&invoiceSelection?.scopeId===jobsQuery.scopeId?invoiceSelection:null;
   const selectedSnapshot=jobsQuery.readable&&!deniedJobRead(jobsQuery.error)&&selection?.scopeId===jobsQuery.scopeId?selection.job:null;
-  const setSelectedJob=value=>setSelection(value?{scopeId:jobsQuery.scopeId,job:value}:null);
+  const setSelectedJob=useCallback(value=>setSelection(value?{scopeId:jobsQuery.scopeId,job:value}:null),[jobsQuery.scopeId]);
   const detailQuery=useWorkspaceQuery(['job',selectedSnapshot?.id||null],()=>JobManagementService.getJob(selectedSnapshot.id),{enabled:showViewModal&&!!selectedSnapshot});
   const selectedJob=showViewModal?(detailQuery.readable&&!deniedJobRead(detailQuery.error)?detailQuery.data?.job||jobs.find(row=>row.id===selectedSnapshot?.id)||selectedSnapshot:null):selectedSnapshot;
   const todayKey=new Date().toLocaleDateString('en-CA');
@@ -109,6 +111,13 @@ const JobManagementPage = () => {
     window.addEventListener('keydown', keydown);
     return () => { live.current = false; lifecycle.current++; window.removeEventListener('keydown', keydown); };
   }, []);
+  const requestedJob = new URLSearchParams(globalThis.window?.location?.search || '').get('job'), openedJobLink = useRef(null);
+  useEffect(() => {
+    if (!requestedJob || !jobsQuery.readable || openedJobLink.current === `${jobsQuery.scopeId}:${requestedJob}`) return;
+    openedJobLink.current = `${jobsQuery.scopeId}:${requestedJob}`; let current = true; const ticket = ++localAction.current;
+    JobManagementService.getJob(requestedJob).then(result => { if (!current || !live.current || ticket !== localAction.current) return; if (!result.success || !result.job) { toast.error(result.error || 'This appointment is not available in your workspace.'); return; } setSelectedJob(result.job); setShowStatusModal(false); setShowEditModal(false); setShowViewModal(true); });
+    return () => { current = false; };
+  }, [requestedJob, jobsQuery.scopeId, jobsQuery.readable, setSelectedJob]);
 
   const refreshSavedCustomer = async (saved, metadata) => {
     if (!metadata?.customerAddressUpdated || !saved?.customerId) return;
@@ -567,6 +576,7 @@ const JobManagementPage = () => {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div>
                         <div className="text-sm font-medium"><button type="button" onClick={() => openViewModal(job)} aria-label={`View job details for ${job.customerName || 'Customer'} · ${job.serviceType || 'Service'}`} className="text-left text-primary-700 underline decoration-primary-300 underline-offset-2 hover:text-primary-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500">{job.serviceType || 'Service'}</button><ModifiedBadge job={job} /></div>
+                        <AppointmentKindBadge job={job} outcome />
                         <div className="text-sm text-gray-500 flex items-center">
                           <MapPinIcon className="h-3 w-3 mr-1" />
                           {job.address || 'No address'}
@@ -713,7 +723,7 @@ const JobManagementPage = () => {
                   <p className="text-lg font-semibold text-gray-900">{formatCurrency(selectedJob.totalCost)}</p>
                 </div>
                 
-                <JobWorkDetails key={selectedJob.id} job={selectedJob} />
+                <JobWorkDetails key={selectedJob.id} job={selectedJob} allowInquiryLink={can('customers.manage')} />
 
                 <JobChangeHistory job={selectedJob} />
                 <div className="border-t pt-4"><JobPhotos job={selectedJob} /><ServiceChecklist key={selectedJob.id} job={selectedJob} /></div>
@@ -721,7 +731,7 @@ const JobManagementPage = () => {
               </div>
               
               <div className="flex justify-end space-x-3 mt-6">
-                {can('invoices.manage') && selectedJob.status === 'completed' && (
+                {can('invoices.manage') && selectedJob.status === 'completed' && !isEstimateVisit(selectedJob) && selectedJob.billable !== false && (
                   <button
                     onClick={() => handleCreateInvoice(selectedJob)}
                     className="px-4 py-2 border border-primary-600 text-primary-700 rounded-md hover:bg-primary-50"
@@ -772,7 +782,7 @@ const JobManagementPage = () => {
                   <SelectControl
                     disabled={isLoading}
                     value={statusData.status}
-                    onChange={(e) => setStatusData(prev => ({ ...prev, status: e.target.value }))}
+                    onChange={(e) => setStatusData(prev => ({ ...prev, status: e.target.value, ...(isEstimateVisit(selectedJob) && e.target.value === 'completed' && (!prev.estimateOutcome || prev.estimateOutcome === 'estimate_pending') ? { estimateOutcome: 'quote_needed' } : {}) }))}
                     className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                   >
                     <option value="">Select Status</option>
@@ -782,6 +792,7 @@ const JobManagementPage = () => {
                     <option value="cancelled">Cancelled</option>
                   </SelectControl>
                 </div>
+                {isEstimateVisit(selectedJob) && <label className="block text-sm font-medium">Estimate outcome<SelectControl aria-label="Estimate visit outcome" className="input-field mt-1 w-full" disabled={isLoading} value={statusData.estimateOutcome || 'estimate_pending'} onChange={event => setStatusData(previous => ({ ...previous, estimateOutcome: event.target.value }))}>{estimateOutcomes.map(row => <option key={row.value} value={row.value}>{row.label}</option>)}</SelectControl></label>}
                 
                 {statusData.status === 'completed' && (
                   <>

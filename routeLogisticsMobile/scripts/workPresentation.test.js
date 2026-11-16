@@ -29,3 +29,14 @@ test('existing service address, coordinates, contact and work data retain priori
   assert.equal(result.address, '2 Job Street'); assert.equal(result.city, ''); assert.equal(result.customerPhone, '555-0200');
   assert.equal(jobDestination(result), '34,-118'); assert.equal(result.workNotes, 'Observed activity');
 });
+
+test('selected service-property snapshot controls address, unit access and navigation instead of billing defaults',()=>{
+ const original={id:'estimate',appointmentKind:'estimate_visit',servicePropertyId:'rental',address:'9 Old Billing Street',city:'Billing City',latitude:40,longitude:-100,serviceProperty:{address:'22 Rental Street, Bakersfield, CA',label:'Rental',unit:'B',latitude:35,longitude:-119},propertyAccessInstructions:'Enter gate 2468'};
+ const normalized=normalizeJobLocation(original,{address:'99 New Billing Street',city:'Another City',latitude:42,longitude:-101,serviceInstructions:'Wrong property code'});
+ assert.equal(normalized.address,original.serviceProperty.address);assert.equal(normalized.city,'');assert.equal(normalized.serviceInstructions,'');assert.equal(normalized.propertyAccessInstructions,'Enter gate 2468');assert.equal(normalized.serviceProperty.unit,'B');assert.equal(jobDestination(normalized),'35,-119');assert.equal(original.address,'9 Old Billing Street');
+});
+
+test('unmapped selected property navigates by its own address without stale customer or job coordinates',()=>{
+ const normalized=normalizeJobLocation({id:'estimate',servicePropertyId:'rental',latitude:40,longitude:-100,address:'Wrong old street',serviceProperty:{address:'Correct rental address'}},{address:'Billing address',latitude:42,longitude:-101});
+ assert.equal(normalized.latitude,undefined);assert.equal(normalized.longitude,undefined);assert.equal(jobDestination(normalized),'Correct rental address');
+});

@@ -51,8 +51,15 @@ export async function cachedRead(name, loader) {
 export async function overlayJobs(jobs) {
   const rows = await queuedWork();
   return jobs.map((saved) => {
-    const confirmed = [...rows].reverse().find(row => row.kind === 'job' && row.jobId === saved.id && row.state === 'synced' && Object.hasOwn(row.patch || {}, 'notes') && row.serverVersion);
-    const job = confirmed && versionAtMost(saved.updatedAt, confirmed.serverVersion) ? canonicalNotes(saved, confirmed.patch.notes) : saved;
+    let job = saved;
+    // Notes and outcomes may be acknowledged in separate operations. Replay
+    // each confirmed field against the incoming version so the newest outcome
+    // cannot hide an earlier saved note when an old snapshot is restored.
+    for (const confirmed of rows.filter(row => row.kind === 'job' && row.jobId === saved.id && row.state === 'synced' && row.serverVersion)) {
+      if (!versionAtMost(saved.updatedAt, confirmed.serverVersion)) continue;
+      if (Object.hasOwn(confirmed.patch || {}, 'estimateOutcome')) job = { ...job, ...confirmed.patch };
+      if (Object.hasOwn(confirmed.patch || {}, 'notes')) job = canonicalNotes(job, confirmed.patch.notes);
+    }
     return rows.filter((row) => row.kind === 'job' && row.jobId === job.id && !['discarded', 'synced'].includes(row.state)).reduce((current, row) => ({
     ...current, ...(['pending', 'syncing'].includes(row.state) ? row.patch : {}),
     syncState: row.state, syncOperationId: row.id, syncError: row.error || '', syncErrorCode: row.errorCode || null, syncPatch: row.patch,
@@ -100,7 +107,7 @@ export function persistWorkNoteDraft(job, text, { editedAt = Date.now() } = {}) 
     const store = noteStore(scope, job.id), previous = store.peek(), revision = Crypto.randomUUID();
     const record = { jobId: job.id, userId: uid, companyId: claims?.companyId || null, membershipId: claims?.membershipId || null, role: claims?.role || 'owner',
       text, editedAt, revision, operationId: revision, baseVersion: previous?.state === 'draft' ? previous.baseVersion : offlineVersion(job.updatedAt),
-      jobBase: { ...Object.fromEntries(['customerId','customerName','serviceType','serviceName','date','time','estimatedDuration','duration','address','serviceAddress','serviceProperty','location','workNotes','notes','dispatchNotes'].filter(key=>job[key]!==undefined).map(key=>[key,job[key]])),
+      jobBase: { ...Object.fromEntries(['customerId','customerName','serviceType','serviceName','date','time','estimatedDuration','duration','address','serviceAddress','serviceProperty','location','workNotes','notes','dispatchNotes','appointmentKind','billable','estimateOutcome','inquiryId','servicePropertyId','propertyAccessInstructions','serviceInstructions'].filter(key=>job[key]!==undefined).map(key=>[key,job[key]])),
         id: job.id, companyId: job.companyId || null, userId: job.userId || uid, assignedTo: job.assignedTo || null, assignedToUid: job.assignedToUid || null, status: job.status, updatedAt: offlineVersion(job.updatedAt) },
       state: 'draft', dirty: true };
     return trackWrite(uid, store.persist(record));
@@ -275,9 +282,13 @@ export function flushOffline() {
           const patch = { ...row.patch }; if (Object.hasOwn(patch,'notes')) delete patch.notes;
           const bases = await readCache('job-bases', scope) || {}, base = bases[row.jobId];
           if (versionAtMost(base?.updatedAt,result.version)) { bases[row.jobId] = { ...base, ...patch, updatedAt: result.version }; if (Object.hasOwn(row.patch,'notes')) bases[row.jobId]=canonicalNotes(bases[row.jobId],row.patch.notes,scope); await writeCache('job-bases', bases, scope); }
-          if (Object.hasOwn(row.patch,'notes')) {
+          if (Object.hasOwn(row.patch,'notes') || Object.hasOwn(row.patch,'estimateOutcome')) {
             const detail=await readCache(`job-detail:${row.jobId}`,scope);
-            if(detail?.job&&versionAtMost(detail.job.updatedAt,result.version))await writeCache(`job-detail:${row.jobId}`,{...detail,job:{...canonicalNotes(detail.job,row.patch.notes,scope),updatedAt:result.version}},scope);
+            if(detail?.job&&versionAtMost(detail.job.updatedAt,result.version)) {
+              let merged={...detail.job,...patch,updatedAt:result.version};
+              if(Object.hasOwn(row.patch,'notes'))merged=canonicalNotes(merged,row.patch.notes,scope);
+              await writeCache(`job-detail:${row.jobId}`,{...detail,job:merged},scope);
+            }
             if(row.workNoteDraft?.revision)await noteStore(scope,row.jobId).compareAndSet(row.workNoteDraft.revision,current=>({ ...current,state:'synced',dirty:false,serverVersion:result.version }));
           }
         }

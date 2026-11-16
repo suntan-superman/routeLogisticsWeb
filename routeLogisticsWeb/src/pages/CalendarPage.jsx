@@ -29,6 +29,8 @@ import '@syncfusion/ej2-react-schedule/styles/tailwind.css';
 import './calendar.css';
 import JobFormModal from '../components/JobFormModal';
 import { canManage } from '../services/tenancy';
+import AppointmentKindBadge from '../components/AppointmentKindBadge';
+import { isEstimateVisit } from '../utils/appointmentKind';
 const EMPTY=[];
 const statusColors={scheduled:'#3B82F6','in-progress':'#F59E0B',completed:'#10B981',cancelled:'#EF4444','on-hold':'#8B5CF6'};
 const getStatusColor=status=>statusColors[status]||'#6B7280';
@@ -60,7 +62,7 @@ const CalendarPage = () => {
     let hour=Number(match[1]);if(match[3])hour=hour%12+(match[3].toUpperCase()==='PM'?12:0);if(hour>23)return[];
     startDate.setHours(hour,Number(match[2]),0,0);
     const endDate=new Date(startDate.getTime()+(parseFloat(job.estimatedDuration??job.duration)||2)*3600000);
-    return[{Id:job.id,Subject:`${job.serviceType||'Service'} - ${customer?.name||job.customerName||'Unknown Customer'}`,StartTime:startDate,EndTime:endDate,
+    return[{Id:job.id,Subject:`${isEstimateVisit(job) ? 'Estimate Visit · ' : ''}${job.serviceType||'Service'} - ${customer?.name||job.customerName||'Unknown Customer'}`,StartTime:startDate,EndTime:endDate,
       Location:job.address||customer?.address||'Location TBD',Description:job.notes||'',IsAllDay:false,RecurrenceRule:'',RecurrenceID:null,RecurrenceException:'',StartTimezone:'',EndTimezone:'',CategoryColor:getStatusColor(job.status),
       JobData:{...job,customer,priority:job.priority||'medium'}}];
   }),[jobs,customers]);
@@ -250,6 +252,8 @@ const CalendarPage = () => {
                 <div className="flex items-start justify-between">
                   <div>
                     <h4 className="text-xl font-semibold text-gray-900">{selectedJob.serviceType}</h4>
+                    <AppointmentKindBadge job={selectedJob} outcome />
+                    {selectedJob.inquiryId && canManage() && <a className="text-sm text-primary-700 underline" href={`/customers?inquiry=${encodeURIComponent(selectedJob.inquiryId)}`}>Open linked inquiry</a>}
                     <p className="text-gray-600">{selectedJob.customer?.name || 'Unknown Customer'}</p>
                   </div>
                   <div className="flex items-center space-x-2">

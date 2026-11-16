@@ -57,6 +57,7 @@ yarn dev
 
 ## Documentation Structure
 
+- [Prospect intake and estimate scheduling — Batch A](./PROSPECT_INTAKE_AND_ESTIMATE_SCHEDULING.md) - Duplicate-aware inquiry/customer reuse, lifecycle, service properties, assigned nonbillable estimate visits, mobile work, follow-up and acceptance evidence.
 - [Invoice integrity repair — November 16, 2026](./INVOICE_INTEGRITY_REPAIR.md) - Authoritative cents/approved pricing, transactional invoice identity, historical compatibility, revisions/authorization, validation and production deployment evidence for G12/G13/G14.
 - [Customer-to-payment workflow audit — November 16, 2026](./CUSTOMER_TO_PAYMENT_WORKFLOW_AUDIT.md) - Current-source/deployed-state lifecycle assessment, confirmed invoice correctness gaps, separate automated/provider/physical evidence and prioritized implementation batches. Audit and planning only; supersedes older broad feature claims for this workflow.
 - [Recent development summary — November 13–15, 2026](./DEVELOPMENT_SUMMARY_2026-11-13_TO_2026-11-15.md) - Consolidated new features, data flows, integration status, deployment evidence and remaining acceptance work. Use this newer report when older feature/TODO snapshots below describe superseded behavior.

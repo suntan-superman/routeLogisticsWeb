@@ -29,6 +29,7 @@ function load(relative) {
   const module = { exports: {} };
   const mockRequire = specifier => {
     if (specifier === 'react') return React;
+    if (specifier.endsWith('/InquiryWorkspace') || specifier.endsWith('/CustomerLifecycleControl')) return { __esModule: true, default: () => null };
     if(specifier.endsWith('/useWorkspaceQuery'))return workspaceHooks;
     if(specifier.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
     if(specifier.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found','workspace-changed'].includes(String(error?.code||'').split('/').pop())};

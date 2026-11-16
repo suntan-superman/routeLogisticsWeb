@@ -23,8 +23,9 @@ export const retryWorkspaceRead = (failures, error) => failures < 1 && !workspac
 // OAuth/payment operations, address checks or other provider work into polling.
 export function mutationResources(name, data = {}, result = {}) {
   if (result?.success === false || ['conflict', 'failed', 'discarded'].includes(result?.status)) return [];
-  if (name === 'rlApplyJobOperation') return result.status === 'synced' ? ['jobs', 'job', 'customer-stats', 'reports', 'analytics', 'operations-report', 'route'] : [];
-  if (['rlManageJob', 'generateServicePlanJob', 'rlGenerateServicePlanJob'].includes(name)) return ['jobs', 'job', 'customer-stats', 'reports', 'analytics', 'operations-report', 'route', 'service-plans'];
+  if (name === 'rlApplyJobOperation') return result.status === 'synced' ? ['jobs', 'job', 'customer-stats', 'reports', 'analytics', 'operations-report', 'route', 'inquiries'] : [];
+  if (['rlManageJob', 'generateServicePlanJob', 'rlGenerateServicePlanJob'].includes(name)) return ['jobs', 'job', 'customers', 'customer', 'customer-stats', 'reports', 'analytics', 'operations-report', 'route', 'service-plans', 'inquiries'];
+  if (name === 'rlManageInquiry' && ['create', 'update', 'saveProperty', 'lifecycle'].includes(data.action)) return ['inquiries', 'customers', 'customer', 'customer-properties', 'customer-stats', 'jobs', 'job'];
   if (name === 'rlManageCustomer') return ['customers', 'customer', 'customer-stats', 'jobs', 'job'];
   if (name === 'rlManageServicePlan') return ['service-plans', 'jobs', 'job', 'route'];
   if (['rlManageStaffAvailability', 'manageTeamMember', 'sendTeamInviteEmail', 'acceptTeamInvite', 'transferCompanyOwnership'].includes(name)) return ['team', 'team-locations', 'schedule-roster', 'availability', 'company', 'route'];

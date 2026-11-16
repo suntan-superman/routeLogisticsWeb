@@ -20,6 +20,7 @@ const { invitationHandlers } = require('./invitations');
 const { recurringHandlers } = require('./recurring');
 const { customerHandlers } = require('./customers');
 const { customerAddressHandlers } = require('./customerAddresses');
+const { customerIntakeHandlers } = require('./customerIntake');
 const { portalHandlers } = require('./portal');
 const { staffLoginHandlers } = require('./staffLogin');
 const { drainMail } = require('./mail');
@@ -57,6 +58,7 @@ const serviceAreas = serviceAreaHandlers(db, { geocode: createGoogleGeocoder({
 }) });
 exports.rlServiceAreas = onCall({ timeoutSeconds: 60 }, serviceAreas.handle);
 exports.rlManageCustomer = onCall({ timeoutSeconds: 60 }, customerAddressHandlers(db, { serviceAreas }).handle);
+exports.rlManageInquiry = onCall({ timeoutSeconds: 60 }, customerIntakeHandlers(db, { serviceAreas }).handle);
 
 const TENANT_COLLECTIONS = ['customers', 'jobs', 'appointments', 'photos', 'estimates', 'estimateTemplates', 'invoices', 'servicePlans', 'serviceLogs'];
 const appUrl = defineString('RL_APP_URL', { default: 'https://route-logistics.com' });

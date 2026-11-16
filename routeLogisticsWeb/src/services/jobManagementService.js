@@ -30,7 +30,7 @@ class JobManagementService {
       requireCapability('jobs.schedule');
       if (options.saveCustomerAddress === true) requireCapability('customers.manage');
       this.getCurrentUserId();
-      const result = await callWorkspace('rlManageJob', { action: 'create', job: jobData, ...(options.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}), ...(options.recurring ? { recurring: options.recurring, operationId: options.operationId } : {}) });
+      const result = await callWorkspace('rlManageJob', { action: 'create', job: jobData, ...(options.operationId ? { operationId: options.operationId } : {}), ...(options.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}), ...(options.recurring ? { recurring: options.recurring } : {}) });
       return { success: true, jobId: result.id, ...(await readWorkspace('jobs', { id: result.id })), customerAddressUpdated: result.customerAddressUpdated === true, ...(result.addressWarning ? { addressWarning: result.addressWarning } : {}), ...(result.serviceArea ? { serviceArea: result.serviceArea } : {}), ...(result.servicePlanId ? { servicePlanId: result.servicePlanId, nextServiceDate: result.nextServiceDate } : {}) };
     } catch (error) {
       console.error('Error creating job:', error);

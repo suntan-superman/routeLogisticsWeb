@@ -1,13 +1,17 @@
 import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
 import { callWorkspace } from '../services/workspaceApi';
+import AppointmentKindBadge from './AppointmentKindBadge';
+import { isEstimateVisit } from '../utils/appointmentKind';
 
 // Jobs and Dispatch read the same authorized work log and visit history.
-export default function JobWorkDetails({ job }) {
+export default function JobWorkDetails({ job, allowInquiryLink = false }) {
   const workNotes = typeof job.workNotes === 'string' ? job.workNotes : '';
   const instructions = typeof job.dispatchNotes === 'string' ? job.dispatchNotes : typeof job.notes === 'string' ? job.notes : '';
   const visitsQuery = useWorkspaceQuery(['job-visits', job.id], () => callWorkspace('rlJobVisit', { action: 'list', jobId: job.id }));
   const visits = visitsQuery.data?.events || [], error = visitsQuery.error?.message || '';
   return <>
+    {isEstimateVisit(job) && <section aria-label="Estimate visit"><AppointmentKindBadge job={job} outcome /><p className="mt-2 text-sm text-gray-600">Nonbillable estimate appointment. Attendance does not approve paid service work.</p>{job.inquiryId && (allowInquiryLink ? <a className="mt-2 inline-block text-sm text-primary-700 underline" href={`/customers?inquiry=${encodeURIComponent(job.inquiryId)}`}>Open linked inquiry</a> : <p className="mt-2 text-xs text-gray-600">Linked to a customer inquiry.</p>)}</section>}
+    {job.propertyAccessInstructions && <section aria-label="Property access instructions"><h3 className="mb-2 font-semibold">Property access instructions</h3><p className="whitespace-pre-wrap break-words">{job.propertyAccessInstructions}</p></section>}
     {!!instructions && <section aria-label="Job instructions"><h3 className="mb-2 font-semibold">Job instructions</h3><p className="whitespace-pre-wrap break-words">{instructions}</p></section>}
     {!!workNotes && <section aria-label="Work notes"><h3 className="mb-2 font-semibold">Work notes</h3><p className="whitespace-pre-wrap break-words">{workNotes}</p></section>}
     {!!(job.actualWorkDone || job.completionNotes) && <section aria-label="Completed work"><h3 className="mb-2 font-semibold">Completed work</h3>{!!job.actualWorkDone && <p className="whitespace-pre-wrap break-words">{job.actualWorkDone}</p>}{!!job.completionNotes && <p className="whitespace-pre-wrap break-words">{job.completionNotes}</p>}</section>}

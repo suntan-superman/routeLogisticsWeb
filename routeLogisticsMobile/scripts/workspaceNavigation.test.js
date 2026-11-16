@@ -143,6 +143,13 @@ test('technician Home prioritizes the active job and exposes four accessible nav
   assert.equal(workflowMounts, 1); assert.equal(alertCalls.length, 0);
 });
 
+test('assigned estimate visits stay in normal Field Home and Schedule with their property and outcome context', async () => {
+  const estimate=job('estimate-field',{appointmentKind:'estimate_visit',billable:false,estimateOutcome:'estimate_pending',inquiryId:'inquiry-field',servicePropertyId:'property-rental',serviceProperty:{address:'22 Selected Rental Road',unit:'B'},propertyAccessInstructions:'Gate 2468',dispatchNotes:'Inspect the exterior only'});
+  day=query('day',[estimate]);detail={...query('detail'),job:estimate};await render();assert.match(visibleText(),/Estimate Visit/);assert.match(visibleText(),/22 Selected Rental Road/);assert.doesNotMatch(visibleText(),/Create Invoice|Approve estimate|Customers tab/);
+  await press('Schedule tab');assert.match(visibleText(),/Estimate Visit/);await openCard('estimate-field');assert.equal(workflowProps.job.id,'estimate-field');assert.equal(workflowProps.job.billable,false);assert.equal(workflowProps.job.servicePropertyId,'property-rental');assert.equal(workflowProps.job.propertyAccessInstructions,'Gate 2468');assert.equal(workflowProps.job.dispatchNotes,'Inspect the exterior only');assert.equal(workflowProps.job.inquiryId,'inquiry-field');
+  await press('Close job details');assert.match(visibleText(),/Schedule/);assert.match(visibleText(),/Estimate Visit/);assert.equal(alertCalls.length,0);
+});
+
 test('Schedule sorts day/week/month cards and retains its view and filters across work-order navigation', async () => {
   await render(); await press('Schedule tab'); await press('Week schedule');
   const scroll = tree.root.findAll(node => node.type === 'ScrollView' && node.props.testID === 'schedule-scroll')[0];

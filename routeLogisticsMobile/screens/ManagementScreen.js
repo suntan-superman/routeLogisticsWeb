@@ -14,6 +14,7 @@ import StaffAvailabilityEditor from '../components/StaffAvailabilityEditor';
 import { GlassInput } from '../components/Glass';
 import { deriveJobExceptions, REASSIGNMENT_REASONS } from '../../functions/shared/jobExceptions';
 import { newExceptionOperationId, reviewJobReassignment } from '../services/jobExceptionOperations';
+import { isEstimateVisit, estimateOutcomeLabel } from '../services/estimateVisitPolicy';
 
 const freshnessLabels={fresh:'Recent authorized position',stale:'Stale last-known position','off-duty':'Off duty · no current position','sharing-disabled':'Location sharing is off',unavailable:'No authorized position',expired:'Location retention expired · no position shown'};
 const statusChoices=[['all','All job statuses'],['scheduled','Scheduled'],['en-route','En route'],['in-progress','In progress'],['completed','Completed'],['cancelled','Cancelled']];
@@ -90,6 +91,7 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
     const assigned=team.find(row=>row.id===job.assignedTo),duration=Number(job.estimatedDuration??job.duration);
     return <View key={job.id} style={{gap:8}}><JobCard job={job} onPress={()=>{if(!busy&&!hasDraft)onOpenJob?.(job);}}/>
       <Text style={{color:palette.secondary,lineHeight:21}}>Assigned: {assigned?.name||job.assignedToName||(job.assignedTo?'Saved staff assignment':'Unassigned')}{Number.isFinite(duration)?` · ${duration} hour${duration===1?'':'s'}`:''}</Text>
+      {isEstimateVisit(job) && !!job.inquiryId && <Text style={{color:palette.secondary,lineHeight:21}}>Inquiry reference: {job.inquiryId}</Text>}
       {(job.assignmentNeedsAttention||job.assignmentNeedsReview)&&<InlineNotice message={job.assignmentReview||job.assignmentReviewReason||'Assignment needs dispatcher review.'}/>}
       {exceptionFor(job).indicators.map(indicator=><InlineNotice key={indicator.code} message={`${indicator.label} · ${indicator.detail}`}/>)}
       {canAssign&&job.reassignmentRequest?.status==='pending'&&<SecondaryButton title="Review reassignment request" accessibilityLabel={`Review reassignment request ${job.id}`} disabled={busy||checking||hasDraft||!context.online} onPress={()=>openRequest(job)}/>}
@@ -168,6 +170,7 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
     </ScrollView>
     </View>
       {assignment&&<ActionDialog title="Review job assignment" busy={busy||checking} onClose={()=>{setAssignment(null);setCheck(null);}} testID="management-assignment-dialog"><Card><SectionHeader title={assignment.customerName||'Customer'} subtitle={`${dayLabel(assignment.date)} · ${assignment.time||'Time not set'}`}/>
+        {isEstimateVisit(assignment)&&<InlineNotice message={`Estimate Visit · ${estimateOutcomeLabel(assignment)}${assignment.inquiryId?' · Inquiry '+assignment.inquiryId:''}`}/>}
         {!!notice&&<InlineNotice {...notice}/>}
         <Text style={{color:palette.secondary,lineHeight:22}}>Choose active company staff. The server checks current membership, availability and calendar conflicts again when saving.</Text>
         <Choice title="Leave job unassigned" selected={!target} disabled={busy||checking} onPress={()=>{setTarget(null);setCheck(null);}}/>

@@ -67,7 +67,7 @@ function invoiceHandlers(db, { now = () => Date.now() } = {}) {
   async function billingSource(tx, scope, jobRow) {
     const job = jobRow.data();
     if (job.status !== 'completed') fail('failed-precondition', 'Complete the job before creating its invoice.');
-    const kind = String(job.kind || job.jobType || job.visitType || job.appointmentType || '').trim().toLowerCase();
+    const kind = String(job.appointmentKind || job.kind || job.jobType || job.visitType || job.appointmentType || '').trim().toLowerCase();
     if (job.billable === false || job.isBillable === false || job.nonBillable === true || ['estimate', 'estimate-visit', 'estimate_visit', 'estimate appointment', 'estimate-appointment'].includes(kind)) fail('failed-precondition', 'This is a nonbillable estimate visit and cannot be invoiced as an ordinary service.');
     if (job.deletedAt || job.archived === true) fail('failed-precondition', 'This job is archived and needs authorized review before billing.');
     const customerId = documentId(job.customerId, 'job customer'), customer = await tx.get(ref('customers', customerId));

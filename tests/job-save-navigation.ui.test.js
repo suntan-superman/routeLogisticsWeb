@@ -37,6 +37,8 @@ function useScopedQuery(key,loader,{enabled=true}={}){
 }
 const mock = name => {
   if(name==='react')return React;
+  if(name.endsWith('/AppointmentKindBadge'))return{__esModule:true,default:()=>null};
+  if(name.endsWith('/appointmentKind'))return{isEstimateVisit:job=>job?.appointmentKind==='estimate_visit',estimateOutcomeLabel:()=>'',estimateOutcomes:[]};
   if(name.endsWith('/components/JobWorkDetails'))return{__esModule:true,default:compile('components/JobWorkDetails.jsx')};
   if(name==='react-hot-toast')return{__esModule:true,default:{success:message=>env.toasts.push({kind:'success',message}),error:message=>env.toasts.push({kind:'error',message})}};
   if(name.endsWith('/hooks/useUnsavedChanges'))return{useUnsavedChanges:useGuard,useConfirmUnsavedChanges:()=>confirmDiscard};

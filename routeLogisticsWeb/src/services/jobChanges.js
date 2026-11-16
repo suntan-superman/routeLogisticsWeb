@@ -2,6 +2,10 @@
 export const TRACKED_FIELDS = [
   ['customerId', 'Customer record'],
   ['customerName', 'Customer'],
+  ['appointmentKind', 'Appointment kind'],
+  ['estimateOutcome', 'Estimate outcome'],
+  ['inquiryId', 'Inquiry'],
+  ['servicePropertyId', 'Saved service property'],
   ['serviceType', 'Service type'],
   ['date', 'Date'],
   ['time', 'Start time'],

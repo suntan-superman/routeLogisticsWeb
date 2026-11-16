@@ -63,7 +63,7 @@ test('successful mutations invalidate only affected current-scope controls and n
   events.publishWorkspaceChange(scope, 'rlReadWorkspace', {}, {}); events.publishWorkspaceChange(scope, 'rlApplyJobOperation', {}, { status: 'conflict' });
   await act(async () => pause(20)); assert.equal(env.calls.jobs, 1); assert.equal(env.calls.customers, 1);
   env.value = 'completed'; await act(async () => events.publishWorkspaceChange(scope, 'rlManageJob', {}, {}));
-  await until(() => seen.jobs.data?.value === 'completed'); assert.equal(env.calls.jobs, 2); assert.equal(env.calls.customers, 1);
+  await until(() => seen.jobs.data?.value === 'completed' && seen.customers.data?.value === 'completed'); assert.equal(env.calls.jobs, 2); assert.equal(env.calls.customers, 2, 'Scheduling can promote a prospect and must refresh customer lifecycle controls.');
 });
 test('transient failures retain a last good snapshot but authorization denial hides it and stops polling', async () => {
   await render(); await until(() => seen.jobs.data);

@@ -9,6 +9,7 @@ import RoutesPage from './RoutesPage';
 import JobPhotos from '../components/JobPhotos';
 import ServiceChecklist from '../components/ServiceChecklist';
 import JobWorkDetails from '../components/JobWorkDetails';
+import AppointmentKindBadge from '../components/AppointmentKindBadge';
 import TeamLocationStatus from '../components/TeamLocationStatus';
 import StaffAvailabilityEditor from '../components/StaffAvailabilityEditor';
 import { LOCATION_LABELS, locationState, nearestOnDuty } from '../utils/workLocations';
@@ -173,7 +174,7 @@ export default function DispatchPage() {
       {more && <p role="status">Showing the first 500 jobs for this date.</p>}
       {!filtered.length && <p>No jobs match these filters.</p>}
       {filtered.map(job => <article key={job.id} className="rounded border bg-white p-4 space-y-2" style={{ borderLeft: `5px solid ${STATUS_COLORS[job.status] || '#6b7280'}` }}>
-        <button className="font-semibold underline" onClick={event => openDetails(job, event.currentTarget)}>{job.customerName || 'Customer'} · {job.serviceType}</button><p>{job.time || 'Time not set'} · {job.status} · {jobAddress(job) || 'Service address not set'}</p>
+        <button className="font-semibold underline" onClick={event => openDetails(job, event.currentTarget)}>{job.customerName || 'Customer'} · {job.serviceType}</button><div><AppointmentKindBadge job={job} outcome /></div><p>{job.time || 'Time not set'} · {job.status} · {jobAddress(job) || 'Service address not set'}</p>
         {scheduleWarning(job, now, company?.timeZone) && <p className="text-amber-800">{scheduleWarning(job, now, company?.timeZone)} · schedule-based, not a traffic prediction</p>}
         <ExceptionIndicators value={exceptions.get(job.id)} />
         <label>Assigned to <SelectControl aria-label={`Assign ${job.customerName || job.id}`} className="rounded border-gray-300" value={job.assignedTo || ''} disabled={busy || !can('jobs.assign')} onChange={e => assign(job, e.target.value)}><option value="">Unassigned</option>{job.assignedTo && !assignableTeam.some(row => row.id === job.assignedTo) && <option value={job.assignedTo} disabled>{job.assignedToName || team.find(row => row.id === job.assignedTo)?.name || 'Previously assigned technician'} (review assignment)</option>}{assignableTeam.map(row => <option value={row.id} key={row.id}>{row.name}</option>)}</SelectControl></label>
@@ -259,7 +260,7 @@ function DispatchJobDetails({ job, onClose, returnFocus, fallbackFocus, destinat
       <div className="mb-5 flex items-start justify-between gap-4"><div><p className="text-sm text-gray-500">Job details</p><h2 id="dispatch-job-title" className="text-xl font-bold">{job.customerName || 'Customer'} · {job.serviceType || 'Service visit'}</h2></div><button ref={close} className="min-h-11 rounded border px-3 py-2" onClick={onClose}>Close details</button></div>
       <div className="space-y-5"><div className="space-y-2 rounded border p-4"><p className="font-semibold" style={{ color: STATUS_COLORS[job.status] || '#374151' }}>Status: {job.status || 'Not set'}</p><p>{job.date} · {job.time || 'Time not set'}</p><p>{jobAddress(job) || 'Service address not set'}</p>{(destination || jobAddress(job)) && <a className="inline-block underline" href={googleNavigation([{ ...job, address: jobAddress(job), location: destination }])} target="_blank" rel="noreferrer">Navigate to service location</a>}</div>
         <JobExceptionReview key={'exception-' + job.id} job={job} value={exceptionState} allowed={canManageRequests} onChanged={onExceptionChanged} onAssign={onAssign} assignmentTeam={assignmentTeam} assigning={assigning} />
-        <JobWorkDetails key={'work-' + job.id} job={job} />
+        <JobWorkDetails key={'work-' + job.id} job={job} allowInquiryLink={canManageRequests} />
         <JobPhotos key={job.id} job={job} /><ServiceChecklist key={'form-' + job.id} job={job} />
       </div>
     </section>

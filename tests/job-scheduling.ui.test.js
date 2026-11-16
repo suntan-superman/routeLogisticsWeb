@@ -22,6 +22,7 @@ function compile(relative) {
   const module = { exports: {} };
   const mock = name => {
     if (name === 'react') return React;
+    if (name.endsWith('/ServicePropertyDirectory')) return { __esModule: true, default: () => null };
     if(name.endsWith('/useWorkspaceQuery'))return queryMock;
     if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
     if (name === 'react-hot-toast') { const toast = message => env.toasts.push(message); toast.success = toast; toast.error = toast; return { __esModule: true, default: toast }; }
@@ -83,6 +84,20 @@ test('one-time scheduling sends the selected technician in the same create reque
   await submit(); assert.equal(writes().length, 1); assert.equal(writes()[0].data.action, 'create'); assert.equal(writes()[0].data.job.assignedTo, 'tech-1');
   assert.equal(writes()[0].data.recurring, undefined); assert.equal(env.created.length, 1);
   assert.ok(env.calls.filter(call => call.name === 'rlManageJob').every(call => call.data.action !== 'assign'));
+});
+
+test('estimate visits retain availability checks but cannot create billable or recurring work', async () => {
+  await render(); assert.equal(select('Appointment kind').props.value, 'service'); await choose('Appointment kind', 'estimate_visit');
+  assert.match(text(), /Free estimate visit — nonbillable/); assert.equal(!!select('Appointment type'), false);
+  await chooseCombobox('Assigned technician', 'Technician One'); assert.match(text(), /Available for this appointment/); await submit();
+  const request = writes()[0].data; assert.equal(request.job.appointmentKind, 'estimate_visit'); assert.equal(request.job.billable, false); assert.equal(request.job.totalCost, 0); assert.equal(request.job.estimateOutcome, 'estimate_pending'); assert.equal(request.recurring, undefined); assert.match(request.operationId, /^[a-f0-9-]{36}$/i);
+});
+
+test('inquiry scheduling locks the approved identity and property and uses its stable operation ID', async () => {
+  const operationId = '5cab7804-e260-44af-9647-e3f489a61658';
+  await render({ defaults: { customerId: customer.id, serviceType: 'Initial estimate', date: '2030-01-10', appointmentKind: 'estimate_visit', inquiryId: 'inquiry-one', servicePropertyId: 'property-one', serviceProperty: { address: '200 Inquiry Service Road' }, operationId } });
+  assert.equal(input('Customer').props.disabled, true); assert.equal(select('Appointment kind').props.disabled, true); assert.equal(input('Service property address').props.disabled, true); assert.equal(button('Schedule Job').props.disabled, false);
+  await submit(); const request = writes()[0].data; assert.equal(request.operationId, operationId); assert.equal(request.job.inquiryId, 'inquiry-one'); assert.equal(request.job.servicePropertyId, 'property-one'); assert.equal(request.job.serviceProperty.address, '200 Inquiry Service Road'); assert.equal(request.job.billable, false);
 });
 
 test('a Save conflict retains the draft and choosing an alternative changes date/time without saving', async () => {

@@ -323,6 +323,14 @@ test('PW-OPS-05 @smoke owner creates and edits a customer with persisted success
   await editor.getByPlaceholder('93311', { exact: true }).fill('');
   await editor.getByPlaceholder('Additional notes about this customer...', { exact: true }).fill('Synthetic browser customer; do not contact.');
   await editor.getByRole('button', { name: 'Add Customer', exact: true }).click();
+  // The existing fixture deliberately shares this service address. New customer
+  // creation now requires an explicit separate-contact decision instead of
+  // silently duplicating an existing contact at that location.
+  const duplicates = editor.getByRole('region', { name: 'Possible duplicate customers', exact: true });
+  await expect(duplicates).toBeVisible();
+  await duplicates.getByLabel('Create an intentionally separate customer', { exact: true }).check();
+  await duplicates.getByLabel('Separate customer record reason', { exact: true }).fill('Authorized synthetic browser contact at a shared test property.');
+  await editor.getByRole('button', { name: 'Add Customer', exact: true }).click();
   await expect(page.getByText('Customer added successfully!', { exact: true })).toBeVisible();
   await expect(customerRow(page, name)).toBeVisible();
   // The current table's action buttons have icons only. Enter through the first

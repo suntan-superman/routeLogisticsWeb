@@ -3,6 +3,7 @@ import { auth } from '../constants/firebase';
 import { getClaims, requireWorkspace } from './tenancy';
 import { readWorkspace } from './workspaceApi';
 import { offlineScope, isOffline, readCache, writeCache, saveJobOffline, queuedWork, getQueuedOperation, resolveOffline, flushOffline } from './offline';
+import { isEstimateVisit, completionEstimateOutcome, ESTIMATE_OUTCOMES } from './estimateVisitPolicy';
 
 const active = new Map();
 const fail = (message, code = 'failed-precondition', operationId) => Object.assign(new Error(message), { code, operationId });
@@ -15,13 +16,15 @@ function validateJob(job, retry = false) {
   if (claims?.role === 'technician' && job.assignedTo !== claims.membershipId) throw fail('This job is no longer assigned to you. Ask your manager to check its assignment.', 'permission-denied');
   if (!['scheduled', 'en-route', 'in-progress'].includes(job.status) && !(retry && job.status === 'completed')) throw fail(job.status === 'cancelled' ? 'This job was cancelled. A manager must reopen it before you can complete it.' : job.status === 'completed' ? 'This job is already completed. Refresh the job list.' : `This job cannot be completed from its current status (${job.status || 'unknown'}).`);
 }
-function completionFields(draft) {
+function completionFields(draft, job) {
   const actualWorkDone = String(draft?.actualWorkDone || '').trim(), completionNotes = String(draft?.completionNotes || '').trim();
   if (!actualWorkDone) throw fail('Describe the work completed before submitting.', 'invalid-argument');
   if (actualWorkDone.length > 10000 || completionNotes.length > 10000) throw fail('Work details and notes must each be at most 10,000 characters.', 'invalid-argument');
   const hours = String(draft?.actualHours ?? '').trim();
   if (hours && (!Number.isFinite(Number(hours)) || Number(hours) < 0 || Number(hours) > 744)) throw fail('Enter actual work hours between 0 and 744, or leave the optional field empty.', 'invalid-argument');
-  return { status: 'completed', actualWorkDone, ...(hours ? { actualHours: Number(hours) } : {}), completionNotes };
+  if (draft?.estimateOutcome && (!isEstimateVisit(job) || !Object.hasOwn(ESTIMATE_OUTCOMES, draft.estimateOutcome))) throw fail('Choose a valid outcome for the estimate visit.', 'invalid-argument');
+  return { status: 'completed', actualWorkDone, ...(hours ? { actualHours: Number(hours) } : {}), completionNotes,
+    ...(isEstimateVisit(job) ? { estimateOutcome: completionEstimateOutcome(job, draft?.estimateOutcome) } : {}) };
 }
 async function outcome(operationId, jobId) {
   const operation = await getQueuedOperation(operationId);
@@ -35,11 +38,13 @@ export function completeJob(job, draft, options = {}) {
   const scope = offlineScope(), key = `${scope}:${job?.id}`;
   if (active.has(key)) return active.get(key);
   const promise = (async () => {
-    const fields = completionFields(draft);
+    let fields = completionFields(draft, job);
     validateJob(job, !!options.retryOperationId);
     const offline = await isOffline();
     const current = offline ? job : (await readWorkspace('jobs', { id: job.id })).job;
     validateJob(current, !!options.retryOperationId);
+    if (isEstimateVisit(current) !== isEstimateVisit(job)) throw fail('This appointment type changed. Reopen the visit before completing it.');
+    fields = completionFields(draft, current);
     if (offlineScope() !== scope) throw fail('Your workspace changed. Reopen the job before submitting completion.', 'workspace-changed');
     let operationId = options.retryOperationId;
     if (operationId) {

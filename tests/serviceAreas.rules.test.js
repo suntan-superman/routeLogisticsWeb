@@ -78,7 +78,7 @@ test('customer physical addresses and Google proofs are server-owned even when c
     await assertSucceeds(updateDoc(target, { notes: 'Preserve non-address editing' }));
     for (const patch of [{ address: '200 Unverified Street, Example, CA 93312' }, { city: 'Changed city' }, { latitude: 35, longitude: -119 }, { location: { latitude: 35, longitude: -119 } }, { addressValidation: { source: 'google-address-validation', validated: true } }]) await assertFails(updateDoc(target, patch));
     await assertFails(setDoc(doc(db, `customers/geo-rules-unverified-${companyId}`), { userId: ownerUid, companyId, name: 'Forged address', address: '200 Unverified Street' }));
-    await assertSucceeds(setDoc(doc(db, `customers/geo-rules-addressless-${companyId}`), { userId: ownerUid, companyId, name: 'Contact only', address: '' }));
+    await assertFails(setDoc(doc(db, `customers/geo-rules-addressless-${companyId}`), { userId: ownerUid, companyId, name: 'Contact only', address: '' })); // Duplicate-aware creation is callable-only, including addressless prospects.
   }
 });
 test('solo customers and jobs cannot bypass mandatory address verification while historical non-address edits remain valid', async () => {

@@ -20,7 +20,7 @@ import { customerView, customerActive, legacyDate } from '../utils/legacyCustome
 
 const editableFields = ['name', 'firstName', 'lastName', 'email', 'phone', 'phoneNumber', 'address', 'city', 'state', 'zipCode', 'postalCode', 'notes', 'serviceInstructions', 'isActive', 'status', 'emailConsent'];
 const customerInput = data => Object.fromEntries(editableFields.filter(field => Object.hasOwn(data || {}, field)).map(field => [field, data[field]]));
-const customerFailure = failure => ({ success: false, error: failure?.message || 'The customer could not be saved. Please try again.', ...(failure?.details?.addressValidation ? { addressValidation: failure.details.addressValidation } : {}) });
+const customerFailure = failure => ({ success: false, error: failure?.message || 'The customer could not be saved. Please try again.', ...(failure?.code ? { code: failure.code } : {}), ...(failure?.details?.matches ? { matches: failure.details.matches } : {}), ...(failure?.details?.addressValidation ? { addressValidation: failure.details.addressValidation } : {}) });
 
 class CustomerService {
   // Get current user ID
@@ -33,11 +33,11 @@ class CustomerService {
   }
 
   // Create a new customer
-  static async createCustomer(customerData) {
+  static async createCustomer(customerData, options = {}) {
     try {
       requireCapability('customers.manage');
       this.getCurrentUserId();
-      const result = await callWorkspace('rlManageCustomer', { action: 'create', customer: customerInput(customerData) });
+      const result = await callWorkspace('rlManageCustomer', { action: 'create', customer: customerInput(customerData), operationId: options.operationId || crypto.randomUUID(), ...(options.duplicateDecision === 'separate' ? { duplicateDecision: 'separate', duplicateReason: options.duplicateReason } : {}) });
       return { success: true, customerId: result.id, customer: customerView(result.id, result.customer) };
     } catch (error) {
       return customerFailure(error);

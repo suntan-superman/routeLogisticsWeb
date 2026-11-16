@@ -31,19 +31,22 @@ function dayLabel(day) {
 function normalizeJobLocation(job, customer) {
   if (!job) return job;
   const text = value => typeof value === 'string' ? value.trim() : '';
+  const property = job.serviceProperty && typeof job.serviceProperty === 'object' ? job.serviceProperty : null;
+  const propertyAddress = text(property?.address), selectedProperty = !!job.servicePropertyId || !!propertyAddress;
   const ownAddress = job.address && typeof job.address === 'object' ? job.address : null;
   const customerAddress = customer?.address && typeof customer.address === 'object' ? customer.address : null;
-  const ownStreet = text(job.address) || text(ownAddress?.street) || text(ownAddress?.line1);
+  const ownStreet = propertyAddress || text(job.address) || text(ownAddress?.street) || text(ownAddress?.line1);
   const customerStreet = text(customer?.address) || text(customerAddress?.street) || text(customerAddress?.line1);
-  const useCustomerLocation = !ownStreet;
+  const useCustomerLocation = !ownStreet && !selectedProperty;
   // Customer detail is already authorized by the workspace endpoint. Copy only
   // contact and service-location fields; never merge a customer document into a job.
-  const normalized = { ...job, address: ownStreet || customerStreet,
+  const normalized = { ...job, address: ownStreet || (selectedProperty ? '' : customerStreet),
     customerName: text(job.customerName) || text(customer?.name) || [text(customer?.firstName), text(customer?.lastName)].filter(Boolean).join(' '),
     customerPhone: text(job.customerPhone) || text(customer?.phone) || text(customer?.phoneNumber),
-    serviceInstructions: text(job.serviceInstructions) || text(customer?.serviceInstructions),
+    serviceInstructions: text(job.serviceInstructions) || (!selectedProperty ? text(customer?.serviceInstructions) : ''),
+    ...(text(job.propertyAccessInstructions) || text(property?.accessInstructions) ? { propertyAccessInstructions: text(job.propertyAccessInstructions) || text(property?.accessInstructions) } : {}),
   };
-  for (const field of ['city', 'state', 'zipCode']) normalized[field] = text(job[field]) || text(ownAddress?.[field])
+  for (const field of ['city', 'state', 'zipCode']) normalized[field] = (propertyAddress ? text(property[field]) : text(job[field]) || text(ownAddress?.[field]))
     || (useCustomerLocation ? text(customer?.[field]) || text(customerAddress?.[field]) : '');
   if (useCustomerLocation) {
     const lat = customer?.latitude ?? customer?.location?.latitude ?? customer?.location?.lat;
@@ -51,13 +54,19 @@ function normalizeJobLocation(job, customer) {
     if (typeof lat === 'number' && typeof lng === 'number' && Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
       && job.latitude == null && job.longitude == null && !job.location) Object.assign(normalized, { latitude: lat, longitude: lng });
   }
+  if (propertyAddress) {
+    const lat = property.latitude ?? property.location?.lat, lng = property.longitude ?? property.location?.lng;
+    if (typeof lat === 'number' && typeof lng === 'number' && Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) Object.assign(normalized, { latitude: lat, longitude: lng });
+    else { delete normalized.latitude; delete normalized.longitude; delete normalized.location; }
+  }
   return normalized;
 }
 function jobDestination(job) {
-  const lat = job?.latitude ?? job?.location?.lat, lng = job?.longitude ?? job?.location?.lng;
+  const property = job?.serviceProperty, selected = typeof property?.address === 'string' && !!property.address.trim();
+  const lat = selected ? property.latitude ?? property.location?.lat : job?.latitude ?? job?.location?.lat, lng = selected ? property.longitude ?? property.location?.lng : job?.longitude ?? job?.location?.lng;
   if (typeof lat === 'number' && typeof lng === 'number' && Number.isFinite(lat) && Number.isFinite(lng)
     && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return `${lat},${lng}`;
-  return [job?.address, job?.city, job?.state, job?.zipCode].filter(value => typeof value === 'string' && value.trim()).join(', ');
+  return selected ? property.address.trim() : [job?.address, job?.city, job?.state, job?.zipCode].filter(value => typeof value === 'string' && value.trim()).join(', ');
 }
 const navigationUrl = job => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(jobDestination(job))}&travelmode=driving`;
 module.exports = { timeMinutes, sortJobs, nextJob, groupJobs, dayLabel, normalizeJobLocation, jobDestination, navigationUrl };

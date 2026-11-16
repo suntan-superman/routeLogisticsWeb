@@ -8,6 +8,9 @@ import JobPhotos from './JobPhotos';
 import FieldWorkTools from './FieldWorkTools';
 import ServiceChecklist from './ServiceChecklist';
 import JobReassignmentRequest from './JobReassignmentRequest';
+import EstimateVisitOutcome from './EstimateVisitOutcome';
+import { isEstimateVisit, ESTIMATE_OUTCOMES, completionEstimateOutcome } from '../services/estimateVisitPolicy';
+import { jobDestination } from '../services/workPresentation';
 import { completeJob } from '../services/jobCompletion';
 import { getQueuedOperation, resolveOffline } from '../services/offline';
 
@@ -30,6 +33,7 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
   const [workBusy, setWorkBusy] = useState(false), [workDraft, setWorkDraft] = useState(false);
   const [serviceBusy, setServiceBusy] = useState(false), [serviceDraft, setServiceDraft] = useState(false);
   const [requestBusy,setRequestBusy]=useState(false),[requestDraft,setRequestDraft]=useState(false);
+  const [outcomeBusy,setOutcomeBusy]=useState(false),[outcomeDraft,setOutcomeDraft]=useState(false);
   const [retryOperationId, setRetryOperationId] = useState(null), [savedChange, setSavedChange] = useState(null);
   const [submitted, setSubmitted] = useState(null), [closeRequested, setCloseRequested] = useState(false);
   const [completionDialog, setCompletionDialog] = useState(null), [resolvingDrafts, setResolvingDrafts] = useState(false);
@@ -37,10 +41,11 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
   const workBusyRef = useRef(false), workDraftRef = useRef(false);
   const serviceBusyRef = useRef(false), serviceDraftRef = useRef(false);
   const requestBusyRef=useRef(false),requestDraftRef=useRef(false);
+  const outcomeBusyRef=useRef(false),outcomeDraftRef=useRef(false);
   const workActionsRef = useRef(null), checklistActionsRef = useRef(null), draftAction = useRef(null);
   const notify = useRef(onInteractionChange); notify.current = onInteractionChange;
   const hasCompletionDraft = Object.values(draft).some(value => String(value).trim());
-  const hasDraft = photoDraft || workDraft || serviceDraft || requestDraft || hasCompletionDraft || !!completionDialog, busy = saving || reviewing || photoBusy || workBusy || serviceBusy || requestBusy || resolvingDrafts;
+  const hasDraft = photoDraft || workDraft || serviceDraft || requestDraft || outcomeDraft || hasCompletionDraft || !!completionDialog, busy = saving || reviewing || photoBusy || workBusy || serviceBusy || requestBusy || outcomeBusy || resolvingDrafts;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; generation.current++; notify.current?.({ busy: false, hasDraft: false }); }; }, []);
   useEffect(() => { notify.current?.({ busy, hasDraft }); }, [busy, hasDraft]);
   useEffect(() => {
@@ -50,6 +55,7 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
     setWorkBusy(false); setWorkDraft(false); workBusyRef.current = false; workDraftRef.current = false;
     setServiceBusy(false); setServiceDraft(false); serviceBusyRef.current = false; serviceDraftRef.current = false;
     setRequestBusy(false);setRequestDraft(false);requestBusyRef.current=false;requestDraftRef.current=false;
+    setOutcomeBusy(false);setOutcomeDraft(false);outcomeBusyRef.current=false;outcomeDraftRef.current=false;
     setRetryOperationId(null); setSavedChange(null); setSubmitted(null); setCloseRequested(false);
     draftAction.current = null; setCompletionDialog(null); setResolvingDrafts(false);
   }, [job?.id]);
@@ -78,8 +84,11 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
   const updateServiceDraft = useCallback(value => { serviceDraftRef.current = value; if (mounted.current) setServiceDraft(value); }, []);
   const updateRequestBusy=useCallback(value=>{requestBusyRef.current=value;if(mounted.current)setRequestBusy(value);},[]);
   const updateRequestDraft=useCallback(value=>{requestDraftRef.current=value;if(mounted.current)setRequestDraft(value);},[]);
+  const updateOutcomeBusy=useCallback(value=>{outcomeBusyRef.current=value;if(mounted.current)setOutcomeBusy(value);},[]);
+  const updateOutcomeDraft=useCallback(value=>{outcomeDraftRef.current=value;if(mounted.current)setOutcomeDraft(value);},[]);
   const accessReason = workAccessReason(job, user, permissions);
-  const displayJob = submitted?.jobId === job?.id ? { ...job, ...submitted.draft, status: 'completed' } : job;
+  const displayJob = submitted?.jobId === job?.id ? { ...job, ...submitted.draft, status: 'completed', ...(isEstimateVisit(job) ? { estimateOutcome: completionEstimateOutcome(job, submitted.draft.estimateOutcome) } : {}) } : job;
+  const estimateVisit = isEstimateVisit(displayJob);
   const canComplete = !accessReason && ['scheduled', 'en-route', 'in-progress'].includes(displayJob?.status);
   const explainBlockedPhoto = () => {
     if (photoBusyRef.current) { setError('Finish or cancel the camera/photo selection before leaving this job.'); return true; }
@@ -88,7 +97,8 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
   };
   const close = () => {
     if (completionDialog) { if (!busy) setCompletionDialog(null); return; }
-    if (submitting.current !== null || reviewPending.current !== null || workBusyRef.current || serviceBusyRef.current || requestBusyRef.current || explainBlockedPhoto()) return;
+    if (submitting.current !== null || reviewPending.current !== null || workBusyRef.current || serviceBusyRef.current || requestBusyRef.current || outcomeBusyRef.current || explainBlockedPhoto()) return;
+    if(outcomeDraftRef.current){showCompletionProblem('Save the selected estimate outcome or choose Keep current outcome before closing this work order.');return;}
     if(requestDraftRef.current){showCompletionProblem('Finish submitting or explicitly cancel the reassignment request before closing this work order. Its notes remain in the request section.');return;}
     if (hasCompletionDraft || workDraftRef.current || serviceDraftRef.current || retryOperationId) { setCloseRequested(true); return; }
     onClose?.();
@@ -104,12 +114,13 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
     if (hasWork && !work?.notes && !work?.application && !work?.visit) messages.push('Work notes, a product application or a visit record has unsaved changes.');
     if (hasChecklist) messages.push('The service checklist has unsaved answers.');
     if(requestDraftRef.current)messages.push('Finish submitting or explicitly cancel the reassignment request in its section before completing this work order. Request notes cannot be discarded by completion.');
+    if(outcomeDraftRef.current)messages.push('Save the selected estimate outcome or choose Keep current outcome in its section before completing this visit.');
     if (work?.visitAttempted) messages.push('The visit may already have reached the server. Retry its saved operation to confirm it; it cannot be discarded here.');
     const workReady = !hasWork || !!workActionsRef.current?.saveDrafts && !!workActionsRef.current?.discardDrafts;
     const checklistReady = !hasChecklist || !!checklistActionsRef.current?.saveDrafts && !!checklistActionsRef.current?.discardDrafts;
-    return { work, hasWork, hasChecklist, hasDraft: photoDraftRef.current || hasWork || hasChecklist || requestDraftRef.current,
-      canSave: !requestDraftRef.current && !photoDraftRef.current && workReady && checklistReady,
-      canDiscard: !requestDraftRef.current && !photoDraftRef.current && !work?.visitAttempted && workReady && checklistReady, messages };
+    return { work, hasWork, hasChecklist, hasDraft: photoDraftRef.current || hasWork || hasChecklist || requestDraftRef.current || outcomeDraftRef.current,
+      canSave: !requestDraftRef.current && !outcomeDraftRef.current && !photoDraftRef.current && workReady && checklistReady,
+      canDiscard: !requestDraftRef.current && !outcomeDraftRef.current && !photoDraftRef.current && !work?.visitAttempted && workReady && checklistReady, messages };
   };
   const blockedCompletionReason = () => accessReason || (['cancelled', 'canceled'].includes(displayJob?.status)
     ? 'This job was cancelled. A manager must reopen it before it can be completed.'
@@ -217,13 +228,13 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
     } catch (failure) { if (mounted.current && generation.current === ticket) showCompletionProblem(failure.message || 'Could not discard this saved completion. Keep this screen open and retry.'); }
     finally { if (submitting.current === ticket) submitting.current = null; if (mounted.current && generation.current === ticket) setSaving(false); }
   };
-  const edit = () => { if (explainBlockedPhoto() || workBusyRef.current || workDraftRef.current || serviceBusyRef.current || serviceDraftRef.current || requestBusyRef.current || requestDraftRef.current || hasCompletionDraft || retryOperationId) { if (!photoBusyRef.current && !photoDraftRef.current) setError('Finish the reassignment request or save/discard your work draft before editing the job.'); return; } onEdit?.(job); };
+  const edit = () => { if (explainBlockedPhoto() || workBusyRef.current || workDraftRef.current || serviceBusyRef.current || serviceDraftRef.current || requestBusyRef.current || requestDraftRef.current || outcomeBusyRef.current || outcomeDraftRef.current || hasCompletionDraft || retryOperationId) { if (!photoBusyRef.current && !photoDraftRef.current) setError('Finish the outcome or reassignment request, or save/discard your work draft before editing the job.'); return; } onEdit?.(job); };
   if (!job?.id) return <View><InlineNotice tone="error" message="Reopen the job from your job list." /><GlassButton title="Return to jobs" onPress={onClose} /></View>;
   // Dispatch instructions are projected separately from editable work notes.
   // Offline work-note patches deliberately use the legacy `notes` field.
   const dispatchNotes = typeof displayJob.dispatchNotes === 'string' ? displayJob.dispatchNotes : '';
-  const address = [displayJob.address, displayJob.city, displayJob.state, displayJob.zipCode].filter(value => typeof value === 'string' && value.trim()).join(', ');
-  const destination = typeof displayJob.latitude === 'number' && typeof displayJob.longitude === 'number' ? displayJob.latitude + ',' + displayJob.longitude : address;
+  const address = typeof displayJob.serviceProperty?.address === 'string' && displayJob.serviceProperty.address.trim() ? displayJob.serviceProperty.address : [displayJob.address, displayJob.city, displayJob.state, displayJob.zipCode].filter(value => typeof value === 'string' && value.trim()).join(', ');
+  const destination = jobDestination(displayJob);
   const navigate = () => Linking.openURL('https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(destination) + '&travelmode=driving').catch(failure => setError(failure.message || 'Navigation could not open. Check your map application.'));
   return <View testID="job-workflow" style={{ flex: 1, backgroundColor: palette.background }}>
     <View style={{ flex: 1 }} pointerEvents={completionDialog||closeRequested ? 'none' : 'auto'} accessibilityElementsHidden={!!completionDialog||closeRequested} importantForAccessibility={completionDialog||closeRequested ? 'no-hide-descendants' : 'auto'}>
@@ -233,8 +244,9 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 28, gap: 20 }}>
       {!!error && <InlineNotice tone="error" message={error} />}
       {!!notice && <InlineNotice tone="success" message={notice} />}
-      {busy && <View accessibilityLiveRegion="polite" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><ActivityIndicator color={palette.accent} /><Text style={{ flex: 1, color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{saving ? 'Saving completion…' : reviewing ? 'Loading saved work…' : workBusy ? 'Saving your work…' : 'Finish or cancel the photo picker to continue.'}</Text></View>}
+      {busy && <View accessibilityLiveRegion="polite" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><ActivityIndicator color={palette.accent} /><Text style={{ flex: 1, color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{saving ? 'Saving completion…' : reviewing ? 'Loading saved work…' : outcomeBusy ? 'Saving estimate outcome…' : workBusy ? 'Saving your work…' : 'Finish or cancel the photo picker to continue.'}</Text></View>}
       <Card>
+        {estimateVisit && <Text accessibilityRole="text" style={{ color: palette.accent, fontSize: 14, fontWeight: '700' }}>Estimate Visit</Text>}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><StatusBadge status={displayJob.status} />{!!job.syncState && <StatusBadge syncState={job.syncState} />}</View>
         <Text style={{ color: palette.text, fontSize: 25, lineHeight: 32, fontWeight: '700', letterSpacing: -0.5 }}>{displayJob.customerName || 'Assigned customer'}</Text>
         <Text style={{ color: palette.secondary, fontSize: 16, lineHeight: 24 }}>{displayJob.serviceType || 'Service visit'}</Text>
@@ -242,11 +254,13 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
         <Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 20 }}>Status: {displayJob.status}{submitted?.status === 'queued' ? ' · awaiting synchronization' : ''}</Text>
         {!!job.syncError && <InlineNotice tone="error" message={job.syncError} />}
         {(displayJob.estimatedDuration ?? displayJob.duration) != null && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Estimated duration: {displayJob.estimatedDuration ?? displayJob.duration} hours</Text>}
-        {permissions.can?.('jobs.pricing') && (displayJob.estimatedCost ?? displayJob.totalCost) != null && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Estimated cost: {'$' + Number(displayJob.estimatedCost ?? displayJob.totalCost).toFixed(2)}</Text>}
+        {!estimateVisit && permissions.can?.('jobs.pricing') && (displayJob.estimatedCost ?? displayJob.totalCost) != null && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Estimated cost: {'$' + Number(displayJob.estimatedCost ?? displayJob.totalCost).toFixed(2)}</Text>}
       </Card>
       {mode === 'details' && <Card><SectionHeader title="Service location" />
         <Text style={{ color: palette.text, fontSize: 15, lineHeight: 23 }}>{address || 'No service address supplied. Contact your manager before travelling.'}</Text>
         {!!displayJob.serviceInstructions && <Text style={{ color: palette.text, fontSize: 15, lineHeight: 23 }}>Service instructions: {displayJob.serviceInstructions}</Text>}
+        {!!displayJob.propertyAccessInstructions && <Text testID="property-access-instructions" style={{ color: palette.text, fontSize: 15, lineHeight: 23 }}>Property access: {displayJob.propertyAccessInstructions}</Text>}
+        {!!(displayJob.serviceProperty?.label || displayJob.serviceProperty?.unit) && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 21 }}>Property: {displayJob.serviceProperty.label || 'Service property'}{displayJob.serviceProperty.unit ? ' · Unit ' + displayJob.serviceProperty.unit : ''}</Text>}
         {!!destination && <GlassButton secondary title="Navigate to job" icon="navigate-outline" onPress={navigate} />}
         {!!displayJob.customerPhone && <GlassButton secondary title="Call customer" icon="call-outline" onPress={() => Linking.openURL('tel:' + String(displayJob.customerPhone).replace(/[^+0-9]/g, '')).catch(failure => setError(failure.message || 'The phone application could not open.'))} />}
       </Card>}
@@ -254,6 +268,9 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
         <Text testID="job-dispatch-notes" selectable style={{ color: palette.text, fontSize: 15, lineHeight: 23 }}>{dispatchNotes}</Text>
       </Card>}
       {mode === 'details' && !!accessReason && <InlineNotice tone="error" message={accessReason} />}
+      {estimateVisit && <View style={{ display: mode === 'details' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details'} pointerEvents={mode === 'details' ? 'auto' : 'none'}>
+        <EstimateVisitOutcome key={job.id} job={displayJob} active={mode === 'details' && !completionDialog} readOnly={!!accessReason || ['cancelled','canceled'].includes(displayJob.status)} onChanged={onChanged} onBusyChange={updateOutcomeBusy} onDraftChange={updateOutcomeDraft} />
+      </View>}
       <View style={{ display: mode === 'details' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details'} importantForAccessibility={mode === 'details' ? 'auto' : 'no-hide-descendants'} pointerEvents={mode === 'details' ? 'auto' : 'none'}>
         <FieldWorkTools key={job.id} job={job} active={mode === 'details' && !completionDialog} draftActionsRef={workActionsRef} readOnly={!!accessReason || ['completed', 'cancelled', 'canceled'].includes(displayJob.status)} showNavigation={false} onChanged={onChanged} onBusyChange={updateWorkBusy} onDraftChange={updateWorkDraft} />
       </View>
@@ -279,13 +296,15 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
         {permissions.canManage && onEdit && !submitted && <GlassButton secondary title="Edit job" disabled={busy} onPress={edit} />}
         {permissions.canManage && onFollowUp && displayJob.status === 'completed' && <GlassButton secondary title="Schedule follow-up" disabled={busy} onPress={() => { if (!explainBlockedPhoto() && !workDraftRef.current && !serviceDraftRef.current && !hasCompletionDraft) onFollowUp(displayJob); }} />}
       </View>}
-      {mode === 'completion' && <Card><SectionHeader title="Document completed work" subtitle="Work description is required. Actual hours and completion notes are optional." />
+      {mode === 'completion' && <Card><SectionHeader title={estimateVisit ? 'Document estimate visit' : 'Document completed work'} subtitle={estimateVisit ? 'Record what was observed. Completing this free visit does not approve a quote or create an invoice.' : 'Work description is required. Actual hours and completion notes are optional.'} />
+        {estimateVisit && <View style={{ gap: 8 }}><SectionHeader title="Visit outcome" />{Object.entries(ESTIMATE_OUTCOMES).filter(([value]) => value !== 'estimate_pending').map(([value,label]) => <GlassButton key={value} secondary={completionEstimateOutcome(displayJob, draft.estimateOutcome) !== value} title={label} accessibilityLabel={`Completion outcome: ${label}`} disabled={saving} onPress={() => setDraft(current => ({ ...current, estimateOutcome: value }))} />)}</View>}
         <GlassInput label="Work completed" value={draft.actualWorkDone} onChangeText={value => setDraft(current => ({ ...current, actualWorkDone: value }))} editable={!saving} multiline />
         <GlassInput label="Actual hours worked" value={draft.actualHours} onChangeText={value => setDraft(current => ({ ...current, actualHours: value }))} editable={!saving} keyboardType="decimal-pad" />
         <GlassInput label="Completion notes" value={draft.completionNotes} onChangeText={value => setDraft(current => ({ ...current, completionNotes: value }))} editable={!saving} multiline />
         <GlassButton title="Review completion" disabled={busy} onPress={review} /><GlassButton secondary title="Cancel completion" disabled={busy} onPress={() => { setError(''); setMode('details'); }} />
       </Card>}
       {mode === 'confirm' && <ConfirmationPanel title="Confirm completed work" message="Your current assignment is checked before synchronization. Offline work remains saved on this device until that check succeeds.">
+        {estimateVisit && <Text style={{ color: palette.accent, fontWeight: '600', lineHeight: 23 }}>Estimate Visit · {ESTIMATE_OUTCOMES[completionEstimateOutcome(displayJob, draft.estimateOutcome)]}</Text>}
         <Text style={{ color: palette.text, fontSize: 16, lineHeight: 24 }}>{draft.actualWorkDone}</Text>
         {!!draft.actualHours.trim() && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Actual hours: {draft.actualHours}</Text>}
         {!!draft.completionNotes.trim() && <Text style={{ color: palette.secondary, fontSize: 15, lineHeight: 23 }}>{draft.completionNotes}</Text>}

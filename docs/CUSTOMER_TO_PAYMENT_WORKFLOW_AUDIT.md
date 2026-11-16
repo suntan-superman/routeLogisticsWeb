@@ -8,6 +8,8 @@
 
 **Original audit scope:** source inspection, read-only deployed metadata, existing local/emulator tests and implementation planning. No application features, runtime configuration or financial records were changed during that audit. No provider transactions, real email/SMS, live Stripe activation, QuickBooks writes or deployments were performed during the audit.
 
+**Batch A implementation addendum:** G01–G04 now have an implemented inquiry-to-assigned-estimate workflow. [Prospect intake and estimate scheduling](PROSPECT_INTAKE_AND_ESTIMATE_SCHEDULING.md) records duplicate-aware contact reuse, lifecycle, stable service properties, follow-up, checked nonbillable estimate visits and mobile outcomes. Release verification is pending; physical acceptance remains separate. Other audit gaps, including technician quote preparation/delivery, are not closed by Batch A.
+
 **November 16 repair addendum, verified 12:10 PM Pacific:** **G12, G13 and G14 are resolved** by implementation `4821a11b682e79c1c0586ba89257dde0c7ea06d0`. The server-authoritative invoice contract preserves approved quote terms, atomically prevents duplicate bills, and enforces financial authorization/revisions. Four affected Route Logistics Functions and the narrow invoice rules change are deployed. Web publication `47cf3c2` is ready in Netlify deployment `6afb6298f174af9dbe74c0cb`; corrected served assets were verified. [Invoice integrity repair](INVOICE_INTEGRITY_REPAIR.md) records source, tests, deployed revisions, historical compatibility and remaining acceptance. Separate executed suites passed 528/528 full emulator cases, 29/29 final invoice cases, 437/437 web cases and 36/36 browser smoke executions across three engines; counts overlap. No real financial/provider operation or historical repair was performed. All baseline record metadata remained unchanged, Stripe remains test-only, QB writes remain disabled and its processor remains PAUSED. Other findings and original line-number references below remain a dated audit baseline unless explicitly updated.
 
 ## 1. Executive summary
@@ -22,7 +24,7 @@ The original audit identified three priority billing defects, now resolved by th
 2. **Concurrent invoice creation could duplicate billing.** The original query-then-add path produced **two invoices for one job** in an isolated concurrency probe.
 3. **Native invoice creation lacked server authority.** Client arithmetic and invoice fields were constrained by rules, but the server did not recompute invoice lines/taxes or transactionally verify completed-job/customer references and revision transitions. This was a financial correctness gap for an authorized finance actor, not evidence of technician or cross-tenant financial access.
 
-Other important missing links are canonical prospect/inquiry tracking, an estimate-visit type, assigned-technician estimate permissions and durable estimate drafts, customer decline/revision requests, scheduling-needed follow-up, native partial/deposit allocations, technician-assisted payments and native-payment-to-QuickBooks export. The company mobile navigation does **not** expose its retained estimate editor; component existence/tests do not establish reachable company functionality.
+Batch A implements prospect/inquiry tracking, duplicate-aware reuse, multiple properties and assigned estimate visits. Important remaining links are assigned-technician quote permissions and durable quote drafts, customer decline/revision requests, approved-quote scheduling-needed follow-up, native partial/deposit allocations, technician-assisted payments and native-payment-to-QuickBooks export. The company mobile navigation does **not** expose its retained quote editor; component existence/tests do not establish reachable company quoting functionality.
 
 Read-only production checks at **11:15 AM Pacific** confirmed all **99 source-exported functions ACTIVE**, deployed Stripe **test mode** with live approval false, QuickBooks **sandbox** with writes and production approval false, enabled estimate/email flags, and a connected sandbox metadata record. The **Route Logistics QuickBooks event processor schedule is PAUSED**. These settings were preserved. Access-token expiry is expected to invoke existing refresh logic; it is not by itself a broken connection.
 
@@ -34,8 +36,8 @@ Recommended sequence: retain the requested A→E business progression and reuse 
 
 ```mermaid
 flowchart LR
-  A[New inquiry: missing tracked intake] --> B[Prospect: contact or quote recipient only]
-  B --> C[Estimate visit: missing explicit appointment kind]
+  A[Tenant inquiry and follow-up queue] --> B[Reuse customer or explicit prospect and service property]
+  B --> C[Assigned nonbillable estimate visit and outcome]
   C --> D[On-site quote: management web exists; technician path missing]
   D --> E[Private versioned PDF/email and customer approval]
   E --> F[Authorized explicit conversion and checked scheduling]
@@ -54,9 +56,9 @@ Approval does not automatically schedule a visit or charge a customer. Estimate 
 
 | Lifecycle stage | Classification | Current UI/backend/data | Platform and actor scope | Evidence and principal limitation | Priority |
 | --- | --- | --- | --- | --- | --- |
-| New inquiry | Missing tracked workflow | Customer contact form and quote recipient fields; no inquiry/follow-up queue | Owner/admin/manager web can record contact text; no public request intake | Existing contact/CSV tests do not establish source, follow-up or lead ownership | A; G01 |
-| Prospect | Partial | `customers` active/archive; quote-only prospect lives in `estimates.recipient` | Management web; company mobile intake absent | No explicit prospect→active lifecycle; manual duplicates and property directory gaps | A; G01–G03 |
-| Estimate appointment | Missing business type | Ordinary `jobs` + checked scheduler can represent a visit | Owner/admin/manager schedule on web; assigned field schedule on mobile | No estimate/nonbillable type or estimate outcome linkage | A; G04 |
+| New inquiry | Implemented bounded internal workflow; release pending | Customers → New Inquiry, `rlManageInquiry`, private inquiry/follow-up queue | Owner/admin/manager web; no new public request intake | Contact reuse/separate decision, source/service/property, follow-up and revision history | A; G01 |
+| Prospect | Implemented bounded workflow; release pending | Existing `customers` lifecycle + separate archive, normalized duplicate review, stable embedded properties | Management web; mobile uses assigned property snapshot | Same-ID activation, no auto merge or historical reclassification; bounded directory limits documented | A; G01–G03 |
+| Estimate appointment | Implemented; native physical acceptance pending | Existing `jobs` with `appointmentKind`, free/nonbillable guard, inquiry/property IDs and outcome | Management web scheduling; normal Field/Management mobile schedules | Existing availability/locks/evidence queues reused; quote preparation remains Batch B | A; G04 |
 | On-site estimate | Partial | `rlEstimate`, `/estimates`, immutable versions/private photos | Owner/admin/manager online web; retained solo mobile editor; company technician path absent | Manual pricing; no technician draft/send policy or restart-safe quote draft | B; G05–G07 |
 | Customer approval | Partial overall; approval contract Complete | `/estimate-approval`, hashed expiring version-bound bearer token | Customer needs no staff account; responsive web | No decline/revision path, portal quote discovery or management approval task | B; G08–G09 |
 | Scheduled job | Complete bounded internal contract | `rlManageJob`, `rlCheckAvailability`, `jobs`, locks/availability/service areas | Management web; assigned field/mobile management visibility | Tests cover conflicts/tenant scope; no customer self-booking, travel-time scheduling or recurring quote conversion | Existing foundation; G10 |
@@ -75,7 +77,8 @@ Web is React/Vite; mobile is Expo/React Native. Both use the existing Firebase p
 | Records | Relationship and purpose |
 | --- | --- |
 | `companies`, `teamMembers`, `users` | Owner, active company membership/role and workspace identity. A role claim alone is insufficient for protected callables. |
-| `customers` | Tenant contact, one saved address, active/archive state, contact/consent fields; existing IDs reused by jobs/invoices/estimates. |
+| `customers` | Tenant contact/lifecycle, separate archive state, saved address plus stable embedded service-property directory; existing IDs reused by jobs/invoices/estimates. |
+| `rlInquiries`, `rlIntakeOperations`, `rlCustomerIdentityLocks` | Private per-request follow-up/history, stable replay receipts and normalized tenant identity serialization. No second customer database. |
 | `jobs`, `servicePlans`, `rlScheduleLocks`, `rlStaffAvailability` | Customer/property snapshot, assigned membership/UID, schedule/status/instructions/work notes, recurring source, checked scheduling and field eligibility. |
 | `estimates`, `rlEstimateVersions`, `rlEstimateOperations`, `rlEstimateApprovalSecrets`, `rlEstimateConversions` | Quote header/customer or recipient, immutable priced/versioned terms, replay IDs, private approval token/version state and deterministic conversion relationship. |
 | `photos`, `serviceLogs`, service-form records, `rlJobVisits`, `rlOperations` | Job-linked private photos, application/service records, arrival/departure/access evidence and durable replay receipts. |
@@ -110,39 +113,39 @@ Sanitized local evidence: ignored `.migration/customer-payment-production-read.j
 
 | Requested question | Finding |
 | --- | --- |
-| Can owner/manager create a prospective customer? | Can create a customer/contact or quote-only recipient; no explicit prospect lifecycle UI. Owner/admin/manager have `customers.manage`. |
+| Can owner/manager create a prospective customer? | Yes: Customers → New Inquiry, using existing `customers.manage`. Explicit Prospect/Active/Inactive lifecycle is separate from archive. |
 | Can dispatcher create one? | Current dispatch operators with those roles can; no separate enabled dispatcher role exists. Technician cannot create customers. |
 | Same collection? | Ordinary contacts use `customers`. An estimate recipient with `customerId:null` is embedded in the quote until explicit approved conversion creates/reuses a customer. |
-| Prospect vs active? | Active/archive (`isActive`, legacy status) exists; inquiry/prospect/active lifecycle is absent. New contacts default active. |
-| Multiple properties? | One saved customer address, with separate job/quote property snapshots. No property directory, stable property ID list or multi-property selector. |
-| Duplicate protection? | CSV retries/import identity and approved-prospect conversion have meaningful protection. Ordinary manual creation/update has no scoped normalized uniqueness/idempotent identity guard. Legitimate shared-contact cases need an explicit policy. |
-| Prospect conversion? | Approved quote conversion can reuse an explicitly selected matching-email customer or explicitly create one; no standalone prospect→active action. Never silently merge historical customers. |
-| Inquiry details? | Contact/free-text notes and quote service/scope exist; no structured inquiry source, follow-up date, lead assignment or queue. Import provenance is not a lead-source workflow. |
+| Prospect vs active? | New inquiry contacts start prospect; missing historical lifecycle stays active without writes. Archive is separate. |
+| Multiple properties? | Versioned embedded directory with stable IDs, primary designation, unit/access instructions and selected appointment snapshots; old addresses remain usable virtually. |
+| Duplicate protection? | Server normalized matching, tenant identity locks, stable operations and explicit separate-contact reason. No automatic merge; legitimate shared contact remains possible. Raw client creation cannot bypass intake. |
+| Prospect conversion? | Explicit management transition, accepted service booking or approved quote conversion retains the customer ID and audit. Free estimate completion does not activate/approve paid work. |
+| Inquiry details? | Independent requests retain source/service/property, notes, due date/staff, status and revision. Compact due/overdue/scheduled/closed queue uses company time zone. |
 | Public estimate request? | No working public service/estimate intake route found. Marketing signup is staff/company signup, not homeowner request intake. Future service-area checks do not themselves create requests. |
 | Portal additional work? | No customer request/estimate/booking action; customer may contact the displayed provider manually. |
 
-Prefer extending `customers` with explicit lifecycle metadata, retaining IDs and historical active defaults. Preserve active/archive as a separate concept. Add explicit duplicate warnings/reuse and an audited identity policy before any merge. Do not infer service locations from billing addresses or current phone location. G01–G03/G24 cover the required work.
+Batch A implements G01–G03 without customer migration or automatic merge. Selected property identity and service snapshot control location; billing address/current phone location is not substituted. Public and portal request intake remains G24.
 
 Evidence: `functions/customerAddresses.js:7–17,63–106`; `functions/customers.js:22–47`; `functions/estimates.js:260–289,623–633`; `routeLogisticsWeb/src/pages/CustomerManagementPage.jsx`; `functions/shared/capabilities.json`.
 
 ## 6. Estimate appointment findings
 
-The scheduling engine is reusable, but no explicit estimate appointment/nonbillable discriminator exists. The current “Appointment type” control means **one-time versus recurring**, not estimate versus service. Naming a normal job “Estimate” does not prevent completion/invoicing as a service.
+Batch A reuses the scheduling engine with explicit **Service job / Estimate visit**, separate from **one-time / recurring**. Missing historical kind remains service. Estimate visits are free/nonbillable, have operational outcomes and cannot enter ordinary invoice creation.
 
 | Requirement | Existing infrastructure and limit |
 | --- | --- |
-| Estimate type and outcome | Missing. No explicit estimate-visit kind/resulting-quote link or estimate-specific completion outcome. |
+| Estimate type and outcome | `appointmentKind:estimate_visit`, nonbillable, inquiry/property linkage and estimate pending/quote needed/prepared/declined/no-access outcomes. Resulting quote preparation/linkage remains Batch B. |
 | Assigned estimator/technician | Ordinary jobs validate active company membership, fieldWorkEnabled, owner/manager/technician identity and availability; office-only/inactive assignees are excluded. |
 | Date/time/duration | Ordinary scheduling supports validated dates, quarter-hour choices and duration. |
 | Availability/calendar overlap | Server checks conflicts/unavailable periods and uses transactional schedule locks; alternative slots exist. Travel time is explicitly excluded. |
 | Service property/coverage | Server property/eligibility checks and approved exceptions exist. Internal jobs may proceed with explicit unverified-address warnings; future public request eligibility is stricter. |
 | Instructions/contact | Current job has customer contact and dispatcher instructions separated from technician work notes. |
-| Mobile visibility | Assigned ordinary jobs appear in field mode; management schedule/reassignment exists. Native creation/full editing hands off to web. |
+| Mobile visibility | Estimate Visit badge/outcome, selected property/unit/access and instructions appear in ordinary Field and Management schedules; web handles intake/full scheduling. Updated binaries required. |
 | Arrival/departure | Existing authorized manual/GPS evidence + durable offline replay can be reused; not proof of access/attendance by itself. |
-| Reschedule/cancel | Ordinary jobs have checked/revisioned transitions; no estimate-specific quote/follow-up consequence. |
-| Follow-up reminders | Existing appointment notification channels are not an estimate follow-up queue with due date/outcome. |
+| Reschedule/cancel | Existing checks retained; inquiry status/outcome follows actual visit changes, cancellation preserves history. Classification/linkage cannot silently be relabeled. |
+| Follow-up reminders | Management queue with due dates/staff/status/outcome is implemented. Existing assignment notifications are reused; no new automated reminder campaign. |
 
-Minimum future shape: use the existing job/appointment record once, add a backward-compatible business kind defaulting historical jobs to service, link inquiry/customer/property and resulting quote, and prevent incidental billing of estimate visits unless an explicitly priced assessment is authorized. Do not duplicate a single visit in both jobs and appointments. G04/G05; backend/rules/web work, plus rebuilt mobile UI where exposed.
+G04 uses the existing job record/evidence/queue once, without a second scheduler or appointment collection. An assessment fee requires a separately priced service. G05 technician quote preparation/delivery remains open; physical estimate-visit acceptance is recorded separately.
 
 Evidence: `functions/scheduling.js:24–42,108–141,157–266`; `functions/workData.js:168–257`; `functions/serviceAreaWorkflows.js`; `routeLogisticsWeb/src/components/JobFormModal.jsx`; `routeLogisticsMobile/screens/WorkspaceScreen.js:106–114`.
 
@@ -362,10 +365,10 @@ Every gap above maps to the planning register below. Complexity: S=small bounded
 
 | ID | Gap and business impact | Severity | Recommended correction | Dependencies | Complexity | Backend deployment / native rebuild |
 | --- | --- | --- | --- | --- | --- | --- |
-| G01 | No tracked inquiry/prospect/source/follow-up; leads can be lost or counted active prematurely | High | Extend existing customer lifecycle with explicit inquiry/contact/source/follow-up/assignment and tracked transitions | Historical defaults, contact reuse policy | M | Yes / Yes if native intake added; web first possible |
-| G02 | Manual duplicate customer creation/update; duplicated contact/billing/portal identity | High | Tenant-normalized duplicate warning/reuse and idempotent create; deliberate shared-email handling, audited review, no silent merge | Existing duplicate inventory/identity policy | M | Yes / Native warning UI rebuild if exposed |
-| G03 | No managed multi-property customer directory; wrong-property risk | Medium | Stable scoped property selection with compatible historical job/quote snapshots | Property/address ownership/migration policy | M | Yes / Yes for native selection |
-| G04 | No estimate-visit/nonbillable kind; estimate attendance can be billed as ordinary service | High | Add explicit kind/link/outcome to existing visit, default old jobs to service; explicit charged-assessment exception | G01, scheduler reuse, invoice eligibility guard | M | Yes / Yes for native presentation |
+| G01 | Tracked inquiry/prospect/source/follow-up | Implemented — release pending | Existing customer lifecycle, private independent inquiry/source/follow-up/staff/status queue with audit | [Batch A validation and limits](PROSPECT_INTAKE_AND_ESTIMATE_SCHEDULING.md) | Bounded implementation complete | Backend/web release pending; physical acceptance separate |
+| G02 | Duplicate-aware customer creation/reuse | Implemented — release pending | Normalized tenant matching, stable operations/identity locks, explicit separate reason; no merge | [Batch A validation and limits](PROSPECT_INTAKE_AND_ESTIMATE_SCHEDULING.md) | Bounded implementation complete | Backend/rules/web release pending |
+| G03 | Stable multi-property directory and selection | Implemented — release pending | Existing address compatibility, versioned directory, server property binding and historical snapshots | [Batch A validation and limits](PROSPECT_INTAKE_AND_ESTIMATE_SCHEDULING.md) | Bounded implementation complete | Backend/web release pending; mobile snapshot display needs new binary |
+| G04 | Explicit estimate visit, outcome and nonbillable protection | Implemented — release pending | Existing scheduler/assignment/evidence/offline queue; inquiry follow-up; invoice rejection | [Batch A validation and physical checklist](PROSPECT_INTAKE_AND_ESTIMATE_SCHEDULING.md) | Bounded implementation complete | Backend/rules/web release pending; updated Android/iOS required |
 | G05 | Company technician estimates unavailable; company native editor unreachable | High | Separate assigned draft/submit/deliver capabilities and owner boolean; management review/send; reachable field action | Current membership/assignment + pricing constraints | M–H | Yes / Yes |
 | G06 | Quote drafts/photos not durable offline; field work can be lost | High for field quoting | Scoped immediate local draft/upload persistence, immutable operation IDs, explicit version conflict/retry | G05 and existing queue patterns | M | Possibly contract extension / Yes |
 | G07 | Estimate pricing catalog/tax applicability missing; manual entry inconsistency | Medium–High | Reuse company services/templates with explicit price snapshots and reviewed flat-tax policy; do not imply tax jurisdiction engine | Company pricing/tax decisions | M | Yes / Yes for onsite editor |

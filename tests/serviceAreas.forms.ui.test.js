@@ -17,6 +17,7 @@ function PropertyMock(props){checker=props;const addressLocked=props.addressRead
 const cache=new Map();
 function load(relative){const file=path.resolve(__dirname,'../routeLogisticsWeb/src',relative);if(cache.has(file))return cache.get(file);const module={exports:{}};const mock=name=>{
  if(name==='react')return React;
+ if(name.endsWith('/ServicePropertyDirectory'))return{__esModule:true,default:()=>null};
     if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
     if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
     if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found','workspace-changed'].includes(String(error?.code||'').split('/').pop())};if(name==='react-hot-toast')return{__esModule:true,default:toast};
@@ -43,11 +44,12 @@ const button=label=>tree.root.findAll(node=>node.type==='button'&&node.children.
 const submit=async()=>act(async()=>tree.root.findByType('form').props.onSubmit({preventDefault(){}}));
 const renderJob=async(existing,overrides={})=>act(async()=>{jobProps={job:existing,defaults:existing?undefined:{customerId:customer.id,serviceType:'Pest Control',date:'2030-01-02'},customers:[customer,other,missing],onClose(){},onCreated(){},...overrides};tree=create(React.createElement(Job,jobProps));});
 const refreshCustomers=async customers=>act(async()=>{jobProps={...jobProps,customers};tree.update(React.createElement(Job,jobProps));});
-const selectCustomer=async id=>act(async()=>tree.root.findAllByType('select')[0].props.onChange({target:{value:id}}));
+const selectCustomer=async id=>act(async()=>tree.root.findAllByType('select').find(node=>node.props['aria-label']==='Customer').props.onChange({target:{value:id}}));
 const changeNotes=async value=>act(async()=>tree.root.findByProps({placeholder:'Gate code, pets, areas of concern…'}).props.onChange({target:{value}}));
 const propertyInput=()=>tree.root.findByProps({'aria-label':'Mock explicit property'});
 const enableAddressEditing=async()=>{assert.ok(button('Enable Editing'),'An explicit Enable Editing action must exist');await act(async()=>button('Enable Editing').props.onClick());};
 const changeProperty=async value=>{if(checker.addressReadOnly)await enableAddressEditing();await act(async()=>propertyInput().props.onChange({target:{value}}));};
+const businessOptions=write=>{const options=write.options;if(!options)return options;if(options.operationId)assert.match(options.operationId,/^[a-f0-9-]{36}$/i);const {operationId,...rest}=options;return Object.keys(rest).length?rest:undefined;};
 const permanentCheckbox=()=>tree.root.findAll(node=>node.type==='input'&&node.props['aria-label']==="Update customer's saved address")[0];
 const choosePermanent=async value=>{assert.ok(permanentCheckbox(),'Permanent-address choice must be visible');await act(async()=>permanentCheckbox().props.onChange({target:{checked:value}}));};
 afterEach(async()=>{if(tree)await act(async()=>tree.unmount());tree=null;jobProps=null;writes=[];planWrites=[];toasts=[];checker=null;configured=true;dirty=false;allowCustomerManage=true;company=defaultCompany;writeFailure=null;writeWarning=null;});
@@ -145,17 +147,17 @@ test('the suggested-address unlock action uses the original customer revision an
  await act(async()=>checker.onEnableAddressEditing());assert.equal(checker.addressReadOnly,false);assert.equal(propertyInput().props.value,savedAddress);assert.equal(writes.length,0);assert.equal(permanentCheckbox(),undefined);
  await refreshCustomers([{...customer,updatedAt:'2026-11-15T16:00:00.000Z'},other,missing]);
  await changeProperty('A Google-confirmed corrected service property');assert.equal(permanentCheckbox().props.checked,false);await choosePermanent(true);await submit();
- assert.equal(writes.length,1);assert.deepEqual(writes[0].options,{saveCustomerAddress:true,expectedCustomerVersion:customer.updatedAt});
+ assert.equal(writes.length,1);assert.deepEqual(businessOptions(writes[0]),{saveCustomerAddress:true,expectedCustomerVersion:customer.updatedAt});
 });
 test('editing a job address defaults to a one-off change and does not request a permanent customer write',async()=>{
  const created=[];await renderJob(undefined,{onCreated:(...args)=>created.push(args)});await changeProperty('One-off service visit address');
- assert.equal(permanentCheckbox().props.checked,false);await submit();assert.equal(writes.length,1);assert.equal(writes[0].value.address,'One-off service visit address');assert.equal(writes[0].options,undefined);
+ assert.equal(permanentCheckbox().props.checked,false);await submit();assert.equal(writes.length,1);assert.equal(writes[0].value.address,'One-off service visit address');assert.equal(businessOptions(writes[0]),undefined);
  for(const key of ['saveCustomerAddress','expectedCustomerVersion','customerAddressUpdated'])assert.equal(Object.hasOwn(writes[0].value,key),false);
  assert.equal(created.length,1);assert.equal(created[0][1]?.customerAddressUpdated===true,false);
 });
 test('an explicit permanent-address choice sends scoped options and confirms the customer update to the parent',async()=>{
  const created=[];await renderJob(undefined,{onCreated:(...args)=>created.push(args)});await changeProperty('A permanent corrected customer property');await choosePermanent(true);
- await submit();assert.equal(writes.length,1);assert.deepEqual(writes[0].options,{saveCustomerAddress:true,expectedCustomerVersion:customer.updatedAt});
+ await submit();assert.equal(writes.length,1);assert.deepEqual(businessOptions(writes[0]),{saveCustomerAddress:true,expectedCustomerVersion:customer.updatedAt});
  assert.deepEqual(writes[0].value.serviceProperty,{address:'A permanent corrected customer property'});
  for(const key of ['saveCustomerAddress','expectedCustomerVersion','customerAddressUpdated'])assert.equal(Object.hasOwn(writes[0].value,key),false);
  assert.equal(created.length,1);assert.equal(created[0][1]?.customerAddressUpdated,true);assert.match(toasts.join(' '),/address|customer/i);
@@ -165,7 +167,7 @@ test('a customer refresh cannot silently rebase a permanent edit and a conflict 
  await refreshCustomers([{...customer,address:'An address changed by another dispatcher',updatedAt:'2026-11-15T16:00:00.000Z'},other,missing]);
  assert.equal(propertyInput().props.value,'A deliberate permanent-address correction');assert.equal(permanentCheckbox().props.checked,true);
  writeFailure='The customer address changed. Review the latest customer record before saving.';await submit();
- assert.equal(writes.length,1);assert.deepEqual(writes[0].options,{saveCustomerAddress:true,expectedCustomerVersion:customer.updatedAt});
+ assert.equal(writes.length,1);assert.deepEqual(businessOptions(writes[0]),{saveCustomerAddress:true,expectedCustomerVersion:customer.updatedAt});
  assert.equal(created.length,0);assert.equal(propertyInput().props.value,'A deliberate permanent-address correction');assert.equal(permanentCheckbox().props.checked,true);assert.equal(dirty,true);
  assert.match(toasts.at(-1),/customer address changed/);assert.equal(toasts.some(message=>/Job scheduled/.test(message)),false);
 });
@@ -175,23 +177,23 @@ test('the recorded job property can become permanent without inventing another j
  await choosePermanent(true);assert.equal(button('Save Changes').props.disabled,false);assert.equal(dirty,true);
  await choosePermanent(false);assert.equal(button('Save Changes').props.disabled,true);assert.equal(dirty,false);
  await choosePermanent(true);await submit();assert.equal(writes.length,1);assert.equal(writes[0].action,'update');assert.equal(writes[0].id,job.id);
- assert.deepEqual(writes[0].options,{saveCustomerAddress:true,expectedCustomerVersion:customer.updatedAt});assert.equal(writes[0].expectedVersion,job.updatedAt);
+ assert.deepEqual(businessOptions(writes[0]),{saveCustomerAddress:true,expectedCustomerVersion:customer.updatedAt});assert.equal(writes[0].expectedVersion,job.updatedAt);
  assert.equal(created[0][0].id,job.id);assert.equal(created[0][1]?.customerAddressUpdated,true);
 });
 test('customer selection relocks the address and discards a previous customer permanent-update choice',async()=>{
  await renderJob();await changeProperty('An address intended for the first customer');await choosePermanent(true);await selectCustomer(other.id);
  assert.equal(propertyInput().props.value,otherAddress);assert.equal(propertyInput().props.readOnly,true);assert.equal(checker.addressReadOnly,true);assert.equal(permanentCheckbox(),undefined);
  await enableAddressEditing();assert.equal(permanentCheckbox(),undefined);await changeProperty('One-off address for the second customer');assert.equal(permanentCheckbox().props.checked,false);
- await submit();assert.equal(writes.length,1);assert.equal(writes[0].value.customerId,other.id);assert.equal(writes[0].options,undefined);
+ await submit();assert.equal(writes.length,1);assert.equal(writes[0].value.customerId,other.id);assert.equal(businessOptions(writes[0]),undefined);
 });
 test('a missing saved address requires Enable Editing and may be explicitly persisted with a null legacy version',async()=>{
  await renderJob(undefined,{defaults:{customerId:missing.id,serviceType:'Pest Control',date:'2030-01-02'}});
  assert.equal(propertyInput().props.value,'');assert.equal(checker.addressReadOnly,true);await changeProperty('A newly provided customer service address');await choosePermanent(true);
- await submit();assert.equal(writes.length,1);assert.equal(writes[0].value.customerId,missing.id);assert.deepEqual(writes[0].options,{saveCustomerAddress:true,expectedCustomerVersion:null});
+ await submit();assert.equal(writes.length,1);assert.equal(writes[0].value.customerId,missing.id);assert.deepEqual(businessOptions(writes[0]),{saveCustomerAddress:true,expectedCustomerVersion:null});
 });
 test('without customer-management permission an address can change for this job but cannot be made permanent',async()=>{
  allowCustomerManage=false;await renderJob();await changeProperty('A one-off operational service address');assert.equal(permanentCheckbox(),undefined);
- await submit();assert.equal(writes.length,1);assert.equal(writes[0].options,undefined);assert.equal(writes[0].value.address,'A one-off operational service address');
+ await submit();assert.equal(writes.length,1);assert.equal(businessOptions(writes[0]),undefined);assert.equal(writes[0].value.address,'A one-off operational service address');
 });
 test('solo scheduling saves the visible service address instead of a hidden customer suggestion',async()=>{
  company=null;await renderJob();assert.equal(checker,null);

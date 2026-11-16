@@ -1,0 +1,3 @@
+export const isEstimateVisit = job => job?.appointmentKind === 'estimate_visit';
+export const estimateOutcomes = [{ value: 'estimate_pending', label: 'Estimate pending' }, { value: 'quote_needed', label: 'Visit completed — quote needed' }, { value: 'quote_prepared', label: 'Quote prepared' }, { value: 'customer_declined', label: 'Customer declined' }, { value: 'cancelled_no_access', label: 'Cancelled / no access' }];
+export const estimateOutcomeLabel = job => estimateOutcomes.find(row => row.value === job?.estimateOutcome)?.label || (job?.status === 'completed' ? 'Visit completed — quote needed' : job?.status === 'cancelled' ? 'Cancelled / no access' : 'Estimate pending');

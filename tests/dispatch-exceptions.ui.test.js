@@ -100,3 +100,20 @@ test('checked assignment failures stay visible inside the request drawer and ret
   await act(async () => assignment.props.onChange({ target: { value: 'tech-two' } }));
   const drawer = tree.root.findByProps({ 'aria-label': 'Operational exception review' }); assert.match(textOf(drawer), /already has another appointment/); assert.equal(env.jobs[2].assignedTo, 'tech-one'); assert.equal(env.jobs[2].reassignmentRequest.status, 'pending');
 });
+test('dispatch details keep canonical work observations separate from read-only dispatcher instructions', async () => {
+  env.jobs[2] = { ...env.jobs[2], workNotes: 'Observed exterior equipment damage.\nReported it to dispatch.', dispatchNotes: 'Use gate code 2468.\nEnter from the south.', notes: 'Legacy instruction alias must not replace the canonical instructions.' };
+  await mount(); await click('Requested · Synthetic service');
+  const work = tree.root.findByProps({ 'aria-label': 'Work notes' }), instructions = tree.root.findByProps({ 'aria-label': 'Job instructions' });
+  assert.equal(textOf(work.findByType('p')), env.jobs[2].workNotes);
+  assert.equal(textOf(instructions.findByType('p')), env.jobs[2].dispatchNotes);
+  assert.doesNotMatch(textOf(work), /gate code|south|Legacy instruction/);
+  assert.doesNotMatch(textOf(instructions), /equipment damage/);
+  assert.equal(env.calls.length, 0);
+});
+test('intentionally empty canonical work notes never fall back to legacy dispatcher instructions', async () => {
+  env.jobs[2] = { ...env.jobs[2], workNotes: '', notes: 'Legacy site instructions: gate code 1357.' };
+  await mount(); await click('Requested · Synthetic service');
+  assert.equal(tree.root.findAll(node => node.type === 'section' && node.props['aria-label'] === 'Work notes').length, 0);
+  assert.equal(textOf(tree.root.findByProps({ 'aria-label': 'Job instructions' }).findByType('p')), env.jobs[2].notes);
+  assert.equal(env.calls.length, 0);
+});

@@ -16,6 +16,48 @@ const annotate = (...ids) => test.info().annotations.push({ type: 'acceptance', 
 const customerRow = (page, name) => page.getByRole('row').filter({ has: page.getByText(name, { exact: true }) });
 const estimateCard = (page, title) => page.locator('article').filter({ has: page.getByRole('heading', { name: title, exact: true }) });
 
+test('PW-NOTES-01 technician note replay is idempotent and dispatch keeps instructions separate', async ({ page, scenario }) => {
+  annotate('DSP-003', 'SEC-002', 'SEC-003', 'FR-001');
+  const original = await scenario.read('jobs', scenario.ids.jobId), foreign = await scenario.read('jobs', scenario.ids.foreignJobId);
+  await signIn(page, scenario.accounts.technician);
+  const readRequest = page.waitForRequest(request => request.url().includes('/rlReadWorkspace') && request.method() === 'POST');
+  await page.goto('/my-work');
+  const authorization = await (await readRequest).headerValue('authorization');
+  expect(Boolean(authorization?.startsWith('Bearer '))).toBe(true);
+  const endpoint = scenario.functionUrl('rlApplyJobOperation');
+  expect(new URL(endpoint).origin).toBe('http://127.0.0.1:5001');
+  const workNotes = `${scenario.prefix} Technician observations after the visit.\nGate access was checked; no appointment changes requested.`;
+  const payload = { operationId: randomUUID(), jobId: scenario.ids.jobId, patch: { notes: workNotes }, expectedVersion: original.updatedAt };
+  const response = await page.request.post(endpoint, { headers: { authorization }, data: { data: payload } });
+  expect(response.ok()).toBe(true);
+  const accepted = (await response.json()).result;
+  expect(accepted.status).toBe('synced'); expect(typeof accepted.version).toBe('string');
+  const replay = await page.request.post(endpoint, { headers: { authorization }, data: { data: payload } });
+  expect(replay.ok()).toBe(true); expect((await replay.json()).result).toEqual(accepted);
+  const saved = await scenario.read('jobs', scenario.ids.jobId);
+  expect(saved.workNotes).toBe(workNotes); expect(saved.notes).toBe(original.notes);
+  expect(saved.updatedAt).toBe(accepted.version);
+  for (const field of ['status', 'assignedTo', 'assignedToUid', 'date', 'time', 'privateNotes']) expect(saved[field]).toEqual(original[field]);
+  const operations = (await scenario.list('rlOperations')).filter(row => row.companyId === scenario.ids.companyId && row.jobId === scenario.ids.jobId && row.userId === scenario.accounts.technician.uid);
+  expect(operations).toHaveLength(1); expect(operations[0].result).toEqual(accepted);
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await signIn(page, scenario.accounts.manager);
+  await page.goto('/dispatch'); await page.getByLabel('Service date', { exact: true }).fill(scenario.jobDate);
+  await page.getByRole('button', { name: `${scenario.customerName} · ${scenario.jobTitle}`, exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  const observations = dialog.getByRole('region', { name: 'Work notes', exact: true });
+  const instructions = dialog.getByRole('region', { name: 'Job instructions', exact: true });
+  expect(await observations.locator('p').textContent()).toBe(workNotes);
+  expect(await instructions.locator('p').textContent()).toBe(scenario.jobInstructions);
+  await expect(observations.getByText(scenario.jobInstructions, { exact: true })).toHaveCount(0);
+  await expect(instructions.getByText(workNotes, { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Close details', exact: true }).click();
+  await page.getByRole('button', { name: `${scenario.customerName} · ${scenario.jobTitle}`, exact: true }).click();
+  expect(await dialog.getByRole('region', { name: 'Work notes', exact: true }).locator('p').textContent()).toBe(workNotes);
+  expect(await scenario.read('jobs', scenario.ids.jobId)).toEqual(saved);
+  expect(await scenario.read('jobs', scenario.ids.foreignJobId)).toEqual(foreign);
+});
+
 test('PW-OPS-22 technician request reaches dispatch and manager resolution preserves the appointment', async ({ page, scenario }) => {
   annotate('DSP-003', 'SEC-002', 'SEC-003');
   const original = await scenario.read('jobs', scenario.ids.jobId), foreign = await scenario.read('jobs', scenario.ids.foreignJobId);

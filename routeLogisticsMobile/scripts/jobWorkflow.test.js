@@ -304,6 +304,20 @@ test('same-job instruction refresh preserves photo, work-tool and completion dra
   assert.equal(calls.length, 0); assert.equal(reads.length, 0); assert.equal(changes, 0);
 });
 
+test('closing a note draft explicitly saves supported drafts before leaving without completing the job', async () => {
+  await render();workDrafts={notes:true,application:false,visit:false,hasDraft:true};
+  await act(async()=>workProps.onDraftChange(true));await press('Close job details');
+  assert.equal(closes,0);assert.ok(control('Save drafts and close'));
+  await press('Save drafts and close');assert.deepEqual(savedDraftCalls,['work']);assert.equal(closes,1);assert.equal(calls.length,0);
+});
+
+test('a failed note save while closing keeps the work order and its draft open for retry', async () => {
+  await render();workDrafts={notes:true,application:false,visit:false,hasDraft:true};
+  saveWorkDrafts=async()=>({success:false,message:'Device storage unavailable. Work notes retained.'});
+  await act(async()=>workProps.onDraftChange(true));await press('Close job details');await press('Save drafts and close');
+  assert.equal(closes,0);assert.match(text(),/Device storage unavailable/);assert.equal(workDrafts.hasDraft,true);assert.equal(calls.length,0);
+});
+
 test('switching jobs replaces dispatch instructions and never carries another visit’s instructions or completion draft', async () => {
   await render(job({ dispatchNotes: 'First property gate instructions' }));
   await draft();

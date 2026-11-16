@@ -130,7 +130,7 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
     if (inspectDrafts().hasDraft) { showDrafts(); return; }
     setError(''); setNotice(''); setCloseRequested(false); setMode('completion');
   };
-  const resolveDrafts = async discard => {
+  const resolveDrafts = async (discard,closeAfter=false) => {
     if (draftAction.current !== null || submitting.current !== null || reviewPending.current !== null) return;
     const pending = inspectDrafts();
     if (discard ? !pending.canDiscard : !pending.canSave) { showDrafts('Save or cancel the selected draft in its work section before continuing.'); return; }
@@ -146,6 +146,7 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
       const remaining = inspectDrafts();
       if (remaining.hasDraft) { showDrafts('Some work still needs your attention. Save or cancel it before continuing.'); return; }
       workDraftRef.current = false; serviceDraftRef.current = false; setWorkDraft(false); setServiceDraft(false);
+      if(closeAfter){setCompletionDialog(null);setCloseRequested(false);onClose?.();return;}
       if (!canComplete) { showCompletionProblem(blockedCompletionReason()); return; }
       setCompletionDialog(null); setCloseRequested(false); setError(''); setNotice(''); setMode('completion');
     } catch (failure) {
@@ -203,6 +204,14 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
     if (submitting.current !== null || explainBlockedPhoto()) return;
     const ticket = generation.current; submitting.current = ticket; setSaving(true); setError('');
     try {
+      const pending=inspectDrafts();
+      if(!pending.canDiscard)throw new Error('Save or cancel the current draft in its section before leaving. Saved work remains on this device.');
+      for(const [needed,actions] of [[pending.hasWork,workActionsRef.current],[pending.hasChecklist,checklistActionsRef.current]]){
+        if(!needed)continue;
+        const result=await actions.discardDrafts();
+        if(!mounted.current||generation.current!==ticket)return;
+        if(!result?.success)throw new Error(result?.message||'The draft could not be marked discarded. Your work is retained.');
+      }
       if (retryOperationId) await resolveOffline(retryOperationId, 'discard');
       if (mounted.current && generation.current === ticket) onClose?.();
     } catch (failure) { if (mounted.current && generation.current === ticket) showCompletionProblem(failure.message || 'Could not discard this saved completion. Keep this screen open and retry.'); }
@@ -217,7 +226,7 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
   const destination = typeof displayJob.latitude === 'number' && typeof displayJob.longitude === 'number' ? displayJob.latitude + ',' + displayJob.longitude : address;
   const navigate = () => Linking.openURL('https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(destination) + '&travelmode=driving').catch(failure => setError(failure.message || 'Navigation could not open. Check your map application.'));
   return <View testID="job-workflow" style={{ flex: 1, backgroundColor: palette.background }}>
-    <View style={{ flex: 1 }} pointerEvents={completionDialog ? 'none' : 'auto'} accessibilityElementsHidden={!!completionDialog} importantForAccessibility={completionDialog ? 'no-hide-descendants' : 'auto'}>
+    <View style={{ flex: 1 }} pointerEvents={completionDialog||closeRequested ? 'none' : 'auto'} accessibilityElementsHidden={!!completionDialog||closeRequested} importantForAccessibility={completionDialog||closeRequested ? 'no-hide-descendants' : 'auto'}>
     <ScreenHeader title={mode === 'details' ? 'Job Details' : mode === 'completion' ? 'Complete job' : 'Review completion'} subtitle={mode === 'details' ? 'Your assigned work order' : displayJob.customerName || 'Assigned visit'}>
       <GlassButton secondary title="Close" accessibilityLabel="Close job details" disabled={busy} onPress={close} />
     </ScreenHeader>
@@ -225,9 +234,6 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
       {!!error && <InlineNotice tone="error" message={error} />}
       {!!notice && <InlineNotice tone="success" message={notice} />}
       {busy && <View accessibilityLiveRegion="polite" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><ActivityIndicator color={palette.accent} /><Text style={{ flex: 1, color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{saving ? 'Saving completion…' : reviewing ? 'Loading saved work…' : workBusy ? 'Saving your work…' : 'Finish or cancel the photo picker to continue.'}</Text></View>}
-      {closeRequested && <ConfirmationPanel title="Keep your work?" message="Your work draft is still here. Keep editing, or explicitly discard it before closing.">
-        <GlassButton secondary title="Keep editing" disabled={busy} onPress={() => setCloseRequested(false)} /><GlassButton title="Discard draft and close" disabled={busy} onPress={discardAndClose} />
-      </ConfirmationPanel>}
       <Card>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><StatusBadge status={displayJob.status} />{!!job.syncState && <StatusBadge syncState={job.syncState} />}</View>
         <Text style={{ color: palette.text, fontSize: 25, lineHeight: 32, fontWeight: '700', letterSpacing: -0.5 }}>{displayJob.customerName || 'Assigned customer'}</Text>
@@ -288,6 +294,12 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
       </ConfirmationPanel>}
     </ScrollView>
     </View>
+    {closeRequested&&!completionDialog&&<ActionDialog testID="close-work-drafts-dialog" title="Keep your work?" message="Save supported work drafts before closing. A failed save keeps the work order open and retains your text." busy={busy} onClose={()=>{if(!busy)setCloseRequested(false);}}>
+      {(hasCompletionDraft||retryOperationId)&&<InlineNotice message="Resume or cancel the completion draft before saving and closing. Previously queued work remains on the device."/>}
+      <GlassButton title="Save drafts and close" disabled={busy||hasCompletionDraft||!!retryOperationId||!inspectDrafts().canSave} busy={resolvingDrafts} onPress={()=>resolveDrafts(false,true)}/>
+      <GlassButton secondary title="Keep editing" disabled={busy} onPress={()=>setCloseRequested(false)}/>
+      <GlassButton secondary title="Discard draft and close" disabled={busy||!inspectDrafts().canDiscard} onPress={discardAndClose}/>
+    </ActionDialog>}
     {!!completionDialog && <ActionDialog testID="completion-action-dialog" title={completionDialog.title} message={completionDialog.message} tone={completionDialog.tone} busy={busy} onClose={() => { if (!busy) setCompletionDialog(null); }}>
       {completionDialog.kind === 'drafts' && <>
         <GlassButton title="Save drafts and continue" busy={resolvingDrafts} disabled={busy || !inspectDrafts().canSave} onPress={() => resolveDrafts(false)} />

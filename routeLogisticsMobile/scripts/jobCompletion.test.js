@@ -8,7 +8,7 @@ const root = path.resolve(__dirname, '..');
 
 function fixture() {
   const storage = new Map(), copies = [], calls = [], operations = new Map(), visitOperations=new Map(), modules = new Map();
-  let online = true, nextId = 0, syncError = null, hold = null, storageError = null, serviceResult = {status:'synced',version:1};
+  let online = true, nextId = 0, syncError = null, hold = null, storageError = null, storageReadHold=null, serviceResult = {status:'synced',version:1};
   const claims = { companyId: 'acme', role: 'technician', membershipId: 'member' };
   const auth = { currentUser: { uid: 'tech', emailVerified: true }, app: { options: { projectId: 'mi-factotum-field-service' } } };
   const job = { id: 'job', companyId: 'acme', assignedTo: 'member', status: 'in-progress', updatedAt: '2026-11-13T10:00:00.000Z' };
@@ -43,7 +43,7 @@ function fixture() {
     const mockRequire = name => {
       if (name === './workspaceApi') return workspace;
       if (name === '@react-native-async-storage/async-storage') return {
-        getItem: async key => storage.get(key) || null,
+        getItem: async key => {if(storageReadHold)await storageReadHold;return storage.get(key) || null;},
         setItem: async (key, value) => { if (storageError) throw storageError; storage.set(key, value); },
         getAllKeys: async () => [...storage.keys()], multiRemove: async keys => keys.forEach(key => storage.delete(key)),
       };
@@ -66,10 +66,104 @@ function fixture() {
   }
   const offline = load('services/offline.js'), completion = load('services/jobCompletion.js');
   return { ...offline, ...completion, job, claims, auth, copies, calls, operations, visitOperations, storage, restartOffline:()=>{modules.delete(path.resolve(root,'services/offline.js'));return load('services/offline.js');},
-    online: value => { online = value; }, failSync: value => { syncError = value; }, holdSync: value => { hold = value; }, failStorage: value => { storageError = value; }, serviceResult:value=>{serviceResult=value;} };
+    online: value => { online = value; }, failSync: value => { syncError = value; }, holdSync: value => { hold = value; }, failStorage: value => { storageError = value; }, holdStorageRead:value=>{storageReadHold=value;},serviceResult:value=>{serviceResult=value;} };
 }
 const draft = { actualWorkDone: 'Applied treatment', actualHours: '1.5', completionNotes: 'Work documented.' };
 const visit = (type='arrived',extra={})=>({operationId:`offline-visit-${type}-00000001`,type,note:type==='access-blocked'?'Gate locked; attempted customer contact.':'Field evidence',occurredAt:new Date().toISOString(),...extra});
+
+test('typed work notes persist immediately, retain Unicode and edit time on restart, and never auto-publish',async()=>{
+ const f=fixture();f.online(false);const text='Árbol junto a la puerta.\nCustomer not home; gate locked.',editedAt=1700000000123;
+ const write=f.persistWorkNoteDraft({...f.job},text,{editedAt});
+ const key=[...f.storage.keys()].find(key=>key.includes(':draft:work-notes:'));assert.ok(key,'native write started in the caller stack');assert.equal(JSON.parse(f.storage.get(key)).text,text);
+ const original=await write,restarted=f.restartOffline(),restored=await restarted.readWorkNoteDraft('job');
+ assert.equal(restored.text,text);assert.equal(restored.editedAt,editedAt);assert.equal(restored.revision,original.revision);assert.equal(restored.dirty,true);assert.equal((await restarted.queuedWork()).length,0);assert.equal(f.calls.length,0);
+});
+
+test('explicit note Save reuses one immutable operation and recovers pending notes after restart',async()=>{
+ const f=fixture();f.online(false);const snapshot=await f.persistWorkNoteDraft({...f.job},'Save once.');
+ const first=await f.saveWorkNoteDraft('job',{revision:snapshot.revision}),again=await f.saveWorkNoteDraft('job',{revision:snapshot.revision});assert.equal(first.operationId,again.operationId);
+ const restarted=f.restartOffline(),rows=await restarted.queuedWork(),restored=await restarted.readWorkNoteDraft('job');assert.equal(rows.length,1);assert.equal(rows[0].id,snapshot.operationId);assert.deepEqual(rows[0].patch,{notes:'Save once.'});assert.equal(rows[0].workNoteDraft.editedAt,snapshot.editedAt);assert.equal(restored.state,'pending');assert.equal(restored.dirty,false);assert.equal(f.calls.length,0);
+});
+
+test('ACK retains canonical work notes in both offline caches and overlays stale detail after restart',async()=>{
+ const f=fixture();f.online(false);const stale={...f.job,workNotes:'Old field note',notes:'Old field note',dispatchNotes:'Use the side gate.'};
+ await f.writeCache('job-bases',{job:stale});await f.writeCache('job-detail:job',{job:stale,customer:{id:'safe-customer'}});
+ await f.persistWorkNoteDraft(stale,'Fresh field observations');await f.saveWorkNoteDraft('job');f.online(true);await f.flushOffline();
+ const base=(await f.readCache('job-bases')).job,detail=(await f.readCache('job-detail:job')).job;
+ for(const value of [base,detail]){assert.equal(value.workNotes,'Fresh field observations');assert.equal(value.notes,'Fresh field observations');assert.equal(value.dispatchNotes,'Use the side gate.');}
+ const restarted=f.restartOffline(),restored=await restarted.readWorkNoteDraft('job'),[overlaid]=await restarted.overlayJobs([stale]);assert.equal(restored.state,'synced');assert.equal(restored.text,'Fresh field observations');assert.equal(restored.serverVersion,f.job.updatedAt);assert.equal(overlaid.workNotes,'Fresh field observations');assert.equal(overlaid.dispatchNotes,'Use the side gate.');
+});
+
+test('direct job-note Save preserves validated offline identity and schedule before enqueueing without replacing an existing base',async()=>{
+ const f=fixture();f.online(false);const job={...f.job,customerName:'Synthetic customer',date:'2026-11-16',time:'09:15',serviceType:'Synthetic service',dispatchNotes:'Authorized gate instructions'};
+ await f.persistWorkNoteDraft(job,'Field observations');await f.saveWorkNoteDraft('job');const before=(await f.readCache('job-bases')).job;assert.equal(before.id,job.id);assert.equal(before.companyId,job.companyId);assert.equal(before.assignedTo,job.assignedTo);assert.equal(before.customerName,job.customerName);assert.equal(before.time,job.time);assert.equal(before.dispatchNotes,job.dispatchNotes);
+ f.online(true);await f.flushOffline();const after=(await f.readCache('job-bases')).job;assert.equal(after.id,job.id);assert.equal(after.companyId,job.companyId);assert.equal(after.date,job.date);assert.equal(after.workNotes,'Field observations');
+ f.online(false);const richer={...after,customerName:'Existing richer cache',serviceName:'Keep existing detail'};await f.writeCache('job-bases',{job:richer});await f.persistWorkNoteDraft({...job,updatedAt:after.updatedAt},'Second note');await f.saveWorkNoteDraft('job');assert.deepEqual((await f.readCache('job-bases')).job,richer);
+});
+
+test('a saved note ACK cannot clear or overwrite newer unsubmitted typing',async()=>{
+ const f=fixture();f.online(false);const first=await f.persistWorkNoteDraft({...f.job},'Submitted original');await f.saveWorkNoteDraft('job',{revision:first.revision});
+ const latest=await f.persistWorkNoteDraft({...f.job},'Typed after Save; must survive',{editedAt:1700000000555});f.online(true);await f.flushOffline();
+ const restored=await f.restartOffline().readWorkNoteDraft('job');assert.equal(restored.revision,latest.revision);assert.equal(restored.text,latest.text);assert.equal(restored.editedAt,latest.editedAt);assert.equal(restored.state,'draft');assert.equal(restored.dirty,true);
+ const rows=await f.queuedWork();assert.equal(rows.length,1);assert.equal(rows[0].patch.notes,'Submitted original');assert.equal(rows[0].state,'synced');assert.equal(f.operations.size,1);
+});
+
+test('older note ACK and synced overlays cannot replace newer known server notes',async()=>{
+ const f=fixture();f.online(false);await f.persistWorkNoteDraft({...f.job},'Old submitted text');await f.saveWorkNoteDraft('job');
+ const newer={...f.job,workNotes:'Newer server edit',notes:'Newer server edit',updatedAt:'2026-11-13T12:00:00.000Z'};await f.writeCache('job-bases',{job:newer});await f.writeCache('job-detail:job',{job:newer});
+ f.online(true);await f.flushOffline();assert.equal((await f.readCache('job-bases')).job.workNotes,'Newer server edit');assert.equal((await f.readCache('job-detail:job')).job.workNotes,'Newer server edit');assert.equal((await f.overlayJobs([newer]))[0].workNotes,'Newer server edit');
+});
+
+test('manager ACK updates canonical workNotes while preserving dispatcher notes and access instructions',async()=>{
+ const f=fixture();f.claims.role='manager';f.online(false);const base={...f.job,notes:'Dispatcher directions',dispatchNotes:'Dispatcher directions',workNotes:'Old field work'};await f.writeCache('job-bases',{job:base});await f.persistWorkNoteDraft(base,'Manager field observations');await f.saveWorkNoteDraft('job');f.online(true);await f.flushOffline();
+ const saved=(await f.readCache('job-bases')).job;assert.equal(saved.workNotes,'Manager field observations');assert.equal(saved.notes,'Dispatcher directions');assert.equal(saved.dispatchNotes,'Dispatcher directions');
+});
+
+test('work-note drafts are exact user/company/role/member/job scoped and wrong assignments cannot persist',async()=>{
+ const f=fixture();f.online(false);await f.persistWorkNoteDraft({...f.job},'Private local work');
+ assert.equal(await f.readWorkNoteDraft('other-job'),null);
+ for(const [target,key,value] of [[f.auth.currentUser,'uid','another-user'],[f.claims,'companyId','other-company'],[f.claims,'role','manager'],[f.claims,'membershipId','other-member']]){const old=target[key];target[key]=value;assert.equal(await f.readWorkNoteDraft('job'),null);target[key]=old;}
+ await assert.rejects(f.persistWorkNoteDraft({...f.job,assignedTo:'different'},'No access'),/verified job assignment/);await assert.rejects(f.persistWorkNoteDraft({...f.job,assignedToUid:'different'},'No access'),/verified job assignment/);assert.equal((await f.readWorkNoteDraft('job')).text,'Private local work');
+});
+
+test('intentional empty work-note drafts remain dirty through restart and publish only on explicit Save',async()=>{
+ const f=fixture();f.online(false);await f.persistWorkNoteDraft({...f.job,workNotes:'Old note'},'');const restarted=f.restartOffline();assert.equal((await restarted.readWorkNoteDraft('job')).text,'');assert.equal((await restarted.readWorkNoteDraft('job')).dirty,true);assert.equal((await restarted.queuedWork()).length,0);
+ await restarted.saveWorkNoteDraft('job');assert.deepEqual((await restarted.queuedWork())[0].patch,{notes:''});
+});
+
+test('a workspace change during draft hydration cannot return private prior-scope text',async()=>{
+ const f=fixture();f.online(false);await f.persistWorkNoteDraft({...f.job},'Private old workspace');let release;f.holdStorageRead(new Promise(resolve=>{release=resolve;}));
+ const read=f.readWorkNoteDraft('job');f.claims.companyId='other-company';release();await assert.rejects(read,/workspace changed/);f.holdStorageRead(null);assert.equal(await f.readWorkNoteDraft('job'),null);
+});
+
+test('switching scope immediately after Save or Discard cannot act on the new account workspace',async()=>{
+ const f=fixture();f.online(false);await f.persistWorkNoteDraft({...f.job},'Original workspace draft');
+ const save=f.saveWorkNoteDraft('job');f.claims.companyId='another-company';await assert.rejects(save,/workspace changed/);assert.equal((await f.queuedWork()).length,0);assert.equal(await f.readWorkNoteDraft('job'),null);
+ f.claims.companyId='acme';const discard=f.discardWorkNoteDraft('job');f.claims.companyId='another-company';await assert.rejects(discard,/workspace changed/);f.claims.companyId='acme';assert.equal((await f.readWorkNoteDraft('job')).text,'Original workspace draft');assert.equal((await f.queuedWork()).length,0);
+});
+
+test('account deletion summary includes retained unsent notes, excludes another user and does not double-count submitted notes',async()=>{
+ const f=fixture();f.online(false);await f.persistWorkNoteDraft({...f.job},'Local draft protected by the deletion warning');assert.deepEqual(await f.accountOfflineSummary('tech'),{pendingOperations:1,pendingPhotos:0});assert.deepEqual(await f.accountOfflineSummary('other-user'),{pendingOperations:0,pendingPhotos:0});
+ await f.saveWorkNoteDraft('job');assert.deepEqual(await f.accountOfflineSummary('tech'),{pendingOperations:1,pendingPhotos:0});await f.persistWorkNoteDraft({...f.job},'New unsubmitted text');assert.deepEqual(await f.accountOfflineSummary('tech'),{pendingOperations:2,pendingPhotos:0});
+});
+
+test('storage failure cannot report a retained draft or queue a save and retries keep edit time',async()=>{
+ const f=fixture();f.online(false);f.failStorage(new Error('Device storage full'));await assert.rejects(f.persistWorkNoteDraft({...f.job},'Keep on screen',{editedAt:123}),/storage full/);assert.equal(f.storage.size,0);assert.equal(f.calls.length,0);
+ f.failStorage(null);await f.persistWorkNoteDraft({...f.job},'Keep on screen',{editedAt:123});assert.equal((await f.readWorkNoteDraft('job')).editedAt,123);assert.equal((await f.queuedWork()).length,0);
+});
+
+test('only explicit matching draft discard hides text and retains its archived evidence',async()=>{
+ const f=fixture();f.online(false);const old=await f.persistWorkNoteDraft({...f.job},'Old edit');const current=await f.persistWorkNoteDraft({...f.job},'Retain until confirmed');assert.equal((await f.discardWorkNoteDraft('job',{revision:old.revision})).discarded,false);
+ assert.equal((await f.discardWorkNoteDraft('job',{revision:current.revision})).discarded,true);assert.equal(await f.restartOffline().readWorkNoteDraft('job'),null);const archive=[...f.storage.entries()].find(([key])=>key.includes(':discarded:'));assert.equal(JSON.parse(archive[1]).text,current.text);
+ const submitted=await f.persistWorkNoteDraft({...f.job},'Queued evidence remains');await f.saveWorkNoteDraft('job');assert.equal((await f.discardWorkNoteDraft('job',{revision:submitted.revision})).discarded,false);assert.equal((await f.queuedWork())[0].patch.notes,'Queued evidence remains');
+});
+
+test('reviewed conflict retries retain the note revision and cannot recreate its superseded operation ID',async()=>{
+ const f=fixture();f.online(false);const original=await f.persistWorkNoteDraft({...f.job},'Captured conflict evidence');await f.saveWorkNoteDraft('job');f.job.updatedAt='2026-11-13T10:00:30.000Z';f.online(true);await f.flushOffline();assert.equal((await f.readWorkNoteDraft('job')).state,'conflict');
+ const retry=await f.resolveOffline(original.operationId,'retry');await f.flushOffline();assert.notEqual(retry.operationId,original.operationId);
+ const restored=await f.restartOffline().readWorkNoteDraft('job');assert.equal(restored.state,'synced');assert.equal(restored.operationId,retry.operationId);assert.equal(restored.revision,original.revision);assert.equal(restored.text,original.text);
+ const saved=await f.saveWorkNoteDraft('job',{revision:original.revision});assert.equal(saved.operationId,retry.operationId);assert.equal((await f.queuedWork()).length,1);assert.equal(f.operations.size,1);
+});
 
 for(const type of ['arrived','departed','access-blocked'])test(`offline ${type} evidence persists its identity/time before acknowledgement and survives a process restart`,async()=>{
   const f=fixture();f.online(false);const original=visit(type);

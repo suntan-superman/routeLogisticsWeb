@@ -3,7 +3,7 @@ import { View, Text, Linking, Pressable, AppState } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as Location from 'expo-location';
 import { JobService } from '../services/firebase';
-import { saveApplicationOffline, saveVisitOffline, cachedRead, queuedWork, subscribeOffline, flushOffline, getQueuedOperation, resolveOffline } from '../services/offline';
+import { saveApplicationOffline, saveVisitOffline, cachedRead, queuedWork, subscribeOffline, flushOffline, getQueuedOperation, resolveOffline, readWorkNoteDraft, persistWorkNoteDraft, saveWorkNoteDraft, discardWorkNoteDraft, offlineVersion } from '../services/offline';
 import { readWorkspace, callWorkspace } from '../services/workspaceApi';
 import { getClaims } from '../services/tenancy';
 import { useTheme } from '../theme/ThemeProvider';
@@ -33,14 +33,20 @@ function VisitAction({type,event,busy,pending,loading,historyError,cached,readOn
     {(saved||local)&&!readOnly&&<SecondaryButton title={`Record another ${name.toLowerCase()}`} disabled={busy} onPress={onRepeat}/>}
   </View>;
 }
-const workNotes = job => ['pending', 'syncing'].includes(job?.syncState) && job?.syncPatch?.notes != null ? job.syncPatch.notes
-  : job?.workNotes || (getClaims()?.role === 'technician' ? job?.notes : '') || '';
+const workNotes = job => ['pending', 'syncing'].includes(job?.syncState) && typeof job?.syncPatch?.notes === 'string' ? job.syncPatch.notes
+  : typeof job?.workNotes === 'string' ? job.workNotes : getClaims()?.role === 'technician' && typeof job?.notes === 'string' ? job.notes : '';
+const noteDraftForJob = (draft, job) => {
+  if (!draft || draft.state !== 'synced' || draft.dirty) return draft;
+  const server = Date.parse(offlineVersion(job?.updatedAt)), saved = Date.parse(draft.serverVersion);
+  return Number.isFinite(server) && Number.isFinite(saved) && server > saved ? null : draft;
+};
 
 export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyChange, draftActionsRef, showNavigation = true, readOnly = false, active = true }) {
   const { palette } = useTheme();
   const [notes, setNotes] = useState(() => workNotes(job)), [dirty, setDirty] = useState(false), [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const [noticeTone,setNoticeTone]=useState('success');
+  const [noteState,setNoteState]=useState(null),[noteStorageError,setNoteStorageError]=useState(''),[notesLoading,setNotesLoading]=useState(true);
   const [ready, setReady] = useState(null), recordsRefresh = useRef(null), visitsRefresh=useRef(null);
   const [records, setRecords] = useState([]), [recordsError, setRecordsError] = useState('');
   const [visits, setVisits] = useState([]), [visitsError, setVisitsError] = useState(''), [visitsLoading, setVisitsLoading] = useState(false), [visitsMore, setVisitsMore] = useState(false);
@@ -49,12 +55,50 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
   const mounted = useRef(false), generation = useRef(0), lock = useRef(false), sequence = useRef(0), dirtyRef = useRef(false);
   const visitSequence = useRef(0), visitAttempt = useRef(null), lastVisitJob = useRef(job);
   const visitReceipts=useRef(new Map()),draftState=useRef({notes,form,visitDraft}),lastError=useRef(''),draftAPI=useRef(null);
+  const noteEdit=useRef(0),noteSnapshot=useRef(null),noteWrite=useRef(null),noteRetry=useRef(null);
   draftState.current={notes,form,visitDraft};
   const callbacks = useRef({ onChanged, onDraftChange, onBusyChange }), target = useRef(job);
   callbacks.current = { onChanged, onDraftChange, onBusyChange }; target.current = job;
   const current = (ticket, id) => mounted.current && generation.current === ticket && target.current?.id === id;
   const allowWork = !readOnly && !['completed', 'cancelled', 'canceled'].includes(job?.status);
   const reportError=(message,visit=false)=>{lastError.current=message;setError(message);if(visit)setVisitSaveError(message);};
+  const restoreNotes=useCallback(async()=>{
+    const selected=target.current,ticket=generation.current,edit=noteEdit.current;
+    if(!selected?.id)return;
+    try{
+      const stored=await readWorkNoteDraft(selected.id);
+      if(!current(ticket,selected.id)||edit!==noteEdit.current)return;
+      const saved=noteDraftForJob(stored,target.current);
+      // Hydration and queue acknowledgements cannot replace unfinished typing.
+      if(dirtyRef.current){
+        if(saved&&saved.text===draftState.current.notes&&(!noteSnapshot.current||saved.revision===noteSnapshot.current.revision)){
+          noteSnapshot.current=saved;setNoteState(saved);
+        }
+        return;
+      }
+      const value=saved?saved.text:workNotes(target.current);
+      noteSnapshot.current=saved;draftState.current.notes=value;dirtyRef.current=saved?.dirty===true;
+      setNotes(value);setDirty(dirtyRef.current);setNoteState(saved);setNoteStorageError('');
+    }catch(failure){if(current(ticket,selected.id)&&edit===noteEdit.current)setNoteStorageError(failure.message||'Saved work notes could not be restored. Retry without clearing device storage.');}
+    finally{if(current(ticket,selected.id)&&edit===noteEdit.current)setNotesLoading(false);}
+  },[]);
+  const persistNotes=(value,{editedAt=Date.now(),increment=true}={})=>{
+    const selected={...target.current},ticket=generation.current,edit=increment?++noteEdit.current:noteEdit.current;
+    dirtyRef.current=true;draftState.current.notes=value;setNotes(value);setDirty(true);setNotesLoading(false);
+    setNoteStorageError('');setNoteState({state:'saving',text:value,editedAt});noteRetry.current={text:value,editedAt};
+    let writing;
+    try{writing=persistWorkNoteDraft(selected,value,{editedAt});}
+    catch(failure){writing=Promise.reject(failure);}
+    const pending=Promise.resolve(writing).then(saved=>{
+      if(current(ticket,selected.id)&&edit===noteEdit.current){noteSnapshot.current=saved;setNoteState(saved);setNoteStorageError('');noteRetry.current=null;}
+      return saved;
+    },failure=>{
+      if(current(ticket,selected.id)&&edit===noteEdit.current){setNoteStorageError(failure.message||'Work notes are not saved on this device. Retry before leaving.');setNoteState({state:'storage-failed',text:value,editedAt});}
+      throw failure;
+    });
+    noteWrite.current={edit,promise:pending};void pending.catch(()=>{});
+    return pending;
+  };
   const loadRecords = useCallback(async ({ query = false } = {}) => {
     const selected = target.current, ticket = generation.current, request = ++sequence.current;
     if (!selected?.id) return;
@@ -106,13 +150,14 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
   const visitResource=useJobResourceRefresh('visits', job?.id, loadVisits, { enabled: ready === job?.id && active });visitsRefresh.current=visitResource.refetch;
   useEffect(() => {
     mounted.current = true; generation.current++; lock.current = false; dirtyRef.current = false;
+    noteEdit.current=0;noteSnapshot.current=null;noteWrite.current=null;noteRetry.current=null;setNoteState(null);setNoteStorageError('');setNotesLoading(true);
     setNotes(workNotes(job)); setDirty(false); setForm(null); setBusy(false); setError(''); setNotice(''); setRecords([]); setRecordsError('');
     setVisits([]); setVisitsMore(false); setVisitsError('');setVisitsCached(false);setVisitSaveError(''); setVisitDraft(null); setVisitAttempted(false); visitAttempt.current = null;visitReceipts.current.clear();lastError.current='';draftState.current={notes:workNotes(job),form:null,visitDraft:null}; lastVisitJob.current = job;
-    setReady(job?.id); const unsubscribe = subscribeOffline(() => {void recordsRefresh.current?.();void visitsRefresh.current?.();});
+    setReady(job?.id);void restoreNotes();const unsubscribe = subscribeOffline(() => {void recordsRefresh.current?.();void visitsRefresh.current?.();void restoreNotes();});
     return () => { mounted.current = false; generation.current++; sequence.current++; visitSequence.current++; unsubscribe(); callbacks.current.onBusyChange?.(false); callbacks.current.onDraftChange?.(false); };
-  }, [job?.id, loadRecords, loadVisits]);
+  }, [job?.id, loadRecords, loadVisits,restoreNotes]);
   useEffect(() => { lastVisitJob.current = job; }, [job]);
-  useEffect(() => { if (!dirtyRef.current) setNotes(workNotes(job)); }, [job?.workNotes, job?.notes, job?.syncPatch?.notes, job?.syncState]);
+  useEffect(() => { if (!dirtyRef.current) void restoreNotes(); }, [job?.workNotes, job?.notes, job?.syncPatch?.notes, job?.syncState,job?.updatedAt,restoreNotes]);
   useEffect(() => { callbacks.current.onDraftChange?.(dirty || hasApplicationDraft(form) || !!visitDraft); }, [dirty, form, visitDraft]);
   const perform = async (action,{visit=false}={}) => {
     if (lock.current || !allowWork) return false;
@@ -132,9 +177,25 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
     const result = await JobService.updateJob(selected.id, patch);
     if (!result.success) throw new Error(result.error?.message || result.error || 'Unable to save work. Try again.');
     if (!current(ticket, selected.id)) return;
-    if ('notes' in patch) { dirtyRef.current = false; setDirty(false); }
     setNotice(result.queued ? 'Work saved on this device. Synchronization will check your current assignment.' : 'Work saved.');
     await changed(ticket, selected.id);
+  });
+  const saveNotes=()=>perform(async(selected,ticket)=>{
+    const edit=noteEdit.current,value=draftState.current.notes;
+    let saved=noteWrite.current?.edit===edit?await noteWrite.current.promise:noteSnapshot.current;
+    if(!saved||saved.text!==value)saved=await persistNotes(value,{increment:false,editedAt:noteRetry.current?.editedAt||Date.now()});
+    if(!current(ticket,selected.id))return false;
+    if(edit!==noteEdit.current){reportError('Newer work-note edits are retained. Select Save work notes again to submit them.');return false;}
+    const result=await saveWorkNoteDraft(selected.id,{revision:saved.revision});
+    if(!result?.success)throw new Error(result?.error?.message||result?.error||'Work notes could not be queued. Your draft is retained.');
+    if(!current(ticket,selected.id))return false;
+    if(edit===noteEdit.current&&draftState.current.notes===value){
+      dirtyRef.current=false;setDirty(false);noteSnapshot.current={...saved,state:'pending',dirty:false};setNoteState(noteSnapshot.current);setNoteStorageError('');
+      await restoreNotes();
+    }
+    const acknowledged=noteSnapshot.current?.state==='synced'&&noteSnapshot.current.text===value;
+    setNoticeTone(acknowledged?'success':'info');setNotice(edit===noteEdit.current?(acknowledged?'Work notes saved to server.':'Work notes saved on device. Synchronization status is shown with the notes.'):'Earlier work notes are queued. Newer edits are retained and still need Save work notes.');
+    await changed(ticket,selected.id);
   });
   const saveApplication = () => {
     const application=draftState.current.form;
@@ -196,9 +257,20 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
   const inspectDrafts=()=>({notes:dirtyRef.current,application:hasApplicationDraft(draftState.current.form),visit:!!draftState.current.visitDraft,
     visitAttempted:!!visitAttempt.current,visitType:draftState.current.visitDraft?.type||null,
     hasDraft:dirtyRef.current||hasApplicationDraft(draftState.current.form)||!!draftState.current.visitDraft});
-  const discardDrafts=()=>{
+  const discardDrafts=async()=>{
     if(lock.current)return{success:false,message:'Wait for the current save operation to finish.'};
     if(visitAttempt.current)return{success:false,unconfirmed:true,message:'This visit report may already be saved. Retry the same event to confirm its result before leaving; it cannot be discarded as an unsaved report.'};
+    if(dirtyRef.current){
+      const selected=target.current.id,ticket=generation.current,edit=noteEdit.current;
+      try{
+        const saved=noteWrite.current?.edit===edit?await noteWrite.current.promise:noteSnapshot.current;
+        if(!current(ticket,selected)||edit!==noteEdit.current)return{success:false,message:'The note changed. Review it before discarding.'};
+        const result=await discardWorkNoteDraft(selected,{revision:saved?.revision});
+        if(!current(ticket,selected)||edit!==noteEdit.current)return{success:false,message:'The work order or note changed. Its current draft was retained.'};
+        if(!result?.discarded)return{success:false,message:'The note is already queued or changed. Review its synchronization status; saved operations were retained.'};
+        noteEdit.current++;noteSnapshot.current=null;noteWrite.current=null;noteRetry.current=null;setNoteState(null);setNoteStorageError('');
+      }catch(failure){return{success:false,message:failure.message||'The local note draft could not be marked discarded. Your text is retained.'};}
+    }
     const restored=workNotes(target.current);dirtyRef.current=false;draftState.current={notes:restored,form:null,visitDraft:null};
     setNotes(restored);setDirty(false);setForm(null);setVisitDraft(null);setVisitAttempted(false);setError('');setVisitSaveError('');lastError.current='';
     callbacks.current.onDraftChange?.(false);return{success:true};
@@ -208,7 +280,7 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
     const selected=target.current?.id,ticket=generation.current;
     if(!allowWork)return{success:false,message:'This work order is no longer open for changes.'};
     const failed=()=>({success:false,message:lastError.current||'The draft could not be saved. Review the highlighted fields and retry.',unconfirmed:!!visitAttempt.current});
-    if(dirtyRef.current&&!(await save({notes:draftState.current.notes})))return failed();
+    if(dirtyRef.current&&!(await saveNotes()))return failed();
     if(!current(ticket,selected))return{success:false,message:'The work order changed. Reopen it before continuing.'};
     if(hasApplicationDraft(draftState.current.form)&&!(await saveApplication()))return failed();
     if(!current(ticket,selected))return{success:false,message:'The work order changed. Reopen it before continuing.'};
@@ -277,8 +349,14 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
       </View>)}
     </Card>
     <Card><SectionHeader title="Work notes" subtitle="Document observations and work instructions for this visit." />
-      {allowWork ? <><FormField label="Work notes" value={notes} onChangeText={value => { dirtyRef.current = true;draftState.current.notes=value; setNotes(value); setDirty(true); }} editable={!busy} multiline />
-        <SecondaryButton title="Save work notes" disabled={!dirty} busy={busy} onPress={() => save({ notes })} /></> : <Text style={{ color: palette.text, fontSize: 15, lineHeight: 23 }}>{notes || 'No work notes recorded.'}</Text>}
+      {!!noteStorageError&&<InlineNotice tone="error" message={noteStorageError}/>}
+      <Text accessibilityLiveRegion="polite" style={{color:['failed','conflict','storage-failed'].includes(noteState?.state)?palette.danger:palette.secondary,fontSize:13,lineHeight:21}}>{notesLoading?'Restoring saved work notes…':({saving:'Saving on device…',draft:'Saved on device — draft retained. Select Save work notes to queue synchronization.',pending:'Saved on device — waiting to sync',syncing:'Synchronizing work notes',synced:'Saved to server',failed:'Synchronization failed — retry required',conflict:'Conflict — management attention required. Your work notes are retained.','storage-failed':'Work notes are not saved on device. Retry before leaving.'}[noteState?.state]||'Work notes are separate from dispatcher job instructions.')}</Text>
+      {!!noteState?.error&&<InlineNotice tone="error" message={noteState.error}/>}
+      {allowWork ? <><FormField label="Work notes" value={notes} maxLength={10000} onChangeText={value=>{void persistNotes(value).catch(()=>{});}} editable={!busy} multiline />
+        {noteStorageError&&<SecondaryButton title="Retry saving notes on device" disabled={busy} onPress={()=>{const draft=noteRetry.current;if(draft)void persistNotes(draft.text,{editedAt:draft.editedAt,increment:false}).catch(()=>{});else void restoreNotes();}}/>}
+        <SecondaryButton title="Save work notes" disabled={!dirty} busy={busy} onPress={saveNotes} />
+        {noteState?.state==='failed'&&noteState.operationId&&<SecondaryButton title="Retry work-note synchronization" disabled={busy} onPress={()=>perform(async()=>{await resolveOffline(noteState.operationId,'retry');await restoreNotes();})}/>}
+      </> : <Text style={{ color: palette.text, fontSize: 15, lineHeight: 23 }}>{notes || (notesLoading?'Restoring saved work notes…':'No work notes recorded.')}</Text>}
     </Card>
     <Card><SectionHeader title="Product applications" subtitle="Application records for this assigned visit." />
       {!!recordsError && <InlineNotice tone="error" message={recordsError} />}

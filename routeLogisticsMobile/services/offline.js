@@ -7,9 +7,11 @@ import { auth } from '../constants/firebase';
 import { AppState } from 'react-native';
 import { getClaims, tenantFields, requireWorkspace } from './tenancy';
 import { createQueue, retryDelay, revisionOperation, linkRevision, advanceRevision, restoreLegacyDependencies } from './offlineQueueCore';
+import { createWorkNoteDraftStore } from './workNoteDraftCore';
 
 const queues = new Map(), draining = new Map(), listeners = new Set();
 const pausedAccounts = new Set(), writing = new Map();
+const noteDraftStores = new Map();
 const accountPrefix = uid => `rl-offline-v1:${auth.app.options.projectId}:${uid}:`;
 const pausedScope = scope => [...pausedAccounts].some(uid => scope.startsWith(accountPrefix(uid)));
 function trackWrite(uid, task) {
@@ -48,17 +50,113 @@ export async function cachedRead(name, loader) {
 }
 export async function overlayJobs(jobs) {
   const rows = await queuedWork();
-  return jobs.map((job) => rows.filter((row) => row.kind === 'job' && row.jobId === job.id && !['discarded', 'synced'].includes(row.state)).reduce((current, row) => ({
+  return jobs.map((saved) => {
+    const confirmed = [...rows].reverse().find(row => row.kind === 'job' && row.jobId === saved.id && row.state === 'synced' && Object.hasOwn(row.patch || {}, 'notes') && row.serverVersion);
+    const job = confirmed && versionAtMost(saved.updatedAt, confirmed.serverVersion) ? canonicalNotes(saved, confirmed.patch.notes) : saved;
+    return rows.filter((row) => row.kind === 'job' && row.jobId === job.id && !['discarded', 'synced'].includes(row.state)).reduce((current, row) => ({
     ...current, ...(['pending', 'syncing'].includes(row.state) ? row.patch : {}),
     syncState: row.state, syncOperationId: row.id, syncError: row.error || '', syncErrorCode: row.errorCode || null, syncPatch: row.patch,
-  }), job));
+  }), job); });
 }
+function versionAtMost(value, maximum) {
+  const normalized = offlineVersion(value), limit = offlineVersion(maximum);
+  if (normalized == null || normalized === limit) return true;
+  const a = typeof normalized === 'number' ? normalized : Date.parse(normalized), b = typeof limit === 'number' ? limit : Date.parse(limit);
+  return Number.isFinite(a) && Number.isFinite(b) && a <= b;
+}
+function canonicalNotes(job, text, scope = offlineScope()) {
+  // For technicians notes is a legacy work-log alias. Other roles keep their
+  // dispatcher notes intact and receive the canonical workNotes field only.
+  return { ...job, workNotes: text, ...(scope.split(':')[4] === 'technician' ? { notes: text } : {}) };
+}
+function noteStore(scope, jobId) {
+  if (typeof jobId !== 'string' || !jobId || jobId.length > 200 || jobId.includes('/')) throw new Error('Reopen a valid job before saving work notes.');
+  const key = `${scope}:draft:work-notes:${jobId}`;
+  if (!noteDraftStores.has(key)) noteDraftStores.set(key, createWorkNoteDraftStore(AsyncStorage, key));
+  return noteDraftStores.get(key);
+}
+const draftState = row => ({ jobId: row.jobId, text: row.patch.notes, revision: row.workNoteDraft?.revision || row.id, operationId: row.id,
+  editedAt: row.workNoteDraft?.editedAt || row.createdAt, baseVersion: row.baseVersion ?? row.expectedVersion ?? null,
+  serverVersion: row.serverVersion || null, state: row.state, dirty: false, error: row.error || '' });
+const submittedNote = (rows, snapshot) => [...rows].reverse().find(row => row.kind === 'job' && row.jobId === snapshot.jobId && row.state !== 'discarded'
+  && (row.id === snapshot.operationId || row.workNoteDraft?.revision === snapshot.revision) && Object.hasOwn(row.patch || {}, 'notes') && row.patch.notes === snapshot.text);
+export async function readWorkNoteDraft(jobId) {
+  const scope = offlineScope(), stored = await noteStore(scope, jobId).read(), rows = await queue(scope).read();
+  if (offlineScope() !== scope) throw new Error('Your workspace changed. Reopen work notes under the current account.');
+  if (stored && stored.state !== 'discarded') {
+    const submitted = submittedNote(rows, stored);
+    return submitted ? { ...stored, ...draftState(submitted), revision: stored.revision } : stored;
+  }
+  const saved = [...rows].reverse().find(row => row.kind === 'job' && row.jobId === jobId && Object.hasOwn(row.patch || {}, 'notes') && row.state !== 'discarded');
+  return saved ? draftState(saved) : null;
+}
+export function persistWorkNoteDraft(job, text, { editedAt = Date.now() } = {}) {
+  try {
+    const scope = offlineScope(), uid = auth.currentUser?.uid, claims = getClaims();
+    if (pausedScope(scope)) throw new Error('Account deletion is in progress. Work notes remain on this screen.');
+    if (!auth.currentUser?.emailVerified || typeof text !== 'string' || text.length > 10000 || !Number.isFinite(editedAt)
+      || !job?.id || (claims?.companyId ? job.companyId !== claims.companyId : job.companyId || job.userId !== uid)
+      || claims?.role === 'technician' && (job.assignedTo !== claims.membershipId || job.assignedToUid && job.assignedToUid !== uid)) throw new Error('Your verified job assignment and work notes of at most 10,000 characters are required.');
+    const store = noteStore(scope, job.id), previous = store.peek(), revision = Crypto.randomUUID();
+    const record = { jobId: job.id, userId: uid, companyId: claims?.companyId || null, membershipId: claims?.membershipId || null, role: claims?.role || 'owner',
+      text, editedAt, revision, operationId: revision, baseVersion: previous?.state === 'draft' ? previous.baseVersion : offlineVersion(job.updatedAt),
+      jobBase: { ...Object.fromEntries(['customerId','customerName','serviceType','serviceName','date','time','estimatedDuration','duration','address','serviceAddress','serviceProperty','location','workNotes','notes','dispatchNotes'].filter(key=>job[key]!==undefined).map(key=>[key,job[key]])),
+        id: job.id, companyId: job.companyId || null, userId: job.userId || uid, assignedTo: job.assignedTo || null, assignedToUid: job.assignedToUid || null, status: job.status, updatedAt: offlineVersion(job.updatedAt) },
+      state: 'draft', dirty: true };
+    return trackWrite(uid, store.persist(record));
+  } catch (error) { return Promise.reject(error); }
+}
+export const saveWorkNoteDraft = (jobId, { revision } = {}) => {
+  let requestedScope;try{requestedScope=offlineScope();}catch(error){return Promise.reject(error);}
+  return saveWork(async () => {
+  if (offlineScope() !== requestedScope) throw new Error('Your workspace changed. Reopen work notes before saving.');
+  const scope = requestedScope, store = noteStore(scope, jobId), snapshot = await store.read();
+  if (offlineScope() !== scope) throw new Error('Your workspace changed. Reopen work notes before saving.');
+  if (!snapshot || snapshot.state === 'discarded') throw new Error('No retained work-note draft is available. Edit the note and save again.');
+  if (revision && revision !== snapshot.revision) throw new Error('The work-note draft changed. Save the latest text instead of an older revision.');
+  // An explicit conflict review can assign a new queue identity. Re-saving the
+  // same captured revision must follow that operation, never recreate its old ID.
+  const submitted = submittedNote(await queue(scope).read(), snapshot);
+  if (offlineScope() !== scope) throw new Error('Your workspace changed. Reopen work notes before saving.');
+  const result = await saveJobOffline(jobId, { notes: snapshot.text }, { expectedScope:scope,operationId: submitted?.id || snapshot.operationId, expectedVersion: submitted?.expectedVersion ?? snapshot.baseVersion, baseJob: snapshot.jobBase,
+    workNoteDraft: { revision: snapshot.revision, editedAt: snapshot.editedAt } });
+  await store.compareAndSet(snapshot.revision, current => current.state === 'synced' ? current : { ...current, state: 'pending', dirty: false });
+  return { ...result, revision: snapshot.revision, editedAt: snapshot.editedAt, text: snapshot.text };
+  });
+};
+export const discardWorkNoteDraft = (jobId, { revision } = {}) => {
+  let requestedScope;try{requestedScope=offlineScope();}catch(error){return Promise.reject(error);}
+  return saveWork(async () => {
+  if (offlineScope() !== requestedScope) throw new Error('Your workspace changed. Reopen the current work-note draft.');
+  const scope = requestedScope, store = noteStore(scope, jobId), current = await store.read();
+  if (offlineScope() !== scope) throw new Error('Your workspace changed. Reopen the current work-note draft.');
+  if (!current || current.state !== 'draft' || revision && revision !== current.revision) return { discarded: false, current };
+  const rows = await queue(scope).read();
+  if (rows.some(row => row.id === current.operationId && !['discarded'].includes(row.state))) return { discarded: false, current };
+  const tombstone = { ...current, state: 'discarded', dirty: false, discardedAt: Date.now() };
+  await store.archive(tombstone);
+  const result = await store.compareAndSet(current.revision, value => value.state === 'draft' ? { ...value, state: 'discarded', dirty: false, discardedAt: tombstone.discardedAt } : null);
+  return { discarded: result.changed, current: result.current };
+  });
+};
 export const saveJobOffline = (jobId, patch, options = {}) => saveWork(async () => {
-  const scope = offlineScope(), jobs = await readCache('job-bases', scope) || {};
-  let base = jobs[jobId];
+  const scope = offlineScope();
+  if(options.expectedScope&&options.expectedScope!==scope)throw new Error('Your workspace changed. Reopen the job before saving.');
+  const jobs = await readCache('job-bases', scope) || {};
+  let base = jobs[jobId] || options.baseJob;
   if (!base && !(await isOffline())) base = (await readWorkspace('jobs', { id: jobId })).job;
   if (!base) throw new Error('Open this job online before editing it offline.');
   if (offlineScope() !== scope) throw new Error('Your workspace changed. Reopen the job before saving.');
+  if (!jobs[jobId] && options.baseJob) {
+    const claims=getClaims(),uid=auth.currentUser?.uid;
+    if(!auth.currentUser?.emailVerified||base.id!==jobId||(claims?.companyId?base.companyId!==claims.companyId:base.companyId||base.userId!==uid)
+      ||claims?.role==='technician'&&(base.assignedTo!==claims.membershipId||base.assignedToUid&&base.assignedToUid!==uid))throw new Error('Your verified current workspace and job assignment are required to save work notes.');
+    // A detail opened directly may not have populated the list's base cache.
+    // Keep that already-authorized context before enqueueing; ACK merging must
+    // not produce an identity-less offline job or overwrite a richer base.
+    await writeCache('job-bases',{...jobs,[jobId]:base},scope);
+    if(offlineScope()!==scope)throw new Error('Your workspace changed. Reopen the job before saving.');
+  }
   const id = options.operationId || Crypto.randomUUID();
   await queue(scope).edit(rows => {
     const existing = rows.find(row => row.id === id);
@@ -66,7 +164,8 @@ export const saveJobOffline = (jobId, patch, options = {}) => saveWork(async () 
       if (existing.kind !== 'job' || existing.jobId !== jobId || JSON.stringify(existing.patch) !== JSON.stringify(patch)) throw new Error('This saved operation belongs to a different change. Reopen the job.');
       return;
     }
-    rows.push(linkRevision(rows, { id, kind: 'job', jobId, patch, expectedVersion: offlineVersion(base.updatedAt), createdAt: Date.now(), state: 'pending', attempts: 0, nextAttempt: 0 }));
+    rows.push(linkRevision(rows, { id, kind: 'job', jobId, patch, expectedVersion: Object.hasOwn(options, 'expectedVersion') ? options.expectedVersion : offlineVersion(base.updatedAt),
+      ...(options.workNoteDraft ? { workNoteDraft: options.workNoteDraft } : {}), createdAt: Date.now(), state: 'pending', attempts: 0, nextAttempt: 0 }));
   });
   void flushOffline().catch(() => {});
   return { success: true, queued: true, operationId: id };
@@ -172,7 +271,16 @@ export function flushOffline() {
           Object.assign(current, { state: result.status, server: result.server || null, serverVersion: result.version || null, event:result.event || null, error: result.status === 'conflict' ? result.message || 'This job changed online. Evidence is retained; management attention is required.' : '' });
           if (result.status === 'synced') advanceRevision(rows, row, result.version);
         });
-        if (result.status === 'synced' && row.kind === 'job') { const bases = await readCache('job-bases', scope) || {}; bases[row.jobId] = { ...bases[row.jobId], ...row.patch, updatedAt: result.version }; await writeCache('job-bases', bases, scope); }
+        if (result.status === 'synced' && row.kind === 'job') {
+          const patch = { ...row.patch }; if (Object.hasOwn(patch,'notes')) delete patch.notes;
+          const bases = await readCache('job-bases', scope) || {}, base = bases[row.jobId];
+          if (versionAtMost(base?.updatedAt,result.version)) { bases[row.jobId] = { ...base, ...patch, updatedAt: result.version }; if (Object.hasOwn(row.patch,'notes')) bases[row.jobId]=canonicalNotes(bases[row.jobId],row.patch.notes,scope); await writeCache('job-bases', bases, scope); }
+          if (Object.hasOwn(row.patch,'notes')) {
+            const detail=await readCache(`job-detail:${row.jobId}`,scope);
+            if(detail?.job&&versionAtMost(detail.job.updatedAt,result.version))await writeCache(`job-detail:${row.jobId}`,{...detail,job:{...canonicalNotes(detail.job,row.patch.notes,scope),updatedAt:result.version}},scope);
+            if(row.workNoteDraft?.revision)await noteStore(scope,row.jobId).compareAndSet(row.workNoteDraft.revision,current=>({ ...current,state:'synced',dirty:false,serverVersion:result.version }));
+          }
+        }
         if (result.status === 'synced' && row.kind === 'visit') { const bases=await readCache('job-bases',scope)||{}; if(bases[row.jobId]) { bases[row.jobId]={...bases[row.jobId],updatedAt:result.version}; await writeCache('job-bases',bases,scope); } }
         if (result.status === 'synced' && row.kind === 'photo') await FileSystem.deleteAsync(row.localUri, { idempotent: true });
         if (result.status === 'synced' && row.kind === 'service-form') {
@@ -227,7 +335,9 @@ async function accountQueues(uid) {
 }
 export async function accountOfflineSummary(uid) {
   const rows = (await accountQueues(uid)).flatMap(value => value.rows).filter(row => !['synced', 'discarded'].includes(row.state));
-  return { pendingOperations: rows.filter(row => row.kind !== 'photo').length, pendingPhotos: rows.filter(row => row.kind === 'photo').length };
+  const prefix=accountPrefix(uid),keys=(await AsyncStorage.getAllKeys()).filter(key=>key.startsWith(prefix)&&key.includes(':draft:work-notes:')&&!key.includes(':discarded:'));
+  const drafts=(await Promise.all(keys.map(async key=>JSON.parse(await AsyncStorage.getItem(key)||'null')))).filter(value=>value?.state==='draft'&&value.dirty&&!rows.some(row=>row.id===value.operationId||row.workNoteDraft?.revision===value.revision));
+  return { pendingOperations: rows.filter(row => row.kind !== 'photo').length + drafts.length, pendingPhotos: rows.filter(row => row.kind === 'photo').length };
 }
 export async function purgeOfflineForAccount(uid) {
   const prefix = accountPrefix(uid), records = await accountQueues(uid);
@@ -238,5 +348,6 @@ export async function purgeOfflineForAccount(uid) {
   const keys = (await AsyncStorage.getAllKeys()).filter(key => key.startsWith(prefix) || [`rl-session-v1:${uid}`, `rl-session-v2:${uid}`, `rl-session-v3:${uid}`].includes(key));
   if (keys.length) await AsyncStorage.multiRemove(keys);
   for (const scope of queues.keys()) if (scope.startsWith(prefix)) queues.delete(scope);
+  for (const key of noteDraftStores.keys()) if (key.startsWith(prefix)) noteDraftStores.delete(key);
   notify();
 }

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), React = require('react');
 const { create, act } = require('react-test-renderer'), babel = require('@babel/core');
 global.IS_REACT_ACT_ENVIRONMENT = true;
-let tree, data, queue, listeners, writes, failure, workDrafts, busyStates, changes, update, visits, visitRequests, visitRecord, visitList, visitCache, cachedVisits, offline, gpsPermission, gpsFix, gpsRequests, permissionRequests, operationSequence, actionsRef;
+let tree, data, queue, listeners, writes, failure, workDrafts, busyStates, changes, update, visits, visitRequests, visitRecord, visitList, visitCache, cachedVisits, offline, gpsPermission, gpsFix, gpsRequests, permissionRequests, operationSequence, actionsRef, noteDrafts;
 async function flushVisits(){if(offline)return;for(const row of queue.filter(row=>row.kind==='visit'&&row.state==='pending')){row.state='syncing';try{const payload={...row.record,jobId:row.jobId,operationId:row.id};visitRequests.push(payload);const result=await visitRecord(payload);if(!result.event?.id||!['manual','manual-gps'].includes(result.event.source))throw new Error('The server did not confirm a saved manual visit report.');row.event=result.event;row.state='synced';row.error='';}catch(error){row.state=String(error.code||'').endsWith('permission-denied')?'conflict':'failed';row.error=error.message;}}listeners.forEach(listener=>listener());}
 const panel = ({ children, title, subtitle }) => React.createElement('View', null, title && React.createElement('Text', null, title), subtitle && React.createElement('Text', null, subtitle), children);
 const button = ({ title, onPress, busy, disabled }) => React.createElement('Pressable', { accessibilityLabel: title, onPress, disabled: !!busy || !!disabled }, React.createElement('Text', null, title));
@@ -23,6 +23,11 @@ const requireMock = name => {
     callWorkspace: async (name, payload) => { assert.equal(name, 'rlJobVisit'); if (payload.action === 'list') return visitList(payload.jobId); visitRequests.push(payload); return visitRecord(payload); },
   };
   if (name.endsWith('/services/offline')) return {
+    offlineVersion:value=>value||null,
+    readWorkNoteDraft:async id=>noteDrafts.get(id)||null,
+    persistWorkNoteDraft:(job,text,{editedAt}={})=>{const snapshot={jobId:job.id,text,editedAt,revision:`notes-${++operationSequence}`,operationId:`notes-${operationSequence}`,state:'draft',dirty:true};noteDrafts.set(job.id,snapshot);return Promise.resolve(snapshot);},
+    saveWorkNoteDraft:async(id,{revision}={})=>{const snapshot=noteDrafts.get(id);assert.ok(snapshot);assert.equal(snapshot.revision,revision);const patch={notes:snapshot.text};writes.push({id,patch});const result=await update(id,patch);if(result.success&&noteDrafts.get(id)?.revision===revision)noteDrafts.set(id,{...snapshot,state:'pending',dirty:false});return result;},
+    discardWorkNoteDraft:async(id,{revision}={})=>{const snapshot=noteDrafts.get(id);if(!snapshot||snapshot.state!=='draft'||revision&&snapshot.revision!==revision)return{discarded:false,current:snapshot};noteDrafts.delete(id);return{discarded:true};},
     cachedRead: async(key, loader) => {if(key.startsWith('visits:')&&visitCache)return cachedVisits||{events:[],hasMore:false};const result=await loader();if(key.startsWith('visits:'))cachedVisits=result;return result;}, queuedWork: async () => queue, isOffline: async () => offline,
     subscribeOffline: listener => { listeners.add(listener); return () => listeners.delete(listener); },
     saveApplicationOffline: async (jobId, record) => { if (failure) throw failure; queue.push({ id: 'local-record', kind: 'application', jobId, record, state: 'pending' }); listeners.forEach(listener => listener()); },
@@ -45,7 +50,7 @@ const control = label => tree.root.findAll(node => node.type === 'Pressable' && 
 async function press(label) { const node = control(label); assert.ok(node, label); assert.equal(node.props.disabled, false); await act(async () => node.props.onPress()); }
 async function input(label, value) { await act(async () => tree.root.findByProps({ accessibilityLabel: label }).props.onChangeText(value)); }
 beforeEach(() => {
-  tree = null; data = []; queue = []; listeners = new Set(); writes = []; failure = null; workDrafts = []; busyStates = []; changes = 0; update = async () => ({ success: true, queued: true });
+  tree = null; data = []; queue = []; listeners = new Set(); noteDrafts=new Map();writes = []; failure = null; workDrafts = []; busyStates = []; changes = 0; update = async () => ({ success: true, queued: true });
   visits = []; visitRequests = [];visitCache=false;cachedVisits=null;actionsRef={current:null};visitList=async jobId=>({events:visits.filter(event=>!event.jobId||event.jobId===jobId),hasMore:false}); offline = false; gpsPermission = { granted: true }; gpsFix = { coords: { latitude: 35, longitude: -119, accuracy: 15 }, timestamp: Date.now() }; gpsRequests = permissionRequests = operationSequence = 0;
   visitRecord = async payload => { const event = { id: payload.operationId, jobId:payload.jobId,type: payload.type, note: payload.note, source: payload.latitude == null ? 'manual' : 'manual-gps', recordedAt: new Date().toISOString(), capturedAt: payload.capturedAt, accuracy: payload.accuracy }; visits = [event, ...visits]; return { event, duplicate: false }; };
 });
@@ -164,7 +169,7 @@ test('GPS proximity alone cannot turn a manual button green and distant manual G
 test('a failed synchronization stays amber and retained evidence cannot be removed by discarding unrelated drafts',async()=>{
  await render();await press('Record arrival');await input('Visit note','At the gate.');visitRecord=async()=>{throw new Error('Network timed out; retry this event.');};
  await press('Save visit record');assert.equal(actionFor('arrived').props.style.backgroundColor,'#FEF3C7');assert.equal(control('Arrival recorded'),undefined);assert.match(text(),/Network timed out/);
- assert.equal(control('Cancel visit record'),undefined);let result;await act(async()=>{result=actionsRef.current.discardDrafts();});assert.equal(result.success,true);assert.equal(queue.length,1);assert.equal(queue[0].state,'failed');
+ assert.equal(control('Cancel visit record'),undefined);let result;await act(async()=>{result=await actionsRef.current.discardDrafts();});assert.equal(result.success,true);assert.equal(queue.length,1);assert.equal(queue[0].state,'failed');
  assert.equal(actionsRef.current.getDrafts().visitAttempted,false);const original=visitRequests[0].operationId;
  visitRecord=async payload=>({event:manual('server-id','arrived',new Date().toISOString()),duplicate:true});await press('Retry saved arrived event');assert.equal(visitRequests[1].operationId,original);assert.equal(actionFor('arrived').props.style.backgroundColor,'#D1FAE5');
 });
@@ -197,7 +202,7 @@ test('draft API reads synchronous notes and optional product state and saves wit
  await input('Work notes','Saved through completion guard.');assert.equal(actionsRef.current.getDrafts().notes,true);let result;await act(async()=>{result=await actionsRef.current.saveDrafts();});
  assert.equal(result.success,true);assert.equal(actionsRef.current.getDrafts().hasDraft,false);assert.equal(writes[0].patch.notes,'Saved through completion guard.');assert.equal(queue.length,0);
  await input('Product','Optional entered product');assert.equal(actionsRef.current.getDrafts().application,true);await act(async()=>{result=await actionsRef.current.saveDrafts();});assert.equal(result.success,false);assert.match(result.message,/product, target pest and positive quantity/);assert.equal(actionsRef.current.getDrafts().application,true);
- await act(async()=>{result=actionsRef.current.discardDrafts();});assert.equal(result.success,true);assert.equal(actionsRef.current.getDrafts().hasDraft,false);assert.equal(queue.length,0);
+ await act(async()=>{result=await actionsRef.current.discardDrafts();});assert.equal(result.success,true);assert.equal(actionsRef.current.getDrafts().hasDraft,false);assert.equal(queue.length,0);
 });
 
 test('draft API retains a visit until durable storage succeeds, then completion can continue with queued evidence',async()=>{

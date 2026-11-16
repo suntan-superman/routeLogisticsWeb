@@ -12,6 +12,20 @@ Previously recorded browser coverage is **33 scenarios** (99 configured executio
 
 ### November 16 — field reliability and job exceptions
 
+**Later Android note-repair follow-up:** physical testing of `91c544c` passed
+arrival and captured-photo restart retention but failed typed work-note retention.
+The editor persisted text only after explicit Save, and an ACK cache mapping could
+also hide synchronized notes. [Offline work-note repair](OFFLINE_WORK_NOTES_REPAIR.md)
+adds immediate scoped draft storage, explicit save-before-close, stable queued
+submissions and canonical cache restoration. Final automated checks pass **398
+mobile**, **414 web**, **9 real Firestore note/replay cases**, **6 targeted backend
+unit cases**, and **PW-NOTES-01 Chromium**. Original notes were not found in the
+device snapshot; the pending arrival, photo and job operation were backed up
+without clearing storage. The repaired local Android release installed in place
+at 10:50 AM Pacific on November 16; UID and airplane mode remained unchanged.
+Fresh physical restart plus synchronization acceptance remains outstanding.
+This update does not mark FR-007/FR-008 Pass or change case counts.
+
 Arrival, departure and access-blocked evidence now use the existing durable,
 workspace-scoped offline queue. Local acknowledgement follows storage success;
 restart/replay preserves the original event time and operation identity. Current
@@ -4064,7 +4078,7 @@ Exact paths below are relative to https://route-logistics.com unless a native or
 - **Preconditions:** Rebuilt Android app with retained app data; dedicated synthetic assigned job and authorized technician/manager identities; desktop Dispatch available. A new real push requires separate explicit authorization; this procedure sends none by default.
 - **User role:** Assigned technician and authorized owner/manager
 - **Exact navigation path:** Android Field → assigned job → visit controls/Assignment support; web /dispatch; Android Management → Schedule
-- **Execution / evidence class:** manual; Physical Android — not executed
+- **Execution / evidence class:** manual; Physical Android — partial original-release evidence, repaired-build retest pending
 - **Hands-on estimate:** 20 minutes
 - **Test steps:**
 
@@ -4073,7 +4087,7 @@ Exact paths below are relative to https://route-logistics.com unless a native or
 3. Request reassignment; inspect the unchanged appointment in Dispatch/Management, resolve or perform checked reassignment, and confirm in-progress review plus late/overdue filters. Test actual push only under a separate explicit recipient/count budget.
 
 - **Expected result:** Durable independent drafts/evidence survive Android process restart; synchronization is authorized and idempotent, conflicts are actionable, request review changes only its intended metadata/assignment and no invisible navigation guard remains. No automatic repeated late/overdue notifications occur.
-- **Actual result:** Not executed on a rebuilt physical Android device. Earlier Android background assignment display/tap in MSG-10 does not certify these new offline/exception workflows.
+- **Actual result:** The operator tested `91c544c` in airplane mode: arrival and captured-photo restart retention passed; typed work-note restoration failed. The note defect was reproduced, repaired and covered by automated storage/UI/backend/browser regressions; see [repair and physical retest](OFFLINE_WORK_NOTES_REPAIR.md). Offline restart and successful synchronization on the repaired device build remain Not Run, as do the rest of this end-to-end procedure. Earlier Android background assignment display/tap in MSG-10 does not certify them.
 - **Status:** **Not Run**
 - **Evidence reference:** [physical procedure and rebuild steps](FIELD_RELIABILITY_AND_JOB_EXCEPTIONS.md#physical-android-and-ios-acceptance--not-yet-executed); FR-001–006 supporting automated evidence only
 - **Cleanup instructions:** Synchronize/reconcile all synthetic pending evidence, restore only the recorded synthetic assignments and end test shifts. Do not uninstall/clear app storage or delete legitimate history.

@@ -43,6 +43,14 @@ Chromium, Firefox and WebKit against local emulators. FR-007 and FR-008 remain *
 physical Android/iOS procedures are executed. No additional email, SMS, push or
 financial-provider test is claimed here.
 
+Implementation `91c544c` is published on the existing production site (Netlify
+ready and served Dispatch asset verified November 16 at 8:50 AM Pacific). Eight
+affected Route Logistics functions are ACTIVE and the deployed job rules match
+the tested source. The release audit preserved all 509 customers, 11 jobs and
+two invoices, every unrelated function and existing integration safety flags.
+Both native bundles and the local Android release build passed; installing
+updated builds and executing FR-007/FR-008 remains separate physical acceptance.
+
 ### November 15 — visible visit recording and completion feedback
 
 Manual arrival/departure controls are amber before recording and green with a

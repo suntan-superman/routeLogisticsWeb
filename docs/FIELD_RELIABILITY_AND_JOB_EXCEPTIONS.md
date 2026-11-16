@@ -2,6 +2,8 @@
 
 Implemented November 16, 2026 on the existing `main` branch and Firebase project `mi-factotum-field-service`.
 
+Implementation commit: `91c544c6da8bb978076ef7e7c92bd316bfddaf52`.
+
 ## Offline arrival failure and repair
 
 The visit editor explicitly rejected offline saves before calling `rlJobVisit`. The existing durable queue supported job updates, photos, applications and service forms, but had no visit-event operation. The completion draft dialog correctly retained unsaved input but could not persist that visit evidence.
@@ -132,11 +134,11 @@ The scoped deployment completed November 16. All eight affected functions are AC
 - `rlQueueNativeJobUpdated`.
 - `rlDeliverNativePush`.
 
-The narrow Firestore job-rule protection was published with the deployment. Runtime probes of `rlJobException`, `rlJobVisit` and `rlManageJob` returned HTTP 401 / `UNAUTHENTICATED` without credentials or mutations.
+The narrow Firestore job-rule protection was published with the deployment; the deployed rules source was verified to match the tested local file. Runtime probes of `rlJobException`, `rlJobVisit` and `rlManageJob` returned HTTP 401 / `UNAUTHENTICATED` without credentials or mutations.
 
 The 8:47 AM Pacific production audit confirmed exactly the eight expected function changes; every unrelated function was unchanged. All **509 customers, 11 existing jobs and two invoices** matched the pre-deployment document IDs and full-precision update versions. Existing integration safety flags were unchanged: sandbox accounting writes and production approval remain off, Stripe remains test-only and broad SMS remains disabled. No new provider test was sent. A read-only legacy-evidence check found no active Acme job with a pre-existing arrival record omitted from its arrival summary; historical visits were not rewritten.
 
-Web publication is verified after pushing the implementation to the existing `main` branch. Installed native applications still require the rebuilt app.
+At **8:50 AM Pacific**, Netlify deployment `6afb33d757c192bcd5cc9e13` for implementation commit `91c544c` was **ready**. Public production HTML and the new `DispatchPage-BELS8oLi.js` asset returned HTTP 200; the served asset contains the exception callable, request-review interface and potentially-late indicator. Installed native applications still require the rebuilt app. No paid EAS build, App Store submission or device installation was initiated.
 
 ## Physical Android and iOS acceptance — not yet executed
 

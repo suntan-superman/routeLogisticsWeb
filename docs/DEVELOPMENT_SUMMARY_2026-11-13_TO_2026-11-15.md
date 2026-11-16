@@ -1,8 +1,11 @@
 # Route Logistics — Recent Development Summary
 
-**Period:** November 13–15, 2026, Pacific time, with November 12 migration foundations included for context.  
-**Application release covered:** `c93c992`, published November 15, 2026.  
-**Applications:** Route Logistics web, iOS and Android.  
+**Period:** November 13–15, 2026, Pacific time, with November 12 migration foundations included for context.
+
+**Application release covered:** `c93c992`, published November 15, 2026.
+
+**Applications:** Route Logistics web, iOS and Android.
+
 **Infrastructure:** Existing Firebase project `mi-factotum-field-service`, existing Netlify production site, and existing `main` branch.
 
 This document summarizes the recent features, workflow changes, data flows and verification results. It distinguishes implemented functionality from provider acceptance and physical-device testing. Older roadmap and documentation snapshots contain prerequisites and limitations that subsequent releases have superseded; the status below reflects the later implementation and recorded acceptance evidence.

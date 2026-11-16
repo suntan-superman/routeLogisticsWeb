@@ -23,3 +23,9 @@ test('a manual unavailable period excludes a still-fresh on-duty location from d
   assert.deepEqual(nearestOnDuty([row], { lat: 35, lng: -119 }, now), []);
   assert.equal(nearestOnDuty([{ ...row, availability: { active: false, state: 'normal' } }], { lat: 35, lng: -119 }, now).length, 1);
 });
+
+test('office-only staff are excluded from assignment recommendations even when on duty with current GPS', () => {
+  const person = { onDuty: true, location: fix() };
+  const roster = [{ ...person, memberId: 'office-owner', fieldWorkEnabled: false }, { ...person, memberId: 'office-manager', availability: { fieldWorkEnabled: false } }, { ...person, memberId: 'field-manager', fieldWorkEnabled: true }];
+  assert.deepEqual(nearestOnDuty(roster, { lat: 35, lng: -119 }, now).map(row => row.memberId), ['field-manager']);
+});

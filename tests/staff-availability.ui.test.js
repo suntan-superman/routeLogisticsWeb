@@ -81,3 +81,41 @@ test('a saved editor cannot reopen before its roster refresh and revision update
   await click('Change availability'); await dates(); await click('Save availability');
   assert.equal(calls[1].data.expectedRevision, 4);
 });
+
+test('field work is a separate dirty-only setting with an explicit scoped save and success feedback', async () => {
+  await render(); await click('Field work settings');
+  const checkbox = () => tree.root.findByProps({ 'aria-label': 'Can be assigned field work' });
+  assert.equal(checkbox().props.checked, true);
+  assert.equal(button('Save field work setting').props.disabled, true);
+  assert.equal(tree.root.findAllByProps({ 'aria-label': 'Temporary staff status' }).length, 0);
+  await act(async () => checkbox().props.onChange({ target: { checked: false } }));
+  assert.equal(dirty, true); assert.equal(button('Save field work setting').props.disabled, false);
+  await click('Save field work setting');
+  assert.deepEqual(calls, [{ name: 'rlManageStaffAvailability', data: { memberId: 'tech-a', action: 'set-field-work', expectedRevision: 3, fieldWorkEnabled: false } }]);
+  assert.equal(refreshed, 1); assert.equal(dirty, false);
+  assert.match(text(), /Staff member marked office-only/); assert.equal(toasts[0][0], 'success');
+});
+
+test('office-only staff can be re-enabled explicitly without clearing manual availability periods', async () => {
+  await render({ member: { memberId: 'manager', name: 'Working manager', availability: { revision: 8, scheduled: 2, fieldWorkEnabled: false } } });
+  await click('Field work settings');
+  const checkbox = tree.root.findByProps({ 'aria-label': 'Can be assigned field work' });
+  assert.equal(checkbox.props.checked, false);
+  await act(async () => checkbox.props.onChange({ target: { checked: true } }));
+  await click('Save field work setting');
+  assert.deepEqual(calls[0].data, { memberId: 'manager', action: 'set-field-work', fieldWorkEnabled: true, expectedRevision: 8 });
+  assert.match(text(), /Field work assignments enabled/);
+});
+
+test('field work errors retain the flag draft and duplicate taps do not create a second operation', async () => {
+  await render(); await click('Field work settings');
+  await act(async () => tree.root.findByProps({ 'aria-label': 'Can be assigned field work' }).props.onChange({ target: { checked: false } }));
+  handler = async () => { throw Error('Staff availability changed. Refresh the team before saving again.'); };
+  await click('Save field work setting');
+  assert.equal(dirty, true); assert.match(text(), /Refresh the team/);
+  let finish; handler = () => new Promise(resolve => { finish = resolve; });
+  await act(async () => { const save = button('Save field work setting').props.onClick; save(); save(); });
+  assert.equal(calls.length, 2);
+  await act(async () => finish({ success: true }));
+  assert.equal(refreshed, 1);
+});

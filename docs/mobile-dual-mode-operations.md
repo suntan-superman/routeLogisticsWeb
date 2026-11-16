@@ -17,6 +17,15 @@ Management Mode. The shared capability policy is unchanged.
 
 ## Field Mode and work preservation
 
+Field-work eligibility is an independent company/UID flag. Owners/managers use
+Management → Team → staff details → Field work settings to set **Can be assigned
+field work** with an explicit confirmation. Existing staff default to enabled;
+office-only staff retain their company permissions, existing appointments and
+history, but are excluded from new assignment choices. The flag does not alter
+shift/GPS consent or override temporary leave and schedule checks. It does not
+remove access to completing work already assigned. Its editor captures the
+opening revision and warns on unsaved changes; a stale save requires refresh.
+
 Company staff all use TechnicianHomeScreen, ScheduleScreen, RouteScreen and the
 same JobWorkflow. Owners/managers can be assigned without a second technician
 membership. Personal reads use server `assignedTo: 'self'`, with separate query

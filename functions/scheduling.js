@@ -106,17 +106,19 @@ function schedulingHandlers(db) {
     }
     return { company, profile: null };
   }
-  async function resolve(tx, scope, id, { company, allowLegacy = false, relaxed = false } = {}) {
+  async function resolve(tx, scope, id, { company, allowLegacy = false, relaxed = false, includeOffice = false } = {}) {
     if (!id) return null;
     documentId(id, 'technician');
     const ownerId = company?.get('ownerId') || (!scope.companyId ? scope.uid : null);
     if (id === ownerId) {
-      const [deleted, profile] = await Promise.all([read(tx, db.doc(`rlAccountDeletions/${ownerId}`)), read(tx, db.doc(`users/${ownerId}`))]);
+      const [deleted, profile, availabilityRow] = await Promise.all([read(tx, db.doc(`rlAccountDeletions/${ownerId}`)), read(tx, db.doc(`users/${ownerId}`)), scope.companyId ? read(tx, availabilityRef(db, scope.companyId, ownerId)) : Promise.resolve(null)]);
       if (!relaxed && deleted.exists) throw failure('This technician is no longer active or available in this company. Choose another technician.');
+      const availability = availabilityRow?.data();
+      if (!relaxed && !includeOffice && availability?.fieldWorkEnabled === false) throw failure('This staff member is office-only and cannot receive new field assignments. An owner or manager must enable field work first.');
       const memberships = scope.companyId ? await read(tx, scoped('teamMembers', scope).where('uid', '==', ownerId).limit(21)) : null;
       if (!relaxed && memberships?.size > 20) throw failure('This owner has memberships that need review before scheduling.');
       const ownerMember = memberships?.docs.find(row => row.get('status') === 'active')?.data() || {};
-      return { id: ownerId, uid: ownerId, role: 'owner', ...staffIdentity(ownerMember, profile.data() || {}, scope.companyId ? 'Company owner' : 'You', scope.companyId), aliases: [ownerId, ...(memberships?.docs || []).map(row => row.id)] };
+      return { id: ownerId, uid: ownerId, role: 'owner', fieldWorkEnabled: availability?.fieldWorkEnabled !== false, availability, ...staffIdentity(ownerMember, profile.data() || {}, scope.companyId ? 'Company owner' : 'You', scope.companyId), aliases: [ownerId, ...(memberships?.docs || []).map(row => row.id)] };
     }
     if (!scope.companyId) throw failure('Choose the owner of this independent workspace.');
     const member = await read(tx, db.doc(`teamMembers/${id}`));
@@ -128,12 +130,14 @@ function schedulingHandlers(db) {
       else if (relaxed && rows.docs.length) chosen = rows.docs[0];
     }
     const uid = chosen?.get('uid');
-    if (chosen && uid === ownerId) return resolve(tx, scope, ownerId, { company, allowLegacy, relaxed });
+    if (chosen && uid === ownerId) return resolve(tx, scope, ownerId, { company, allowLegacy, relaxed, includeOffice });
     if (!chosen || typeof uid !== 'string' || !uid || !relaxed && (chosen.get('status') !== 'active' || !['technician', 'manager'].includes(chosen.get('role')) && !(allowLegacy && chosen.get('role') === 'admin'))) throw failure('This technician is no longer active or available in this company. Choose another technician.');
     documentId(uid, 'technician account');
-    const [deleted, aliases, profile] = await Promise.all([read(tx, db.doc(`rlAccountDeletions/${uid}`)), read(tx, scoped('teamMembers', scope).where('uid', '==', uid).limit(21)), read(tx, db.doc(`users/${uid}`))]);
+    const [deleted, aliases, profile, availabilityRow] = await Promise.all([read(tx, db.doc(`rlAccountDeletions/${uid}`)), read(tx, scoped('teamMembers', scope).where('uid', '==', uid).limit(21)), read(tx, db.doc(`users/${uid}`)), read(tx, availabilityRef(db, scope.companyId, uid))]);
     if (!relaxed && (deleted.exists || aliases.size > 20 || aliases.docs.filter(row => row.get('status') === 'active').length > 1)) throw failure('This technician is no longer active or has memberships that need review. Choose another technician.');
-    return { id: chosen.id, uid, role: chosen.get('role'), ...staffIdentity(chosen.data(), profile.data() || {}, 'Technician', scope.companyId), aliases: [...new Set([chosen.id, uid, ...aliases.docs.map(row => row.id)])] };
+    const availability = availabilityRow.data();
+    if (!relaxed && !includeOffice && availability?.fieldWorkEnabled === false) throw failure('This staff member is office-only and cannot receive new field assignments. An owner or manager must enable field work first.');
+    return { id: chosen.id, uid, role: chosen.get('role'), fieldWorkEnabled: availability?.fieldWorkEnabled !== false, availability, ...staffIdentity(chosen.data(), profile.data() || {}, 'Technician', scope.companyId), aliases: [...new Set([chosen.id, uid, ...aliases.docs.map(row => row.id)])] };
   }
   async function roster(tx, scope, context) {
     if (!scope.companyId) return [await resolve(tx, scope, scope.uid, context)];
@@ -142,10 +146,10 @@ function schedulingHandlers(db) {
     const counts = new Map();
     rows.docs.filter(row => row.get('status') === 'active' && row.get('uid')).forEach(row => counts.set(row.get('uid'), (counts.get(row.get('uid')) || 0) + 1));
     const result = [];
-    try { result.push(await resolve(tx, scope, context.company.get('ownerId'), context)); } catch (error) { if (error.code !== 'failed-precondition') throw error; }
+    try { result.push(await resolve(tx, scope, context.company.get('ownerId'), { ...context, includeOffice: true })); } catch (error) { if (error.code !== 'failed-precondition') throw error; }
     for (const row of rows.docs) {
       if (row.get('status') !== 'active' || !['technician', 'manager'].includes(row.get('role')) || !row.get('uid') || row.get('uid') === context.company.get('ownerId') || counts.get(row.get('uid')) !== 1) continue;
-      try { result.push(await resolve(tx, scope, row.id, context)); } catch (error) { if (error.code !== 'failed-precondition') throw error; }
+      try { result.push(await resolve(tx, scope, row.id, { ...context, includeOffice: true })); } catch (error) { if (error.code !== 'failed-precondition') throw error; }
     }
     return result.sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -201,6 +205,7 @@ function schedulingHandlers(db) {
   }
   async function withAvailability(tx, scope, person) {
     if (!person || !scope.companyId) return person;
+    if (Object.hasOwn(person, 'availability')) return person;
     return { ...person, availability: (await read(tx, availabilityRef(db, scope.companyId, person.uid))).data() };
   }
   async function prepare(tx, scope, next, options = {}) {
@@ -227,9 +232,9 @@ function schedulingHandlers(db) {
     if (preferred && options.preferredTechnicianUid && options.preferredTechnicianUid !== preferred.uid) { preferred = null; unavailable = true; }
     if (options.before?.assignedTo) try { old = await resolve(tx, scope, options.before.assignedTo, { ...context, relaxed: true, allowLegacy: true }); } catch { old = { uid: options.before.assignedTo }; }
     const candidates = preferred ? [preferred] : [];
-    if (fallback === 'auto') for (const person of await roster(tx, scope, context)) if ((!scope.companyId || person.role === 'technician') && !candidates.some(existing => existing.uid === person.uid)) candidates.push(person);
+    if (fallback === 'auto') for (const person of await roster(tx, scope, context)) if (person.fieldWorkEnabled !== false && (!scope.companyId || person.role === 'technician') && !candidates.some(existing => existing.uid === person.uid)) candidates.push(person);
     const allLocks = await locks(tx, scope, [old, ...candidates]);
-    if (!candidates.length) return { assignedTo: null, assignedToUid: null, assignedToName: '', available: false, memberUnavailable: unavailable, assignmentReview: unavailable ? 'The preferred technician is no longer active. Assign another technician.' : 'This recurring visit needs a technician assignment.', assignmentNeedsAttention: true, locks: allLocks.filter(row => row.uid === old?.uid), scope };
+    if (!candidates.length) return { assignedTo: null, assignedToUid: null, assignedToName: '', available: false, memberUnavailable: unavailable, assignmentReview: unavailable ? 'The preferred staff member is not eligible for new field assignments. Choose another field-enabled technician.' : 'This recurring visit needs a technician assignment.', assignmentNeedsAttention: true, locks: allLocks.filter(row => row.uid === old?.uid), scope };
     const candidate = interval(job), settings = reservationOptions(job, options.before, { ...searchOptions(options), ...options }), loaded = await loadRows(tx, scope, candidate, settings);
     let last;
     for (const person of candidates) {
@@ -250,7 +255,7 @@ function schedulingHandlers(db) {
       await rateLimit(db, 'schedule-check', scope.uid, 90);
       if (data.companyId !== undefined && (data.companyId || null) !== (scope.companyId || null)) throw new HttpsError('permission-denied', 'Choose this workspace’s schedule.');
       const context = await actor(null, scope), action = data.action || 'check';
-      if (action === 'roster') return { technicians: await Promise.all((await roster(null, scope, context)).map(async person => ({ id: person.id, name: person.name, email: person.email, role: person.role, availability: availabilityView((await withAvailability(null, scope, person))?.availability) }))), ...environment(context) };
+      if (action === 'roster') return { technicians: await Promise.all((await roster(null, scope, context)).map(async person => ({ id: person.id, name: person.name, email: person.email, role: person.role, fieldWorkEnabled: person.fieldWorkEnabled !== false, availability: availabilityView((await withAvailability(null, scope, person))?.availability) }))), ...environment(context) };
       if (action !== 'check') throw new HttpsError('invalid-argument', 'Choose an availability check or technician roster.');
       const options = searchOptions(data), job = { date: data.date, time: data.time, estimatedDuration: data.estimatedDuration, assignedTo: data.memberId || null };
       const candidate = interval(job); let before;

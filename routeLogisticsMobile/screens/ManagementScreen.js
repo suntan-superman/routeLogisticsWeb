@@ -28,11 +28,12 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
   const allowed=!!user?.companyId&&permissions.can('dispatch.manage'),canLocations=permissions.can('locations.viewTeam'),canAssign=permissions.can('jobs.assign'),canOverride=['owner','manager'].includes(user?.role);
   const data=useManagementData(date,{enabled:active&&allowed,canViewLocations:canLocations});
   const readable=allowed&&context.canReadWork;
-  const team=useMemo(()=>readable?mergeTeam(data.team.data?.team,data.positions.data?.roster,data.positions.data?.locations):[],[readable,data.team.data,data.positions.data]);
+  const team=useMemo(()=>readable?mergeTeam(data.team.data?.team,data.positions.data?.roster,data.positions.data?.locations).map(row=>({...row,fieldWorkEnabled:row.fieldWorkEnabled!==false&&row.availability?.fieldWorkEnabled!==false})):[],[readable,data.team.data,data.positions.data]);
   const jobs=readable?sortJobs(data.jobs.data?.jobs||[]):[],policy=data.positions.data?.policy||{};
   const current=team.find(row=>row.id===selected),availabilityMember=team.find(row=>row.id===availability);
   const route=useManagementRoute(selected,date,{enabled:active&&allowed&&!!selected&&showRoute&&view==='team'});
   const hasDraft=!!assignment||!!availability;
+  const targetMember=team.find(row=>row.id===target),targetEligible=!target||!!targetMember&&targetMember.fieldWorkEnabled!==false;
   // Retained hidden management pages must never clear the active work order's
   // draft/busy guard. Workspace owns transitions; report only while visible.
   useEffect(()=>{if(active)onInteractionChange?.({busy:busy||checking,hasDraft});},[active,busy,checking,hasDraft,onInteractionChange]);
@@ -52,6 +53,7 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
   const openAssignment=job=>{if(!canAssign||busy||hasDraft)return;setShowDate(false);setAssignment(job);setTarget(job.assignedTo||null);setCheck(null);setNotice(null);};
   const preflight=async()=>{
     if(!assignment||lifetime.current.pending||busy||checking||!readable||!context.online)return;
+    if(!targetEligible){setCheck(null);setNotice({tone:'error',message:'This staff member is office only or no longer eligible for new field assignments. Choose another person or Unassigned.'});return;}
     lifetime.current.pending='check';const ticket=++lifetime.current.sequence,expected=scope;setChecking(true);setNotice(null);
     try{const result=await checkManagementAssignment(assignment,target);if(isCurrent(ticket,expected))setCheck(result);}
     catch(error){if(isCurrent(ticket,expected))setNotice({tone:'error',message:error.message||'The assignment could not be checked. Retry while online.'});}
@@ -76,6 +78,7 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
     <Text style={{color:palette.secondary,lineHeight:22}}>{freshnessLabels[state]}</Text>
     {!!row.location&&<Text style={{color:palette.secondary,lineHeight:22}}>Last updated: {updatedLabel(row.location.capturedAt||row.location.updatedAt)}</Text>}
     <Text style={{color:row.availability?.state==='unavailable'&&row.availability?.active?palette.danger:palette.secondary,lineHeight:22}}>{availabilityLabel(row.availability)}</Text>
+    <Text style={{color:palette.secondary,lineHeight:22}}>{row.fieldWorkEnabled?'Field work enabled':'Office only · Not offered for new field assignments'}</Text>
     <SecondaryButton title="Technician details" accessibilityLabel={`Details for ${row.name}`} disabled={busy||hasDraft} onPress={()=>{setSelected(row.id);setShowRoute(false);onViewChange?.('team');}}/>
   </Card>;};
   if(!allowed)return <InlineNotice tone="error" message="Your current role does not permit management operations."/>;
@@ -108,12 +111,13 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
           <Text style={{color:palette.secondary,lineHeight:22}}>{freshnessLabels[locationStatus(current,policy,now)]}</Text>
           {!!current.location&&<><Text style={{color:palette.secondary,lineHeight:22}}>Last updated: {updatedLabel(current.location.capturedAt||current.location.updatedAt)}</Text>{Number.isFinite(current.location.accuracy)&&<Text style={{color:palette.secondary}}>Accuracy: ±{Math.round(current.location.accuracy)} m</Text>}</>}
           <Text style={{color:palette.text,lineHeight:22}}>{availabilityLabel(current.availability)}</Text>
+          <Text style={{color:palette.secondary,lineHeight:22}}>{current.fieldWorkEnabled?'Field work enabled':'Office only · Existing appointments are preserved'}</Text>
           {current.availability?.active&&<Text style={{color:palette.secondary,lineHeight:22}}>Override ends: {updatedLabel(current.availability.endsAt)}</Text>}
           {!!current.availability?.nextChangeAt&&<Text style={{color:palette.secondary,lineHeight:22}}>Next availability change: {updatedLabel(current.availability.nextChangeAt)}</Text>}
           {canOverride&&<SecondaryButton title="Change staff availability" disabled={busy||hasDraft||!context.online} onPress={()=>{setShowDate(false);setAvailability(current.id);setNotice(null);}}/>}
           <SecondaryButton title={showRoute?'Hide daily route':'View daily route'} disabled={busy||hasDraft} onPress={()=>setShowRoute(value=>!value)}/>
         </Card>
-        {!!availabilityMember&&<StaffAvailabilityEditor key={availabilityMember.id} member={availabilityMember} busy={busy} onSave={options=>mutate(()=>saveStaffAvailability(options),'Staff availability saved. Existing scheduled work remains visible for review.')} onCancel={()=>setAvailability(null)}/>}
+        {!!availabilityMember&&<StaffAvailabilityEditor key={availabilityMember.id} member={availabilityMember} busy={busy} onSave={options=>mutate(()=>saveStaffAvailability(options),options.action==='set-field-work'?'Field work setting saved. Existing appointments and permissions are unchanged.':'Staff availability saved. Existing scheduled work remains visible for review.')} onCancel={()=>setAvailability(null)}/>}
         {showRoute&&<Card><SectionHeader title={`Daily route · ${dayLabel(date)}`}/>{route.isLoading?<LoadingState message="Loading this technician’s route…"/>:route.error?<InlineNotice tone="error" message={route.error.message}><SecondaryButton title="Retry daily route" onPress={route.refetch}/></InlineNotice>:!route.data?<InlineNotice message="Route not loaded. Refresh while online."/>:<>
           {orderedRouteStops(route.data).map((stop,index)=><View key={stop.id} style={{gap:6}}><Text style={{color:palette.text,lineHeight:22}}>{index+1}. {stop.time||'Time not set'} · {stop.customerName||'Customer'}</Text><Text style={{color:palette.secondary,lineHeight:22}}>{stop.address||'Property address not provided'}</Text><SecondaryButton title={`Open route stop ${index+1}`} onPress={()=>{if(!busy&&!hasDraft)onOpenJob?.({id:stop.id});}}/></View>)}
           {!route.data.stops?.length&&<Text style={{color:palette.secondary}}>No remaining eligible stops for this date.</Text>}
@@ -129,11 +133,12 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
       {assignment&&<Card><SectionHeader title="Review job assignment" subtitle={`${assignment.customerName||'Customer'} · ${dayLabel(assignment.date)} · ${assignment.time||'Time not set'}`}/>
         <Text style={{color:palette.secondary,lineHeight:22}}>Choose active company staff. The server checks current membership, availability and calendar conflicts again when saving.</Text>
         <Choice title="Leave job unassigned" selected={!target} disabled={busy||checking} onPress={()=>{setTarget(null);setCheck(null);}}/>
-        {team.filter(row=>['owner','manager','technician'].includes(row.role)||row.id===assignment.assignedTo).map(row=><Choice key={row.id} title={`Assign to ${row.name}`} selected={target===row.id} disabled={busy||checking} onPress={()=>{setTarget(row.id);setCheck(null);}}/>)}
+        {team.filter(row=>(['owner','manager','technician'].includes(row.role)||row.id===assignment.assignedTo)&&row.fieldWorkEnabled).map(row=><Choice key={row.id} title={`Assign to ${row.name}`} selected={target===row.id} disabled={busy||checking} onPress={()=>{setTarget(row.id);setCheck(null);}}/>)}
+        {!targetEligible&&<InlineNotice tone="error" message="This saved assignee is office only or no longer eligible for new field assignments. Existing work remains assigned; choose someone else to reassign this job."/>}
         {apparentConflict(assignment,jobs,target)&&!check&&<InlineNotice message="The loaded schedule suggests an overlapping visit. Check availability before confirming."/>}
-        {!check&&<PrimaryButton title="Check assignment availability" busy={checking} disabled={busy||target===(assignment.assignedTo||null)||!context.online} onPress={preflight}/>}
+        {!check&&<PrimaryButton title="Check assignment availability" busy={checking} disabled={busy||!targetEligible||target===(assignment.assignedTo||null)||!context.online} onPress={preflight}/>}
         {check&&!check.available&&<InlineNotice tone="error" message={check.reason||'This staff member is unavailable or has a schedule conflict. Choose someone else or change the appointment on the web.'}/>}
-        {check?.available&&<><InlineNotice message={`Assign this appointment to ${team.find(row=>row.id===target)?.name||'Unassigned'}? Date, time and service property remain unchanged.`}/><PrimaryButton title="Confirm job assignment" busy={busy} onPress={()=>mutate(()=>saveManagementAssignment(assignment,target),'Job assignment saved. The affected schedules have been refreshed.')}/></>}
+        {check?.available&&targetEligible&&<><InlineNotice message={`Assign this appointment to ${team.find(row=>row.id===target)?.name||'Unassigned'}? Date, time and service property remain unchanged.`}/><PrimaryButton title="Confirm job assignment" busy={busy} onPress={()=>{if(targetEligible)mutate(()=>saveManagementAssignment(assignment,target),'Job assignment saved. The affected schedules have been refreshed.');}}/></>}
         <SecondaryButton title="Cancel assignment" disabled={busy||checking} onPress={()=>{setAssignment(null);setCheck(null);}}/>
       </Card>}
       <SecondaryButton title="Refresh company operations" disabled={busy||checking} onPress={refresh}/>

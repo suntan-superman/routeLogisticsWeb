@@ -8,7 +8,31 @@ Use the existing production site, Firebase project and corporate TestFlight app 
 
 Route Logistics has a tested field-work foundation suitable for a **controlled pilot after the short physical core workflow passes**. It is not yet certified across every browser, device, optional commercial feature or integration delivery path. Current automated results are recorded below; the original source/function inventory remains a dated acceptance baseline. Physical-device and genuine provider delivery acceptance remain separate.
 
-Current browser coverage is **32 scenarios** (96 configured executions across Chromium, Firefox and WebKit). See the November 15 addenda below for execution evidence. Earlier evidence for the original 25 scenarios is retained, including the later clean 75/75 Jobs-date run. Physical iPhone/Android and genuine provider acceptance remain separate.
+Current browser coverage is **33 scenarios** (99 configured executions across Chromium, Firefox and WebKit). See the November 15 addenda below for execution evidence. Earlier evidence for the original 25 scenarios is retained, including the later clean 75/75 Jobs-date run. Physical iPhone/Android and genuine provider acceptance remain separate.
+
+### November 15 — office-only and field-enabled staff
+
+Owners/managers can explicitly save **Can be assigned field work** from Team
+Locations/Dispatch staff settings and mobile Management staff details. This
+company/UID flag defaults to enabled for existing staff and is separate from
+role, temporary leave, duty status and GPS consent. Office-only staff remain
+visible with their existing assignments and permissions. New scheduling,
+rescheduling, preferred plans, recurring fallbacks and nearest-staff assignment
+recommendations exclude them. Current assigned work can still be completed.
+
+PW-OPS-20 checks dirty-only save, the office-only badge, picker exclusion, a
+forged assignment rejected by the real emulator callable, unchanged membership,
+profile and existing job records, and explicit re-enabling followed by a valid
+assignment. No production staff settings or customer records are changed by
+automated acceptance. New mobile controls require a rebuild and physical
+owner/manager acceptance; physical verification has not been marked Pass.
+
+Results: **342/342 web**, **289/289 mobile**, **177 Functions passes/one existing
+emulator-only skip**, **61/61 focused scheduling, availability, membership,
+recurring-calendar and mobile-parity emulator cases**, and **3/3 PW-OPS-20 browser
+executions** (WebKit, Chromium, Firefox). Expo Doctor passed **18/18** and iOS
+bundle export passed. Production web build passed; lint retains only the two
+existing hook warnings. The full 99 browser executions were not rerun.
 
 ### November 15 — distinguishable scheduling staff
 

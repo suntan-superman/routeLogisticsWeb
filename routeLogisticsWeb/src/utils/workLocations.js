@@ -17,6 +17,6 @@ export function distanceMeters(a, b) {
 }
 export function nearestOnDuty(roster, destination, now = Date.now(), freshAfterSeconds = 300) {
   if (!destination) return [];
-  return (roster || []).filter(member => !(member.availability?.active && member.availability.state === 'unavailable') && (member.onDuty || member.dutyStatus === 'on-duty') && locationState(member.location, now, freshAfterSeconds) === 'live' && Number.isFinite(member.location.accuracy) && member.location.accuracy <= 200)
+  return (roster || []).filter(member => member.fieldWorkEnabled !== false && member.availability?.fieldWorkEnabled !== false && !(member.availability?.active && member.availability.state === 'unavailable') && (member.onDuty || member.dutyStatus === 'on-duty') && locationState(member.location, now, freshAfterSeconds) === 'live' && Number.isFinite(member.location.accuracy) && member.location.accuracy <= 200)
     .map(member => ({ ...member, distance: distanceMeters(member.location, destination) })).filter(member => member.distance != null).sort((a,b) => a.distance-b.distance);
 }

@@ -84,6 +84,24 @@ test('missing names fall back to email without repeating it and retain that iden
   assert.deepEqual(env.members, []);
 });
 
+test('office-only staff are not offered for new assignments and saved office-only assignments retain their identity', async () => {
+  reset((_name, data) => data.action === 'roster' ? { technicians: [
+    { id: 'owner', name: 'Office owner', role: 'owner', fieldWorkEnabled: false },
+    { id: 'tech-1', name: 'Office manager', email: 'office@example.test', role: 'manager', availability: { fieldWorkEnabled: false } },
+    { id: 'tech-2', name: 'Field manager', role: 'manager', fieldWorkEnabled: true },
+  ] } : available);
+  await render({ memberId: '' });
+  assert.deepEqual(tree.root.findAllByType('option').map(option => option.props.value), ['', 'tech-2']);
+  await act(async () => select().props.onChange({ target: { value: 'tech-1' } }));
+  assert.deepEqual(env.members, []);
+  await update({ memberId: 'tech-1' });
+  const previous = tree.root.findAllByType('option').find(option => option.props.value === 'tech-1');
+  assert.equal(previous.props.disabled, true);
+  assert.match(previous.children.join(''), /Office manager · office@example\.test \(office only\)/);
+  assert.match(text(), /Existing appointments remain assigned/);
+  assert.equal(env.calls.filter(call => call.data.action === 'check').length, 0);
+});
+
 test('unassigned and solo owner flows keep assignment explicit without inventing schedule checks', async () => {
   reset(); await render({ companyId: null, memberId: '' });
   assert.deepEqual(env.calls.map(call => call.data.action), ['roster']); assert.equal(env.calls[0].data.companyId, null);

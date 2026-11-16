@@ -29,10 +29,10 @@ function AvailabilityForm({ companyId, member, allowed = false, onChanged }) {
   useEffect(() => { setOpen(false); setBaseline(null); setError(''); setMessage(''); setBusy(false); }, [identity, allowed]);
   const dirty = open && baseline !== null && JSON.stringify(form) !== baseline;
   useUnsavedChanges(dirty || busy, { scope: `staff-availability:${identity}`, message: 'You have unsaved staff availability changes. Leave without saving them?' });
-  const begin = () => {
+  const begin = (mode = 'availability') => {
     if (busy || operation.current) return;
-    const next = initialForm(); setForm(next); setBaseline(JSON.stringify(next)); revision.current = member.availability?.revision || 0;
-    setError(''); setMessage(''); setOpen(true);
+    const next = { ...initialForm(), fieldWorkEnabled: member.fieldWorkEnabled !== false && member.availability?.fieldWorkEnabled !== false }; setForm(next); setBaseline(JSON.stringify(next)); revision.current = member.availability?.revision || 0;
+    setError(''); setMessage(''); setOpen(mode);
   };
   const save = async action => {
     if (operation.current || busy) return;
@@ -41,19 +41,25 @@ function AvailabilityForm({ companyId, member, allowed = false, onChanged }) {
     const ticket = identity; operation.current = true; setBusy(true); setError(''); setMessage('');
     try {
       await callWorkspace('rlManageStaffAvailability', { memberId: member.memberId || member.id, action, expectedRevision: revision.current,
-        ...(action === 'set' ? { status: form.reason === 'emergency' ? 'available' : 'unavailable', reason: form.reason, startsAt, endsAt } : {}) });
+        ...(action === 'set-field-work' ? { fieldWorkEnabled: form.fieldWorkEnabled } : action === 'set' ? { status: form.reason === 'emergency' ? 'available' : 'unavailable', reason: form.reason, startsAt, endsAt } : {}) });
       if (!mounted.current || current.current !== ticket) return;
-      const success = action === 'clear' ? 'Manual availability periods cleared.' : 'Staff availability saved.';
+      const success = action === 'set-field-work' ? form.fieldWorkEnabled ? 'Field work assignments enabled.' : 'Staff member marked office-only.' : action === 'clear' ? 'Manual availability periods cleared.' : 'Staff availability saved.';
       setMessage(success); setOpen(false); setBaseline(null); toast.success(success); await onChanged?.();
     } catch (failure) {
-      if (mounted.current && current.current === ticket) { setError(failure.message || 'Availability could not be saved. Refresh and retry.'); toast.error('Availability could not be saved.'); }
+      if (mounted.current && current.current === ticket) { setError(failure.message || 'Staff settings could not be saved. Refresh and retry.'); toast.error('Staff settings could not be saved.'); }
     } finally { operation.current = false; if (mounted.current && current.current === ticket) setBusy(false); }
   };
   return <div className="space-y-2">
-    {!open && <button type="button" disabled={busy} data-availability-revision={member.availability?.revision || 0} className="text-sm font-medium text-primary-800 underline disabled:opacity-50" onClick={begin}>Change availability</button>}
+    {!open && <div className="flex flex-wrap gap-x-4 gap-y-2"><button type="button" disabled={busy} data-availability-revision={member.availability?.revision || 0} className="text-sm font-medium text-primary-800 underline disabled:opacity-50" onClick={() => begin()}>Change availability</button><button type="button" disabled={busy} className="text-sm font-medium text-primary-800 underline disabled:opacity-50" onClick={() => begin('field-work')}>Field work settings</button></div>}
     {message && <p role="status" className="text-sm text-emerald-800">{message}</p>}
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-    {open && <fieldset disabled={busy} className="space-y-3 rounded-lg border border-primary-100 bg-primary-50 p-3">
+    {open === 'field-work' && <fieldset disabled={busy} className="space-y-3 rounded-lg border border-primary-100 bg-primary-50 p-3">
+      <legend className="text-sm font-semibold">Field work for {member.name || 'staff member'}</legend>
+      <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" aria-label="Can be assigned field work" className="rounded border-gray-300 text-primary-600 focus:ring-primary-500" checked={form.fieldWorkEnabled} onChange={event => setForm(previous => ({ ...previous, fieldWorkEnabled: event.target.checked }))} />Can be assigned field work</label>
+      <p className="text-xs text-gray-700">Turn this off for office-only staff. Their role and existing appointments stay intact. On-duty status, leave and schedule conflicts are checked separately.</p>
+      <div className="flex flex-wrap gap-2"><button type="button" className="btn-primary" disabled={busy || !dirty} onClick={() => { if (dirty) save('set-field-work'); }}>{busy ? 'Saving…' : 'Save field work setting'}</button><button type="button" className="btn-secondary" disabled={busy} onClick={() => { setOpen(false); setBaseline(null); setError(''); }}>Cancel changes</button></div>
+    </fieldset>}
+    {open === 'availability' && <fieldset disabled={busy} className="space-y-3 rounded-lg border border-primary-100 bg-primary-50 p-3">
       <legend className="text-sm font-semibold">Availability for {member.name || 'staff member'}</legend>
       <label className="block text-sm">Temporary status<select aria-label="Temporary staff status" className="mt-1 block w-full rounded border-gray-300" value={form.reason} onChange={event => setForm(previous => ({ ...previous, reason: event.target.value }))}>{Object.entries(reasons).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       <div className="space-y-2"><label className="block text-sm">From date<input aria-label="Availability from date" type="date" className="mt-1 block w-full rounded border-gray-300" value={form.startDate} onChange={event => setForm(previous => ({ ...previous, startDate: event.target.value }))} /></label><TimeSelect label="From time" value={form.startTime} onChange={startTime => setForm(previous => ({ ...previous, startTime }))} /></div>

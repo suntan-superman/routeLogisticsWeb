@@ -42,7 +42,10 @@ function routeHandlers(db) {
       const team = [];
       for (const person of candidates) {
         const [deleted, availability] = await Promise.all([db.doc(`rlAccountDeletions/${documentId(person.uid)}`).get(), availabilityRef(db, token.companyId, person.uid).get()]);
-        if (!deleted.exists) team.push({ id: person.id, name: person.name, role: person.role, availability: availabilityView(availability.data()) });
+        if (!deleted.exists) {
+          const view = availabilityView(availability.data());
+          team.push({ id: person.id, name: person.name, role: person.role, fieldWorkEnabled: view.fieldWorkEnabled, availability: view });
+        }
       }
       const data = staff.company.data();
       return { team, companyId: token.companyId, startAddress: [data.address, data.city, data.state, data.zipCode].filter((v) => typeof v === 'string' && v.trim()).join(', ') };

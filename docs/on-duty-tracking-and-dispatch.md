@@ -6,6 +6,26 @@ November 13, 2026. Existing `main`, Firebase project `mi-factotum-field-service`
 
 ## Operator workflow
 
+Owners/managers can mark any active staff member, including themselves, as
+office-only through **Team Locations → Field work settings → Can be assigned
+field work**. The same control appears on Dispatch staff cards. Save explicitly;
+unchanged settings cannot be submitted. Mobile Management → Team → staff details
+also provides the setting after rebuilding the app.
+
+Field eligibility is separate from role, on-duty status, temporary leave and
+schedule conflicts. Existing staff default to field-enabled until an authorized
+owner/manager changes the flag. Office-only staff stay in the team and retain
+their permissions and existing appointments. New assignments, rescheduling,
+service-plan preferences, recurring fallbacks and nearby assignment suggestions
+exclude them; no historical jobs are silently reassigned. Re-enabling field work
+does not clear sick leave, start a shift, or change GPS consent.
+
+The flag is stored in the existing private, company/UID-scoped
+`rlStaffAvailability` record. `rlManageStaffAvailability` action `set-field-work`
+requires current owner/manager authorization, an active same-company target and
+the current revision. Updates participate in the scheduling UID lock and audit
+history. Clients cannot write the private record directly.
+
 The company owner opens **Team Locations → Location policy**, selects **1, 3 or 5 minutes**, and saves the interval. The default is three minutes. Existing active shifts receive a changed interval on their next successful update. Last-location retention remains a separate owner setting; this release does not change Acme's stored policy automatically.
 
 On mobile, tap **Off Duty** at the top right of the Home header, then **Start shift** in its dialog. That action explicitly confirms work-location sharing. A green **On Duty** or red **Off Duty** button stays above the scrolling job list; explanatory text, GPS details and shift controls are shown only in the dialog. Select background sharing and grant the device's Always/background location permission to continue while the app is backgrounded or the phone is locked. App-open sharing is available without background consent. No job has to be in progress. **End shift** remains accessible while offline or while access is being checked, stops local collection first and removes only unsent optional GPS samples. Saved work, application and photo queues are untouched. If the server cannot be reached, its duty status needs a reconnect/End shift confirmation; the device does not resume tracking automatically.

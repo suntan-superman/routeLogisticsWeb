@@ -623,6 +623,99 @@ test('PW-OPS-19 scheduling resolves profile names and selects the correct same-n
   await expect(edit.getByRole('combobox', { name: 'Assigned technician', exact: true })).toHaveValue(selectedLabel);
 });
 
+test('PW-OPS-20 owner marks staff office-only without changing existing work and restores field assignment explicitly', async ({ page, scenario }) => {
+  annotate('DSP-002', 'DSP-003', 'SEC-003');
+  const staff = scenario.accounts.technician;
+  const membershipBefore = await scenario.read('teamMembers', staff.membershipId);
+  const profileBefore = await scenario.read('users', staff.uid);
+  const originalJob = await scenario.read('jobs', scenario.ids.jobId);
+  const savedAvailability = async () => (await scenario.list('rlStaffAvailability')).find(row => row.companyId === scenario.ids.companyId && row.userId === staff.uid);
+  const teamRow = () => page.getByRole('listitem').filter({ has: page.getByText('Synthetic technician', { exact: true }) });
+  await signIn(page, scenario.accounts.owner);
+
+  async function saveFieldWork(enabled) {
+    await page.goto('/team-locations');
+    const row = teamRow();
+    await expect(row).toBeVisible();
+    await row.getByRole('button', { name: 'Field work settings', exact: true }).click();
+    const settings = row.getByRole('group', { name: 'Field work for Synthetic technician', exact: true });
+    const checkbox = settings.getByRole('checkbox', { name: 'Can be assigned field work', exact: true });
+    if (enabled) await expect(checkbox).not.toBeChecked();
+    else await expect(checkbox).toBeChecked();
+    await expect(settings.getByRole('button', { name: 'Save field work setting', exact: true })).toBeDisabled();
+    await checkbox.setChecked(enabled);
+    const savedResponse = page.waitForResponse(response => response.url().includes('/rlManageStaffAvailability') && response.request().method() === 'POST');
+    await settings.getByRole('button', { name: 'Save field work setting', exact: true }).click();
+    const response = await savedResponse;
+    expect(response.ok()).toBe(true);
+    await expect(row.getByText(enabled ? 'Field work assignments enabled.' : 'Staff member marked office-only.', { exact: true })).toBeVisible();
+    await expect.poll(async () => (await savedAvailability())?.fieldWorkEnabled).toBe(enabled);
+    return response;
+  }
+
+  const disabledResponse = await saveFieldWork(false);
+  await expect(teamRow()).toBeVisible();
+  await expect(teamRow().getByText('Office only', { exact: true })).toBeVisible();
+  expect(await scenario.read('teamMembers', staff.membershipId)).toEqual(membershipBefore);
+  expect(await scenario.read('users', staff.uid)).toEqual(profileBefore);
+  expect(await scenario.read('jobs', scenario.ids.jobId)).toEqual(originalJob);
+
+  await page.goto('/jobs');
+  await page.getByRole('button', { name: 'New Job', exact: true }).click();
+  const emptyForm = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Schedule New Job', exact: true }) });
+  const picker = emptyForm.getByRole('combobox', { name: 'Assigned technician', exact: true });
+  await expect(picker).toBeEnabled();
+  await picker.click();
+  await picker.fill(staff.email);
+  await expect(emptyForm.getByRole('listbox').getByRole('option')).toHaveCount(0);
+  await expect(emptyForm.getByRole('listbox').getByText('No matches found.', { exact: true })).toBeVisible();
+  await picker.press('Escape');
+  // Searching an unselected option does not dirty the appointment.
+  await emptyForm.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(emptyForm).toHaveCount(0);
+
+  // Reuse this synthetic owner's real callable authorization without exposing
+  // it. This request bypasses only the picker, not backend authorization.
+  const authorization = await disabledResponse.request().headerValue('authorization');
+  expect(Boolean(authorization?.startsWith('Bearer '))).toBe(true);
+  const endpoint = scenario.functionUrl('rlManageJob');
+  expect(new URL(endpoint).origin).toBe('http://127.0.0.1:5001');
+  expect(new URL(endpoint).pathname).toBe('/demo-routelogistics/us-central1/rlManageJob');
+  const forgedService = `Rejected office-only assignment ${scenario.ids.companyId}`;
+  const rejected = await page.request.post(endpoint, {
+    headers: { authorization },
+    data: { data: { action: 'create', job: {
+      customerId: scenario.ids.customerId, customerName: scenario.customerName,
+      serviceType: forgedService, date: laterDate(), time: '10:45', estimatedDuration: 1,
+      assignedTo: staff.membershipId, address: insideAddress(scenario),
+      serviceProperty: { address: insideAddress(scenario) }, serviceCategory: 'Pest Control', totalCost: 0,
+    } } },
+  });
+  expect(rejected.ok()).toBe(false);
+  const failure = (await rejected.json()).error;
+  expect(failure).toMatchObject({ status: 'FAILED_PRECONDITION', details: { scheduling: { available: false } } });
+  expect(failure.message).toContain('office-only');
+  expect((await scenario.list('jobs')).filter(job => job.serviceType === forgedService)).toHaveLength(0);
+  expect(await scenario.read('jobs', scenario.ids.jobId)).toEqual(originalJob);
+
+  await saveFieldWork(true);
+  await expect(teamRow().getByText('Office only', { exact: true })).toHaveCount(0);
+  const service = `Restored field assignment ${scenario.ids.companyId}`;
+  const restored = await openAddressJob(page, scenario, service);
+  await checkProperty(restored, insideAddress(scenario), 'Property is inside coverage');
+  await chooseTechnician(restored);
+  await expect(restored.getByRole('combobox', { name: 'Assigned technician', exact: true })).toHaveValue(`Synthetic technician · ${staff.email}`);
+  await expect(restored.getByText('Available for this appointment', { exact: true })).toBeVisible();
+  await restored.getByRole('button', { name: 'Schedule Job', exact: true }).click();
+  await expect(page.getByText('Job scheduled', { exact: true })).toBeVisible();
+  const visits = (await scenario.list('jobs')).filter(job => job.serviceType === service);
+  expect(visits).toHaveLength(1);
+  expect(visits[0]).toMatchObject({ companyId: scenario.ids.companyId, assignedTo: staff.membershipId, assignedToUid: staff.uid });
+  expect(await scenario.read('teamMembers', staff.membershipId)).toEqual(membershipBefore);
+  expect(await scenario.read('users', staff.uid)).toEqual(profileBefore);
+  expect(await scenario.read('jobs', scenario.ids.jobId)).toEqual(originalJob);
+});
+
 test.describe('Temporary staff availability', () => {
   test.use({ timezoneId: 'America/Los_Angeles' });
 

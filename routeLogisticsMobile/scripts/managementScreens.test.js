@@ -101,3 +101,33 @@ test('a staff departure during availability editing leaves an explicit cancel pa
  data.team.data={team:data.team.data.team.filter(row=>row.id!=='tech')};await act(async()=>tree.update(React.createElement(App)));await settle();
  assert.match(texts(),/no longer in the active team/);await press('Cancel unavailable staff changes');assert.equal(interactions.at(-1).hasDraft,false);
 });
+test('field-work eligibility defaults enabled and changes only after explicit save and confirmation',async()=>{
+ const values=[],props={member:{id:'manager',name:'Manager',availability:{revision:4,state:'unavailable',active:true,reason:'vacation',scheduled:1}},busy:false,onSave:value=>values.push(value),onCancel:()=>{}};
+ await act(async()=>{tree=create(React.createElement(AvailabilityEditor,props));});
+ assert.equal(button('Can be assigned field work').props.accessibilityState.checked,true);assert.equal(button('Save field work setting').props.disabled,true);
+ await press('Can be assigned field work');assert.equal(values.length,0);assert.equal(button('Save field work setting').props.disabled,false);assert.equal(button('Review availability change').props.disabled,true);
+ await press('Save field work setting');assert.equal(values.length,0);assert.match(texts(),/Existing appointments, role, duty and location consent stay unchanged/);
+ await press('Confirm field work setting');assert.deepEqual(values,[{memberId:'manager',action:'set-field-work',fieldWorkEnabled:false,expectedRevision:4}]);
+});
+test('field-work save remains dirty-only and keeps its opening revision across polling',async()=>{
+ const values=[],member={id:'manager',name:'Manager',fieldWorkEnabled:false,availability:{revision:5,fieldWorkEnabled:false,state:'normal'}},props={member,busy:false,onSave:value=>values.push(value),onCancel:()=>{}};
+ await act(async()=>{tree=create(React.createElement(AvailabilityEditor,props));});assert.match(texts(),/Office only/);assert.equal(button('Can be assigned field work').props.accessibilityState.checked,false);
+ await press('Can be assigned field work');await press('Can be assigned field work');assert.equal(button('Save field work setting').props.disabled,true);assert.equal(values.length,0);
+ await press('Can be assigned field work');await press('Save field work setting');
+ await act(async()=>tree.update(React.createElement(AvailabilityEditor,{...props,member:{...member,availability:{...member.availability,revision:6}}})));
+ await press('Confirm field work setting');assert.equal(values[0].expectedRevision,5);assert.equal(values[0].fieldWorkEnabled,true);assert.equal('role'in values[0],false);assert.equal('reason'in values[0],false);
+});
+test('office-only staff retain visible schedules and membership role but cannot receive a new mobile assignment',async()=>{
+ view='team';data.team.data={team:data.team.data.team.map(row=>row.id==='manager'?{...row,fieldWorkEnabled:false}:row)};await render();await press('Details for Manager');assert.match(texts(),/manager|Office only.*Existing appointments/);assert.ok(button('Change staff availability'));
+ await press('Back to team');await press('Details for Luis');await press('Back to team');
+ await act(async()=>tree.unmount());tree=null;view='schedule';await render();await press('Assign job open');assert.equal(button('Assign to Manager'),undefined);assert.ok(button('Assign to Luis'));assert.equal(calls.some(row=>row[0]==='assign'),false);
+});
+test('polling can revoke assignment eligibility after preflight without discarding the job or allowing confirm',async()=>{
+ view='schedule';await render();await press('Assign job open');await press('Assign to Manager');await press('Check assignment availability');assert.ok(button('Confirm job assignment'));
+ data.positions.data={...data.positions.data,roster:data.positions.data.roster.map(row=>row.memberId==='manager'?{...row,availability:{...row.availability,fieldWorkEnabled:false}}:row)};
+ await act(async()=>tree.update(React.createElement(App)));await settle();assert.equal(button('Confirm job assignment'),undefined);assert.match(texts(),/office only or no longer eligible/);assert.ok(button('Cancel assignment'));assert.equal(calls.some(row=>row[0]==='assign'),false);
+});
+test('a manager can explicitly change field eligibility without triggering assignment, shift or location actions',async()=>{
+ user.role='manager';view='team';await render();await press('Details for Luis');await press('Change staff availability');await press('Can be assigned field work');await press('Save field work setting');assert.equal(calls.some(row=>row[0]==='availability'),false);
+ await press('Confirm field work setting');const saved=calls.find(row=>row[0]==='availability');assert.equal(saved[1].action,'set-field-work');assert.equal(saved[1].fieldWorkEnabled,false);assert.match(texts(),/Field work setting saved/);assert.equal(calls.some(row=>row[0]==='assign'),false);assert.equal(interactions.at(-1).hasDraft,false);
+});

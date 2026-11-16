@@ -5,7 +5,7 @@ const at = Date.parse('2030-01-03T17:00:00Z');
 const vacation = { status: 'unavailable', reason: 'vacation', startsAt: '2030-01-03T16:00:00.000Z', endsAt: '2030-01-04T02:00:00.000Z' };
 const emergency = { status: 'available', reason: 'emergency', startsAt: '2030-01-03T18:00:00.000Z', endsAt: '2030-01-03T20:00:00.000Z' };
 test('availability is time bounded, preserves revisions and exposes future periods without inventing duty', () => {
-  assert.deepEqual(availabilityView(null, at), { state: 'normal', active: false, revision: 0, reason: '', startsAt: null, endsAt: null, scheduled: 0, status: null, nextChangeAt: null });
+  assert.deepEqual(availabilityView(null, at), { state: 'normal', active: false, revision: 0, fieldWorkEnabled: true, reason: '', startsAt: null, endsAt: null, scheduled: 0, status: null, nextChangeAt: null });
   const data = { revision: 4, periods: [vacation] };
   assert.equal(availabilityView(data, at).state, 'unavailable');
   const future = availabilityView(data, Date.parse('2030-01-03T15:00:00Z'));
@@ -52,4 +52,11 @@ test('availability dates and reasons reject indefinite, expired, oversized, and 
   const valid = { ...vacation, startsAt: new Date(at).toISOString() };
   assert.equal(parsePeriod(valid, at).status, 'unavailable');
   for (const patch of [{ status: 'active' }, { reason: 'owner' }, { endsAt: null }, { startsAt: 'bad' }, { endsAt: new Date(at).toISOString() }, { startsAt: '2020-01-01T00:00:00Z' }, { endsAt: '2031-01-03T00:00:00Z' }, { endsAt: '2030-02-30T10:00:00Z' }, { endsAt: '2030-01-04T24:00:00Z' }]) assert.throws(() => parsePeriod({ ...valid, ...patch }, at), { code: 'invalid-argument' });
+});
+test('field assignment eligibility defaults on and remains independent of temporary availability periods', () => {
+  assert.equal(availabilityView({}, at).fieldWorkEnabled, true);
+  const office = availabilityView({ fieldWorkEnabled: false, periods: [emergency] }, Date.parse('2030-01-03T19:00:00Z'));
+  assert.equal(office.fieldWorkEnabled, false); assert.equal(office.state, 'available');
+  const field = availabilityView({ fieldWorkEnabled: true, periods: [vacation] }, at);
+  assert.equal(field.fieldWorkEnabled, true); assert.equal(field.state, 'unavailable');
 });

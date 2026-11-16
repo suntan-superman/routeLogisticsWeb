@@ -23,11 +23,13 @@ export default function TechnicianAvailability({ companyId, memberId = '', membe
   runtime.current.scope = scope;
   if (labels.current.scope !== scope) labels.current = { scope, values: new Map() };
   const rosterCurrent = roster.scope === scope, rosterLoading = !rosterCurrent || roster.loading;
-  const technicians = rosterCurrent ? roster.technicians : [];
+  const knownMembers = rosterCurrent ? roster.technicians : [];
+  const technicians = knownMembers.filter(member => member.fieldWorkEnabled !== false);
+  const officeOnly = knownMembers.some(member => member.id === memberId && member.fieldWorkEnabled === false);
   const selected = technicians.find(member => member.id === memberId);
   const legacy = !!memberId && rosterCurrent && !roster.loading && !roster.error && !selected;
   const options = [{ value: '', label: 'Unassigned' }, ...technicians.map(member => ({ value: member.id, label: member.label }))];
-  if (memberId && !selected) options.push({ value: memberId, label: `${labels.current.values.get(memberId) || memberName || 'Previously assigned staff member'} (${rosterLoading ? 'loading…' : roster.error ? 'not confirmed' : 'unavailable'})`, disabled: true });
+  if (memberId && !selected) options.push({ value: memberId, label: `${labels.current.values.get(memberId) || memberName || 'Previously assigned staff member'} (${rosterLoading ? 'loading…' : roster.error ? 'not confirmed' : officeOnly ? 'office only' : 'unavailable'})`, disabled: true });
   const slotValid = validDate(date) && validTime(time) && Number.isFinite(Number(estimatedDuration)) && Number(estimatedDuration) > 0;
   const mayCheck = !!memberId && !!selected && slotValid && !rosterLoading && !roster.error && !disabled;
 
@@ -41,7 +43,7 @@ export default function TechnicianAvailability({ companyId, memberId = '', membe
         const email = typeof member.email === 'string' ? member.email.trim() : '';
         const name = typeof member.name === 'string' && member.name.trim() ? member.name.trim() : email || (member.role === 'owner' ? 'Company owner' : 'Technician');
         const label = email && email.toLocaleLowerCase() !== name.toLocaleLowerCase() ? `${name} · ${email}` : name;
-        return { id: member.id, name, email, label, role: member.role };
+        return { id: member.id, name, email, label, role: member.role, fieldWorkEnabled: member.fieldWorkEnabled !== false && member.availability?.fieldWorkEnabled !== false };
       });
       const unique = [...new Map(rows.map(member => [member.id, member])).values()];
       unique.forEach(member => labels.current.values.set(member.id, member.label));
@@ -84,7 +86,7 @@ export default function TechnicianAvailability({ companyId, memberId = '', membe
     {rosterLoading && <p role="status" className="text-sm text-gray-600">Loading technicians…</p>}
     {rosterCurrent && roster.error && <div role="alert" className="space-y-2 rounded-lg bg-red-50 p-3 text-sm text-red-800"><p>{roster.error}</p><button type="button" className={actionClass} disabled={disabled} onClick={() => { if (!disabled) setRosterRetry(value => value + 1); }}>Retry technicians</button></div>}
     {!rosterLoading && !roster.error && !technicians.length && <p role="status" className="text-sm text-gray-600">No active technicians are available for assignment. Leave this appointment unassigned or refresh the team.</p>}
-    {legacy && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">This saved assignment is no longer available. Choose an active technician or Unassigned.</p>}
+    {legacy && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{officeOnly ? 'This staff member is now office-only. Existing appointments remain assigned; choose field-enabled staff for a new or rescheduled appointment.' : 'This saved assignment is no longer available. Choose an active technician or Unassigned.'}</p>}
     {!memberId && !rosterLoading && <p role="status" className="text-sm text-gray-600">Unassigned appointments can be assigned later from dispatch.</p>}
     {memberId && !slotValid && <p role="status" className="text-sm text-gray-600">Choose a valid date, start time and duration to check this technician’s schedule.</p>}
     {currentCheck?.loading && <p role="status" className="text-sm text-gray-600">Checking scheduled work…</p>}

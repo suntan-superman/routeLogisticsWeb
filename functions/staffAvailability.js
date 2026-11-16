@@ -15,7 +15,7 @@ function availabilityView(data, now = Date.now()) {
   const periods = periodsFor(data), selected = selectedPeriod(data, now);
   const pending = periods.filter(period => millis(period.startsAt) > now).sort((a, b) => millis(a.startsAt) - millis(b.startsAt));
   const displayed = selected || (pending[0] ? selectedPeriod(data, millis(pending[0].startsAt)) : null);
-  return { state: selected?.status || 'normal', active: !!selected, revision: Number(data?.revision) || 0,
+  return { state: selected?.status || 'normal', active: !!selected, revision: Number(data?.revision) || 0, fieldWorkEnabled: data?.fieldWorkEnabled !== false,
     reason: displayed?.reason || '', startsAt: displayed?.startsAt || null, endsAt: displayed?.endsAt || null,
     scheduled: periods.filter(period => millis(period.endsAt) > now).length, status: displayed?.status || null,
     nextChangeAt: periods.flatMap(period => [millis(period.startsAt), millis(period.endsAt)]).filter(time => time > now).sort((a, b) => a - b).map(time => new Date(time).toISOString())[0] || null,
@@ -102,7 +102,9 @@ function staffAvailabilityHandlers(db, { now = () => Date.now() } = {}) {
     const scope = await requireCapability(db, request, 'dispatch.manage'), data = request.data || {}, time = now();
     if (!scope.companyId || !['owner', 'manager'].includes(scope.role)) throw new HttpsError('permission-denied', 'Only a company owner or manager can change staff availability.');
     if (data.companyId !== undefined && data.companyId !== scope.companyId) throw new HttpsError('permission-denied', 'Choose a member of your company.');
-    if (!['set', 'clear'].includes(data.action)) throw new HttpsError('invalid-argument', 'Choose an availability action.');
+    if (!['set', 'clear', 'set-field-work'].includes(data.action)) throw new HttpsError('invalid-argument', 'Choose an availability action.');
+    const fieldWorkAction = data.action === 'set-field-work';
+    if (fieldWorkAction && typeof data.fieldWorkEnabled !== 'boolean') throw new HttpsError('invalid-argument', 'Choose whether this staff member can receive field assignments.');
     if (!Number.isInteger(data.expectedRevision) || data.expectedRevision < 0) throw new HttpsError('invalid-argument', 'Refresh staff availability before saving.');
     const period = data.action === 'set' ? parsePeriod(data, time) : null;
     await rateLimit(db, 'staff-availability', scope.uid, 30);
@@ -112,10 +114,11 @@ function staffAvailabilityHandlers(db, { now = () => Date.now() } = {}) {
       const [saved, lockRow, shift, location] = await Promise.all([tx.get(ref), tx.get(lock), tx.get(shiftRef), tx.get(locationRef)]);
       const previous = saved.data(), revision = Number(previous?.revision) || 0;
       if (revision !== data.expectedRevision) throw new HttpsError('aborted', 'Staff availability changed. Refresh the team before saving again.');
-      const periods = data.action === 'clear' ? [] : [...periodsFor(previous).filter(item => millis(item.endsAt) > time), period];
+      const periods = fieldWorkAction ? periodsFor(previous) : data.action === 'clear' ? [] : [...periodsFor(previous).filter(item => millis(item.endsAt) > time), period];
       if (periods.length > MAX_PERIODS) throw new HttpsError('resource-exhausted', 'There are too many pending availability periods. Restore normal availability before replacing the schedule.');
-      const next = { companyId: scope.companyId, userId: person.uid, memberId: person.id, periods, revision: revision + 1, updatedBy: scope.uid, updatedAt: new Date(time).toISOString() };
-      const availability = availabilityView(next, time), stopping = availability.state === 'unavailable';
+      const fieldWorkEnabled = fieldWorkAction ? data.fieldWorkEnabled : previous?.fieldWorkEnabled !== false;
+      const next = { companyId: scope.companyId, userId: person.uid, memberId: person.id, periods, fieldWorkEnabled, revision: revision + 1, updatedBy: scope.uid, updatedAt: new Date(time).toISOString() };
+      const availability = availabilityView(next, time), stopping = !fieldWorkAction && availability.state === 'unavailable';
       tx.set(ref, next);
       tx.set(lock, { companyId: scope.companyId, technicianUid: person.uid, revision: (Number(lockRow.get('revision')) || 0) + 1, updatedAt: next.updatedAt });
       if (stopping && shift.get('status') === 'on-duty') {
@@ -124,8 +127,8 @@ function staffAvailabilityHandlers(db, { now = () => Date.now() } = {}) {
         tx.set(db.doc(`rlWorkShiftEvents/${shift.get('id')}-availability-${next.revision}`), { ...ended, event: 'end', actorId: scope.uid, recordedAt: new Date(time) });
       }
       if (stopping && location.get('sharing') === true) tx.update(locationRef, { sharing: false, stoppedAt: new Date(time) });
-      tx.create(db.collection('rlAudit').doc(), { action: `staff.availability.${data.action}`, companyId: scope.companyId, actorId: scope.uid, memberId: person.id, userId: person.uid, before: previous?.periods || [], after: periods, revision: next.revision, createdAt: next.updatedAt });
-      return { memberId: person.id, availability, shiftStopped: stopping && shift.get('status') === 'on-duty', message: stopping ? 'Staff marked unavailable. Existing jobs remain scheduled for dispatcher review.' : 'Availability updated. Duty and location sharing still require the employee to start a shift.' };
+      tx.create(db.collection('rlAudit').doc(), { action: fieldWorkAction ? 'staff.fieldWork.update' : `staff.availability.${data.action}`, companyId: scope.companyId, actorId: scope.uid, memberId: person.id, userId: person.uid, before: fieldWorkAction ? { fieldWorkEnabled: previous?.fieldWorkEnabled !== false } : previous?.periods || [], after: fieldWorkAction ? { fieldWorkEnabled } : periods, revision: next.revision, createdAt: next.updatedAt });
+      return { memberId: person.id, fieldWorkEnabled, availability, shiftStopped: stopping && shift.get('status') === 'on-duty', message: fieldWorkAction ? fieldWorkEnabled ? 'Field assignments enabled. Existing role and availability restrictions still apply.' : 'Marked office-only. Existing jobs, work history and shift consent are unchanged.' : stopping ? 'Staff marked unavailable. Existing jobs remain scheduled for dispatcher review.' : 'Availability updated. Duty and location sharing still require the employee to start a shift.' };
     });
   };
 }

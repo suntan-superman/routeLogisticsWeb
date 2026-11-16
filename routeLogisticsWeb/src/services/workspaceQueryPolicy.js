@@ -1,7 +1,7 @@
 export const WORKSPACE_POLL_MS = 30_000;
 export const WORKSPACE_QUERY_ROOT = 'rl-workspace';
 
-export function workspaceScope(user, claims, workspace, projectId = 'mi-factotum-field-service') {
+export function workspaceScope(user, claims, workspace, projectId = null) {
   const status = workspace?.status || null;
   const role = claims?.role || (status === 'solo' ? 'owner' : null);
   const companyId = claims?.companyId || null, membershipId = claims?.membershipId || null;

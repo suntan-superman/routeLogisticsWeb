@@ -4044,6 +4044,8 @@ All application-owned web dropdowns now use accessible green DOM options, includ
 
 The production read-only investigation found David's active, verified Acme manager account and correct company/member claims, but no job assigned to his membership or UID. Acme retained seven job records. Off-duty state is not a filter for assigned-job reads. The operator confirmed that this was the appointment blocked by the address-correction requirement, so no assignment was missing from synchronization. No assignment was invented or rewritten. Existing historical appointments and all manual acceptance statuses remain intact.
 
+The initial Netlify build compiled successfully but its scanner classified a redundant project-ID literal in the new query helper as an environment secret. The helper now takes the project exclusively from the initialized Firebase app, with no literal fallback. Secret scanning and all existing scan exclusions remain unchanged. All six affected backend functions were independently confirmed ACTIVE in the Route Logistics codebase after deployment.
+
 ## F. Physical-device checklist
 
 | Operator action | Cases | Record / pass condition |

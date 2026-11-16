@@ -5,6 +5,9 @@ const user = { uid: 'synthetic-owner', emailVerified: true };
 test('query authority includes project, account, tenant, role, membership, verification and workspace state', () => {
   const first = workspaceScope(user, { companyId: 'one', role: 'owner' }, { status: 'company' });
   assert.equal(first.readable, true); assert.equal(WORKSPACE_POLL_MS, 30000);
+  assert.equal(first.key[1], null);
+  const configured = workspaceScope(user, { companyId: 'one', role: 'owner' }, { status: 'company' }, 'demo-routelogistics');
+  assert.equal(configured.key[1], 'demo-routelogistics'); assert.notEqual(configured.id, first.id);
   for (const next of [workspaceScope({ ...user, uid: 'another' }, { companyId: 'one', role: 'owner' }, { status: 'company' }), workspaceScope(user, { companyId: 'two', role: 'owner' }, { status: 'company' }), workspaceScope(user, { companyId: 'one', role: 'manager', membershipId: 'member' }, { status: 'company' })]) assert.notEqual(first.id, next.id);
   for (const next of [workspaceScope(null, null, null), workspaceScope({ ...user, emailVerified: false }, { companyId: 'one', role: 'owner' }, { status: 'company' }), workspaceScope(user, { companyId: 'one', role: 'manager' }, { status: 'company' }), workspaceScope(user, null, { status: 'pending' })]) assert.equal(next.readable, false);
   assert.equal(workspaceScope(user, null, { status: 'solo' }).readable, true);

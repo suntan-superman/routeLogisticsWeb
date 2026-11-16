@@ -1,4 +1,5 @@
 const { test, before, after, beforeEach } = require('node:test');
+const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {
@@ -91,7 +92,7 @@ test('invoice payment locks and accounting fields are server-owned', async () =>
   await assertFails(updateDoc(doc(owner(), 'invoices/locked'), { status: 'paid' }));
   await assertFails(updateDoc(doc(owner(), 'invoices/locked'), { qbBalance: 0 }));
   await assertFails(updateDoc(doc(owner(), 'invoices/locked'), { paymentLock: null }));
-  await assertSucceeds(updateDoc(doc(owner(), 'invoices/locked'), { notes: 'Call customer' }));
+  await assertFails(updateDoc(doc(owner(), 'invoices/locked'), { notes: 'Call customer' }));
 });
 
 test('location and saved-route documents are accessible only through authorized callables', async () => {
@@ -248,7 +249,7 @@ test('unknown collections are denied', async () => {
 
 
 // ---- P1: invoices, service plans, service logs ----
-test('invoices: owner writes, manager and technician reads denied, paid immutable', async () => {
+test('invoices: owner reads but all financial writes require the callable, manager and technician reads denied', async () => {
   await env.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), 'invoices/i1'), { userId: 'owner1', companyId: 'c1', status: 'draft', total: 100 });
     await setDoc(doc(ctx.firestore(), 'invoices/iPaid'), { userId: 'owner1', companyId: 'c1', status: 'paid', total: 100 });
@@ -257,7 +258,8 @@ test('invoices: owner writes, manager and technician reads denied, paid immutabl
   await assertFails(getDoc(doc(manager(), 'invoices/i1'))) ;
   await assertFails(updateDoc(doc(tech(), 'invoices/i1'), { status: 'paid' }));
   await assertFails(setDoc(doc(tech(), 'invoices/iNew'), { userId: 'tech1', companyId: 'c1', status: 'draft', total: 5 }));
-  await assertSucceeds(updateDoc(doc(owner(), 'invoices/i1'), { status: 'sent' }));
+  await assertSucceeds(getDoc(doc(owner(), 'invoices/i1')));
+  await assertFails(updateDoc(doc(owner(), 'invoices/i1'), { status: 'sent' }));
   await assertFails(updateDoc(doc(owner(), 'invoices/iPaid'), { total: 1 }));
   await assertFails(updateDoc(doc(owner(), 'invoices/i1'), { status: 'bogus' }));
   await assertFails(setDoc(doc(owner(), 'invoices/neg'), { userId: 'owner1', companyId: 'c1', status: 'draft', total: -1 }));
@@ -267,6 +269,56 @@ test('invoices: owner writes, manager and technician reads denied, paid immutabl
 test('invoices: other tenants cannot read', async () => {
   await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), 'invoices/i1'), { userId: 'owner1', companyId: 'c1', status: 'draft', total: 1 }));
   await assertFails(getDoc(doc(as('x', { companyId: 'c2', role: 'owner' }), 'invoices/i1')));
+});
+
+test('all client roles including owner, admin and solo owner cannot bypass invoice creation, revision, status or deletion', async () => {
+  await env.withSecurityRulesDisabled(async ctx => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'teamMembers/a1'), { companyId: 'c1', uid: 'admin1', role: 'admin', status: 'active' });
+    for (const status of ['draft','sent','paid','void']) await setDoc(doc(db, `invoices/server-${status}`), { userId: 'owner1', companyId: 'c1', customerId: 'cu1', jobId: 'jDone', status, total: 108.25, revision: 1 });
+    await setDoc(doc(db, 'invoices/legacy-solo'), { userId: 'solo1', status: 'draft', total: 0 });
+  });
+  const admin = as('admin1', { companyId: 'c1', role: 'admin', membershipId: 'a1' });
+  const clients = [owner(), admin, manager(), tech(), as('solo1'), as('portal', { portal: true, portalEmail: 'synthetic@example.test' }), env.unauthenticatedContext().firestore()];
+  await assertSucceeds(getDoc(doc(admin, 'invoices/server-draft')));
+  await assertSucceeds(getDocs(query(collection(owner(), 'invoices'), where('companyId', '==', 'c1'))));
+  await assertSucceeds(getDoc(doc(as('solo1'), 'invoices/legacy-solo')));
+  for (let index = 0; index < clients.length; index++) {
+    const client = clients[index];
+    await assertFails(setDoc(doc(client, `invoices/forged-${index}`), { userId: 'owner1', companyId: 'c1', customerId: 'cu1', jobId: 'jDone', status: 'draft', total: 1, revision: 1 }));
+    for (const status of ['draft','sent','paid','void']) {
+      const invoice = doc(client, `invoices/server-${status}`);
+      await assertFails(updateDoc(invoice, { total: 0, revision: 2 }));
+      await assertFails(updateDoc(invoice, { notes: 'Bypass revision', dueDate: '2026-12-01' }));
+      await assertFails(updateDoc(invoice, { status: 'paid' }));
+      await assertFails(deleteDoc(invoice));
+    }
+    await assertFails(updateDoc(doc(client, 'invoices/legacy-solo'), { total: 1 }));
+    await assertFails(deleteDoc(doc(client, 'invoices/legacy-solo')));
+  }
+  await env.withSecurityRulesDisabled(async ctx => {
+    assert.equal((await getDoc(doc(ctx.firestore(), 'invoices/server-draft'))).data().total, 108.25);
+    assert.equal((await getDoc(doc(ctx.firestore(), 'invoices/legacy-solo'))).data().total, 0);
+  });
+});
+
+test('invoice claims, operation receipts, audit and descendants are server-only even for financial owners', async () => {
+  await env.withSecurityRulesDisabled(async ctx => {
+    await setDoc(doc(ctx.firestore(), 'teamMembers/a1'), { companyId: 'c1', uid: 'admin1', role: 'admin', status: 'active' });
+    for (const name of ['rlInvoiceClaims','rlInvoiceOperations','rlInvoiceAudit']) {
+      await setDoc(doc(ctx.firestore(), `${name}/server-record`), { companyId: 'c1', userId: 'owner1', invoiceId: 'legacy-random-id' });
+      await setDoc(doc(ctx.firestore(), `${name}/server-record/private/detail`), { companyId: 'c1', userId: 'owner1' });
+    }
+  });
+  const admin = as('admin1', { companyId: 'c1', role: 'admin', membershipId: 'a1' });
+  for (const name of ['rlInvoiceClaims','rlInvoiceOperations','rlInvoiceAudit']) for (const client of [owner(), admin, manager(), tech(), as('solo1'), as('portal', { portal: true }), env.unauthenticatedContext().firestore()]) {
+    await assertFails(getDoc(doc(client, `${name}/server-record`)));
+    await assertFails(getDocs(query(collection(client, name), where('companyId', '==', 'c1'))));
+    await assertFails(setDoc(doc(client, `${name}/forged`), { companyId: 'c1', userId: 'owner1', invoiceId: 'forged' }));
+    await assertFails(updateDoc(doc(client, `${name}/server-record`), { invoiceId: 'forged' }));
+    await assertFails(deleteDoc(doc(client, `${name}/server-record`)));
+    await assertFails(getDoc(doc(client, `${name}/server-record/private/detail`)));
+  }
 });
 
 test('serviceLogs: technicians use the assigned-work callable; no client deletion', async () => {

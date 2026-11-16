@@ -38,6 +38,7 @@ export function mutationResources(name, data = {}, result = {}) {
   if (name === 'rlServiceForms' && ['save', 'assign'].includes(data.action)) return ['service-forms', 'job'];
   if (name === 'rlServiceAreas' && ['save', 'exception', 'approve-exception'].includes(data.action)) return ['service-areas', 'company'];
   if (name === 'rlEstimate' && ['save', 'create', 'update', 'revise', 'send', 'deliver', 'convert', 'archive', 'delete'].includes(data.action)) return ['estimates', 'estimate', 'jobs', 'job', 'reports'];
+  if (name === 'rlManageInvoice' && ['create', 'replace', 'update', 'status'].includes(data.action)) return ['invoices', 'invoice', 'jobs', 'job', 'payments', 'analytics', 'reports', 'invoice-preview'];
   if (['emailInvoice', 'rlCancelInvoicePayment', 'rlRecordPayment'].includes(name)) return ['invoices', 'invoice', 'payments', 'reports'];
   if (name === 'rlSmsCustomerConsent' && ['grant', 'revoke'].includes(data.action)) return ['customers', 'customer', 'sms-consent'];
   if (name === 'rlSmsConfig' && data.action === 'save') return ['sms-config'];

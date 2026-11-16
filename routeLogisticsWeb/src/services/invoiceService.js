@@ -1,94 +1,61 @@
-import { collection, doc, getDocs, getDocsFromServer, addDoc, updateDoc, deleteDoc, query, where, orderBy, limit, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocsFromServer, query, orderBy, limit } from 'firebase/firestore';
 import { db } from './firebase';
-import { scopeWhere, tenantFields } from './tenancy';
-import { computeTotals, generateInvoiceNumber, addDays } from './invoiceMath';
+import { scopeWhere } from './tenancy';
+import { callWorkspace } from './workspaceApi';
 
-const today = () => new Date().toISOString().slice(0, 10);
 const ok = (data = {}) => ({ success: true, ...data });
-const fail = (error) => {
-  console.error(error);
+const fail = error => {
+  console.error('Invoice operation failed', { code: error.code || 'unknown' });
   return { success: false, error: error.message || String(error), ...(error.code ? { code: error.code } : {}) };
+};
+const jobIdentity = job => typeof job === 'string' ? job : job?.id;
+const operationId = options => options.operationId || crypto.randomUUID();
+const invoke = async (action, data) => {
+  try { return ok(await callWorkspace('rlManageInvoice', { action, ...data })); }
+  catch (error) { return fail(error); }
 };
 
 export async function listInvoices(max = 200) {
   try {
-    // An unavailable server must not turn an empty local cache into a successful
-    // "No invoices" result. React Query retains the last confirmed snapshot.
+    // Keep the last confirmed server snapshot when a background refresh fails.
     const snap = await getDocsFromServer(query(collection(db, 'invoices'), scopeWhere(), orderBy('createdAt', 'desc'), limit(max)));
-    return ok({ invoices: snap.docs.map((d) => ({ id: d.id, ...d.data() })) });
-  } catch (error) {
-    return fail(error);
-  }
+    return ok({ invoices: snap.docs.map(d => ({ ...d.data(), id: d.id })) });
+  } catch (error) { return fail(error); }
 }
 
-export async function createInvoice({ customerId = null, customerName = '', customerEmail = '', customerAddress = '', jobId = null, lineItems = [], taxRate = 0, notes = '', dueInDays = 14 }) {
-  try {
-    const totals = computeTotals(lineItems, taxRate);
-    if (!totals.lineItems.length) throw new Error('Add at least one line item');
-    const issueDate = today();
-    const ref = await addDoc(collection(db, 'invoices'), {
-      ...tenantFields(),
-      invoiceNumber: generateInvoiceNumber(),
-      status: 'draft',
-      customerId,
-      customerName,
-      customerEmail,
-      customerAddress,
-      jobId,
-      ...totals,
-      notes,
-      issueDate,
-      dueDate: addDays(issueDate, dueInDays),
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    return ok({ id: ref.id });
-  } catch (error) {
-    return fail(error);
-  }
-}
+export const previewInvoiceFromJob = (job, options = {}) => invoke('preview', {
+  jobId: jobIdentity(job),
+  ...(options.replacementOf ? { replacementOf: options.replacementOf, expectedRevision: options.expectedRevision } : {}),
+});
 
-// One invoice per job: returns the existing one instead of creating a duplicate.
-export async function createInvoiceFromJob(job, { taxRate = 0, customerEmail = '' } = {}) {
-  try {
-    const existing = await getDocs(query(collection(db, 'invoices'), scopeWhere(), where('jobId', '==', job.id), limit(5)));
-    const live = existing.docs.find((d) => d.data().status !== 'void');
-    if (live) return ok({ id: live.id, existing: true });
-    return await createInvoice({
-      customerId: job.customerId || null,
-      customerName: job.customerName || '',
-      customerEmail,
-      customerAddress: job.address || '',
-      jobId: job.id,
-      lineItems: [{ description: job.serviceType || 'Service', quantity: 1, unitPrice: Number(job.totalCost) || 0 }],
-      taxRate,
-    });
-  } catch (error) {
-    return fail(error);
+// Pricing comes exclusively from the canonical job/approved estimate on the
+// server. Legacy caller-supplied lines, customer details and totals are ignored.
+export async function createInvoice({ jobId, notes, dueInDays } = {}, options = {}) {
+  if (!jobId) return fail(new Error('Select a completed job before creating an invoice.'));
+  let fingerprint = options.sourceFingerprint;
+  if (!fingerprint) {
+    const preview = await previewInvoiceFromJob(jobId, options);
+    if (!preview.success) return preview;
+    if (preview.existingInvoice && !options.replacementOf) return ok({ id: preview.existingInvoice.id, invoiceId: preview.existingInvoice.id, invoice: preview.existingInvoice, existing: true, replacementRequired: preview.replacementRequired === true });
+    fingerprint = preview.sourceFingerprint;
   }
+  return invoke(options.replacementOf ? 'replace' : 'create', {
+    jobId, operationId: operationId(options), sourceFingerprint: fingerprint,
+    ...(notes !== undefined ? { notes } : {}), ...(dueInDays !== undefined ? { dueInDays } : {}),
+    ...(options.replacementOf ? { replacementOf: options.replacementOf, expectedRevision: options.expectedRevision } : {}),
+  });
 }
+export const createInvoiceFromJob = (job, options = {}) => createInvoice({ jobId: jobIdentity(job), ...(options.notes !== undefined ? { notes: options.notes } : {}), ...(options.dueInDays !== undefined ? { dueInDays: options.dueInDays } : {}) }, options);
 
-export async function updateInvoice(id, { lineItems, taxRate, ...rest }) {
-  try {
-    const patch = { ...rest, updatedAt: serverTimestamp() };
-    if (lineItems) Object.assign(patch, computeTotals(lineItems, taxRate));
-    await updateDoc(doc(db, 'invoices', id), patch);
-    return ok();
-  } catch (error) {
-    return fail(error);
-  }
-}
+export const updateInvoice = (id, changes = {}, options = {}) => invoke('update', {
+  invoiceId: id, changes, expectedRevision: options.expectedRevision, operationId: operationId(options),
+});
+const setStatus = (id, status, options = {}, extra = {}) => invoke('status', {
+  invoiceId: id, status, expectedRevision: options.expectedRevision, operationId: operationId(options), ...extra,
+});
+export const markInvoiceSent = (id, options = {}) => setStatus(id, 'sent', options);
+export const markInvoicePaid = (id, paymentMethod = 'other', options = {}) => setStatus(id, 'paid', options, { paymentMethod });
+export const voidInvoice = (id, options = {}) => setStatus(id, 'void', options);
 
-const setStatus = (id, status, extra = {}) => updateInvoice(id, { status, ...extra });
-export const markInvoiceSent = (id) => setStatus(id, 'sent', { sentAt: serverTimestamp() });
-export const markInvoicePaid = (id, paymentMethod = 'other') => setStatus(id, 'paid', { paidAt: serverTimestamp(), paymentMethod });
-export const voidInvoice = (id) => setStatus(id, 'void', { voidedAt: serverTimestamp() });
-
-export async function deleteDraftInvoice(id) {
-  try {
-    await deleteDoc(doc(db, 'invoices', id));
-    return ok();
-  } catch (error) {
-    return fail(error);
-  }
-}
+// Compatibility entry point: drafts are voided with an audit trail, never deleted.
+export const deleteDraftInvoice = (id, options = {}) => voidInvoice(id, options);

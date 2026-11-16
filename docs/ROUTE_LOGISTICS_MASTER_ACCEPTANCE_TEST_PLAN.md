@@ -10,6 +10,26 @@ Route Logistics has a tested field-work foundation suitable for a **controlled p
 
 Previously recorded browser coverage is **33 scenarios** (99 configured executions across Chromium, Firefox and WebKit). See the November 15 addenda below for execution evidence. Earlier evidence for the original 25 scenarios is retained, including the later clean 75/75 Jobs-date run. Newly added scenarios are not implied to have run by that baseline. Physical iPhone/Android and genuine provider acceptance remain separate.
 
+### November 16 — invoice integrity repair
+
+[Invoice integrity repair](INVOICE_INTEGRITY_REPAIR.md) adds the authoritative
+`rlManageInvoice` preview/create/replace/update/status contract. Approved quote
+versions control line/tax/cents values; transactional workspace/job claims and
+stable operations prevent concurrent duplicate invoices. Historical invoices
+remain unchanged, revisions/statuses are server-checked, direct client writes
+are denied, and email issuance is revisioned/audited. No mobile changes, actual
+financial/provider operations, automatic invoicing or historical migration are
+part of this release. Final suite/deployment evidence is recorded in that report.
+
+INV-01/INV-03/INV-08/INV-09 below use the corrected contract. Manual/operator and
+real-provider cases retain their existing status; browser/emulator results do
+not certify physical/provider acceptance or change the 169-case counts here.
+Executed release checks: 528/528 full emulator regressions, 29/29 final invoice
+regressions, 437/437 web tests and 36/36 browser smoke executions across Chromium,
+Firefox and WebKit (including PW-INVOICE-01 in all three). Counts overlap and are
+not summed. Functions unit runs passed 28/28 guards and 181 cases with one
+emulator-only skip. No new real provider operation was performed.
+
 ### November 16 — field reliability and job exceptions
 
 **Later Android note-repair follow-up:** physical testing of `91c544c` passed
@@ -484,7 +504,7 @@ This includes native screens/panels, the web-only portal/review entry points, an
 
 Appendix 1 below lists every one of the 100 deployed Cloud Function exports, including callable endpoints, HTTP webhooks, Firestore triggers, schedulers and the nine generated stamp triggers. All were ACTIVE at the metadata snapshot. Callable SDK endpoints require the Firebase callable envelope/auth/App Check or endpoint-specific checks; an active URL is not anonymous CRUD permission.
 
-A separate access class is the **browser Firebase SDK → Firestore/Storage**. Some CRM, job, invoice, company and template reads/writes use existing client SDK services and security rules rather than a dedicated function per operation. Inventory/authorization coverage therefore includes `routeLogisticsWeb/src/services`, `firestore.rules`, `storage.rules` and server-owned projections/private collections. No assumption that every app action is a REST endpoint is valid.
+A separate access class is the **browser Firebase SDK → Firestore/Storage**. Some CRM, job, company and template reads/writes use existing client SDK services and security rules rather than a dedicated function per operation. Invoice list reads retain this path; invoice financial writes use `rlManageInvoice` following the November16 repair. Inventory/authorization coverage therefore includes `routeLogisticsWeb/src/services`, `firestore.rules`, `storage.rules` and server-owned projections/private collections. No assumption that every app action is a REST endpoint is valid.
 
 ## C. Test data
 
@@ -2817,21 +2837,21 @@ Exact paths below are relative to https://route-logistics.com unless a native or
 
 - **Test ID:** INV-01
 - **Feature/module:** Invoices: generate once from a synthetic job
-- **Preconditions:** A clearly labeled synthetic job with a known $10.00 cost; no real customer invoice is selected.
+- **Preconditions:** A separately authorized synthetic approved estimate with subtotal$100, tax$8.25, total$108.25, converted to an eligible completed job; no real customer invoice is selected. New fixture creation for future manual production acceptance requires its own authorization.
 - **User role:** Pest-control company owner or authorized finance admin
-- **Exact navigation path:** /jobs → open synthetic job details → Create Invoice → /invoices
+- **Exact navigation path:** /jobs → open synthetic job details → Create Invoice → Review invoice → Create draft invoice → /invoices
 - **Execution / evidence class:** manual; Operator/manual acceptance — not executed
 - **Hands-on estimate:** 6 minutes
 - **Test steps:**
 
-1. Create the invoice from the synthetic job and record its fixture ID/number.
-2. Return to the same job and choose Create Invoice again once; verify the existing non-void invoice opens.
-3. Inspect customer/job association, line description, quantity, unit price, subtotal, tax and total; do not mark an actual customer invoice paid.
+1. Open the server preview and verify approved-version source, original lines, subtotal$100, tax$8.25 and total$108.25; opening the preview must not create a financial record.
+2. Explicitly confirm draft creation and record its identity/number only after acknowledgement. Return and choose Create Invoice again; open the preserved existing invoice.
+3. Use local emulators for2/5 concurrent requests, different finance actors, uncertain retries and explicit void/replacement; verify one canonical active invoice and no duplicate billing audit/message effects.
 
-- **Expected result:** Sequential creation reuses one invoice for that job. Current UI creates one service line from job cost with default zero tax; it does not provide a standalone line-item/discount editor.
+- **Expected result:** Approved lines/tax/value remain exact; current pricing cannot replace approved terms. New creation/replay uses one transactional identity; ordinary retry cannot replace a void invoice. Ordinary jobs require an explicit valid price, with explicit zero distinct from missing. No standalone price/discount editor or automatic billing is introduced.
 - **Actual result:** Not executed against the production UI or device in this acceptance run.
 - **Status:** **Not Run**
-- **Evidence reference:** `routeLogisticsWeb/src/pages/JobManagementPage.jsx:40`; `routeLogisticsWeb/src/pages/JobManagementPage.jsx:804`; `routeLogisticsWeb/src/services/invoiceService.js:50`
+- **Evidence reference:** `functions/invoices.js`; `functions/shared/invoiceMath.js`; `tests/invoiceIntegrity.integration.test.js`; `tests/browser/invoice-integrity.spec.js`; `routeLogisticsWeb/src/components/InvoiceCreationDialog.jsx`; `docs/INVOICE_INTEGRITY_REPAIR.md`
 - **Cleanup instructions:** Retain the marked synthetic fixture for audit. Restore only its saved baseline settings when specified. Do not delete or change existing customer, membership, job, or financial records.
 
 #### INV-02 — Invoices: rendering, filters and print
@@ -2866,11 +2886,11 @@ Exact paths below are relative to https://route-logistics.com unless a native or
 - **Hands-on estimate:** 0 minutes
 - **Test steps:**
 
-1. Run invoice math and rule suites for quantities, rounding, totals, invalid amounts and allowed states.
-2. Run payment-lock, paid-invoice immutability and cross-tenant/technician denial test cases.
-3. Do not reproduce these adverse mutations on existing production invoices.
+1. Run authoritative invoice suites for approved108.25 source fidelity, line/tax cents, explicit zero versus missing amount, immutable version/customer/property relationships and client-total rejection.
+2. Verify2/5 concurrent requests, stable operation replay, historical random IDs, more than five historical matches, multiple-active review and explicit concurrent void replacement.
+3. Verify expected revision/CAS/audit, sent-term/paid/payment-lock protection, invalid legacy issuance denial, current owner/admin membership and transaction-race revocation. All direct client invoice mutations and private claim/operation/audit descendants must be denied. Keep historical reads unchanged.
 
-- **Expected result:** Unsupported/negative/non-finite/fractional-cent payment amounts fail, financial changes require the right role, and locks/paid states cannot be forged.
+- **Expected result:** Server derives amounts from approved terms or explicit job pricing; no duplicate canonical billing or stale financial overwrite. Only current authorized financial actors mutate through the callable; managers, technicians, customer sessions and direct Firestore writes cannot bypass it. No adverse mutation occurs on existing production invoices.
 - **Actual result:** Current November 14 acceptance run passed the referenced test cases in the Functions (138 passed, 1 unit-invocation skip), Firestore/Storage/integration (330 passed), and final full web UI/unit (232 passed, including five emulator opt-in/transport guard test cases) suites as applicable. No new provider write, transaction, message or physical-device action was performed for this case.
 - **Status:** **Pass**
 - **Evidence reference:** `routeLogisticsWeb/src/services/invoiceMath.test.js`; `tests/firestore.rules.test.js`; `tests/payments.integration.test.js`; `tests/paymentLifecycle.integration.test.js`; `.migration/acceptance-functions.log`; `.migration/acceptance-rules.log`; `.migration/acceptance-web-final.log`
@@ -2971,7 +2991,7 @@ Exact paths below are relative to https://route-logistics.com unless a native or
 - **Hands-on estimate:** 5 minutes
 - **Test steps:**
 
-1. Use an emulator for destructive delete/void and forged-paid tests; inspect the production UI controls without acting on real invoices.
+1. Use emulators for direct-delete denial, explicit audited Void/replacement and forged-paid tests; inspect production controls without acting on real invoices. Drafts are voided, not deleted.
 2. For an intentionally created synthetic pending test intent, cancel its unpaid attempt and verify unlock/history.
 3. Verify that Cancel attempt explicitly says it does not issue a refund and technicians cannot access finance actions.
 
@@ -2992,7 +3012,7 @@ Exact paths below are relative to https://route-logistics.com unless a native or
 - **Hands-on estimate:** 0 minutes
 - **Test steps:**
 
-1. Run invoice email/receipt worker tests for valid recipient, paid/superseded invoices, retry leasing and customer/tenant changes.
+1. Run invoice email/receipt worker tests for expected revision, valid financial terms/recipient, paid/superseded invoices, retry leasing and customer/tenant changes. Draft issuance increments revision and audit atomically with deduplicated mail.
 2. Verify test Stripe events never queue live payment-confirmation mail.
 3. Inspect the Email invoice action/confirmation only; do not click Send without separate current recipient authorization.
 

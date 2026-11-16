@@ -30,7 +30,7 @@ import JobPhotos from '../components/JobPhotos';
 import ServiceChecklist from '../components/ServiceChecklist';
 import JobApplicationLog from '../components/JobApplicationLog';
 import JobWorkDetails from '../components/JobWorkDetails';
-import { createInvoiceFromJob } from '../services/invoiceService';
+import InvoiceCreationDialog from '../components/InvoiceCreationDialog';
 import { canManage, can } from '../services/tenancy';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { formatCalendarDate } from '../utils/calendarDate';
@@ -47,12 +47,9 @@ const JobManagementPage = () => {
   const navigate = useNavigate();
   const confirm = useConfirm();
 
-  const handleCreateInvoice = async (job) => {
+  const handleCreateInvoice = job => {
     if (!can('invoices.manage')) return toast.error('Invoice access is required.');
-    const res = await createInvoiceFromJob(job);
-    if (!res.success) return toast.error(res.error || 'Could not create invoice');
-    toast.success(res.existing ? 'Opening existing invoice' : 'Invoice created');
-    navigate('/invoices');
+    return transition(() => { setSelectedJob(job); setShowViewModal(false); setInvoiceSelection({ scopeId: jobsQuery.scopeId, jobId: job.id }); });
   };
 
   const jobsQuery=useWorkspaceQuery(['jobs',500],()=>JobManagementService.getJobs(500));
@@ -71,6 +68,8 @@ const JobManagementPage = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [selection,setSelection]=useState(null);
+  const [invoiceSelection,setInvoiceSelection]=useState(null);
+  const invoiceJob=jobsQuery.readable&&!deniedJobRead(jobsQuery.error)&&invoiceSelection?.scopeId===jobsQuery.scopeId?invoiceSelection:null;
   const selectedSnapshot=jobsQuery.readable&&!deniedJobRead(jobsQuery.error)&&selection?.scopeId===jobsQuery.scopeId?selection.job:null;
   const setSelectedJob=value=>setSelection(value?{scopeId:jobsQuery.scopeId,job:value}:null);
   const detailQuery=useWorkspaceQuery(['job',selectedSnapshot?.id||null],()=>JobManagementService.getJob(selectedSnapshot.id),{enabled:showViewModal&&!!selectedSnapshot});
@@ -643,6 +642,14 @@ const JobManagementPage = () => {
       </div>
 
       {/* View Job Modal */}
+      {invoiceJob && <InvoiceCreationDialog key={`${invoiceJob.scopeId}:${invoiceJob.jobId}`} jobId={invoiceJob.jobId}
+        onClose={() => { setInvoiceSelection(null); setShowViewModal(true); }}
+        onOpenInvoice={id => { setInvoiceSelection(null); navigate(`/invoices?invoice=${encodeURIComponent(id)}`); }}
+        onCreated={result => {
+          setInvoiceSelection(null); toast.success(result.existing ? 'Opening existing invoice' : 'Draft invoice created');
+          invalidate(['invoices', 'invoice', 'jobs', 'job', 'payments', 'analytics', 'reports', 'invoice-preview']).catch(() => toast.error('Invoice saved. Refresh the invoice list if it does not update.'));
+          navigate(`/invoices?invoice=${encodeURIComponent(result.id || result.invoiceId)}`);
+        }} />}
       {showViewModal && selectedJob && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
           <div ref={viewPanel} role="dialog" aria-modal="true" aria-label="Job Details" className="relative top-10 mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white">

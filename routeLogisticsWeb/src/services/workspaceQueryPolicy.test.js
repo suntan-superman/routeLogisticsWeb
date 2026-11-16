@@ -28,5 +28,10 @@ test('only successful writes invalidate affected controls; reads, provider work 
   assert.deepEqual(mutationResources('rlSmsCustomerConsent', { action: 'status' }), []);
   assert.deepEqual(mutationResources('rlApplyJobOperation', {}, { status: 'conflict' }), []);
   assert.deepEqual(mutationResources('rlManageJob', {}, { success: false }), []);
+  assert.deepEqual(mutationResources('rlManageInvoice', { action: 'preview' }), []);
+  for (const action of ['create', 'replace', 'update', 'status']) {
+    assert.deepEqual(mutationResources('rlManageInvoice', { action }, { success: false }), []);
+    for (const resource of ['invoices','invoice','jobs','job','payments','analytics','reports','invoice-preview']) assert.ok(mutationResources('rlManageInvoice', { action }, { success: true }).includes(resource));
+  }
   assert.ok(mutationResources('rlApplyJobOperation', {}, { status: 'synced' }).includes('jobs'));
 });

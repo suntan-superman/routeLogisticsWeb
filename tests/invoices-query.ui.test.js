@@ -11,19 +11,19 @@ const importer=name=>{
  if(name==='react-hot-toast')return{__esModule:true,default:{success(){},error(){}}};
  if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
  if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated'].includes(String(error?.code||'').split('/').pop())};
- if(name.endsWith('/services/tenancy')||name==='./tenancy')return{canManage:()=>true,scopeWhere:()=>({companyId:'synthetic-company'})};
+ if(name.endsWith('/services/tenancy')||name==='./tenancy')return{canManage:()=>true,can:()=>true,scopeWhere:()=>({companyId:'synthetic-company'})};
  if(name.endsWith('/services/invoiceService'))return service;
  if(name.endsWith('/services/invoiceMath')||name==='./invoiceMath')return{isOverdue:()=>false};
  if(name.endsWith('/ConfirmProvider'))return{useConfirm:()=>async()=>true};
  if(name.endsWith('/AuthContext'))return{useAuth:()=>({userProfile:{businessName:'Synthetic provider'}})};
- if(name.endsWith('/services/workspaceApi'))return{callWorkspace:async()=>{throw Error('No invoice mutation is authorized in this suite.');}};
+ if(name.endsWith('/services/workspaceApi')||name==='./workspaceApi')return{callWorkspace:async()=>{throw Error('No invoice mutation is authorized in this suite.');}};
  if(name.endsWith('/paymentConfig'))return{paymentsConfigured:false,paymentMode:'test'};
- if(name.endsWith('/InvoicePayment')||name.endsWith('/PaymentHistory'))return{__esModule:true,default:()=>null};
+ if(name.endsWith('/InvoicePayment')||name.endsWith('/PaymentHistory')||name.endsWith('/InvoiceCreationDialog'))return{__esModule:true,default:()=>null};
  if(name==='./firebase')return{db:{}};
  if(name==='firebase/firestore')return{
   collection:(_db,collectionId)=>({collectionId}),query:(...parts)=>parts,orderBy:(field,direction)=>({field,direction}),limit:max=>({max}),
   getDocs:()=>{throw Error('An invoice list must not silently fall back to its empty offline cache.');},
-  getDocsFromServer:async query=>{queries.push(query);if(pending)return pending;if(failure)throw failure;return{docs:[{id:record.id,data:()=>record}]};},
+  getDocsFromServer:async query=>{queries.push(query);if(pending)return pending;if(failure)throw failure;return{docs:[{id:record.id,data:()=>({...record,id:'legacy-stored-alias'})}]};},
  };
  throw Error('Unexpected invoice query dependency '+name);
 };
@@ -36,6 +36,7 @@ afterEach(async()=>{if(tree)await act(async()=>tree.unmount());tree=null;failure
 
 test('invoice list requires a tenant-scoped server snapshot and retains its service response contract',async()=>{
  const result=await service.listInvoices();assert.deepEqual(result,{success:true,invoices:[record]});
+ assert.equal(result.invoices[0].id,record.id,'The canonical document ID must override a mismatching historical stored id');
  assert.deepEqual(queries[0],[{collectionId:'invoices'},{companyId:'synthetic-company'},{field:'createdAt',direction:'desc'},{max:200}]);
 });
 test('a disconnected first invoice load shows loading and then an actionable error rather than a false empty success',async()=>{

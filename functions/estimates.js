@@ -26,6 +26,7 @@ const {
 const { serviceAreaWorkflow, storedGeometry, propertyAddress } = require('./serviceAreaWorkflows');
 const { serviceAreaHandlers } = require('./serviceAreas');
 const { validatedCustomerAddress } = require('./customerAddresses');
+const { approvedBillingSnapshot } = require('./shared/invoiceMath');
 const PHOTO_LIMIT = 1572864,
   PDF_LIMIT = 10 * 1024 * 1024;
 const timestamp = value => value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : Date.parse(value || '');
@@ -631,6 +632,7 @@ function estimateHandlers(db, config = {}) {
             newCustomer = {userId:current.get('userId'),...(scope.companyId ? {companyId:scope.companyId} : {}),name:source.recipient.name,email:source.recipient.email,emailNormalized:source.recipient.email,phone:source.recipient.phone,address:source.recipient.address,city:'',state:'',zipCode:'',...(newCustomerAddress || {}),isActive:true,totalSpent:0,totalJobs:0,lastServiceDate:null,source:'rl-approved-estimate',createdFromEstimateId:id,createdAt:new Date(now()).toISOString(),updatedAt:new Date(now()).toISOString()};
             customer = {id:newId,ref:destination,get:key=>newCustomer[key]};
           } else fail('failed-precondition', 'Select a matching company customer or explicitly create one from this approved prospect.');
+          const billingSnapshot = approvedBillingSnapshot(source, { estimateId: id, estimateVersion: source.version, customerId: customer.id });
           const assignedTo = schedule.assignedTo || null;
           await serviceAreas.assertCurrent(tx, area);
           const job = {
@@ -655,6 +657,8 @@ function estimateHandlers(db, config = {}) {
             status: 'scheduled',
             estimatedCost: source.total,
             total: source.total,
+            totalCost: billingSnapshot.total,
+            billingSnapshot,
             estimateId: id,
             estimateVersion: source.version,
             createdAt: new Date(now()).toISOString(),

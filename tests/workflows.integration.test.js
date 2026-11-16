@@ -54,7 +54,7 @@ test('disabled email creates a usable invitation link without queuing mail and b
   await assert.rejects(portal.requestCustomerOTP({ data: { email: 'direct@workflows.test' } }), { code: 'failed-precondition' });
   await assert.rejects(portal.verifyCustomerOTP({ data: {} }), { code: 'failed-precondition' });
   const invoices = invoiceEmailHandlers(db, () => 'https://rl.test', () => false);
-  await assert.rejects(invoices.emailInvoice({ auth: owner, data: {} }), { code: 'failed-precondition' });
+  await assert.rejects(invoices.emailInvoice({ auth: owner, data: { expectedRevision: 0 } }), { code: 'failed-precondition' });
   assert.equal((await invoices.reminders()).skipped, true);
   assert.equal((await db.collection('rlMail').get()).size, mailBefore);
 });
@@ -151,7 +151,7 @@ test('email worker leases prevent concurrent delivery and cancel paid invoice em
 });
 test('reminders respect consent and retries deduplicate the weekly email', async () => {
   await db.doc('customers/reminder-customer').set({ companyId: 'workflow-co', email: 'reminder@workflows.test' });
-  await db.doc('invoices/reminder-test').set({ companyId: 'workflow-co', customerId: 'reminder-customer', status: 'sent', total: 20, dueDate: '2020-01-01' });
+  await db.doc('invoices/reminder-test').set({ companyId: 'workflow-co', customerId: 'reminder-customer', status: 'sent', lineItems: [{ description: 'Synthetic reminder service', quantity: 1, unitPrice: 20, amount: 20 }], subtotal: 20, tax: 0, taxRate: 0, total: 20, dueDate: '2020-01-01' });
   const options = { reminder: true, appUrl: 'https://rl.test' };
   assert.equal((await queueInvoiceEmail(db, 'reminder-test', options)).skipped, true);
   await db.doc('customers/reminder-customer').update({ emailConsent: true });

@@ -24,6 +24,7 @@ const { portalHandlers } = require('./portal');
 const { staffLoginHandlers } = require('./staffLogin');
 const { drainMail } = require('./mail');
 const { invoiceEmailHandlers } = require('./invoiceEmail');
+const { invoiceHandlers } = require('./invoices');
 const { ownershipHandler } = require('./ownership');
 const { paymentHandlers, stripeKeyForMode } = require('./payments');
 const { routeHandlers } = require('./routes');
@@ -175,6 +176,7 @@ exports.rlPublicContent = onRequest({ timeoutSeconds: 60 }, publicContentHandler
 exports.rlDeliverEmail = onSchedule({ schedule: 'every 1 minutes', secrets: emailEnabled() ? ['RL_SMTP_URL'] : [], timeoutSeconds: 120, maxInstances: 1 }, () => emailEnabled() ? drainMail(db, process.env.RL_SMTP_URL, emailFrom.value()) : undefined);
 const invoiceEmails = invoiceEmailHandlers(db, () => appUrl.value(), emailEnabled);
 exports.emailInvoice = onCall(invoiceEmails.emailInvoice);
+exports.rlManageInvoice = onCall({ timeoutSeconds: 60 }, invoiceHandlers(db).handle);
 exports.rlQueueInvoiceReminders = onSchedule({ schedule: 'every day 09:00', timeZone: 'Etc/UTC', timeoutSeconds: 540 }, invoiceEmails.reminders);
 const recurring = recurringHandlers(db, { serviceAreas, scheduling });
 exports.rlManageServicePlan = onCall({ timeoutSeconds: 60 }, recurring.manageServicePlan);

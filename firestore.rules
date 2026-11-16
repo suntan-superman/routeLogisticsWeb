@@ -243,28 +243,12 @@ service cloud.firestore {
     }
 
     // ---------- invoices ----------
-    // Paid invoices are immutable (void by issuing a new document); only drafts may be deleted.
+    // Financial creation, revisions and status changes are server-authoritative.
+    // rlManageInvoice preserves historical invoices and audits explicit mutations;
+    // payment, mail and accounting workers use the Admin SDK independently.
     match /invoices/{id} {
-      function validInvoiceStatus(s) {
-        return s in ['draft', 'sent', 'paid', 'void'];
-      }
-      function paymentFields() {
-        return ['paymentLock', 'paymentStatus', 'paymentIntentId', 'amountRefunded', 'paymentUpdatedAt', 'testPaymentStatus', 'testPaymentUpdatedAt', 'qbTestPaymentStatus', 'qbBalance', 'qbPaymentReview', 'qbReconciledAt', 'paidVia'];
-      }
       allow read: if financeAccess(resource.data);
-      allow create: if validCreate(false) && (claimCompany() == null || isFinance())
-        && !request.resource.data.keys().hasAny(paymentFields())
-        && validInvoiceStatus(request.resource.data.get('status', 'draft'))
-        && request.resource.data.get('total', 0) is number
-        && request.resource.data.get('total', 0) >= 0;
-      allow update: if financeAccess(resource.data) && tenancyUnchanged()
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(paymentFields())
-        && (resource.data.get('paymentLock', null) == null
-          || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['total', 'currency', 'customerId', 'status', 'lineItems', 'subtotal', 'tax', 'taxRate']))
-        && resource.data.get('status', 'draft') != 'paid'
-        && validInvoiceStatus(request.resource.data.get('status', 'draft'))
-        && request.resource.data.get('total', 0) is number && request.resource.data.get('total', 0) >= 0;
-      allow delete: if financeAccess(resource.data) && resource.data.get('status', 'draft') == 'draft';
+      allow create, update, delete: if false;
     }
 
     // ---------- recurring service plans ----------

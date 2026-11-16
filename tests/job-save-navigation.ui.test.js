@@ -55,6 +55,7 @@ const mock = name => {
   if(name.endsWith('/components/ServiceChecklist')||name==='./RoutesPage')return{__esModule:true,default:ChildDraft};
   if(name.endsWith('/components/JobChangeHistory'))return{__esModule:true,default:()=>null,ModifiedBadge:()=>null};
   if(name.endsWith('/components/JobFormModal'))return{__esModule:true,default:env.kind==='warning-parent'?JobEditorProbe:()=>null};
+  if(name.endsWith('/components/InvoiceCreationDialog'))return{__esModule:true,default:compile('components/InvoiceCreationDialog.jsx')};
   if(name.endsWith('/components/StaffAvailabilityEditor')||name.endsWith('/components/JobPhotos')||name.endsWith('/components/JobApplicationLog')||name.endsWith('/components/TeamLocationStatus'))return{__esModule:true,default:()=>null};
   if(name.endsWith('.css'))return{};
   if(name==='@syncfusion/ej2-react-schedule')return new Proxy({ScheduleComponent:props=>React.createElement('section',{'aria-label':'Calendar probe','data-event-count':props.eventSettings.dataSource.length})},{get:(target,key)=>target[key]||(()=>null)});

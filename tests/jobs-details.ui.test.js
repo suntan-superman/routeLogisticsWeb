@@ -29,7 +29,10 @@ function compile(relative) {
       updateJobStatus: async () => { throw Error('Read-only details must not update a job.'); },
     } };
     if (name.endsWith('/customerService')) return { __esModule: true, default: { getCustomers: async () => ({ success: true, customers: [] }) } };
-    if (name.endsWith('/invoiceService')) return { createInvoiceFromJob: async () => { throw Error('Viewing details must not create invoices.'); } };
+    if (name.endsWith('/invoiceService')) return {
+      previewInvoiceFromJob: async jobId => { env.invoicePreviews.push(jobId); return { success: true, sourceKind: 'job-price', sourceFingerprint: 'preview-only', lineItems: [{ description: 'Saved service', quantity: 1, unitPrice: 100, amount: 100 }], subtotal: 100, tax: 0, total: 100 }; },
+      createInvoiceFromJob: async () => { env.invoiceMutations++; throw Error('Viewing details must not create invoices.'); },
+    };
     if (name.endsWith('/workspaceApi')) return { callWorkspace: async (name, data) => {
       env.calls.push({ name, data });
       assert.equal(name, 'rlJobVisit'); assert.equal(data.action, 'list');
@@ -60,7 +63,7 @@ const click = async label => { const target = button(label); assert.ok(target, l
 const mount = async () => act(async () => { tree = create(React.createElement(Page), { createNodeMock: () => ({ focus() {}, contains: () => false, querySelectorAll: () => [], isConnected: true }) }); });
 beforeEach(() => {
   global.window = new EventTarget(); global.document = { body: { style: { overflow: '' } }, activeElement: null, querySelectorAll: () => [] };
-  env = { jobs: [base('job-one', { workNotes: 'Observed exterior damage.\nDiscussed with dispatch.', dispatchNotes: 'Gate code 2468.', notes: 'Legacy instructions.', actualWorkDone: 'Exterior inspection', completionNotes: 'No product applied.' }), base('job-two', { workNotes: 'Second job work log.' })], visits: { 'job-one': [{ id: 'arrival-one', type: 'arrived', capturedAt: '2026-11-16T17:10:00Z', source: 'manual-gps', accuracy: 12, note: 'Access confirmed.' }, { id: 'departure-one', type: 'departed', capturedAt: '2026-11-16T17:50:00Z', source: 'manual', note: 'Service completed.' }] }, reads: [], calls: [], navigation: [], toasts: [], visitFailure: null, visitPending: null, jobFailure: null };
+  env = { jobs: [base('job-one', { workNotes: 'Observed exterior damage.\nDiscussed with dispatch.', dispatchNotes: 'Gate code 2468.', notes: 'Legacy instructions.', actualWorkDone: 'Exterior inspection', completionNotes: 'No product applied.' }), base('job-two', { workNotes: 'Second job work log.' })], visits: { 'job-one': [{ id: 'arrival-one', type: 'arrived', capturedAt: '2026-11-16T17:10:00Z', source: 'manual-gps', accuracy: 12, note: 'Access confirmed.' }, { id: 'departure-one', type: 'departed', capturedAt: '2026-11-16T17:50:00Z', source: 'manual', note: 'Service completed.' }] }, reads: [], calls: [], invoicePreviews: [], invoiceMutations: 0, navigation: [], toasts: [], visitFailure: null, visitPending: null, jobFailure: null };
 });
 afterEach(async () => { if (tree) await act(async () => tree.unmount()); tree = null; delete global.window; delete global.document; });
 
@@ -123,4 +126,11 @@ test('an authorization failure during refresh removes private selected job detai
   await act(async () => hooks.useInvalidateWorkspace()(['job']));
   assert.equal(dialog(), undefined); assert.doesNotMatch(content(), /Observed exterior damage|Access confirmed|Gate code 2468/);
   assert.ok(button('Close unavailable job'));
+});
+
+test('completed Job Details opens an explicit invoice review and closing preview does not create or send an invoice', async () => {
+  await mount(); await click('Ant prevention'); assert.equal(env.invoicePreviews.length, 0); assert.equal(env.invoiceMutations, 0);
+  await click('Create Invoice'); assert.equal(dialog(), undefined); assert.deepEqual(env.invoicePreviews, ['job-one']); assert.equal(env.invoiceMutations, 0);
+  const preview = tree.root.findAll(node => node.props.role === 'dialog' && node.props['aria-labelledby'] === 'invoice-preview-title')[0]; assert.ok(preview); assert.match(textOf(preview), /Create draft invoice/);
+  await click('Close preview'); assert.ok(dialog()); assert.equal(env.invoiceMutations, 0); assert.equal(env.navigation.length, 0);
 });

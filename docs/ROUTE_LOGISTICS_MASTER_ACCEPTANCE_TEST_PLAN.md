@@ -34,11 +34,17 @@ checks: 564/564 broader emulator cases, 129/129 final focused cases (including
 legacy archive and owner-exception safeguards), 452/452 web, 417/417 mobile and
 42/42 browser smoke executions across Chromium/Firefox/WebKit. Counts overlap;
 the broader run preceded the final targeted backend refinements. Functions
-guards passed 28/28; full Functions units passed184 with one emulator-only skip.
-Expo Doctor18/18, iOS/Android exports and the local Android release build passed.
+guards passed 28/28; full Functions units passed 184 with one emulator-only skip.
+Expo Doctor 18/18, iOS/Android exports and the local Android release build passed.
 Implementation `cd6dcab` has seven targeted Functions ACTIVE, tested rules
 deployed and both inquiry indexes READY. Both read-only empty query shapes passed
-in production. Web publication evidence is recorded in the release report.
+in production. Web publication `00b0471`, Netlify `6afb731d2c8e0cac2e90a9ea`, was
+verified ready with corrected served assets at **1:18 PM Pacific, November 16**.
+The final read-only check at 1:19 PM preserves all 518 customers/17 jobs/one
+estimate/six invoices and baseline financial mappings/events; no production
+intake test records were created. G01–G04 are resolved for implementation;
+operator scenarios A–F, updated iOS/Android installation and genuine fresh
+notification/offline handset acceptance remain separate and unchecked.
 
 ### November 16 — invoice integrity repair
 

@@ -217,13 +217,13 @@ tests use synthetic, tenant-private verified fixtures and make no provider calls
 
 Physical acceptance remains required after rebuilding: select quarter-hour times,
 cancel/reopen the picker, review invalid/corrected addresses, and verify one-visit
-versus explicitly permanent changes. No physical/manual case is newly marked Pass.
+versus explicitly permanent changes. No address-editing physical/manual case is newly marked Pass.
 
 | Cases | Pass | Fail | Blocked | Not Run | Dated historical live/provider Pass |
 | --- | --- | --- | --- | --- | --- |
-| 161 | 45 | 0 | 7 | 109 | 9 |
+| 161 | 46 | 0 | 5 | 110 | 10 |
 
-The 45 Pass results include current automated/read-only checks (including newly automated DSP-009) and **nine dated historical provider/live checks**. A historical Pass proves only the named prior scenario. The 109 Not Run cases still require manual/operator execution; seven Blocked entries are scoped feature/prerequisite gaps, including overlapping Android readiness entries. Case counts are acceptance scenarios, not individual automated test counts.
+The 46 Pass results include current automated/read-only checks (including newly automated DSP-009) and **ten dated provider/live checks**, including the November 16 Android background assignment receipt/tap (MSG-10). A dated Pass proves only the named scenario. The 110 Not Run cases still require manual/operator execution; five Blocked entries are scoped feature/prerequisite gaps. The Android FCM configuration blocker is resolved, while the broader native workflow in DEV-004 remains Not Run. Case counts are acceptance scenarios, not individual automated test counts.
 
 | Classification | Current evidence | Acceptance limit |
 | --- | --- | --- |
@@ -3304,9 +3304,9 @@ Exact paths below are relative to https://route-logistics.com unless a native or
 3. When an authorized Android build exists, execute assignment/status delivery and tap cases on a real device, with current notification/runtime permissions.
 
 - **Expected result:** Android native push is accepted only after a configured FCM v1 path and real-device receipt/tap; Android browser tests remain separate.
-- **Actual result:** Blocked prerequisite at last verified EAS inspection (November 14, 2026): androidCredentials was empty. No physical Android delivery or tap is verified; parent current metadata may supersede this snapshot.
-- **Status:** **Blocked**
-- **Evidence reference:** `.migration/native-push-eas-metadata.json`; `docs/commercial-readiness.md`; `routeLogisticsMobile/app.config.js`
+- **Actual result:** November 16, 2026, physical Android build 1.0.1 (1): the operator associated matching-project FCM v1 credentials and enabled notifications. One authorized synthetic assignment to the Acme manager produced exactly one Android delivery, accepted on attempt 1; direct Expo receipt was `ok`. Android showed the high-importance notification while the app was in the background. The operator found it in the drawer and confirmed tapping opened the correct synthetic work order. No repeat send, runtime change, rebuild or deployment. This Pass covers that background assignment and tap only; status notifications, other OS states, heads-up/sound and broader native workflows are separate checks.
+- **Status:** **Pass**
+- **Evidence reference:** `docs/android-push-diagnosis.md`; `.migration/android-fcm-current-audit.json`; `.migration/android-push-single-test.json`; `routeLogisticsMobile/app.config.js`
 - **Cleanup instructions:** Do not create a new Firebase project, alter iOS signing, or expose credentials. Retain the existing Android package.
 
 ### Phase 16 — Security and access control
@@ -3772,9 +3772,9 @@ Exact paths below are relative to https://route-logistics.com unless a native or
 3. Only after separately authorized delivery, test FCM arrival/tap/invalid-token recovery.
 
 - **Expected result:** Native Android workflow and actual FCM v1 delivery are independently accepted; iOS/APNs evidence is not reused as Android proof.
-- **Actual result:** Historical configuration audit documented no EAS Android FCM v1 credential and no physical Android delivery. Current handset/build/credential acceptance is outstanding; recheck metadata before claiming this remains a fresh configuration failure.
-- **Status:** **Blocked**
-- **Evidence reference:** `routeLogisticsMobile/app.config.js`; `routeLogisticsMobile/services/nativePush.js`; `docs/communications-activation.md:72`
+- **Actual result:** November 16 FCM v1 association, notification permission, Android manager registration and one background assignment delivery/tap passed (MSG-10). The operator also reports native login and assigned-job synchronization working. This broader case's camera/gallery, offline queue, background location and invalid-token physical recovery steps were not executed in that push test and remain Not Run; the credential prerequisite is resolved.
+- **Status:** **Not Run**
+- **Evidence reference:** `routeLogisticsMobile/app.config.js`; `routeLogisticsMobile/services/nativePush.js`; `docs/android-push-diagnosis.md`
 - **Cleanup instructions:** Do not buy/create infrastructure or expose service-account credentials. Close any later explicitly authorized test window.
 
 #### DEV-005 — Native accessibility, large text and return navigation
@@ -4071,7 +4071,7 @@ Executed checks: 406/406 web tests, including seven saved-warning/canonical-ID/r
 | iOS native push by OS state and tap | DEV-002; MSG-07 | Foreground, background, locked, terminated cases separately; approved device only; drafts retained and correct existing assignment opens |
 | Safari portal/reviews/PDF/withdrawal | POR-001,005–010; REV-002,007–008; DEV-001; BRO-003 | Explicit fresh OTP/message permission; provider switch, file auth, revocation, readable feedback/keyboard |
 | Android browser | BRO-004; DEV-003 | Physical Chrome portal/back/files/keyboard; not satisfied by desktop emulation |
-| Android native and FCM v1 | DEV-004; MSG-10 | Build plus credential metadata then actual device delivery/tap; currently outstanding |
+| Android native and FCM v1 | DEV-004; MSG-10 | November 16 credential/permission checks and one background assignment receipt/drawer/tap passed; broader camera/offline/location/OS-state checks remain |
 | Native accessibility and return navigation | DEV-005; BRO-006 | Large text, labels/focus, usable touch targets, no clipping or trapped overlay |
 
 Batch work with one operator: keep desktop dispatch open while the iPhone runs the assigned work. Perform the short background waits while checking portal/history/CMS. Record actual app foreground/background state for every push, since prior receipt did not identify all OS states. A local acceptance harness can verify UI transitions but cannot certify camera hardware, battery policy or native permission prompts.
@@ -4091,7 +4091,7 @@ Batch work with one operator: keep desktop dispatch open while the iPhone runs t
 | Twilio delivery | Nov14 ~10:30AM approved tollfree +1 888-250-6769 produced carrierDelivered, genuine signed status callbacks and handsetreceipt | Dedicated RL send-only credentials; directFrom/noMessagingService required. Broad SMS staysfalse; only authorized recipient may be retested with explicit budget |
 | Twilio STOP/START | Historical physical STOP→START acknowledgements and signed EventStreams verified; STOP suppressed/cancelled queued; START did not restore RL consent | Fourpurpose RL consent independently renewed for bounded prior pilot; refresh expiry/budget before any future send; provider optout shared acrossMerxus/RL |
 | Expo / APNs iOS | Nov14 authorized push received and tap opened existing completed work order; corporate APNs/bundle audited | Not proof of a newly created assignment queue, current installed build, all OS states or Android delivery; current physical matrix NotRun |
-| Android FCM v1 | Last recorded EAS audit Androidcredentials=[]; no physical Android success | Recheck metadata/operator build before calling it current missing configuration; native delivery acceptance remainsBlocked |
+| Android FCM v1 | November 16 matching EAS FCM v1 association, granted permission, active Android manager registration; one assignment, one send, Expo receipt `ok`, operator-confirmed drawer display/correct-job tap | Background assignment accepted; other OS states, heads-up/sound and broader native workflows remain separate |
 | Review SMS | Automated consent/STOP/durable retry/expiry/pilot denial test cases pass | No real reviewSMS sent or separately authorized purpose. Broad review automationfalse. Do not reuse fourpurpose service-message consent |
 
 QuickBooks prior financial checks were **sandbox accounting records**, not Stripe processing: payment147 $5partial then payment148 $15remaining reconciled the controlled $20 invoice. The RL source invoice remained sent while test fields moved partial→paid. Tax invoice146 separately used the certified manual8% mapping. Exact persisted evidence and limitations are in [quickbooks-sandbox-certification.md](quickbooks-sandbox-certification.md). Do not replay these writes or manufacture new certification records unnecessarily.
@@ -4112,7 +4112,7 @@ Severity: **S1** data loss, cross-tenant exposure or unusable core operation; **
 | OBS-POR04-READINESS / S3 test timing — resolved | Firefox PW-POR-04 invoice click raced asynchronous feedback loading in the 74/75 matrix | Development | Spec waits for explicit feedback readiness and asserts invoice details open; no API/UI authorization weakened. Corrected case passed 9/9 across three engines with 3 repeats each; initial failed batch retained |
 | DEF-JOBS-DATE / S3 — resolved | Original UTC parsing shifted date-only Jobs labels. Corrected shared `calendarDate.js` is used by Jobs table/details; 9 timezone tests, web241/241, smoke9/9 and a single clean browser75/75 passed. Original evidence: `.migration/job-date-display-audit.json` | Development | Production fix `176bb244b33c394601fd176dfa46c05fa4df0ad5`, verified ready on Netlify November 14 at 6:57 PM Pacific. Actual served formatter verified offline; `.migration/jobs-date-production-verification.json`. Stored dates/times unchanged; no customer-record reads/writes or mobile rebuild |
 | GAP-MOB-GEO / S2 native manager forms | Native Home → Schedule service lacks customerId/serviceProperty/serviceCategory; shared native estimate input lacks serviceProperty; HomeScreen.js:1075, functions/shared/estimateClient.js:19 | Development | Source contract gap; use web schedule/estimate for configured territory. Do not weaken server eligibility. Not a technician work-order blocker |
-| GAP-ANDROID-FCM / S2 Android native only | Last audit EAS androidCredentials=[]; docs/communications-activation.md:72; DEV-004/MSG-10 | Operator/development | Current metadata/build/physical receipt and tap outstanding. Does not block iOS or Android browser pilot |
+| GAP-ANDROID-FCM / resolved November 16 | `docs/android-push-diagnosis.md`; current EAS metadata and single-test evidence; MSG-10 | Operator/development | Matching FCM v1 association and Android notification opt-in restored. One background assignment receipt/drawer/tap passed without runtime changes, rebuild or deployment; broader DEV-004 physical workflows remain Not Run |
 | GAP-WEB-01 / S3 explicit industry selection | CompanySetupPage.jsx has categories but no industry selector; ONB-003 | Product/development | Use pest/pool category and pinned service checklist; no selector certification |
 | GAP-WEB-02 / S3 company template summary | Company Setup → Templates is Coming Soon; estimate template CRUD is separate | Development | Use /estimate-templates; do not claim automatic photo-estimate template application |
 | GAP-WEB-03 / S3 discounts | Estimate form/backend has no discount field and rejects negative unit prices; EST-005 | Product/development | Use supported fixed line pricing; not required for zero-value field pilot |

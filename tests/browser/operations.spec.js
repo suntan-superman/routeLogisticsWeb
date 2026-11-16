@@ -125,6 +125,7 @@ test('PW-OPS-03 @smoke manager can dispatch but cannot access financial invoices
 test('PW-OPS-04 @smoke technician sees only assigned work and cannot open customer administration', async ({ page, scenario }) => {
   annotate('SEC-002', 'SEC-003', 'DSP-002');
   const foreignJob = await scenario.read('jobs', scenario.ids.foreignJobId);
+  const assignedBefore = await scenario.read('jobs', scenario.ids.jobId);
   await signIn(page, scenario.accounts.technician);
   await page.goto('/my-work');
   await expect(page.getByRole('heading', { name: 'My Work', exact: true })).toBeVisible();
@@ -135,9 +136,21 @@ test('PW-OPS-04 @smoke technician sees only assigned work and cannot open custom
   await assigned.click();
   await expect(page.getByRole('button', { name: 'Close job', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Start work', exact: true })).toBeVisible();
+  const instructions = page.getByRole('region', { name: 'Job instructions', exact: true });
+  await expect(instructions.getByRole('heading', { name: 'Job instructions', exact: true })).toBeVisible();
+  expect(await instructions.locator('p').textContent()).toBe(scenario.jobInstructions);
+  await expect(instructions.getByRole('textbox')).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Work notes', exact: true })).toHaveValue(scenario.workNotes);
+  await expect(page.getByText(scenario.jobPrivateNotes)).toHaveCount(0);
   await page.getByRole('button', { name: 'Close job', exact: true }).click();
+  await expect(instructions).toHaveCount(0);
   await assigned.click();
   await expect(page.getByRole('button', { name: 'Close job', exact: true })).toBeVisible();
+  await expect(instructions).toBeVisible();
+  expect(await instructions.locator('p').textContent()).toBe(scenario.jobInstructions);
+  await expect(page.getByRole('textbox', { name: 'Work notes', exact: true })).toHaveValue(scenario.workNotes);
+  await expect(page.getByText(scenario.jobPrivateNotes)).toHaveCount(0);
+  expect(await scenario.read('jobs', scenario.ids.jobId)).toEqual(assignedBefore);
   await page.goto('/customers');
   await expect(page.getByRole('heading', { name: 'Access unavailable', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add Customer', exact: true })).toHaveCount(0);

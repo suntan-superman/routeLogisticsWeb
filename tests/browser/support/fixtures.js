@@ -45,8 +45,11 @@ async function seed(info) {
   }
   const now = new Date(), jobDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   const serviceType = `${prefix} Scheduled inspection`, completedServiceType = `${prefix} Completed inspection`, otherServiceType = `${prefix} Pool visit`;
+  const jobInstructions = `${prefix} Site access: use the south entrance.\nIf the side gate is locked, call dispatch before starting work.`;
+  const workNotes = `${prefix} Prior technician observation: exterior equipment checked.`;
+  const jobPrivateNotes = `${prefix} INTERNAL_PRIVATE_NOTE_NOT_FOR_FIELD_STAFF`;
   const scope = { companyId: ids.companyId, userId: accounts.owner.uid, customerId: ids.customerId, customerName, customerEmail, address: insideAddress, date: jobDate, time: '10:00', assignedTo: accounts.technician.membershipId, status: 'scheduled', serviceCategory: 'Pest Control', serviceProperty: { address: insideAddress }, createdAt: now.toISOString(), updatedAt: now.toISOString(), synthetic: true };
-  await db.doc(`jobs/${ids.jobId}`).set({ ...scope, serviceType });
+  await db.doc(`jobs/${ids.jobId}`).set({ ...scope, serviceType, notes: jobInstructions, workNotes, privateNotes: jobPrivateNotes });
   await db.doc(`jobs/${ids.completedJobId}`).set({ ...scope, serviceType: completedServiceType, status: 'completed', completedAt: now.toISOString() });
   await db.doc(`jobs/${ids.otherJobId}`).set({ ...scope, companyId: ids.otherCompanyId, userId: accounts.foreignOwner.uid, customerId: ids.otherCustomerId, assignedTo: null, serviceType: otherServiceType });
   await db.doc(`jobs/${ids.foreignJobId}`).set({ ...scope, companyId: ids.otherCompanyId, userId: accounts.foreignOwner.uid, customerId: ids.otherCustomerId, assignedTo: null, serviceType: `${prefix} Private other provider job` });
@@ -74,7 +77,7 @@ async function seed(info) {
   const limits = await db.collection('rlRateLimits').get();
   for (const row of limits.docs) await row.ref.delete();
   const readDoc = async documentPath => (await db.doc(documentPath).get()).data() || null;
-  return { ids, accounts, prefix, companyName, otherCompanyName, customerName, customerEmail, email: customerEmail, jobDate, serviceType, jobTitle: serviceType, completedServiceType, otherServiceType, estimateTitle, invoiceNumber, insideAddress, outsideAddress, photoCaption, documentName,
+  return { ids, accounts, prefix, companyName, otherCompanyName, customerName, customerEmail, email: customerEmail, jobDate, serviceType, jobTitle: serviceType, jobInstructions, workNotes, jobPrivateNotes, completedServiceType, otherServiceType, estimateTitle, invoiceNumber, insideAddress, outsideAddress, photoCaption, documentName,
     approvalUrl: `/estimate-approval#id=${ids.estimateId}&token=${token}`,
     functionUrl: name => `http://127.0.0.1:5001/${PROJECT}/us-central1/${name}`,
     readDoc, read: (collection, key) => readDoc(`${collection}/${key}`),

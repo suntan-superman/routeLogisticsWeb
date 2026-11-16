@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../theme/ThemeProvider';
@@ -7,7 +7,7 @@ import { cachedRead, queuedWork, saveServiceFormOffline, subscribeOffline } from
 import { Card, SectionHeader, PrimaryButton, SecondaryButton, FormField, InlineNotice } from './MobileUI';
 const { validateAnswers } = require('../../functions/shared/serviceFormSchema');
 
-export default function ServiceChecklist({ job, readOnly = false, onBusyChange, onDraftChange }) {
+export default function ServiceChecklist({ job, readOnly = false, onBusyChange, onDraftChange, draftActionsRef }) {
   const { permissions } = useAuth(), { palette } = useTheme();
   const [data, setData] = useState(null), [catalog, setCatalog] = useState([]), [answers, setAnswers] = useState({}), [pending, setPending] = useState(null);
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [dirty, setDirty] = useState(false), [loading, setLoading] = useState(true);
@@ -37,9 +37,9 @@ export default function ServiceChecklist({ job, readOnly = false, onBusyChange, 
   useEffect(() => { callbacks.current.onDraftChange?.(dirty); }, [dirty]);
   const change = (field, value) => { if (lock.current) return; setAnswers(previous => ({ ...previous, [field.id]: value })); dirtyRef.current = true; setDirty(true); setNotice(''); };
   const perform = async action => {
-    if (lock.current) return;
+    if (lock.current) return { success: false, message: 'Wait for the service report to finish saving.' };
     lock.current = true; setBusy(true); callbacks.current.onBusyChange?.(true); setError(''); setNotice('');
-    try { await action(); } catch (failure) { if (mounted.current) setError(failure.message || 'Service form could not be saved. Your draft is retained.'); }
+    try { await action(); return { success: true }; } catch (failure) { const message = failure.message || 'Service form could not be saved. Your draft is retained.'; if (mounted.current) setError(message); return { success: false, message }; }
     finally { lock.current = false; if (mounted.current) { setBusy(false); callbacks.current.onBusyChange?.(false); } }
   };
   const save = status => perform(async () => {
@@ -50,12 +50,22 @@ export default function ServiceChecklist({ job, readOnly = false, onBusyChange, 
     const clean = validateAnswers(form.template, numeric, { complete: status === 'completed' });
     await saveServiceFormOffline(job, { templateId: form.template.id, templateVersion: form.template.version, assignmentVersion: form.assignmentVersion, expectedVersion: form.responseVersion, answers: clean, status });
     if (!mounted.current) return;
-    dirtyRef.current = false; setDirty(false); setNotice('Service report saved on this device. Synchronization verifies your current assignment and template version.'); await load();
+    dirtyRef.current = false; setDirty(false); callbacks.current.onDraftChange?.(false); setNotice('Service report saved on this device. Synchronization verifies your current assignment and template version.'); await load();
   });
   const assign = template => perform(async () => {
     if (dirtyRef.current || pending) throw new Error('Save or explicitly discard current service answers before changing templates.');
     await callWorkspace('rlServiceForms', { action: 'assign', jobId: job.id, templateId: template.id, templateVersion: template.version, expectedVersion: data?.form?.assignmentVersion || 0 }); await load();
   });
+  useImperativeHandle(draftActionsRef, () => ({
+    getDrafts: () => ({ checklist: dirtyRef.current, hasDraft: dirtyRef.current }),
+    saveDrafts: async () => dirtyRef.current ? save('draft') : { success: true },
+    discardDrafts: () => {
+      if (lock.current) return { success: false, message: 'Wait for the service report to finish saving.' };
+      setAnswers(pending?.record?.answers || formRef.current?.answers || {});
+      dirtyRef.current = false; setDirty(false); callbacks.current.onDraftChange?.(false); setError(''); setNotice('Unsaved checklist changes discarded. Saved reports are retained.');
+      return { success: true };
+    },
+  }));
   const form = data?.form, editable = !!data?.enabled && !!form && !readOnly && !pending && !['completed','cancelled','canceled'].includes(job.status);
   const choice = (field, value, checked, label = value) => <Pressable key={value} accessibilityRole={field.type === 'select' ? 'radio' : 'checkbox'} accessibilityLabel={label} accessibilityState={{ checked, disabled: !editable || busy }} disabled={!editable || busy}
     onPress={() => change(field, field.type === 'select' ? value : checked ? (answers[field.id] || []).filter(item => item !== value) : [...(answers[field.id] || []), value])}

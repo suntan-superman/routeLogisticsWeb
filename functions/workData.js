@@ -33,10 +33,14 @@ function coordinates(data) {
 }
 function projectJob(id, data, role) {
   data = { ...data, ...(servicePropertySite(data) || {}) };
-  if (hasCapability(role, 'reports.financial')) return { ...data, id, updatedAt: version(data.updatedAt) };
+  // JobForm's Notes are shared dispatch instructions (gate codes, pets, access).
+  // Keep the editable technician work log separate; legacy mobile clients still
+  // receive their workNotes through the notes alias below.
+  const dispatchNotes = typeof data.notes === 'string' ? data.notes : '';
+  if (hasCapability(role, 'reports.financial')) return { ...data, dispatchNotes, id, updatedAt: version(data.updatedAt) };
   const property = data.serviceProperty && typeof data.serviceProperty === 'object' ? { serviceProperty: pick(data.serviceProperty, ['address', 'formattedAddress', 'postalCode', 'latitude', 'longitude', 'validated', 'source']) } : {};
   const area = hasCapability(role, 'jobs.schedule') && data.serviceAreaEligibility ? { serviceAreaEligibility: pick(data.serviceAreaEligibility, ['status', 'settingsRevision', 'serviceCategory', 'purpose', 'checkedAt', 'exceptionId', 'continuedFromServicePlan']) } : {};
-  return { id, ...pick(data, JOB_FIELDS), ...coordinates(data), ...property, ...area, ...(hasCapability(role, 'jobs.pricing') ? pick(data, PRICING_FIELDS) : { notes: typeof data.workNotes === 'string' ? data.workNotes : '' }) };
+  return { id, ...pick(data, JOB_FIELDS), dispatchNotes, ...coordinates(data), ...property, ...area, ...(hasCapability(role, 'jobs.pricing') ? pick(data, PRICING_FIELDS) : { notes: typeof data.workNotes === 'string' ? data.workNotes : '' }) };
 }
 function projectCustomer(id, data, role) {
   if (hasCapability(role, 'reports.financial')) return { ...data, id, updatedAt: customerVersion(data.updatedAt) };

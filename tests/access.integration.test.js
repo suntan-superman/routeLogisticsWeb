@@ -20,7 +20,7 @@ before(async () => {
   for (const role of ['admin', 'manager', 'technician']) await db.doc(`teamMembers/access-${role}`).set({ companyId: 'access-co', uid: `access-${role}`, role, status: 'active' });
   await db.doc('customers/access-customer').set({ companyId: 'access-co', name: 'Customer', phone: '555', totalSpent: 999, invoiceBalance: 99, history: [{ total: 999 }], notes: 'Billing only', address: '1 Main St' });
   for (const [id, assignedTo, companyId] of [['access-job', 'access-technician', 'access-co'], ['access-unassigned', null, 'access-co'], ['access-foreign', 'access-technician', 'other-co']]) {
-    await db.doc(`jobs/${id}`).set({ companyId, userId: 'access-owner', customerId: 'access-customer', assignedTo, date: '2026-11-13', time: id === 'access-unassigned' ? '10:00' : '09:00', estimatedDuration: 1, status: 'scheduled', totalCost: 150, invoiceBalance: 99, revisions: [{ price: 500 }], notes: 'Billing instructions', workNotes: 'Gate code provided', updatedAt: '2026-11-13T00:00:00.000Z' });
+    await db.doc(`jobs/${id}`).set({ companyId, userId: 'access-owner', customerId: 'access-customer', assignedTo, date: '2026-11-13', time: id === 'access-unassigned' ? '10:00' : '09:00', estimatedDuration: 1, status: 'scheduled', totalCost: 150, invoiceBalance: 99, revisions: [{ price: 500 }], notes: 'Use the side gate', privateNotes: 'Private billing instructions', workNotes: 'Gate code provided', updatedAt: '2026-11-13T00:00:00.000Z' });
   }
   work = workDataHandlers(db); offline = offlineHandler(db); routes = routeHandlers(db);
   photo = jobPhotoHandler(db, () => ({ file: () => ({ save: async (buffer, options) => uploads.push({ buffer, options }), getMetadata: async () => [{ size: bytes.length, contentType: 'image/jpeg' }], download: async () => [bytes] }) }));
@@ -37,10 +37,10 @@ test('all four roles have explicit operational, financial and governance capabil
   }
   assert.equal(hasCapability('dispatcher', 'jobs.assign'), false);
 });
-test('technician job and customer responses exclude financial fields, old notes and history', async () => {
+test('technician sees shared job instructions and a separate work log while private financial/customer notes and history remain excluded', async () => {
   const result = await work.read(request('technician', { resource: 'jobs', id: 'access-job' }));
-  assert.equal(result.job.notes, 'Gate code provided'); assert.equal(result.customer.name, 'Customer');
-  for (const field of ['totalCost', 'invoiceBalance', 'revisions', 'paymentIntentId']) assert.equal(result.job[field], undefined);
+  assert.equal(result.job.notes, 'Gate code provided'); assert.equal(result.job.dispatchNotes, 'Use the side gate'); assert.equal(result.customer.name, 'Customer');
+  for (const field of ['totalCost', 'invoiceBalance', 'revisions', 'paymentIntentId', 'privateNotes']) assert.equal(result.job[field], undefined);
   for (const field of ['totalSpent', 'invoiceBalance', 'history', 'notes']) assert.equal(result.customer[field], undefined);
   assert.deepEqual((await work.read(request('technician', { resource: 'jobs', date: '2026-11-13' }))).jobs.map(job => job.id), ['access-job']);
   await assert.rejects(work.read(request('technician', { resource: 'jobs', id: 'access-unassigned' })), { code: 'permission-denied' });

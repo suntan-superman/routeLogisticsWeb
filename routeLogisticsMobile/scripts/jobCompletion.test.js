@@ -60,6 +60,24 @@ function fixture() {
 }
 const draft = { actualWorkDone: 'Applied treatment', actualHours: '1.5', completionNotes: 'Work documented.' };
 
+test('offline work-note overlays and cached jobs preserve separate dispatcher access instructions', async () => {
+  const f = fixture(), instructions = 'Synthetic gate code 2468\nUse the side entrance.';
+  Object.assign(f.job, { dispatchNotes: instructions, notes: 'Earlier field observations', workNotes: 'Earlier field observations' });
+  const base = { ...f.job };
+  await f.writeCache('job-bases', { [base.id]: base });
+  f.online(false);
+  await f.saveJobOffline(base.id, { notes: 'New offline observations' });
+  const [pending] = await f.overlayJobs([base]);
+  assert.equal(pending.dispatchNotes, instructions);
+  assert.equal(pending.notes, 'New offline observations');
+  assert.equal(pending.syncPatch.notes, 'New offline observations');
+  assert.equal(pending.syncPatch.dispatchNotes, undefined);
+  const saved = (await f.readCache('job-bases'))[base.id];
+  assert.equal(saved.dispatchNotes, instructions);
+  assert.equal(saved.workNotes, 'Earlier field observations');
+  assert.equal(f.calls.length, 0);
+});
+
 test('completion synchronizes once and concurrent duplicate taps share one operation', async () => {
   const f = fixture(); let release;
   f.holdSync(new Promise(resolve => { release = resolve; }));

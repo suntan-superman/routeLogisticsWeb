@@ -10,6 +10,58 @@ Route Logistics has a tested field-work foundation suitable for a **controlled p
 
 Current browser coverage is **33 scenarios** (99 configured executions across Chromium, Firefox and WebKit). See the November 15 addenda below for execution evidence. Earlier evidence for the original 25 scenarios is retained, including the later clean 75/75 Jobs-date run. Physical iPhone/Android and genuine provider acceptance remain separate.
 
+### November 15 — visible visit recording and completion feedback
+
+Manual arrival/departure controls are amber before recording and green with a
+checkmark and saved timestamp after a canonical manual record is acknowledged
+or loaded from authorized history. GPS-only inferred events remain separate.
+Explicit repeat recording preserves history; a new arrival returns the prior
+departure control to pending. Failed/unconfirmed attempts retain their original
+operation ID, remain retryable and cannot be discarded as if never sent.
+
+Completion now opens a viewport-fixed JS dialog outside the work-order scroll
+view. It names actual unsaved entries and offers keep editing, save drafts and
+continue, or explicit discard of unsaved local drafts and continue. An untouched
+blank product form no longer counts as a draft. Product applications, visit
+records, photos and checklists are not mandatory completion prerequisites.
+Required work description, optional-hours validation, authorization, assignment,
+version and durable-queue conflict checks remain enforced. Validation errors,
+save failures, saved-offline outcomes and synchronized success are visible in
+the dialog. No native Modal or arbitrary presentation delay was added.
+
+Final combined mobile validation passed **315/315**, Expo Doctor **18/18**, and
+iOS bundle export. Tests cover saved/manual/cached visit state, repeat cycles,
+failed and duplicate actions, no discarded uncertain visit, child save/discard,
+partial checklist draft saves, visible feedback, keyboard/back/focus behavior,
+stale-job callbacks and existing photo/completion guards. This mobile follow-up
+does not claim a rerun of the web/provider suites below. Physical rebuilt
+iPhone/Android acceptance remains Not Run.
+
+### November 15 — assigned-job access instructions
+
+The web JobForm Notes field is explicitly for shared gate codes and service
+instructions. Authorized job reads now expose those saved notes as a distinct
+read-only `dispatchNotes` value. Mobile Job Details shows **Job instructions**
+below Service location, and web My Work shows the same instructions. Technician
+work observations, customer service instructions and completion notes stay
+separate. Private billing/customer notes, pricing and history remain restricted;
+unassigned, foreign, revoked and unverified reads still fail closed.
+
+PW-OPS-04 now verifies multiline instructions, an independent work-note editor,
+private-note exclusion, close/reopen behavior and unchanged synthetic job data.
+Mobile regressions cover selectable text, same-job instruction refresh without
+discarding photo/work/completion drafts, another job's isolation, and offline
+work-note overlays retaining dispatcher instructions. No production job or
+customer record is rewritten. A native rebuild and physical-device check of the
+new card remain required; no physical acceptance case is marked Pass here.
+
+Results: **294/294 mobile**, **342/342 web**, **181 Functions passes/one existing
+emulator-only skip**, **27/27 focused notes/access/field-parity/workflow emulator
+cases**, and **3/3 updated PW-OPS-04 executions** (WebKit, Chromium, Firefox).
+Both production web build and iOS bundle export passed. Lint retains the same
+two existing hook warnings. The other 96 configured browser executions and
+physical mobile acceptance were not rerun for this change.
+
 ### November 15 — office-only and field-enabled staff
 
 Owners/managers can explicitly save **Can be assigned field work** from Team

@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, Pressable, ActivityIndicator } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, Pressable, ActivityIndicator, ScrollView, BackHandler, Keyboard, AccessibilityInfo, findNodeHandle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeProvider';
 import { GlassCard, GlassButton, GlassInput, IconButton } from './Glass';
@@ -84,4 +84,37 @@ export function LoadingState({ message = 'Loading your work…' }) {
 }
 export function ConfirmationPanel({ title, message, children }) {
   return <Card><SectionHeader title={title} />{!!message && <InlineNotice message={message} />}{children}</Card>;
+}
+
+// Mount after a screen's ScrollView so feedback stays in the viewport. This is
+// a JS overlay, avoiding native Modal/picker presentation conflicts on iOS.
+export function ActionDialog({ title, message, tone = 'info', busy = false, onClose, children, testID = 'action-dialog' }) {
+  const { palette } = useTheme(), heading = useRef(null), current = useRef({ busy, onClose });
+  current.current = { busy, onClose };
+  const close = () => { if (!current.current.busy) current.current.onClose?.(); };
+  useEffect(() => {
+    const listener = BackHandler?.addEventListener?.('hardwareBackPress', () => { if (!current.current.busy) current.current.onClose?.(); return true; });
+    return () => listener?.remove?.();
+  }, []);
+  useEffect(() => {
+    Keyboard?.dismiss?.();
+    const handle = heading.current && findNodeHandle?.(heading.current);
+    if (handle != null) AccessibilityInfo?.setAccessibilityFocus?.(handle);
+    AccessibilityInfo?.announceForAccessibility?.([title, message].filter(Boolean).join('. '));
+  }, [title, message]);
+  return <View testID={testID} accessibilityViewIsModal importantForAccessibility="yes" onAccessibilityEscape={close}
+    style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 100, elevation: 30, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+    <Pressable testID={`${testID}-backdrop`} accessible={false} disabled={busy} onPress={close} style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(0,0,0,0.6)' }} />
+    <View style={{ width: '100%', maxWidth: 520, maxHeight: '90%', borderRadius: 20, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, overflow: 'hidden' }}>
+      <View style={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <Text ref={heading} accessibilityRole="header" style={{ flex: 1, color: palette.text, fontSize: 20, fontWeight: '700', lineHeight: 27 }}>{title}</Text>
+        {!!onClose && <GlassButton secondary title="Close" accessibilityLabel="Close dialog" disabled={busy} onPress={close} />}
+      </View>
+      <ScrollView keyboardShouldPersistTaps="handled" style={{ flexGrow: 0, flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20, gap: 12 }}>
+        {!!message && <Text accessibilityRole={tone === 'error' ? 'alert' : 'text'} accessibilityLiveRegion="polite" style={{ color: tone === 'error' ? palette.danger : tone === 'success' ? palette.accent : palette.secondary, fontSize: 15, lineHeight: 23 }}>{message}</Text>}
+        {busy && <ActivityIndicator accessibilityLabel="Saving changes" color={palette.accent} />}
+        {children}
+      </ScrollView>
+    </View>
+  </View>;
 }

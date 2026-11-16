@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),React=require('react'),{create,act}=require('react-test-renderer'),babel=require('@babel/core');
 global.IS_REACT_ACT_ENVIRONMENT=true;
 const template=require('../../functions/shared/serviceTemplates.json').find(row=>row.id==='pool-maintenance');
-let tree,server,rows,listeners,drafts,busyStates,saves,failure,manager;
+let tree,server,rows,listeners,drafts,busyStates,saves,failure,manager,draftActionsRef;
 const panel=({title,subtitle,children})=>React.createElement('View',null,title&&React.createElement('Text',null,title),subtitle&&React.createElement('Text',null,subtitle),children);
 const button=({title,onPress,disabled})=>React.createElement('Pressable',{accessibilityLabel:title,onPress,disabled},React.createElement('Text',null,title));
 const file=path.resolve(__dirname,'../components/ServiceChecklist.js'),moduleUnderTest={exports:{}};
@@ -21,13 +21,13 @@ const requireMock=name=>{
 };
 new Function('require','module','exports',babel.transformSync(fs.readFileSync(file,'utf8'),{filename:file,configFile:false,babelrc:false,presets:[[require.resolve('babel-preset-expo'),{jsxRuntime:'classic'}]],plugins:[require.resolve('@babel/plugin-transform-modules-commonjs')]}).code)(requireMock,moduleUnderTest,moduleUnderTest.exports);
 const Checklist=moduleUnderTest.exports.default,job={id:'assigned',companyId:'acme',assignedTo:'member',status:'in-progress',totalCost:9999};
-const props=()=>({job,onDraftChange:value=>drafts.push(value),onBusyChange:value=>busyStates.push(value)});
+const props=()=>({job,draftActionsRef,onDraftChange:value=>drafts.push(value),onBusyChange:value=>busyStates.push(value)});
 async function render(){await act(async()=>{tree=create(React.createElement(Checklist,props()));});}
 const control=label=>tree.root.findAll(node=>node.type==='Pressable'&&node.props.accessibilityLabel===label)[0];
 async function press(label){const node=control(label);assert.ok(node,label);assert.notEqual(node.props.disabled,true);await act(async()=>node.props.onPress());}
 async function input(label,value){await act(async()=>tree.root.findByProps({accessibilityLabel:label}).props.onChangeText(value));}
 const text=()=>JSON.stringify(tree.toJSON());
-beforeEach(()=>{tree=null;manager=false;server={enabled:true,form:{template,assignmentVersion:1,responseVersion:0,serviceDate:'2026-11-13',answers:{},status:'draft'},reports:[],photos:[{id:'private-photo-id',caption:'Equipment inspection'}]};rows=[];listeners=new Set();drafts=[];busyStates=[];saves=[];failure=null;});
+beforeEach(()=>{tree=null;manager=false;draftActionsRef={current:null};server={enabled:true,form:{template,assignmentVersion:1,responseVersion:0,serviceDate:'2026-11-13',answers:{},status:'draft'},reports:[],photos:[{id:'private-photo-id',caption:'Equipment inspection'}]};rows=[];listeners=new Set();drafts=[];busyStates=[];saves=[];failure=null;});
 afterEach(async()=>{if(tree)await act(async()=>tree.unmount());assert.equal(listeners.size,0);});
 test('technician service form renders safe units, choices and private photo labels without management or pricing',async()=>{
   await render();assert.match(text(),/Free chlorine/);assert.match(text(),/ppm/);assert.match(text(),/Equipment inspection/);assert.doesNotMatch(text(),/9999|private-photo-id|Use Pool maintenance/);
@@ -47,4 +47,21 @@ test('refresh preserves an unsaved draft and changed template requires explicit 
 });
 test('disabled or closed jobs keep read-only reports without service submission controls',async()=>{
   server.enabled=false;await render();assert.match(text(),/not enabled yet/);assert.equal(control('Save service draft'),undefined);assert.equal(control('Finalize service report'),undefined);
+});
+
+test('completion can save partial optional checklist answers as a draft without requiring final report fields',async()=>{
+  await render();await input('pH reading','7.4');
+  assert.deepEqual(draftActionsRef.current.getDrafts(),{checklist:true,hasDraft:true});
+  let result;await act(async()=>{result=await draftActionsRef.current.saveDrafts();});
+  assert.equal(result.success,true);assert.equal(saves.length,1);assert.equal(saves[0].record.status,'draft');
+  assert.equal(saves[0].record.answers.ph,7.4);assert.equal(saves[0].record.answers.freeChlorine,undefined);
+  assert.deepEqual(draftActionsRef.current.getDrafts(),{checklist:false,hasDraft:false});assert.equal(drafts.at(-1),false);
+});
+
+test('completion draft actions retain failed answers and discard only explicitly unsaved changes',async()=>{
+  await render();await input('pH reading','7.8');failure=new Error('Device storage unavailable.');
+  let result;await act(async()=>{result=await draftActionsRef.current.saveDrafts();});
+  assert.equal(result.success,false);assert.match(result.message,/storage unavailable/);assert.equal(draftActionsRef.current.getDrafts().hasDraft,true);assert.equal(saves.length,0);
+  await act(async()=>{result=draftActionsRef.current.discardDrafts();assert.equal(draftActionsRef.current.getDrafts().hasDraft,false);});
+  assert.equal(result.success,true);assert.equal(drafts.at(-1),false);assert.equal(rows.length,0);assert.match(text(),/Unsaved checklist changes discarded/);
 });

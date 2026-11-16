@@ -319,14 +319,17 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
           </div>
 
           <div>
-            <label className={label}>Notes</label>
+            <label htmlFor="job-notes" className={label}>Notes</label>
             <textarea
+              id="job-notes"
+              aria-describedby="job-notes-help"
               rows={3}
               value={form.notes}
               onChange={(e) => set('notes', e.target.value)}
               className={input}
               placeholder="Gate code, pets, areas of concern…"
             />
+            <p id="job-notes-help" className="mt-1 text-xs text-gray-500">Shared with assigned staff. Use for gate codes and service instructions.</p>
           </div>
         </div>
 

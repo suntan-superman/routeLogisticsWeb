@@ -17,6 +17,35 @@ Management Mode. The shared capability policy is unchanged.
 
 ## Field Mode and work preservation
 
+Arrival and departure actions are amber before recording and turn green with a
+checkmark plus timestamp after a saved manual record is confirmed. Cached
+records identify their earlier saved status; inferred GPS events are not shown
+as manually recorded. Use **Record another arrival/departure** for a deliberate
+repeat visit. A new arrival returns an older departure indicator to pending.
+
+Complete shows unfinished local entries in a small screen-fixed dialog, with
+**Keep editing**, **Save drafts and continue**, or **Discard unsaved drafts and
+continue**. Discard affects only unsaved local entries; queued work is retained,
+and an attempted visit of uncertain server status must be retried with its
+original operation ID. A blank optional product form does not block completion.
+Work description is required; products, photos, visits and checklists are not
+prerequisites. Saving partial checklist answers creates a draft report and does
+not bypass validation when finalizing that report. Completion errors and saved
+or synchronized results remain visible in the same dialog, outside the scrolling
+work order. The JS overlay preserves the camera/picker lifecycle and blocks
+underlying touch and accessibility focus while open.
+
+Web JobForm **Notes** are operational instructions shared with the assigned
+staff member. The authorized job feed exposes them separately as `dispatchNotes`;
+mobile Job Details shows a read-only, selectable **Job instructions** card below
+the service location. Customer service instructions remain separate. Technician
+observations continue to use `workNotes` and the existing offline operation
+contract; dispatcher instructions never initialize or overwrite that editor.
+Dedicated private/billing/customer notes, financial fields and revision history
+retain their role restrictions. Existing saved job notes need no data migration;
+the new mobile card requires a rebuild and a fresh authorized online read before
+the instructions are available from its scoped offline cache.
+
 Field-work eligibility is an independent company/UID flag. Owners/managers use
 Management → Team → staff details → Field work settings to set **Can be assigned
 field work** with an explicit confirmation. Existing staff default to enabled;

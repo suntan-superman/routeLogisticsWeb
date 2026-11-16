@@ -31,6 +31,18 @@ Netlify (`6afb5151c601ecaa11b12816`, ready at 10:55 AM Pacific on November 16).
 The production Dispatch asset was verified read-only; no backend redeployment
 was necessary. Physical work-note restart/synchronization remains pending.
 
+**Jobs detail access follow-up:** the service name in each Jobs table row now
+opens Job Details directly, without horizontal scrolling to the Actions column.
+Jobs and Dispatch share the same dispatcher instructions, canonical work notes,
+completed-work summary and authorized arrival/departure history component.
+Existing photos, checklist, application records and Jobs status/edit actions are
+preserved. Full web regressions passed **422/422**, including eight new focused
+Jobs UI cases; lint and production build passed. **PW-NOTES-01 Chromium passed**
+against local emulators, verifying the same synchronized note and recorded
+arrival in both screens and closing/reopening Jobs details. No real provider
+messages, production mutations, backend changes or mobile rebuild were required.
+This automated web follow-up does not change physical acceptance case counts.
+
 Arrival, departure and access-blocked evidence now use the existing durable,
 workspace-scoped offline queue. Local acknowledgement follows storage success;
 restart/replay preserves the original event time and operation identity. Current

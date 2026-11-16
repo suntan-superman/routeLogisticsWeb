@@ -16,7 +16,7 @@ const annotate = (...ids) => test.info().annotations.push({ type: 'acceptance', 
 const customerRow = (page, name) => page.getByRole('row').filter({ has: page.getByText(name, { exact: true }) });
 const estimateCard = (page, title) => page.locator('article').filter({ has: page.getByRole('heading', { name: title, exact: true }) });
 
-test('PW-NOTES-01 technician note replay is idempotent and dispatch keeps instructions separate', async ({ page, scenario }) => {
+test('PW-NOTES-01 technician note replay is idempotent and Jobs/Dispatch share work details', async ({ page, scenario }) => {
   annotate('DSP-003', 'SEC-002', 'SEC-003', 'FR-001');
   const original = await scenario.read('jobs', scenario.ids.jobId), foreign = await scenario.read('jobs', scenario.ids.foreignJobId);
   await signIn(page, scenario.accounts.technician);
@@ -34,12 +34,18 @@ test('PW-NOTES-01 technician note replay is idempotent and dispatch keeps instru
   expect(accepted.status).toBe('synced'); expect(typeof accepted.version).toBe('string');
   const replay = await page.request.post(endpoint, { headers: { authorization }, data: { data: payload } });
   expect(replay.ok()).toBe(true); expect((await replay.json()).result).toEqual(accepted);
-  const saved = await scenario.read('jobs', scenario.ids.jobId);
+  let saved = await scenario.read('jobs', scenario.ids.jobId);
   expect(saved.workNotes).toBe(workNotes); expect(saved.notes).toBe(original.notes);
   expect(saved.updatedAt).toBe(accepted.version);
   for (const field of ['status', 'assignedTo', 'assignedToUid', 'date', 'time', 'privateNotes']) expect(saved[field]).toEqual(original[field]);
   const operations = (await scenario.list('rlOperations')).filter(row => row.companyId === scenario.ids.companyId && row.jobId === scenario.ids.jobId && row.userId === scenario.accounts.technician.uid);
   expect(operations).toHaveLength(1); expect(operations[0].result).toEqual(accepted);
+  const visitNote = `${scenario.prefix} Synthetic arrival evidence; no real service visit.`;
+  const visit = await page.request.post(scenario.functionUrl('rlJobVisit'), { headers: { authorization }, data: { data: { action: 'record', evidenceVersion: 1,
+    jobId: scenario.ids.jobId, operationId: randomUUID(), type: 'arrived', note: visitNote, occurredAt: new Date().toISOString(),
+    expectedVersion: accepted.version, expectedAssignee: scenario.accounts.technician.membershipId } } });
+  expect(visit.ok()).toBe(true); expect((await visit.json()).result.status).toBe('synced');
+  saved = await scenario.read('jobs', scenario.ids.jobId);
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await signIn(page, scenario.accounts.manager);
   await page.goto('/dispatch'); await page.getByLabel('Service date', { exact: true }).fill(scenario.jobDate);
@@ -54,6 +60,20 @@ test('PW-NOTES-01 technician note replay is idempotent and dispatch keeps instru
   await page.getByRole('button', { name: 'Close details', exact: true }).click();
   await page.getByRole('button', { name: `${scenario.customerName} · ${scenario.jobTitle}`, exact: true }).click();
   expect(await dialog.getByRole('region', { name: 'Work notes', exact: true }).locator('p').textContent()).toBe(workNotes);
+  await expect(dialog.getByRole('region', { name: 'Visit record', exact: true }).getByText(visitNote, { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Close details', exact: true }).click();
+  await page.goto('/jobs');
+  const openJobsDetails = page.getByRole('button', { name: `View job details for ${scenario.customerName} · ${scenario.jobTitle}`, exact: true });
+  await expect(openJobsDetails).toBeVisible(); await openJobsDetails.click();
+  const jobsDialog = page.getByRole('dialog', { name: 'Job Details', exact: true });
+  await expect(jobsDialog).toBeVisible();
+  expect(await jobsDialog.getByRole('region', { name: 'Work notes', exact: true }).locator('p').textContent()).toBe(workNotes);
+  expect(await jobsDialog.getByRole('region', { name: 'Job instructions', exact: true }).locator('p').textContent()).toBe(scenario.jobInstructions);
+  await expect(jobsDialog.getByRole('region', { name: 'Visit record', exact: true }).getByText(visitNote, { exact: true })).toBeVisible();
+  await jobsDialog.getByRole('button', { name: 'Close', exact: true }).last().click();
+  await expect(jobsDialog).toHaveCount(0); await openJobsDetails.click();
+  expect(await jobsDialog.getByRole('region', { name: 'Work notes', exact: true }).locator('p').textContent()).toBe(workNotes);
+  await expect(jobsDialog.getByRole('region', { name: 'Visit record', exact: true }).getByText(visitNote, { exact: true })).toBeVisible();
   expect(await scenario.read('jobs', scenario.ids.jobId)).toEqual(saved);
   expect(await scenario.read('jobs', scenario.ids.foreignJobId)).toEqual(foreign);
 });

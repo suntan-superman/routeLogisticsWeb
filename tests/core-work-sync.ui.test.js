@@ -22,6 +22,7 @@ function load(relative){
  const module={exports:{}};modules.set(file,module);
  const mock=name=>{
   if(name==='react')return React;if(name==='@tanstack/react-query')return mobile('@tanstack/react-query');
+  if(name.endsWith('/services/workspaceApi'))return{callWorkspace:async(name,data)=>{assert.equal(name,'rlJobVisit');assert.equal(data.action,'list');return{events:[]};}};
   if(name.endsWith('/contexts/AuthContext'))return{useAuth:()=>({currentUser:env.auth.currentUser,userProfile:{name:'Synthetic owner'},company:{id:env.claims.companyId},workspace:env.workspace,loading:false})};
   if(name.endsWith('/services/firebase'))return{auth:env.auth};
   if(name.endsWith('/services/tenancy'))return{getClaims:()=>env.claims,getWorkspace:()=>env.workspace,can,canManage:can};
@@ -47,7 +48,7 @@ function load(relative){
   throw Error(`Unexpected dependency: ${name}`);
  };
  const code=transformSync(fs.readFileSync(file,'utf8'),{format:'cjs',loader:file.endsWith('.jsx')?'jsx':'js'}).code;
- new Function('require','module','exports',code)(mock,module,module.exports);return module.exports;
+ new Function('React','require','module','exports',code)(React,mock,module,module.exports);return module.exports;
 }
 async function render(page){env.Page=load(page).default;await act(async()=>{tree=create(React.createElement(QueryClientProvider,{client},React.createElement(env.Page)),{createNodeMock:()=>({focus(){},contains:()=>false,querySelectorAll:()=>[]})});});await settle();}
 async function rerender(){await act(async()=>tree.update(React.createElement(QueryClientProvider,{client},React.createElement(env.Page))));await settle();}

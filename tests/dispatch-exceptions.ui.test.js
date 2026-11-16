@@ -12,6 +12,7 @@ const request = (extra = {}) => ({ id: 'request-one', status: 'pending', revisio
 const team = [{ id: 'tech-one', name: 'First technician' }, { id: 'tech-two', name: 'Second technician' }].map(row => ({ ...row, role: 'technician' }));
 const importer = name => {
   if (name === 'react') return React;
+  if (name.endsWith('/JobWorkDetails')) { const value = { exports: {} }; new Function('React', 'require', 'module', 'exports', transformSync(fs.readFileSync(path.resolve(__dirname, '../routeLogisticsWeb/src/components/JobWorkDetails.jsx'), 'utf8'), { loader: 'jsx', format: 'cjs' }).code)(React, importer, value, value.exports); return value.exports; }
   if (name.endsWith('/useWorkspaceQuery')) return hooks;
   if (name.endsWith('/SelectControl')) return { __esModule: true, default: selectControlMock(React) };
   if (name.endsWith('/AuthContext')) return { useAuth: () => ({ company: { id: 'synthetic-company', name: 'Synthetic provider', timeZone: 'America/Los_Angeles' }, role: 'manager', can: () => true }) };

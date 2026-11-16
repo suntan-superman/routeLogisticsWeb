@@ -37,6 +37,7 @@ function useScopedQuery(key,loader,{enabled=true}={}){
 }
 const mock = name => {
   if(name==='react')return React;
+  if(name.endsWith('/components/JobWorkDetails'))return{__esModule:true,default:compile('components/JobWorkDetails.jsx')};
   if(name==='react-hot-toast')return{__esModule:true,default:{success:message=>env.toasts.push({kind:'success',message}),error:message=>env.toasts.push({kind:'error',message})}};
   if(name.endsWith('/hooks/useUnsavedChanges'))return{useUnsavedChanges:useGuard,useConfirmUnsavedChanges:()=>confirmDiscard};
   if(name.endsWith('/hooks/useWorkspaceQuery'))return{useWorkspaceQuery:useScopedQuery,useInvalidateWorkspace:()=>async prefixes=>env.calls.push({name:'invalidate',prefixes})};

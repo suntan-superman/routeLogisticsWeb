@@ -29,6 +29,7 @@ import { useNavigate } from 'react-router-dom';
 import JobPhotos from '../components/JobPhotos';
 import ServiceChecklist from '../components/ServiceChecklist';
 import JobApplicationLog from '../components/JobApplicationLog';
+import JobWorkDetails from '../components/JobWorkDetails';
 import { createInvoiceFromJob } from '../services/invoiceService';
 import { canManage, can } from '../services/tenancy';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
@@ -566,7 +567,7 @@ const JobManagementPage = () => {
                   <tr key={job.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div>
-                        <div className="text-sm font-medium text-gray-900">{job.serviceType || 'Service'}<ModifiedBadge job={job} /></div>
+                        <div className="text-sm font-medium"><button type="button" onClick={() => openViewModal(job)} aria-label={`View job details for ${job.customerName || 'Customer'} · ${job.serviceType || 'Service'}`} className="text-left text-primary-700 underline decoration-primary-300 underline-offset-2 hover:text-primary-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500">{job.serviceType || 'Service'}</button><ModifiedBadge job={job} /></div>
                         <div className="text-sm text-gray-500 flex items-center">
                           <MapPinIcon className="h-3 w-3 mr-1" />
                           {job.address || 'No address'}
@@ -705,32 +706,7 @@ const JobManagementPage = () => {
                   <p className="text-lg font-semibold text-gray-900">{formatCurrency(selectedJob.totalCost)}</p>
                 </div>
                 
-                {selectedJob.notes && (
-                  <div>
-                    <h5 className="text-sm font-medium text-gray-700">Notes</h5>
-                    <div className="text-sm text-gray-900 whitespace-pre-line">
-                      {selectedJob.notes}
-                    </div>
-                  </div>
-                )}
-                
-                {selectedJob.actualWorkDone && (
-                  <div>
-                    <h5 className="text-sm font-medium text-gray-700">Actual Work Done</h5>
-                    <div className="text-sm text-gray-900 whitespace-pre-line">
-                      {selectedJob.actualWorkDone}
-                    </div>
-                  </div>
-                )}
-                
-                {selectedJob.completionNotes && (
-                  <div>
-                    <h5 className="text-sm font-medium text-gray-700">Completion Notes</h5>
-                    <div className="text-sm text-gray-900 whitespace-pre-line">
-                      {selectedJob.completionNotes}
-                    </div>
-                  </div>
-                )}
+                <JobWorkDetails key={selectedJob.id} job={selectedJob} />
 
                 <JobChangeHistory job={selectedJob} />
                 <div className="border-t pt-4"><JobPhotos job={selectedJob} /><ServiceChecklist key={selectedJob.id} job={selectedJob} /></div>

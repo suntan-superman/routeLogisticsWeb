@@ -8,6 +8,7 @@ import { googleNavigation } from '../utils/routePlanning';
 import RoutesPage from './RoutesPage';
 import JobPhotos from '../components/JobPhotos';
 import ServiceChecklist from '../components/ServiceChecklist';
+import JobWorkDetails from '../components/JobWorkDetails';
 import TeamLocationStatus from '../components/TeamLocationStatus';
 import StaffAvailabilityEditor from '../components/StaffAvailabilityEditor';
 import { LOCATION_LABELS, locationState, nearestOnDuty } from '../utils/workLocations';
@@ -234,10 +235,6 @@ function JobExceptionReview({ job, value, allowed, onChanged, onAssign, assignme
 
 function DispatchJobDetails({ job, onClose, returnFocus, fallbackFocus, destination, exceptionState, canManageRequests, onExceptionChanged, onAssign, assignmentTeam, assigning }) {
   const panel = useRef(null), close = useRef(null);
-  const workNotes = typeof job.workNotes === 'string' ? job.workNotes : '';
-  const instructions = typeof job.dispatchNotes === 'string' ? job.dispatchNotes : typeof job.notes === 'string' ? job.notes : '';
-  const visitsQuery = useWorkspaceQuery(['job-visits', job.id], () => callWorkspace('rlJobVisit', { action: 'list', jobId: job.id }));
-  const visits = visitsQuery.data?.events || [], error = visitsQuery.error?.message || '', loading = visitsQuery.isPending;
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden'; close.current?.focus();
@@ -262,12 +259,8 @@ function DispatchJobDetails({ job, onClose, returnFocus, fallbackFocus, destinat
       <div className="mb-5 flex items-start justify-between gap-4"><div><p className="text-sm text-gray-500">Job details</p><h2 id="dispatch-job-title" className="text-xl font-bold">{job.customerName || 'Customer'} · {job.serviceType || 'Service visit'}</h2></div><button ref={close} className="min-h-11 rounded border px-3 py-2" onClick={onClose}>Close details</button></div>
       <div className="space-y-5"><div className="space-y-2 rounded border p-4"><p className="font-semibold" style={{ color: STATUS_COLORS[job.status] || '#374151' }}>Status: {job.status || 'Not set'}</p><p>{job.date} · {job.time || 'Time not set'}</p><p>{jobAddress(job) || 'Service address not set'}</p>{(destination || jobAddress(job)) && <a className="inline-block underline" href={googleNavigation([{ ...job, address: jobAddress(job), location: destination }])} target="_blank" rel="noreferrer">Navigate to service location</a>}</div>
         <JobExceptionReview key={'exception-' + job.id} job={job} value={exceptionState} allowed={canManageRequests} onChanged={onExceptionChanged} onAssign={onAssign} assignmentTeam={assignmentTeam} assigning={assigning} />
-        {!!instructions && <section aria-label="Job instructions"><h3 className="mb-2 font-semibold">Job instructions</h3><p className="whitespace-pre-wrap">{instructions}</p></section>}
-        {!!workNotes && <section aria-label="Work notes"><h3 className="mb-2 font-semibold">Work notes</h3><p className="whitespace-pre-wrap">{workNotes}</p></section>}
-        {!!(job.actualWorkDone || job.completionNotes) && <section><h3 className="mb-2 font-semibold">Completed work</h3><p className="whitespace-pre-wrap">{job.actualWorkDone}</p><p className="whitespace-pre-wrap">{job.completionNotes}</p></section>}
-        <section><h3 className="mb-2 font-semibold">Visit record</h3><p className="mb-2 text-xs text-gray-600">Manual reports and GPS evidence do not independently verify access to the property.</p>{loading && <p role="status">Loading visit records…</p>}{error && <div><p role="alert" className="text-red-700">{error}</p><button className="mt-2 underline" onClick={() => visitsQuery.refetch()}>Retry visit records</button></div>}{!loading && !error && !visits.length && <p>No visit events recorded.</p>}
-          {visits.map(visit => <article key={visit.id} className="mb-3 rounded border p-3"><strong>{{ arrived: 'Arrived', departed: 'Departed', 'access-blocked': 'Couldn’t access property' }[visit.type] || 'Visit event'}</strong><p className="text-sm">{new Date(visit.capturedAt || visit.recordedAt).toLocaleString()} · {{ manual: 'Reported manually', 'manual-gps': 'Reported manually with GPS', 'gps-evidence': 'Estimated from GPS evidence' }[visit.source] || 'Visit report'}</p>{Number.isFinite(visit.accuracy) && <p className="text-sm">GPS accuracy: ±{Math.round(visit.accuracy)} m</p>}{visit.note && <p className="whitespace-pre-wrap">{visit.note}</p>}</article>)}
-        </section><JobPhotos key={job.id} job={job} /><ServiceChecklist key={'form-' + job.id} job={job} />
+        <JobWorkDetails key={'work-' + job.id} job={job} />
+        <JobPhotos key={job.id} job={job} /><ServiceChecklist key={'form-' + job.id} job={job} />
       </div>
     </section>
   </div>;

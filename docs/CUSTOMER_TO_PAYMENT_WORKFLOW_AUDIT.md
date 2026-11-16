@@ -6,7 +6,9 @@
 
 **Infrastructure:** existing Firebase project `mi-factotum-field-service` and production Netlify site.
 
-**Scope:** source inspection, read-only deployed metadata, existing local/emulator tests and implementation planning. No application features, runtime configuration or financial records were changed. No provider transactions, real email/SMS, live Stripe activation, QuickBooks writes or deployments were performed.
+**Original audit scope:** source inspection, read-only deployed metadata, existing local/emulator tests and implementation planning. No application features, runtime configuration or financial records were changed during that audit. No provider transactions, real email/SMS, live Stripe activation, QuickBooks writes or deployments were performed during the audit.
+
+**November 16 repair addendum, verified 12:10 PM Pacific:** **G12, G13 and G14 are resolved** by implementation `4821a11b682e79c1c0586ba89257dde0c7ea06d0`. The server-authoritative invoice contract preserves approved quote terms, atomically prevents duplicate bills, and enforces financial authorization/revisions. Four affected Route Logistics Functions and the narrow invoice rules change are deployed. Web publication `47cf3c2` is ready in Netlify deployment `6afb6298f174af9dbe74c0cb`; corrected served assets were verified. [Invoice integrity repair](INVOICE_INTEGRITY_REPAIR.md) records source, tests, deployed revisions, historical compatibility and remaining acceptance. Separate executed suites passed 528/528 full emulator cases, 29/29 final invoice cases, 437/437 web cases and 36/36 browser smoke executions across three engines; counts overlap. No real financial/provider operation or historical repair was performed. All baseline record metadata remained unchanged, Stripe remains test-only, QB writes remain disabled and its processor remains PAUSED. Other findings and original line-number references below remain a dated audit baseline unless explicitly updated.
 
 ## 1. Executive summary
 
@@ -14,17 +16,17 @@ The lifecycle is **partially integrated**, with substantial reusable operational
 
 The strongest existing paths are company customer management, checked scheduling/assignment, assigned mobile fieldwork, versioned online management estimates, private photo/PDF delivery, expiring customer approval links, idempotent quote-to-job conversion, secure web Stripe test payments and an optional tenant-isolated QuickBooks sandbox connector.
 
-Three confirmed billing defects deserve priority before an invoicing/payment pilot:
+The original audit identified three priority billing defects, now resolved by the repair above:
 
-1. **Approved quote value can be lost.** Conversion writes job `total`/`estimatedCost`; invoicing reads only `totalCost`. Executing the existing invoice service with an in-memory database boundary produced a **$0 invoice from a $108.25 converted job**, dropping approved quote lines/tax.
-2. **Concurrent invoice creation can duplicate billing.** The current query-then-add path produced **two invoices for one job** in an isolated concurrency probe.
-3. **Native invoice creation is not server-authoritative.** Client arithmetic and invoice fields are constrained by rules, but the server does not recompute invoice lines/taxes or transactionally verify completed-job/customer references and revision transitions. This is a financial correctness gap for an authorized finance actor, not evidence of technician or cross-tenant financial access.
+1. **Approved quote value could be lost.** Conversion wrote job `total`/`estimatedCost`; invoicing read only `totalCost`. Executing the original invoice service with an in-memory database boundary produced a **$0 invoice from a $108.25 converted job**, dropping approved quote lines/tax.
+2. **Concurrent invoice creation could duplicate billing.** The original query-then-add path produced **two invoices for one job** in an isolated concurrency probe.
+3. **Native invoice creation lacked server authority.** Client arithmetic and invoice fields were constrained by rules, but the server did not recompute invoice lines/taxes or transactionally verify completed-job/customer references and revision transitions. This was a financial correctness gap for an authorized finance actor, not evidence of technician or cross-tenant financial access.
 
 Other important missing links are canonical prospect/inquiry tracking, an estimate-visit type, assigned-technician estimate permissions and durable estimate drafts, customer decline/revision requests, scheduling-needed follow-up, native partial/deposit allocations, technician-assisted payments and native-payment-to-QuickBooks export. The company mobile navigation does **not** expose its retained estimate editor; component existence/tests do not establish reachable company functionality.
 
 Read-only production checks at **11:15 AM Pacific** confirmed all **99 source-exported functions ACTIVE**, deployed Stripe **test mode** with live approval false, QuickBooks **sandbox** with writes and production approval false, enabled estimate/email flags, and a connected sandbox metadata record. The **Route Logistics QuickBooks event processor schedule is PAUSED**. These settings were preserved. Access-token expiry is expected to invoke existing refresh logic; it is not by itself a broken connection.
 
-Recommended sequence: retain the requested A→E business progression, reuse existing quote/payment implementations, and make the confirmed Batch C billing-integrity corrections a **mandatory gate before any billing/payment pilot**. A first prospect-to-estimate-visit batch can proceed independently of live payments or QuickBooks.
+Recommended sequence: retain the requested A→E business progression and reuse existing quote/payment implementations. The mandatory G12–G14 implementation gate is now satisfied; remaining financial policy, operator and provider acceptance gates still apply before a billing/payment pilot. A first prospect-to-estimate-visit batch can proceed independently of live payments or QuickBooks.
 
 **Classification:** Complete means an inspected, bounded implementation supported by meaningful automated evidence; it does not imply physical-device or real-provider acceptance. Partial means a necessary workflow/surface/acceptance step remains. Missing means no working path was found. Blocked means external configuration, approval or provider/operator acceptance is required. These distinctions apply to every table below.
 
@@ -38,7 +40,7 @@ flowchart LR
   D --> E[Private versioned PDF/email and customer approval]
   E --> F[Authorized explicit conversion and checked scheduling]
   F --> G[Assigned job and mobile service completion]
-  G --> H[Manual invoice: value, tax and concurrency gaps]
+  G --> H[Reviewed server invoice: approved terms and atomic identity]
   H --> I[Customer web Payment Element: test mode]
   I --> J[Native Stripe reconciliation: test fields only]
   H -. reviewed optional export .-> K[QuickBooks sandbox invoice]
@@ -59,7 +61,7 @@ Approval does not automatically schedule a visit or charge a customer. Estimate 
 | Customer approval | Partial overall; approval contract Complete | `/estimate-approval`, hashed expiring version-bound bearer token | Customer needs no staff account; responsive web | No decline/revision path, portal quote discovery or management approval task | B; G08–G09 |
 | Scheduled job | Complete bounded internal contract | `rlManageJob`, `rlCheckAvailability`, `jobs`, locks/availability/service areas | Management web; assigned field/mobile management visibility | Tests cover conflicts/tenant scope; no customer self-booking, travel-time scheduling or recurring quote conversion | Existing foundation; G10 |
 | Completed service | Partial acceptance | Existing work-order/notes/photo/checklist/visit/offline operation workflow | Assigned technicians; authorized owners/managers doing fieldwork | Current note repair has automated/install evidence; physical offline restart/sync remains separately unaccepted | Preserve; G11 |
-| Invoice | Partial, confirmed correctness defects | Jobs → Create Invoice, `/invoices`, direct client Firestore service | Owner/admin/authorized solo owner; manager/technician excluded | Price/tax loss, non-atomic duplicate guard, client totals and uncontrolled revisions | C; G12–G15 |
+| Invoice | Integrity repaired; wider billing workflow Partial | Jobs → review/confirm, `/invoices`, authoritative `rlManageInvoice` | Owner/admin/authorized solo owner; manager/technician excluded | G12–G14 resolved; partial/deposit ledger and later billing features remain absent | C; G15–G17 |
 | Payment | Partial; live Blocked intentionally | Portal/staff web Stripe Elements Payment Element, signed webhook, private payment/event rows | Customer scoped invoice; owner/admin finance | Full-invoice test collection only; no technician UI, partial/deposit ledger or provider merchant routing | D; G16–G20 |
 | Accounting reconciliation | Partial; automatic processing Blocked by paused schedule | Optional QuickBooks OAuth/mappings/reviewed sandbox export/inbound reconciliation | Owner config/exports; owner/admin read/reconcile | Writes disabled; processor paused; native payment/refund export and tax UI missing; genuine routed delivery unaccepted | C/D; G21–G23 |
 | Daily technician report | Partial underlying data; assembled report Missing | Jobs, visit evidence, shift events, latest position, saved route order | Management web/mobile operations views | No joined per-person/day report/export; no raw historic GPS path | E; G25–G26 |
@@ -77,7 +79,8 @@ Web is React/Vite; mobile is Expo/React Native. Both use the existing Firebase p
 | `jobs`, `servicePlans`, `rlScheduleLocks`, `rlStaffAvailability` | Customer/property snapshot, assigned membership/UID, schedule/status/instructions/work notes, recurring source, checked scheduling and field eligibility. |
 | `estimates`, `rlEstimateVersions`, `rlEstimateOperations`, `rlEstimateApprovalSecrets`, `rlEstimateConversions` | Quote header/customer or recipient, immutable priced/versioned terms, replay IDs, private approval token/version state and deterministic conversion relationship. |
 | `photos`, `serviceLogs`, service-form records, `rlJobVisits`, `rlOperations` | Job-linked private photos, application/service records, arrival/departure/access evidence and durable replay receipts. |
-| `invoices` | Native invoice lines/tax/total/status + `jobId`/`customerId`; current creation is a client service rather than authoritative financial callable. |
+| `invoices` | Server-controlled native invoice lines/tax/cents/total/status/revision + canonical `jobId`/`customerId` and approved-estimate linkage where applicable; legacy values preserved. |
+| `rlInvoiceClaims`, `rlInvoiceOperations`, `rlInvoiceAudit` | Private transactional workspace/job identity, stable replay receipts and revision/action evidence; direct client access denied. |
 | `rlPayments`, `rlPaymentEvents` | Private invoice/mode→Stripe attempt and deduplicated provider events. Test reconciliation uses `testPaymentStatus`, not real invoice settlement. |
 | `rlMail`, notification/push/SMS outboxes | Existing asynchronous delivery, consent/gates, retries and history. Enqueued/sent/provider-delivered/inbox are separate states. |
 | `rlQuickBooksConnections`, `rlQbRealms`, `rlQbMappings`, `rlQbRemoteMappings` | Private tenant/environment grant + realm routing, native→provider IDs and remote uniqueness registry. |
@@ -190,7 +193,7 @@ Evidence: `functions/estimates.js:107–211,313–411,501–581,699–800`; `rou
 | Geographic eligibility? | Server rechecks approved property/category and coverage in the conversion transaction. |
 | Original customer? | Linked customer reused; prospect conversion requires explicit matching-customer reuse or explicit creation. No automatic overwriting of customer data. |
 | Correct property? | Approved service-property snapshot retained; legacy missing property may fall back to recipient address. Capture property explicitly before approval. |
-| Lines/tax? | **Not transferred to billing snapshot.** Job stores quote `total`/`estimatedCost`, linkage and scope, but not full approved lines/subtotal/tax snapshot or `totalCost`. See confirmed G12. |
+| Lines/tax? | **G12 resolved November 16.** New conversions retain validated approved billing snapshots. Invoice creation resolves the immutable approved version for new and historical linked jobs; incomplete/ambiguous sources require review without rewriting history. |
 | Photos/notes? | Original immutable quote/photos remain through estimate linkage; scope/notes copied. No automatic photo duplication into job attachments or normal manager/technician quote-link display. Owner/admin full job projection retains raw linkage. |
 | Idempotent? | Yes: deterministic `rl_estimate_<estimateId>` job and transactional conversion/audit records prevent retry duplicates. |
 | Recurring work? | No recurring conversion option; recurring service-plan infrastructure exists separately. |
@@ -204,23 +207,23 @@ Evidence: `functions/estimates.js:583–694`; `functions/workData.js:12–13,35�
 
 | Check | Result |
 | --- | --- |
-| Generation | Manual owner/admin action on completed-job details. No automatic invoice/charge trigger. Service itself does not authoritatively fetch/validate completed status. |
-| Line origin | One aggregate service description and `job.totalCost`; not approved quote quantities/lines/tax or an actual-work pricing ledger. |
-| Totals/tax | Client `computeTotals`; rules enforce nonnegative total/status/protected fields but not mathematical equality or canonical job/customer relationships. No server tax engine. |
-| Quote conversion | `$108.25` converted-shaped job produced invoice `$0` in isolated execution; see G12. |
+| Generation | Manual authorized financial actor opens server preview and explicitly confirms. Server validates completed/billable job, current membership and canonical customer relationship. No automatic invoice/charge trigger. |
+| Line origin | Approved immutable quote lines/tax retained; ordinary jobs require an explicit valid canonical amount. No actual-work pricing ledger is introduced. |
+| Totals/tax | Server integer-cent calculation with the existing supported flat-tax policy. Direct client writes denied. No tax-jurisdiction engine is introduced. |
+| Quote conversion | G12 resolved: actual approved100 + tax8.25 conversion produces total108.25 with original lines/version in emulator regressions. |
 | Discounts | No explicit policy/UI/calculation; negative quantity/price clamping is not discount support. |
 | Partial payments/deposits | No native allocation/remaining-balance/deposit model. QuickBooks partial-payment tests do not establish native Stripe partial collection. |
 | Manual payment | Owner/admin can mark sent invoice paid with method/paidAt; no required amount/reference or immutable allocation/event receipt. |
-| Revisions | Paid immutable and payment locks protected. Draft/sent edits lack expected-version CAS, numbered revision and invoice-specific audit; no full invoice editor in current page. |
-| Email | Authorized deduplicated `emailInvoice` queues text summary + portal link, changes draft→sent and revalidates recipient. No attached branded invoice PDF. |
+| Revisions | Server expected-revision checks, allowed status transitions and audit. Draft metadata edits only; issued financial terms, paid invoices and payment locks protected. Historical revision omission is treated as0 for explicit permitted actions. |
+| Email | Authorized deduplicated `emailInvoice` queues text summary + portal link and revisioned/audited draft→sent; recipient/terms revalidated. No attached branded invoice PDF. |
 | Download | Staff browser print can save to PDF. Portal generic shared documents are not a dedicated invoice PDF/download action. |
-| Duplicate invoices | Sequential reuse exists, but query(limit5)→random add is not atomic and may miss older nonvoid records. Two concurrent calls produced two invoice creations. |
+| Duplicate invoices | G13 resolved: transactional company/job claim and stable operations converge on one invoice, including historical random-ID lookup without a five-row limit. Explicit void/replacement retains history and prevents replacement races. |
 | Invoice-ready notice | Job-status notification is not an invoice-ready review task; none found. |
-| Numbering | Client random invoice number, not a server uniqueness/sequential numbering policy. Define business policy before claiming formal numbering controls. |
+| Numbering | Server deterministic generation-specific number with collision checks, compatible with existing QB length limits; historical numbers unchanged. No sequential numbering system introduced. |
 
-Key source: [invoice creation](../routeLogisticsWeb/src/services/invoiceService.js#L24), [from-job derivation](../routeLogisticsWeb/src/services/invoiceService.js#L52), [conversion values](../functions/estimates.js#L639), [invoice rules](../firestore.rules#L247), `functions/invoiceEmail.js:23–59`, `routeLogisticsWeb/src/services/invoiceMath.js:4–24`.
+Current repair source: [authoritative invoice contract](../functions/invoices.js), [cent arithmetic](../functions/shared/invoiceMath.js), [client service](../routeLogisticsWeb/src/services/invoiceService.js), [review dialog](../routeLogisticsWeb/src/components/InvoiceCreationDialog.jsx), [invoice rules](../firestore.rules), and [regressions](../tests/invoiceIntegrity.integration.test.js). The original client-math probe evidence remains historical.
 
-The isolated probes evaluated existing source with an in-memory Firestore boundary; no Firestore/network write occurred. Existing tests passing do not negate these uncovered cross-module/concurrency gaps. Do not patch invoice totals or existing customer invoices during this audit. G12–G17.
+The original isolated probes evaluated audit-baseline source with an in-memory Firestore boundary; no Firestore/network write occurred. The repair subsequently reproduced those defects before runtime edits and validated the corrected paths using emulators. G12–G14 are resolved; G15–G17 remain separate. Existing customer invoice totals were not patched or resent.
 
 ## 11. Stripe payment findings
 
@@ -349,7 +352,7 @@ All results below were executed against the audit source baseline, using existin
 
 Logs are ignored under `.migration/customer-payment-*.log` and `.migration/audit-{portal-unit-ui,quickbooks-contract-ui}.log`; sanitized probe is `.migration/customer-payment-invoice-source-probe.json`. Read-only deployed evidence is distinct from tests.
 
-Relevant meaningful emulator cases are in `tests/estimates.integration.test.js`, `scheduling.integration.test.js`, `customerAddresses.integration.test.js`, `workflows.integration.test.js`, `payments.integration.test.js`, `paymentLifecycle.integration.test.js`, `quickbooks.*.integration.test.js`, `portal.integration.test.js`, `firestore.rules.test.js`, `storage.rules.test.js` and `access.integration.test.js`. Passing these isolated contracts does not cover the currently missing quote→job→invoice full-value assertion or concurrent invoice service path.
+Relevant meaningful emulator cases are in `tests/estimates.integration.test.js`, `scheduling.integration.test.js`, `customerAddresses.integration.test.js`, `workflows.integration.test.js`, `payments.integration.test.js`, `paymentLifecycle.integration.test.js`, `quickbooks.*.integration.test.js`, `portal.integration.test.js`, `firestore.rules.test.js`, `storage.rules.test.js` and `access.integration.test.js`. At the original audit baseline these isolated contracts omitted quote→job→invoice full-value and concurrent creation assertions. The repair adds those cross-module cases in `tests/invoiceIntegrity.integration.test.js`; its final29/29 run and the broader528/528 run are recorded separately in the repair report.
 
 Physical handset work-note restart/sync, responsive end-customer quote/payment journeys, real signed Stripe confirmation/receipt and genuine routed Intuit change acceptance were **not performed in this audit**. Previous provider/device evidence remains dated separately in the master acceptance plan and feature reports; it was not copied into fresh Pass results.
 
@@ -370,9 +373,9 @@ Every gap above maps to the planning register below. Complexity: S=small bounded
 | G09 | No approval/scheduling-needed task or estimate follow-up | Medium | Deduplicated management task and follow-up date, keep quote approved until explicitly scheduled | Existing notifications/preferences | S–M | Yes / Only if new native task UI |
 | G10 | Conversion UI lacks assignee/conflict alternatives/recurrence and visible field linkage | Medium | Reuse checked scheduler/assignment controls; retain approved property/link; explicit recurring choice | Existing conversion, G04; recurrence policy | M | Backend only for missing contract / Native UI rebuild if added |
 | G11 | Current repaired offline notes lack final physical restart/sync acceptance | High for pilot acceptance | Run dedicated-device retention/reconnect/exact-once procedure; retain failed draft/photo/visit data | Installed repair and authorized device/test job | S acceptance | No deployment/rebuild unless a real defect is found |
-| G12 | Approved108.25 quote can invoice0; lines/tax lost | **High, billing-pilot blocker** | Server resolves immutable approved version into authoritative job/invoice billing snapshot; ambiguous legacy jobs require review | Estimate linkage, G14 | M | Yes + web / No for web-first repair |
-| G13 | Concurrent invoice creation duplicates bills; limited lookup may miss prior invoice | **High, billing-pilot blocker** | Transactional job billing claim/deterministic identity; explicit void/replacement policy | G12/G14 | M | Yes + web / No |
-| G14 | Client invoice totals/references/transitions; stale revisions can overwrite terms | **High, billing-pilot blocker** | Server cents/tax/ref checks, permitted transitions, expected-version CAS and audit; close raw financial mutation path compatibly | Existing invoice review/migration, tax policy | M–H | Yes + rules/web / Native only later financial UI |
+| G12 | Approved108.25 quote could invoice0; lines/tax lost | **Resolved — November 16** | Immutable approved version/snapshot controls validated lines and cents; ambiguous historical sources fail review | [Deployed repair and automated evidence](INVOICE_INTEGRITY_REPAIR.md) | Completed bounded repair | Functions + web deployed / No native rebuild |
+| G13 | Concurrent creation could duplicate bills; limited lookup missed history | **Resolved — November 16** | Transactional company/job claim, stable operation replay, complete historical lookup and explicit race-safe void/replacement | [Deployed repair and automated evidence](INVOICE_INTEGRITY_REPAIR.md) | Completed bounded repair | Functions + web deployed / No native rebuild |
+| G14 | Client totals/references/transitions and stale revisions lacked server authority | **Resolved — November 16** | Server cents/reference validation, current financial capability, expected revision, transitions/audit and raw client write denial | [Deployed repair and automated evidence](INVOICE_INTEGRITY_REPAIR.md); legacy review remains separate | Completed bounded repair | Functions + rules/web deployed / No native rebuild |
 | G15 | Discounts, deposits and native partial/manual allocation ledger missing | Medium–High if required by pilot | Define explicit discount/tax and source-labelled payment/balance/allocation model; no negative-price substitute | G14 and business billing policy | M–H | Yes + web / Yes if delegated native payments |
 | G16 | No customer branded invoice PDF/dedicated download; text-only invoice mail | Medium | Render authoritative invoice version with authorized download/optional attachment | G14, private document patterns | M | Yes + web / No |
 | G17 | No unified manual/QB/Stripe history, controlled adjustments/refund action or invoice-ready task | Medium | Source-labelled immutable allocations/reviewed adjustments + deduplicated ready task; retain manual invoice creation | G14/G15; later provider test approval | M | Yes + web / Optional native display |
@@ -394,7 +397,7 @@ External live-payment approval and actual-provider/physical acceptance are inten
 | --- | --- | --- | --- |
 | **A — Prospect intake and estimate scheduling** | Staff records inquiry/source/follow-up on a reused/new customer, chooses property and eligible estimator, schedules one explicit estimate visit visible on field schedule | Existing customers, availability, locks, Google property validation, jobs/calendar/dispatch/mobile schedule; no new prospect database or scheduler | G01–G04; no mistaken billing or historical reclassification; web+Functions/rules, native estimate-kind display rebuild |
 | **B — Technician quote and customer decision** | Assigned tech prepares durable quote; management sends or explicit owner policy permits sending; customer approves/declines/revises; management sees scheduling needed | Existing versioned totals/photos/PDF/mail/private approval/conversion are retained; do not rebuild entire estimate engine | G05–G09; restart/permission/versioned recipient acceptance; Functions/web/native builds |
-| **C — Approved work to one correct invoice** | Staff schedules/assigns approved scope, completes service and generates one correctly valued/taxed/revisioned invoice with customer document | Existing conversion/scheduler/fieldwork/invoice display/mail; focus on G10/G12–G14/G16 correctness | **Move G12–G14 repair ahead of any billing/payment pilot even if A/B ship first.** Full quote→job→invoice equality + concurrent repeat assertion required; Functions/rules/web; native optional |
+| **C — Approved work to one correct invoice** | Staff schedules/assigns approved scope, completes service and generates one correctly valued/taxed/revisioned invoice with customer document | Existing conversion/scheduler/fieldwork/invoice display/mail; G12–G14 now resolved; G10/G16 remain | Correctness gate passed in local automated tests and deployed; operator review and remaining workflow/document acceptance still apply. No live/provider billing activation |
 | **D — Secure payment and optional accounting** | Customer pays secure approved amount in test environment, webhook confirms once and customer sees source-labelled history; narrow technician assistance if approved | Reuse current Payment Element/portal/signatures/locks; QB remains optional; no Terminal rebuild by default | Define G15/G17/G18 policy; G20 decision before live, G21–G23 only for accounting users; controlled provider acceptance, keep live disabled until explicitly approved |
 | **E — Daily technician activity** | Management chooses member/day and sees scheduled vs recorded stops, completion/unresolved evidence, valid durations and exports | Reuse jobs/visit/shift/route/map data; start table/CSV/print without GPS-path collection | G25/G26; prove historical attribution, offline gaps, cross-tenant denial and honest labels; web/backend, native optional |
 
@@ -402,7 +405,7 @@ A and early B may share one thin intake/estimate-visit vertical slice. C need no
 
 ## 19. Proposed first implementation batch
 
-**First business batch: A, ending at a scheduled estimate visit**, with billing explicitly out of scope until G12–G14 are corrected. This follows the preferred lifecycle order while making the demonstrated financial defects visible release blockers rather than optional backlog.
+**First business batch: A, ending at a scheduled estimate visit.** G12–G14 have now been repaired and deployed separately. Remaining billing policy, workflow and provider acceptance work stays outside Batch A; this report does not automatically authorize beginning another implementation batch.
 
 1. Define backward-compatible `customers` lifecycle/inquiry metadata and explicit estimate-visit kind. Preserve every current customer ID, active state, property/job snapshot and historical appointment.
 2. Add management-web intake/contact reuse with scoped duplicate warning, service request/source/notes, assigned follow-up and a service-property choice. No bulk merge or prospect database.
@@ -410,7 +413,7 @@ A and early B may share one thin intake/estimate-visit vertical slice. C need no
 4. Expose estimate-visit badge/instructions/outcome in assigned mobile work and retain current arrival/photo/checklist/note/offline controls. Estimate drafting is the next B slice; do not open broad management/finance access.
 5. Prove repeated intake/save creates no duplicate, wrong-tenant/property/staff attempts fail, ordinary historical service jobs are unchanged, estimate visits cannot enter ordinary invoice derivation, and scheduled visit appears on the correct field device.
 
-**Parallel mandatory pre-billing repair plan, not implemented here:** transactional server create-from-job/approved-version contract with exact quote item/tax/total fidelity, deterministic billing identity, explicit completed eligible job/customer checks and revision/audit protection. Add failing-first cross-module and concurrent regression cases for the two probes before changing behavior. No real invoice migration or automatic charging until explicit implementation scope is approved.
+**Pre-billing integrity repair completed separately:** G12–G14 now have transactional creation from approved terms, exact cent fidelity, canonical billing identity, eligibility checks and revision/audit protection. Failing-first regressions, deployment and preservation evidence are in the repair report. No historical invoice migration or automatic charging was introduced.
 
 Expected delivery: targeted Functions/rules and web deployment; native rebuild for new estimate-visit presentation/technician workflow. A documentation-only audit needs neither deployment nor native rebuild. Reuse existing project, secrets, connection and main branch.
 
@@ -435,4 +438,4 @@ Expected delivery: targeted Functions/rules and web deployment; native rebuild f
 - [ ] Portal provider switch, shared PDF/photo and quote access survive responsive screen sizes; revoked association denies future reads while another provider remains independent.
 - [ ] Daily member/day report labels scheduled versus actual evidence, missing/offline events and implicit shift end; no invented driving path, satisfaction score or collected revenue.
 
-**Audit release:** documentation only on existing `main`; no Functions/rules/web deployment, native rebuild, secret access, production data mutation or provider activation authorized/performed by this report.
+**Original audit release:** documentation only on existing `main`; no Functions/rules/web deployment, native rebuild, secret access, production data mutation or provider activation was performed during that audit. The separately authorized invoice repair and deployment are recorded in the November16 addendum above.

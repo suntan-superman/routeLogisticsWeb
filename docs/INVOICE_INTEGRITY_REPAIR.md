@@ -113,7 +113,7 @@ Suite counts below are separate and overlap; real-provider and physical acceptan
 | Chromium/Firefox/WebKit smoke matrix | 36/36 passed (12 scenarios per engine), including invoice preview/create/existing/void/replacement in all three |
 | Web lint and production build | Passed |
 
-Deployed identifiers are recorded in the release addendum after completion. Test logs are ignored under `.migration/invoice-integrity-*`; provider transports and credentials in automated runs are inert/mocked. The full, focused and browser runs are separate overlapping executions, not one added total. PW-INVOICE-01 passed in each engine; its mutations were solely synthetic local-emulator records, not production acceptance invoices.
+Deployed identifiers are recorded below. Test logs are ignored under `.migration/invoice-integrity-*`; provider transports and credentials in automated runs are inert/mocked. The full, focused and browser runs are separate overlapping executions, not one added total. PW-INVOICE-01 passed in each engine; its mutations were solely synthetic local-emulator records, not production acceptance invoices.
 
 ## Production preservation and historical review
 
@@ -130,13 +130,23 @@ Only these Route Logistics Functions were deployed and confirmed ACTIVE:
 
 Firestore ruleset `23e00a1f-3c35-42b1-b8f3-7760bb38ef3e` exactly matches the tested source (normalized SHA-256 `825c78241bbd5ec6410181d282d3c100c38e8ca1558b3b07aa8bc11b6168fc93`). The new callable returned HTTP401/UNAUTHENTICATED for the non-mutating unauthenticated smoke request; it was not exercised against a production customer/job/invoice.
 
-All baseline record metadata hashes/counts matched after deployment. No unrelated function revision changed. All financial integration flags matched the baseline, including the new function's environment. QB processing remains PAUSED; the invoice reminder schedule retains its previous enabled state and schedule, without being invoked by this release. Public web publication follows this backend activation.
+All baseline record metadata hashes/counts matched after deployment. No unrelated function revision changed. All financial integration flags matched the baseline, including the new function's environment. QB processing remains PAUSED; the invoice reminder schedule retains its previous enabled state and schedule, without being invoked by this release.
+
+### Web release — verified 12:10 PM Pacific, November 16
+
+Publication commit **`47cf3c2701c6d3cd9e64cf8db9f65ad505de79d9`** released the already-tested implementation after backend activation. Netlify deployment **`6afb6298f174af9dbe74c0cb`** is **ready** on the existing [production site](https://route-logistics.com/).
+
+Read-only checks fetched the served entry `index-C5tvQ5mY.js` and its Jobs, Invoices and InvoiceCreationDialog assets. Those assets contain the authoritative `rlManageInvoice` client, source preview, explicit draft creation, explicit replacement and historical-review behavior. Public deployment metadata identifies the exact publication commit. Private sanitized evidence is `.migration/invoice-integrity-web-published.json`.
+
+G12, G13 and G14 are resolved for this bounded implementation and automated validation. This does not close the other workflow audit gaps or certify a real provider transaction, production invoice creation or unperformed operator acceptance.
 
 Read-only pre-deployment baseline at **11:30 AM Pacific on November 16**: 518 customers, 17 jobs, one estimate, six invoices, one Stripe payment mapping, one Stripe reconciliation event, four QB mappings, three QB operations, three QB reconciliation receipts and two QB payment mappings. Document IDs/create/update timestamps were hashed privately for before/after comparison; no customer names, contact details, payment secrets or financial values were printed.
 
 The six legacy invoices have no source-job link and require financial-source review; some fields do not follow the current native invoice schema. A private identifier/category-only report is retained in ignored `.migration/invoice-integrity-historical-review.json`. No totals/records were corrected, linked, deleted or resent. Missing provenance does not itself prove a wrong charge.
 
 The baseline was refreshed immediately before deployment at **12:05 PM Pacific**, with the same record counts. The original metadata snapshot is also retained privately.
+
+A final read-only comparison at **12:12 PM Pacific**, after web publication, again matched every baseline record metadata hash/count, financial gate and schedule state. All four affected Functions remained ACTIVE; unrelated function revisions were unchanged.
 
 The deployed Firestore rules were privately backed up and matched the pre-repair source before applying the narrow invoice-write restriction. Production verification is non-mutating: function state/config/rules/assets and unauthenticated denial, not an actual invoice/payment/export/email operation.
 

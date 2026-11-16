@@ -30,6 +30,16 @@ Firefox and WebKit (including PW-INVOICE-01 in all three). Counts overlap and ar
 not summed. Functions unit runs passed 28/28 guards and 181 cases with one
 emulator-only skip. No new real provider operation was performed.
 
+Implementation **`4821a11`** is deployed: `rlManageInvoice`, `rlEstimate`,
+`emailInvoice` and `rlQueueInvoiceReminders` are ACTIVE, and deployed Firestore
+rules match the tested source. Web publication **`47cf3c2`**, Netlify deployment
+**`6afb6298f174af9dbe74c0cb`**, was verified ready with corrected served assets at
+**12:10 PM Pacific, November 16**. Read-only metadata comparisons preserve all
+518 customers, 17 jobs, one estimate, six invoices and the baseline payment/QB
+records. Stripe remains test-only, QB writes remain disabled and its processor
+remains PAUSED. G12–G14 are resolved; remaining operator/provider acceptance and
+the other workflow gaps retain their separate status.
+
 ### November 16 — field reliability and job exceptions
 
 **Later Android note-repair follow-up:** physical testing of `91c544c` passed
@@ -4405,7 +4415,7 @@ Severity: **S1** data loss, cross-tenant exposure or unusable core operation; **
 | QB-DELIVERY / accounting acceptance | Customer59 update Nov14 9:21:44AM and portal sampleSUCCESS uncorrelated with RL genuine delivery; QBO-08 | Operator/Intuit with Codex sanitized log support | Externally unresolved; preserve existing connection; no redeploy without actual defect |
 | PHYSICAL-PENDING / acceptance gap | Current build/camera/offline/backgroundGPS/OSpush matrix NotRun | Operator with Codex assistance | Core physical path gates pilot signoff; old test counts/native camera logs cannot close it |
 | SOURCE-DOC-STALE / S4 | docs/mobile-app.md refers to older stack/modal/photo placeholders | Documentation | Current App/Workspace/JobWorkflow source and this inventory authoritative; no unrelated doc rewrite |
-| RISK-INVOICE-CONCURRENCY / unconfirmed | createInvoiceFromJob queries existing then creates; sequential retry covered, concurrent double-client create not reproduced | Development | Record as unverified concurrency risk; do not claim confirmed duplicates or create real duplicate invoices |
+| DEF-INVOICE-INTEGRITY / resolved November 16 | Later workflow audit reproduced quote108.25→invoice0, concurrent duplicates and client-controlled totals. Failing-first regressions retained privately; G12–G14 | Development | Authoritative `rlManageInvoice`, cent/version validation, transactional identity, expected revisions/audit and raw client write denial deployed in `4821a11`/web `47cf3c2`. Final29 invoice emulator cases and PW-INVOICE-01 in all three engines passed; historical records unchanged. Real-provider/operator acceptance remains separate |
 
 Other bounded limitations: company branding uses an HTTPS logo URL, not a logo-upload manager; CMS image upload is separate. Calendar drag/resize is intentionally disabled. Estimate PDF preview uses Download plus browser viewer. Invoices have no standalone line/tax/discount editor or invoice-specific Checkout link; emails point to /portal. Refund/dispute event reconciliation exists but no refund-creation control. No automatic pool chemical dosing recommendations, no offline visit-evidence queue, and no public provider marketplace/discovery/booking UI exist in this phase.
 

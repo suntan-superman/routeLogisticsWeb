@@ -57,6 +57,7 @@ yarn dev
 
 ## Documentation Structure
 
+- [Customer-to-payment workflow audit — November 16, 2026](./CUSTOMER_TO_PAYMENT_WORKFLOW_AUDIT.md) - Current-source/deployed-state lifecycle assessment, confirmed invoice correctness gaps, separate automated/provider/physical evidence and prioritized implementation batches. Audit and planning only; supersedes older broad feature claims for this workflow.
 - [Recent development summary — November 13–15, 2026](./DEVELOPMENT_SUMMARY_2026-11-13_TO_2026-11-15.md) - Consolidated new features, data flows, integration status, deployment evidence and remaining acceptance work. Use this newer report when older feature/TODO snapshots below describe superseded behavior.
 - [Android push diagnosis and activation](./android-push-diagnosis.md) - November 16 device/credential findings, exact setup steps, regression evidence and controlled physical-test status.
 - [Field reliability and job exceptions — November 16, 2026](./FIELD_RELIABILITY_AND_JOB_EXCEPTIONS.md) - Durable offline visit evidence, derived late/overdue indicators, technician reassignment requests, management review, authorization and exact rebuild/physical acceptance procedures. Automated checks do not certify handset or provider delivery.

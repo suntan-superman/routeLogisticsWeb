@@ -1,3 +1,4 @@
+import SelectControl from '../components/SelectControl';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { formatCustomerDate, legacyDate } from '../utils/legacyCustomer';
 import { motion as Motion } from 'framer-motion';
@@ -21,27 +22,49 @@ import CustomerSmsConsent from '../components/CustomerSmsConsent';
 import AddressValidationNotice from '../components/AddressValidationNotice';
 import { canManage, can } from '../services/tenancy';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useWorkspaceQuery, useInvalidateWorkspace } from '../hooks/useWorkspaceQuery';
+import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 
 const customerForm = (customer = {}) => ({name:customer.name || '',email:customer.email || '',phone:formatPhone(customer.phone || ''),address:customer.address || '',city:customer.city || '',state:customer.state || '',zipCode:customer.zipCode || '',notes:customer.notes || '',isActive:customer.isActive !== false,emailConsent:customer.emailConsent === true});
 const customerSnapshot = data => JSON.stringify(customerForm(data));
+const EMPTY_CUSTOMERS = [];
 
 const CustomerManagementPage = () => {
   const confirm = useConfirm();
-  const [customers, setCustomers] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [lastCustomer, setLastCustomer] = useState(null);
-  const [hasMoreCustomers, setHasMoreCustomers] = useState(false);
+  const [mutating, setIsLoading] = useState(false);
+  const loadedPages = useRef(1), pageScope = useRef(null);
+  const invalidate = useInvalidateWorkspace();
+  const customerQuery = useWorkspaceQuery(['customers', 'pages'], async () => {
+    let cursor = null, lastDoc = null, hasMore = false;
+    const rows = [];
+    for (let page = 0; page < loadedPages.current; page++) {
+      const result = await CustomerService.getCustomers(100, cursor);
+      if (!result.success) throw new Error(result.error || 'Customers could not be loaded.');
+      rows.push(...result.customers); lastDoc = result.lastDoc; hasMore = result.hasMore;
+      if (!hasMore || !lastDoc) break;
+      cursor = lastDoc;
+    }
+    return { customers: [...new Map(rows.map(row => [row.id, row])).values()], lastDoc, hasMore };
+  });
+  if (pageScope.current !== customerQuery.scopeId) { pageScope.current = customerQuery.scopeId; loadedPages.current = 1; }
+  const customers = customerQuery.data?.customers || EMPTY_CUSTOMERS;
+  const hasMoreCustomers = customerQuery.data?.hasMore === true;
+  const lastCustomer = customerQuery.data?.lastDoc || null;
+  const isLoading = mutating || customerQuery.isPending;
+  const setCustomers = updater => customerQuery.setData(previous => ({ ...previous, customers: typeof updater === 'function' ? updater(previous?.customers || []) : updater }));
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [stats, setStats] = useState({
+  const emptyStats = {
     totalCustomers: 0,
     activeCustomers: 0,
     inactiveCustomers: 0,
     totalRevenue: 0
-  });
+  };
+  const statsQuery = useWorkspaceQuery(['customer-stats'], () => CustomerService.getCustomerStats(), { intervalMs: 300000, staleTime: 30000 });
+  const stats = statsQuery.data?.stats || emptyStats;
 
   // Form states
   const [customerData, setCustomerData] = useState(customerForm);
@@ -62,36 +85,18 @@ const CustomerManagementPage = () => {
   const [activeFilter, setActiveFilter] = useState('all'); // all, active, inactive
   const [sortBy, setSortBy] = useState('name'); // name, createdAt, totalSpent
 
-  const loadCustomers = useCallback(async (append = false, cursor = null) => {
-    setIsLoading(true);
-    try {
-      const result = await CustomerService.getCustomers(100, append ? cursor : null);
-      if (result.success) {
-        setCustomers((current) => append ? [...current, ...result.customers] : result.customers);
-        setLastCustomer(result.lastDoc);
-        setHasMoreCustomers(result.hasMore);
-      } else {
-        toast.error(result.error);
-      }
-    } catch (error) {
-      console.error('Error loading customers:', error);
-      toast.error('Error loading customers');
-    }
-    setIsLoading(false);
-  }, []);
-
-  const loadStats = async () => {
-    try {
-      const result = await CustomerService.getCustomerStats();
-      if (result.success) {
-        setStats(result.stats);
-      }
-    } catch (error) {
-      console.error('Error loading stats:', error);
-    }
+  const loadCustomers = async (append = false) => {
+    if (append) loadedPages.current++;
+    const result = await customerQuery.refetch();
+    if (result.error) { if (append) loadedPages.current = Math.max(1, loadedPages.current - 1); toast.error(result.error.message || 'Customers could not be loaded.'); }
   };
-
-  useEffect(() => {loadCustomers();loadStats();},[loadCustomers]);
+  const detailQuery = useWorkspaceQuery(['customer', selectedCustomer?.id], () => CustomerService.getCustomer(selectedCustomer.id), { enabled: showViewModal && !!selectedCustomer?.id });
+  useEffect(() => {
+    if (showViewModal && detailQuery.data?.customer) setSelectedCustomer(detailQuery.data.customer);
+  }, [showViewModal, detailQuery.data]);
+  useEffect(() => {
+    if ([customerQuery.error, detailQuery.error].some(workspaceAccessError)) { setShowViewModal(false); setShowEditModal(false); setShowAddModal(false); setSelectedCustomer(null); setCustomerData(customerForm()); }
+  }, [customerQuery.error, detailQuery.error]);
 
   const filteredCustomers = useMemo(() => {
     let filtered = [...customers];
@@ -168,7 +173,7 @@ const CustomerManagementPage = () => {
         setCustomers(prev => [result.customer, ...prev]);
         setShowAddModal(false);
         resetForm();
-        loadStats();
+        invalidate(['customers', 'customer', 'customer-stats']);
         toast.success('Customer added successfully!');
       } else {
         setAddressValidation(result.addressValidation || null);
@@ -199,6 +204,7 @@ const CustomerManagementPage = () => {
         setShowEditModal(false);
         setSelectedCustomer(null);
         resetForm();
+        invalidate(['customers', 'customer', 'customer-stats']);
         toast.success('Customer updated successfully!');
       } else {
         setAddressValidation(result.addressValidation || null);
@@ -225,7 +231,7 @@ const CustomerManagementPage = () => {
         setCustomers(prev => prev.map(customer => 
           customer.id === customerId ? { ...customer, isActive: false } : customer
         ));
-        loadStats();
+        invalidate(['customers', 'customer', 'customer-stats']);
         toast.success('Customer deleted successfully!');
       } else {
         toast.error(result.error);
@@ -246,7 +252,7 @@ const CustomerManagementPage = () => {
         setCustomers(prev => prev.map(customer => 
           customer.id === customerId ? { ...customer, isActive: true } : customer
         ));
-        loadStats();
+        invalidate(['customers', 'customer', 'customer-stats']);
         toast.success('Customer restored successfully!');
       } else {
         toast.error(result.error);
@@ -312,7 +318,8 @@ const CustomerManagementPage = () => {
       className="space-y-6"
     >
       {/* Header */}
-      {can('customers.export') && <CustomerImport onComplete={async () => { await loadCustomers(); await loadStats(); }} />}
+      {can('customers.export') && <CustomerImport onComplete={() => invalidate(['customers', 'customer', 'customer-stats'])} />}
+      {(customerQuery.error || statsQuery.error) && <p role="alert" className="rounded border border-red-200 bg-red-50 p-3 text-red-800">{(customerQuery.error || statsQuery.error).message} <button className="underline" onClick={() => { customerQuery.refetch(); statsQuery.refetch(); }}>Retry customer refresh</button></p>}
       {hasMoreCustomers && <div className="flex flex-wrap items-center gap-3 rounded border bg-white p-4"><p>Showing {customers.length} customers. Search and filters apply to loaded customers.</p><button disabled={isLoading} className="text-primary-700 underline" onClick={() => loadCustomers(true, lastCustomer)}>Load more customers</button></div>}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between">
@@ -426,7 +433,8 @@ const CustomerManagementPage = () => {
           </div>
           
           <div className="flex gap-2">
-            <select
+            <SelectControl
+              aria-label="Customer status filter"
               value={activeFilter}
               onChange={(e) => setActiveFilter(e.target.value)}
               className="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
@@ -434,9 +442,10 @@ const CustomerManagementPage = () => {
               <option value="all">All Customers</option>
               <option value="active">Active Only</option>
               <option value="inactive">Inactive Only</option>
-            </select>
+            </SelectControl>
             
-            <select
+            <SelectControl
+              aria-label="Customer sort order"
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
               className="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
@@ -444,7 +453,7 @@ const CustomerManagementPage = () => {
               <option value="name">Sort by Name</option>
               <option value="createdAt">Sort by Date Added</option>
               {can('reports.financial') && <option value="totalSpent">Sort by Total Spent</option>}
-            </select>
+            </SelectControl>
           </div>
         </div>
       </div>
@@ -457,7 +466,7 @@ const CustomerManagementPage = () => {
           </h3>
         </div>
         
-        {isLoading ? (
+        {customerQuery.isPending && !customerQuery.data ? (
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
           </div>

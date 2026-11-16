@@ -4,6 +4,7 @@ const { createRequire } = require('node:module');
 const { pathToFileURL } = require('node:url');
 const mobile = createRequire(path.resolve(__dirname,'../routeLogisticsMobile/package.json')), web = createRequire(path.resolve(__dirname,'../routeLogisticsWeb/package.json'));
 const React = mobile('react'), { create, act } = mobile('react-test-renderer'), { transformSync } = web('esbuild');
+const {selectControlMock}=require('./support/workspaceQueryMock.cjs');
 global.IS_REACT_ACT_ENVIRONMENT = true;
 let tree, env;
 let calendarDate, legacyCustomer;
@@ -23,18 +24,29 @@ function reset(kind) {
 }
 const service = {
   getJobs:async()=>({success:true,jobs:env.jobs}),getJobStats:async()=>({success:true,stats:{}}),
+  getJob:async id=>({success:true,job:env.jobs.find(job=>job.id===id)}),
   updateJobStatus:async(id,status,data)=>{env.calls.push({name:'status',id,status,data});if(env.savePending)await env.savePending.promise;if(env.throwSave)throw Error('Status request failed.');if(env.failSave)return{success:false,error:'Status could not be saved.'};return{success:true,job:{...env.jobs.find(job=>job.id===id),...data}};},
 };
+function useScopedQuery(key,loader,{enabled=true}={}){
+  const id=JSON.stringify(key),[state,setState]=React.useState({id,data:undefined,error:null});
+  const fetch=async()=>{try{const data=await loader();if(data?.success===false)throw Error(data.error||'Read failed.');setState({id,data,error:null});return{data};}catch(error){setState(previous=>({...previous,id,error}));return{error};}};
+  React.useEffect(()=>{if(enabled)fetch();},[id,enabled]);
+  return{scopeId:'test-workspace',readable:true,canRead:true,data:state.id===id?state.data:undefined,error:state.id===id?state.error:null,isLoading:enabled&&state.id===id&&!state.data&&!state.error,isFetching:false,
+    refetch:fetch,invalidate:async()=>{},setData:updater=>setState(previous=>({...previous,id,data:typeof updater==='function'?updater(previous.data):updater}))};
+}
 const mock = name => {
   if(name==='react')return React;
   if(name==='react-hot-toast')return{__esModule:true,default:{success:message=>env.toasts.push({kind:'success',message}),error:message=>env.toasts.push({kind:'error',message})}};
   if(name.endsWith('/hooks/useUnsavedChanges'))return{useUnsavedChanges:useGuard,useConfirmUnsavedChanges:()=>confirmDiscard};
+  if(name.endsWith('/hooks/useWorkspaceQuery'))return{useWorkspaceQuery:useScopedQuery,useInvalidateWorkspace:()=>async prefixes=>env.calls.push({name:'invalidate',prefixes})};
   if(name.endsWith('/contexts/AuthContext'))return{useAuth:()=>({currentUser:{uid:'owner-1',displayName:'Owner'},company:{id:'company-1',name:'Company'},role:'owner',can:()=>true})};
   if(name.endsWith('/services/tenancy'))return{canManage:()=>true,can:()=>true};
   if(name.endsWith('/services/jobManagementService'))return{__esModule:true,default:service};
   if(name.endsWith('/services/customerService'))return{__esModule:true,default:{getCustomers:async()=>({success:true,customers:[]})}};
   if(name.endsWith('/services/invoiceService'))return{createInvoiceFromJob:async()=>({success:true,id:'invoice-1'})};
   if(name.endsWith('/components/ConfirmProvider'))return{useConfirm:()=>async()=>true};
+  if(name.endsWith('/components/ThemedSelect'))return{__esModule:true,default:props=>React.createElement('select',{'aria-label':props.label,value:props.value,disabled:props.disabled,onChange:event=>props.onChange(event.target.value)},(props.options||[]).map(option=>React.createElement('option',{key:option.value,value:option.value},option.label)))};
+  if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
   if(name==='react-router-dom')return{useNavigate:()=>()=>{}};
   if(name==='framer-motion')return{motion:{div:({children,...props})=>React.createElement('div',props,children)}};
   if(name==='@heroicons/react/24/outline')return new Proxy({}, {get:()=>()=>null});
@@ -46,6 +58,8 @@ const mock = name => {
   if(name.endsWith('/services/maps'))return{loadMaps:async()=>{throw Error('Maps should not be requested in these tests');}};
   if(name.endsWith('/utils/dispatch'))return{STATUS_COLORS:{scheduled:'blue',completed:'green'},scheduleWarning:()=>'',jobPosition:job=>job.location||null,jobAddress:job=>job.address||''};
   if(name.endsWith('/utils/calendarDate'))return calendarDate;
+  if(name.endsWith('/utils/jobSummary')){const module={exports:{}};new Function('require','module','exports',transformSync(fs.readFileSync(path.resolve(__dirname,'../routeLogisticsWeb/src/utils/jobSummary.js'),'utf8'),{format:'cjs'}).code)(mock,module,module.exports);return module.exports;}
+  if(name.endsWith('/services/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found'].includes(String(error?.code||'').replace(/^functions\//,''))};
   if(name.endsWith('/utils/legacyCustomer'))return legacyCustomer;
   if(name.endsWith('/utils/routePlanning'))return{googleNavigation:()=> 'https://example.invalid'};
   if(name.endsWith('/utils/workLocations'))return{LOCATION_LABELS:{},locationState:()=>'',nearestOnDuty:()=>[]};

@@ -17,6 +17,7 @@ function load(relative) {
   const module = { exports: {} }; modules.set(file, module);
   const mockRequire = name => {
     if (name === 'react') return React;
+    if (name.endsWith('/useJobResources')) return { useJobResourceRefresh: (_resource, id, loader, { enabled }) => { React.useEffect(() => { if (enabled) loader({ query: true }).catch(() => {}); }, [id, enabled]); return { refetch: () => loader().catch(() => {}) }; } };
     if (name.startsWith('@babel/runtime/')) return require(name);
     if (name === 'react-native') return Object.fromEntries(['View', 'Text', 'Button', 'Image', 'ScrollView'].map(key => [key, key]));
     if (name === './Glass') return { GlassButton: props => React.createElement('Button', props) };

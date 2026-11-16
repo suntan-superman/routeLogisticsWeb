@@ -7,6 +7,7 @@ const { getFirestore, Timestamp } = req('firebase-admin/firestore');
 const { workDataHandlers, projectCustomer } = require('../functions/workData');
 const { serviceAreaHandlers } = require('../functions/serviceAreas');
 const { hash } = require('../functions/security');
+const { HttpsError } = req('firebase-functions/v2/https');
 
 const OLD_VERSION = '2026-11-15T00:00:00.000Z';
 const OPERATING = '100 Synthetic Operating Street, Example, CA 93312';
@@ -141,11 +142,41 @@ test('a stale customer version aborts the entire save, including an existing job
   assert.equal((await db.collection('rlAudit').where('companyId', '==', f.id).where('action', '==', 'customer.address.update').get()).size, 0);
 });
 
-test('invalid, unresolved and outside properties cannot update customer records or create jobs', async () => {
+test('known outside and unsafe properties cannot update customer records or create jobs', async () => {
   const f = await fixture(), before = await get(`customers/${f.customerId}`);
-  for (const address of [OUTSIDE, '999 Unresolved Property, Example, CA 93312']) await assert.rejects(f.work.manageJob(f.request(f.save({ job: f.job({ serviceProperty: { address } }) }))), { code: 'failed-precondition' });
+  for (const address of [OUTSIDE, '<script>999 Unsafe Property</script>']) await assert.rejects(f.work.manageJob(f.request(f.save({ job: f.job({ serviceProperty: { address } }) }))), { code: 'failed-precondition' });
   assert.deepEqual(await get(`customers/${f.customerId}`), before);
   assert.equal((await db.collection('jobs').where('companyId', '==', f.id).get()).size, 0);
+});
+test('explicit permanent operator-entered addresses save with the job and remove stale Google coordinates and provenance', async () => {
+  for (const solo of [false, true]) {
+    const f = await fixture({ solo }), address = '999 Unresolved Property, Example, CA 93312';
+    await db.doc(`customers/${f.customerId}`).update({ addressValidation: { source: 'google-address-validation', validatedAt: OLD_VERSION, placeId: 'old-place', postalCode: '93301' } });
+    const result = await f.work.manageJob(f.request(f.save({ job: f.job({ serviceProperty: { address, validated: true, latitude: 0, longitude: 0 }, latitude: 0, longitude: 0 }) })));
+    const customer = await get(`customers/${f.customerId}`), job = await get(`jobs/${result.id}`);
+    assert.equal(result.customerAddressUpdated, true); assert.match(result.addressWarning, /unverified/); assert.equal(customer.address, address); assert.equal(job.address, address);
+    for (const record of [customer, job]) { assert.equal(record.latitude, null); assert.equal(record.longitude, null); assert.equal(record.location, null); }
+    assert.equal(customer.addressValidation.source, 'operator-entered'); assert.equal(customer.addressValidation.validated, false); assert.equal(customer.addressValidation.validatedAt, null); assert.equal(customer.addressValidation.placeId, '');
+    assert.equal(job.serviceProperty.validated, false); assert.equal(job.serviceAreaEligibility.eligible, false); assert.equal(customer.notes, f.original.notes); assert.equal(customer.totalSpent, f.original.totalSpent);
+    const audits = await db.collection('rlAudit').where('actorId', '==', f.uid).where('action', '==', 'customer.address.update').get(); assert.equal(audits.size, 1); assert.equal(audits.docs[0].get('original.addressValidation.placeId'), 'old-place'); assert.equal(audits.docs[0].get('changes.addressValidation.source'), 'operator-entered');
+  }
+});
+test('changing an existing job to an unverified property clears its old point without changing the customer or other appointments', async () => {
+  const f = await fixture(), first = await f.work.manageJob(f.request({ action: 'create', job: f.job() })), customerBefore = await get(`customers/${f.customerId}`), address = '800 Unresolved Replacement Street, Example, CA 93312';
+  const second = await f.work.manageJob(f.request({ action: 'create', job: f.job() })), secondBefore = await get(`jobs/${second.id}`);
+  const updated = await f.work.manageJob(f.request({ action: 'update', id: first.id, expectedVersion: first.updatedAt, job: { serviceProperty: { address, latitude: 34, longitude: -118, validated: true } } }));
+  const job = await get(`jobs/${first.id}`); assert.match(updated.addressWarning, /unverified/); assert.equal(job.address, address); assert.equal(job.serviceProperty.validated, false); assert.equal(job.serviceProperty.latitude, null); assert.equal(job.latitude, null); assert.equal(job.location, null);
+  assert.deepEqual(await get(`customers/${f.customerId}`), customerBefore); assert.deepEqual(await get(`jobs/${second.id}`), secondBefore);
+});
+test('Google timeouts and proposed corrections are warnings for internal scheduling without exposing provider details or forcing replacement', async () => {
+  for (const status of ['unavailable', 'confirmation-required']) {
+    const f = await fixture(), address = '700 Operator Entered Street, Example, CA 93312';
+    f.onGeocode(() => { throw new HttpsError(status === 'unavailable' ? 'unavailable' : 'failed-precondition', 'PRIVATE PROVIDER DETAILS', { addressValidation: { status, message: 'PRIVATE PROVIDER DETAILS', ...(status === 'confirmation-required' ? { suggestedAddress: PROPERTY } : {}) } }); });
+    const saved = await f.work.manageJob(f.request({ action: 'create', job: f.job({ serviceProperty: { address } }) }));
+    assert.equal(saved.serviceArea.eligible, false); assert.equal(saved.serviceArea.addressValidation.status, status); assert.equal(saved.serviceArea.addressValidation.warningOnly, true); assert.equal(JSON.stringify(saved).includes('PRIVATE'), false);
+    const job = await get(`jobs/${saved.id}`); assert.equal(job.address, address); assert.equal(job.serviceProperty.source, 'operator-entered'); assert.equal(job.latitude, null);
+    if (status === 'confirmation-required') assert.equal(saved.serviceArea.addressValidation.suggestedAddress, PROPERTY);
+  }
 });
 
 test('saving a permanent address never rewrites historical jobs or service plans', async () => {

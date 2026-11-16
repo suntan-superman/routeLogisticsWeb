@@ -1,3 +1,4 @@
+import SelectControl from './SelectControl';
 import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -67,13 +68,13 @@ function ServicePropertyForm({ companyId, serviceCategories = [], value = {}, on
   };
   return <section aria-label="Service property eligibility" className="space-y-4 rounded-xl border border-gray-200 bg-white p-5">
     <div><h3 className="text-lg font-semibold">Service property</h3><p className="mt-1 text-sm text-gray-600">Review where the service will take place. Use a saved address or enter a different property. Coverage is checked against the provider’s saved service areas.</p></div>
-    {existing && <p className="text-sm text-gray-600">Existing appointments stay valid when coverage changes. A changed service property will need a new eligibility check.</p>}
+    {existing && <p className="text-sm text-gray-600">Existing appointments stay valid when coverage changes. {purpose === 'scheduling' ? 'Changed addresses are checked again; an address warning does not prevent saving an internal job.' : 'A changed service property needs a new eligibility check.'}</p>}
     {fixedProperty && <p className="text-sm text-gray-600">This workflow uses the recorded service property. You can check coverage or obtain an owner exception without changing its address.</p>}
-    {settings && settings.configured === false && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Service areas have not been configured. Google still verifies new or changed addresses. Public requests remain unavailable until coverage is configured.</p>}
+    {settings && settings.configured === false && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Service areas have not been configured. Google checks new or changed addresses. {purpose === 'scheduling' && 'You can save an internal job with an address warning. '}Public requests remain unavailable until coverage is configured.</p>}
     <fieldset disabled={!!busy || disabled} className="space-y-4">
       <label className="block text-sm font-medium">Service property address<input aria-label="Service property address" disabled={fixedProperty || addressReadOnly} autoComplete="off" className={`${fieldClass} disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-600`} value={address} maxLength={278} onChange={event => patch({ address: event.target.value })} placeholder="Street, city, state and ZIP code" /></label>
       {billingAddress && billingAddress.trim() !== address.trim() && <div><p className="text-sm text-gray-600">Customer address: {billingAddress}</p><button type="button" disabled={fixedProperty || addressReadOnly} className="text-sm font-medium text-primary-700 underline" onClick={() => patch({ address: billingAddress })}>Use this as the service property</button></div>}
-      {!!categories.length && <label className="block text-sm font-medium">Service category<select aria-label="Service property category" disabled={fixedCategory} className={fieldClass} value={serviceCategory} onChange={event => patch({ serviceCategory: event.target.value })}><option value="">Choose a service category</option>{categories.map(category => <option key={category} value={category}>{category}</option>)}</select></label>}
+      {!!categories.length && <label className="block text-sm font-medium">Service category<SelectControl aria-label="Service property category" disabled={fixedCategory} className={fieldClass} value={serviceCategory} onChange={event => patch({ serviceCategory: event.target.value })}><option value="">Choose a service category</option>{categories.map(category => <option key={category} value={category}>{category}</option>)}</SelectControl></label>}
       <button type="button" className={actionClass} disabled={disabled || !companyId || !address.trim() || !!busy || loadingPolicy || !settings} onClick={() => invoke(false)}>{busy === 'check' ? 'Checking property…' : loadingPolicy ? 'Loading service-area policy…' : 'Check service property'}</button>
     </fieldset>
     {error && !addressValidation && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
@@ -83,6 +84,7 @@ function ServicePropertyForm({ companyId, serviceCategories = [], value = {}, on
         {canUnlock && <button type="button" aria-label="Enable Editing for suggested address" className={actionClass} disabled={disabled || !!busy} onClick={() => { if (!disabled && !busy) onEnableAddressEditing(); }}>Enable Editing</button>}
       </div>}
     </AddressValidationNotice>
+    {result?.internalContinuation && !validation && <p role="status" className="text-sm text-amber-900">You may keep this address and save the job. Map placement and service-area eligibility have not been confirmed.</p>}
     {error && !settings && <button type="button" disabled={disabled} className="text-sm text-primary-700 underline" onClick={() => setPolicyAttempt(value => value + 1)}>Retry service-area settings</button>}
     {result && !validation && <div role={result.eligible ? 'status' : 'alert'} className={`rounded-lg p-3 text-sm ${result.eligible ? 'bg-emerald-50 text-emerald-900' : 'bg-amber-50 text-amber-900'}`}>
       <p className="font-semibold">{result.status === 'unconfigured' ? 'Service areas are not configured' : result.eligible ? result.status === 'exception-approved' ? 'Approved property exception' : 'Property is inside coverage' : result.status === 'outside' ? 'Property is outside coverage' : 'Property is not eligible yet'}</p>

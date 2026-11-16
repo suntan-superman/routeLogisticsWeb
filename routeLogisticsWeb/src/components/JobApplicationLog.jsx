@@ -1,8 +1,11 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import SelectControl from './SelectControl';
+import React, { useEffect, useState, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { addServiceLog, listServiceLogsForJob, UNITS } from '../services/serviceLogService';
 import { useAuth } from '../contexts/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
+import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 
 const blank = { product: '', epaRegNo: '', activeIngredient: '', amount: '', unit: 'fl oz', targetPest: '', areaTreated: '', method: '', applicatorLicense: '', notes: '' };
 
@@ -10,7 +13,8 @@ const field = 'mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 tex
 
 const JobApplicationLog = ({ job }) => {
   const { currentUser: user, company, role } = useAuth();
-  const [logs, setLogs] = useState([]);
+  const logsQuery = useWorkspaceQuery(['service-logs', job.id], () => listServiceLogsForJob(job.id));
+  const logs = logsQuery.data?.logs || [];
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
@@ -20,21 +24,14 @@ const JobApplicationLog = ({ job }) => {
   const changed = open && JSON.stringify(form) !== JSON.stringify(blank);
   const { confirmDiscard } = useUnsavedChanges(changed, { scope: `job:${job.id}`, message: 'Your chemical application record has not been saved. Leave without saving it?' });
 
-  const load = useCallback(async (afterSave = false) => {
-    const ticket = generation.current;
-    try {
-      const res = await listServiceLogsForJob(job.id);
-      if (!live.current || ticket !== generation.current) return;
-      if (!res.success) throw new Error(res.error || 'Application records could not be loaded.');
-      setLogs(res.logs); setError('');
-    } catch (failure) { if (live.current && ticket === generation.current) setError(afterSave ? 'Application recorded, but the list could not refresh. Reload the job to view the saved record.' : failure.message || 'Application records could not be loaded. Reload the job to retry.'); }
-  }, [job.id]);
+  const load = async () => { const result = await logsQuery.refetch(); if (result.error) setError('Application recorded, but the list could not refresh. Reload the job to view the saved record.'); };
 
   useEffect(() => {
     const lifecycle = generation;
-    live.current = true; generation.current++; lock.current = false; setForm(blank); setOpen(false); setSaving(false); setLogs([]); setError(''); load();
+    live.current = true; generation.current++; lock.current = false; setForm(blank); setOpen(false); setSaving(false); setError('');
     return () => { live.current = false; lifecycle.current++; };
-  }, [load, scope]);
+  }, [scope]);
+  useEffect(() => { if (workspaceAccessError(logsQuery.error)) { setOpen(false); setForm(blank); } }, [logsQuery.error]);
 
   const set = (k) => (e) => { if (!lock.current) setForm((f) => ({ ...f, [k]: e.target.value })); };
   const toggle = async () => {
@@ -75,7 +72,7 @@ const JobApplicationLog = ({ job }) => {
           {open ? 'Cancel' : 'Record application'}
         </button>
       </div>
-      {error && <p role="alert" className="mb-2 text-sm text-red-700">{error}</p>}
+      {(error || logsQuery.error) && <p role="alert" className="mb-2 text-sm text-red-700">{error || logsQuery.error.message}</p>}
 
       {open && (
         <form onSubmit={submit} className="grid grid-cols-2 gap-2 bg-gray-50 p-3 rounded-md mb-3">
@@ -84,7 +81,7 @@ const JobApplicationLog = ({ job }) => {
           <label className="text-xs text-gray-600">Active ingredient<input className={field} value={form.activeIngredient} onChange={set('activeIngredient')} /></label>
           <label className="text-xs text-gray-600">Amount used *<input required type="number" min="0" step="any" className={field} value={form.amount} onChange={set('amount')} /></label>
           <label className="text-xs text-gray-600">Unit *
-            <select className={field} value={form.unit} onChange={set('unit')}>{UNITS.map((u) => <option key={u}>{u}</option>)}</select>
+            <SelectControl className={field} value={form.unit} onChange={set('unit')}>{UNITS.map((u) => <option key={u}>{u}</option>)}</SelectControl>
           </label>
           <label className="text-xs text-gray-600">Target pest *<input required className={field} value={form.targetPest} onChange={set('targetPest')} /></label>
           <label className="text-xs text-gray-600">Area treated<input className={field} value={form.areaTreated} onChange={set('areaTreated')} /></label>

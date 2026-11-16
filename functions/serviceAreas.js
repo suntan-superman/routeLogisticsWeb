@@ -150,10 +150,11 @@ function serviceAreaHandlers(db, config = {}) {
   }
   async function checkForWorkflow(input = {}) {
     const { companyId } = input, purpose = input.purpose || 'scheduling', publicRequest = input.publicRequest === true || ['public-request', 'booking'].includes(purpose);
+    const internalContinuationAllowed = !publicRequest && purpose === 'scheduling' && input.allowUnverifiedAddress === true;
     if (!PURPOSES.includes(purpose)) fail('invalid-argument', 'Choose a supported service-area check purpose.');
     const requestAddressHash = hash(addressKey(input.propertyAddress)), base = { companyId: companyId || null, purpose, serviceCategory: categoryKey(input.serviceCategory), requestAddressHash, checkedAt: new Date(now()).toISOString(), property: null };
     const [stored, company] = companyId ? await Promise.all([policyRef(companyId).get(), db.doc(`companies/${documentId(companyId)}`).get()]) : [null, null];
-    const settings = stored ? snapshot(stored) : { ...DEFAULT_SETTINGS }, state = { ...base, settingsRevision: settings.revision, policyExists: stored?.exists === true, ...(company ? { providerFingerprint: providerFingerprint(company) } : {}) };
+    const settings = stored ? snapshot(stored) : { ...DEFAULT_SETTINGS }, state = { ...base, settingsRevision: settings.revision, coverageConfigured: settings.configured === true, policyExists: stored?.exists === true, ...(company ? { providerFingerprint: providerFingerprint(company) } : {}) };
     if (company && (!company.exists || company.get('isActive') === false || company.get('deletedAt'))) return issue({ ...state, eligible: false, status: 'unavailable', reason: 'provider-unavailable', message: 'This provider is not available for new service requests.' });
     if (publicRequest && (!settings.configured || settings.acceptingNewCustomers !== true)) return issue({ ...state, ...evaluateCoverage(settings, null, input.serviceCategory, { publicRequest }) });
     // Unconfigured coverage is not an exemption from verifying a supplied address.
@@ -161,7 +162,17 @@ function serviceAreaHandlers(db, config = {}) {
     if (!settings.configured && !String(input.propertyAddress || '').trim()) return issue({ ...state, ...evaluateCoverage(settings, null, input.serviceCategory, { publicRequest }) });
     let property;
     try { property = await validateAddress({ companyId, uid: input.uid }, input.propertyAddress); }
-    catch (error) { const addressValidation = addressValidationDetails(error); return issue({ ...state, eligible: false, status: 'invalid-address', reason: 'property-address-unvalidated', message: addressValidation.message, addressValidation }); }
+    catch (error) {
+      const addressValidation = addressValidationDetails(error), entered = typeof input.propertyAddress === 'string' ? input.propertyAddress.trim() : '';
+      const safeText = entered.length > 0 && entered.length <= 278 && !/[<>\u0000-\u001f]/.test(entered);
+      if (internalContinuationAllowed && safeText) {
+        const categories = companyCategories(company?.data()).map(categoryKey), key = categoryKey(input.serviceCategory);
+        if (settings.configured && settings.categoryOverrides?.length && (!key || !categories.includes(key))) return issue({ ...state, eligible: false, status: 'invalid-category', reason: 'service-category-required', message: 'Choose an offered service category before checking this property.' });
+        const message = `${addressValidation.status === 'unavailable' ? 'Google address verification is unavailable.' : addressValidation.suggestedAddress ? 'Google suggests a different address.' : 'Google could not confirm this address.'} You can save this internal job using the entered address. Coverage and map location remain unverified.`;
+        return issue({ ...state, eligible: false, status: 'address-unverified', reason: 'operator-entered-address-unverified', internalContinuation: true, message, addressValidation: { ...addressValidation, message, warningOnly: true } });
+      }
+      return issue({ ...state, eligible: false, status: 'invalid-address', reason: 'property-address-unvalidated', message: addressValidation.message, addressValidation });
+    }
     const result = { ...state, ...evaluateCoverage(settings, property, input.serviceCategory, { categories: companyCategories(company?.data()), publicRequest }), property, propertyFingerprint: propertyFingerprint(property) };
     if (result.status === 'outside' && settings.allowOutOfAreaRequests && input.exceptionId) {
       const exception = await exceptionRef(input.exceptionId).get();
@@ -171,7 +182,8 @@ function serviceAreaHandlers(db, config = {}) {
   }
   async function assertWorkflowCurrent(tx, input) {
     const { companyId, result } = input;
-    if (!result || issuedResults.get(result) !== hash(JSON.stringify(result)) || result.companyId !== (companyId || null) || !result.eligible || result.purpose !== input.purpose || result.serviceCategory !== categoryKey(input.serviceCategory) || ![result.requestAddressHash, hash(addressKey(result.property?.formattedAddress))].includes(hash(addressKey(input.propertyAddress)))) fail('failed-precondition', 'Recheck service coverage for this service property before saving.');
+    const internalContinuation = result?.internalContinuation === true && result.status === 'address-unverified' && result.eligible === false && input.purpose === 'scheduling' && input.publicRequest !== true;
+    if (!result || issuedResults.get(result) !== hash(JSON.stringify(result)) || result.companyId !== (companyId || null) || !result.eligible && !internalContinuation || result.purpose !== input.purpose || result.serviceCategory !== categoryKey(input.serviceCategory) || ![result.requestAddressHash, hash(addressKey(result.property?.formattedAddress))].includes(hash(addressKey(input.propertyAddress)))) fail('failed-precondition', 'Recheck service coverage for this service property before saving.');
     if (!companyId) { if (['public-request', 'booking'].includes(input.purpose)) fail('failed-precondition', 'Provider coverage is not configured.'); return; }
     const [current, company] = await Promise.all([tx.get(policyRef(companyId)), tx.get(db.doc(`companies/${documentId(companyId)}`))]);
     if (current.exists !== result.policyExists || (current.get('revision') || 0) !== result.settingsRevision) fail('aborted', 'Service coverage changed. Recheck the service property before saving.');
@@ -206,7 +218,7 @@ function serviceAreaHandlers(db, config = {}) {
       return { settings, availableCategories: categories, canManageSettings: true, canApproveExceptions: company.get('ownerId') === scope.uid };
     }
     if (data.action === 'check' || data.action === 'approveException') {
-      const input = { companyId: scope.companyId, propertyAddress: data.propertyAddress, serviceCategory: data.serviceCategory, purpose: data.purpose || 'scheduling', exceptionId: data.exceptionId }, result = await checkForWorkflow(input);
+      const input = { companyId: scope.companyId, propertyAddress: data.propertyAddress, serviceCategory: data.serviceCategory, purpose: data.purpose || 'scheduling', exceptionId: data.exceptionId, ...(data.action === 'check' && (!data.purpose || data.purpose === 'scheduling') ? { allowUnverifiedAddress: true } : {}) }, result = await checkForWorkflow(input);
       if (data.action === 'check') return { result };
       if (company.get('ownerId') !== scope.uid) fail('permission-denied', 'Only the company owner can approve an out-of-area property.');
       if (result.status !== 'outside') fail('failed-precondition', 'Only a validated property outside configured coverage can receive an exception.');

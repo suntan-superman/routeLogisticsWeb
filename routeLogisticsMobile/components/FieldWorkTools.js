@@ -8,6 +8,7 @@ import { readWorkspace, callWorkspace } from '../services/workspaceApi';
 import { getClaims } from '../services/tenancy';
 import { useTheme } from '../theme/ThemeProvider';
 import { Card, SectionHeader, PrimaryButton, SecondaryButton, FormField, InlineNotice, StatusBadge } from './MobileUI';
+import { useJobResourceRefresh } from '../services/useJobResources';
 
 const applicationFields = { product: 'Product', targetPest: 'Target pest', amount: 'Quantity', unit: 'Unit', epaRegNo: 'EPA registration', areaTreated: 'Area treated', method: 'Method', applicatorLicense: 'Applicator license', notes: 'Application notes' };
 const emptyApplication = () => Object.fromEntries(Object.keys(applicationFields).map(key => [key, '']));
@@ -33,10 +34,11 @@ function VisitAction({type,event,busy,pending,loading,historyError,cached,readOn
 const workNotes = job => ['pending', 'syncing'].includes(job?.syncState) && job?.syncPatch?.notes != null ? job.syncPatch.notes
   : job?.workNotes || (getClaims()?.role === 'technician' ? job?.notes : '') || '';
 
-export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyChange, draftActionsRef, showNavigation = true, readOnly = false }) {
+export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyChange, draftActionsRef, showNavigation = true, readOnly = false, active = true }) {
   const { palette } = useTheme();
   const [notes, setNotes] = useState(() => workNotes(job)), [dirty, setDirty] = useState(false), [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
+  const [ready, setReady] = useState(null), recordsRefresh = useRef(null);
   const [records, setRecords] = useState([]), [recordsError, setRecordsError] = useState('');
   const [visits, setVisits] = useState([]), [visitsError, setVisitsError] = useState(''), [visitsLoading, setVisitsLoading] = useState(false), [visitsMore, setVisitsMore] = useState(false);
   const [visitDraft, setVisitDraft] = useState(null), [visitAttempted, setVisitAttempted] = useState(false);
@@ -50,7 +52,7 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
   const current = (ticket, id) => mounted.current && generation.current === ticket && target.current?.id === id;
   const allowWork = !readOnly && !['completed', 'cancelled', 'canceled'].includes(job?.status);
   const reportError=(message,visit=false)=>{lastError.current=message;setError(message);if(visit)setVisitSaveError(message);};
-  const loadRecords = useCallback(async () => {
+  const loadRecords = useCallback(async ({ query = false } = {}) => {
     const selected = target.current, ticket = generation.current, request = ++sequence.current;
     if (!selected?.id) return;
     const [remote, local] = await Promise.allSettled([
@@ -59,14 +61,17 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
     ]);
     if (!current(ticket, selected.id) || request !== sequence.current) return;
     if (remote.status === 'rejected' && ['functions/permission-denied', 'functions/unauthenticated'].includes(remote.reason?.code)) {
-      setRecords([]); setRecordsError(remote.reason.message); return;
+      setRecords([]); setRecordsError(remote.reason.message); if (query) throw remote.reason; return;
     }
     const saved = remote.status === 'fulfilled' ? remote.value || [] : [];
     const pending = local.status === 'fulfilled' ? local.value.filter(row => row.kind === 'application' && row.jobId === selected.id && !['synced', 'discarded'].includes(row.state)).map(row => ({ ...row.record, id: row.id, syncState: row.state, error: row.error })) : [];
     setRecords([...saved, ...pending]);
     setRecordsError([remote.status === 'rejected' ? remote.reason.message : '', local.status === 'rejected' ? local.reason.message : ''].filter(Boolean).join('\n'));
+    if (query && remote.status === 'rejected') throw remote.reason;
+    if (query && local.status === 'rejected') throw local.reason;
+    return [...saved, ...pending];
   }, []);
-  const loadVisits = useCallback(async () => {
+  const loadVisits = useCallback(async ({ query = false } = {}) => {
     const selected = target.current, ticket = generation.current, request = ++visitSequence.current;
     if (!selected?.id) return;
     setVisitsLoading(true);
@@ -81,20 +86,24 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
       if (!current(ticket, selected.id) || request !== visitSequence.current) return;
       const saved=new Map([...(result.events||[]),...visitReceipts.current.values()].filter(event=>!event.jobId||event.jobId===selected.id).map(event=>[event.id,event]));
       setVisits([...saved.values()].sort((a,b)=>Date.parse(b.recordedAt)-Date.parse(a.recordedAt))); setVisitsMore(result.hasMore === true); setVisitsError('');setVisitsCached(!serverRead);
+      return { ...result, events: [...saved.values()] };
     } catch (failure) {
       if (!current(ticket, selected.id) || request !== visitSequence.current) return;
       if (['permission-denied', 'unauthenticated', 'not-found'].includes(String(failure.code || '').split('/').pop())) {visitReceipts.current.clear();setVisits([]);}
       setVisitsError(failure.message || 'Could not load the visit record. Retry while connected.');
+      if (query) throw failure;
     } finally { if (current(ticket, selected.id) && request === visitSequence.current) setVisitsLoading(false); }
   }, []);
+  const applications = useJobResourceRefresh('applications', job?.id, loadRecords, { enabled: ready === job?.id && active }); recordsRefresh.current = applications.refetch;
+  useJobResourceRefresh('visits', job?.id, loadVisits, { enabled: ready === job?.id && active });
   useEffect(() => {
     mounted.current = true; generation.current++; lock.current = false; dirtyRef.current = false;
     setNotes(workNotes(job)); setDirty(false); setForm(null); setBusy(false); setError(''); setNotice(''); setRecords([]); setRecordsError('');
     setVisits([]); setVisitsMore(false); setVisitsError('');setVisitsCached(false);setVisitSaveError(''); setVisitDraft(null); setVisitAttempted(false); visitAttempt.current = null;visitReceipts.current.clear();lastError.current='';draftState.current={notes:workNotes(job),form:null,visitDraft:null}; lastVisitJob.current = job;
-    loadRecords(); loadVisits(); const unsubscribe = subscribeOffline(loadRecords);
+    setReady(job?.id); const unsubscribe = subscribeOffline(() => recordsRefresh.current?.());
     return () => { mounted.current = false; generation.current++; sequence.current++; visitSequence.current++; unsubscribe(); callbacks.current.onBusyChange?.(false); callbacks.current.onDraftChange?.(false); };
   }, [job?.id, loadRecords, loadVisits]);
-  useEffect(() => { if (lastVisitJob.current !== job) { lastVisitJob.current = job; loadVisits(); } }, [job, loadVisits]);
+  useEffect(() => { lastVisitJob.current = job; }, [job]);
   useEffect(() => { if (!dirtyRef.current) setNotes(workNotes(job)); }, [job?.workNotes, job?.notes, job?.syncPatch?.notes, job?.syncState]);
   useEffect(() => { callbacks.current.onDraftChange?.(dirty || hasApplicationDraft(form) || !!visitDraft); }, [dirty, form, visitDraft]);
   const perform = async (action,{visit=false}={}) => {

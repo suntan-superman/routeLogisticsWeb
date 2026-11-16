@@ -19,6 +19,7 @@ function harness(seed = []) {
     const module = { exports: {} }; modules.set(file, module);
     const mockRequire = name => {
       if (name === 'react') return React;
+      if (name.endsWith('/services/useJobResources')) return { useJobResourceRefresh: (_resource, id, loader, { enabled }) => { React.useEffect(() => { if (enabled) loader({ query: true }).catch(() => {}); }, [id, enabled, loader]); return { refetch: () => loader().catch(() => {}) }; } };
       if (name.startsWith('@babel/runtime/')) return require(name);
       if (name === 'react-native') return { View: 'View', Text: 'Text', Pressable: 'Pressable', ScrollView: 'ScrollView', ActivityIndicator: 'ActivityIndicator', AppState: env.app, BackHandler: { addEventListener: (_event, callback) => { env.back = callback; return { remove: () => { if (env.back === callback) env.back = null; } }; } } };
       if (name.endsWith('/AuthContext')) return { useAuth: () => ({ user: env.user, accessStatus: env.accessStatus }) };

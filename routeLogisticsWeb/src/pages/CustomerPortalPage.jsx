@@ -1,3 +1,4 @@
+import SelectControl from '../components/SelectControl';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
@@ -8,6 +9,8 @@ import InvoicePayment from '../components/InvoicePayment';
 import PaymentHistory from '../components/PaymentHistory';
 import { paymentsConfigured, paymentMode } from '../services/paymentConfig';
 import CustomerReviews from '../components/CustomerReviews';
+import { usePrincipalQuery } from '../hooks/usePrincipalQuery';
+import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 import { useConfirmUnsavedChanges } from '../hooks/useUnsavedChanges';
 const call = (name, data) => httpsCallable(portalFunctions, name)(data).then((result) => result.data);
 const money = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
@@ -22,33 +25,33 @@ export default function CustomerPortalPage() {
   const [selectedId, setSelectedId] = useState(''), [openInvoice, setOpenInvoice] = useState(null), [fileView, setFileView] = useState(null), [logoutFailed, setLogoutFailed] = useState(false);
   const alive = useRef(false), identity = useRef(null), selection = useRef(''), requestVersion = useRef(0), fileVersion = useRef(0), authVersion = useRef(0), submitting = useRef(false);
   const clearDetails = () => { fileVersion.current++; setPaymentInvoice(null); setOpenInvoice(null); setFileView(null); };
-  const load = async (current = identity.current) => {
-    if (!current) return;
-    const version = ++requestVersion.current, uid = current.uid, previous = selection.current;
-    clearDetails(); setBusy(true); setError(''); setAccounts([]);
-    try {
-      await portalReady;
-      const data = await call('getCustomerPortal');
-      if (!alive.current || version !== requestVersion.current || identity.current?.uid !== uid || portalAuth.currentUser?.uid !== uid) return;
-      const available = Array.isArray(data.accounts) ? data.accounts : [];
-      const next = available.some(account => account.id === previous) ? previous : available[0]?.id || '';
-      selection.current = next; setSelectedId(next); setAccounts(available); setHasMore(data.hasMoreAccounts === true);
-    } catch (failure) {
-      if (alive.current && version === requestVersion.current && identity.current?.uid === uid) { selection.current = ''; setSelectedId(''); setError(failure.message || 'Your records could not be loaded. Refresh the portal to try again.'); }
-    } finally { if (alive.current && version === requestVersion.current && identity.current?.uid === uid) setBusy(false); }
-  };
-  const loadRef = useRef(load); loadRef.current = load;
+  const portalQuery = usePrincipalQuery('rl-customer-portal', user?.uid, ['accounts'], async () => { await portalReady; return call('getCustomerPortal'); }, {
+    current: uid => alive.current && identity.current?.uid === uid && portalAuth.currentUser?.uid === uid,
+  });
+  const load = () => portalQuery.refetch();
+  useEffect(() => {
+    if (!user || !portalQuery.data) return;
+    const available = Array.isArray(portalQuery.data.accounts) ? portalQuery.data.accounts : [];
+    const previous = selection.current, next = available.some(account => account.id === previous) ? previous : available[0]?.id || '';
+    if (next !== previous) clearDetails();
+    selection.current = next; setSelectedId(next); setAccounts(available); setHasMore(portalQuery.data.hasMoreAccounts === true); setBusy(false);
+  }, [portalQuery.data, user]);
+  useEffect(() => {
+    if (!user || !portalQuery.error) return;
+    setBusy(false);
+    if (workspaceAccessError(portalQuery.error)) { selection.current = ''; setSelectedId(''); setAccounts([]); clearDetails(); }
+  }, [portalQuery.error, user]);
   useEffect(() => {
     alive.current = true;
     const unsubscribe = onAuthStateChanged(portalAuth, current => {
       identity.current = current; selection.current = ''; requestVersion.current++; fileVersion.current++; authVersion.current++;
       setUser(current); setAccounts([]); setSelectedId(''); setPaymentInvoice(null); setOpenInvoice(null); setFileView(null); setHasMore(false);
       setCode(''); setChallenge(null); setMessage(''); setError(''); setLogoutFailed(false);
-      if (current) loadRef.current(current); else setBusy(false);
+      setBusy(!!current);
     });
     return () => { alive.current = false; unsubscribe(); };
   }, []);
-  const selectedAccount = user ? accounts.find(account => account.id === selectedId) : null;
+  const selectedAccount = user && portalQuery.data ? accounts.find(account => account.id === selectedId) : null;
   const selectedAccounts = selectedAccount ? [selectedAccount] : [];
   const chooseProvider = async event => {
     const next = event.target.value;
@@ -107,7 +110,7 @@ export default function CustomerPortalPage() {
       <button disabled={busy || logoutFailed} className="rounded bg-primary-700 px-4 py-2 text-white hover:bg-primary-800 disabled:opacity-50">{busy ? 'Please wait…' : challenge ? 'Sign in' : 'Email a sign-in code'}</button>
       {challenge && <button type="button" disabled={busy || logoutFailed} className="block underline" onClick={() => { authVersion.current++; setChallenge(null); setCode(''); setMessage(''); setError(''); }}>Request a new code or change email</button>}
     </form> : <>
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-4 rounded-xl border bg-white p-5"><label className="min-w-0 flex-1 font-semibold sm:max-w-lg">Service provider<select className="mt-2 block w-full rounded border-gray-300 font-normal" value={selectedId} disabled={busy || !accounts.length} onChange={chooseProvider} aria-describedby="portal-provider-help">{!accounts.length && <option value="">{busy ? 'Loading providers…' : 'No available providers'}</option>}{accounts.map(account => <option key={account.id} value={account.id}>{account.companyName}{account.contactEmail ? ` · ${account.contactEmail}` : ''}</option>)}</select></label><button type="button" className="text-primary-700 underline" disabled={busy} onClick={async () => { if (await confirmDiscard()) load(); }}>{busy ? 'Refreshing…' : 'Refresh visits and invoices'}</button><p id="portal-provider-help" className="w-full text-sm text-gray-500">Only the selected provider's records are shown. Switching providers closes open files, review drafts, and payment details.</p></div>
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-4 rounded-xl border bg-white p-5"><label className="min-w-0 flex-1 font-semibold sm:max-w-lg">Service provider<SelectControl className="mt-2 block w-full rounded border-gray-300 font-normal" value={selectedId} disabled={busy || !accounts.length} onChange={chooseProvider} aria-describedby="portal-provider-help">{!accounts.length && <option value="">{busy ? 'Loading providers…' : 'No available providers'}</option>}{accounts.map(account => <option key={account.id} value={account.id}>{account.companyName}{account.contactEmail ? ` · ${account.contactEmail}` : ''}</option>)}</SelectControl></label><button type="button" className="text-primary-700 underline" disabled={busy} onClick={async () => { if (await confirmDiscard()) load(); }}>{busy ? 'Refreshing…' : 'Refresh visits and invoices'}</button><p id="portal-provider-help" className="w-full text-sm text-gray-500">Only the selected provider's records are shown. Switching providers closes open files, review drafts, and payment details.</p></div>
       {busy && <p role="status" className="py-4 text-gray-600">Loading your authorized providers and service records…</p>}
       {!busy && !accounts.length && !error && <p>No service records are available. Contact your provider to check your email address.</p>}
       {selectedAccounts.map((account) => <section key={`${user.uid}:${account.id}`} aria-label="Selected provider records" className="mb-6 rounded-xl border bg-white p-5 sm:p-7">
@@ -127,7 +130,7 @@ export default function CustomerPortalPage() {
       {hasMore && <p>Showing up to 25 service accounts. Contact your provider for additional records.</p>}
     </>}
     {message && <p role="status" className="mt-4">{message}</p>}
-    {error && <p role="alert" className="mt-4 text-red-700">{error}</p>}
+    {(error || portalQuery.error) && <p role="alert" className="mt-4 text-red-700">{error || portalQuery.error.message}</p>}
     {user && paymentsConfigured && selectedAccounts.some((a) => a.invoices.some((i) => i.status === 'sent' && i.total >= 0.5)) && <section className="mt-6 rounded-xl border bg-white p-5"><h2 className="font-semibold">{paymentMode === 'test' ? 'Test card payments' : 'Secure card payments'}</h2><p className="mb-3 text-sm">{paymentMode === 'test' ? 'No real money is collected. Invoice balances remain unchanged.' : 'Choose an invoice to pay securely through Stripe.'}</p>{selectedAccounts.flatMap((a) => a.invoices.filter((i) => i.status === 'sent' && i.total >= 0.5).map((invoice) => <button type="button" className="mr-3 text-primary-700 underline" key={invoice.id} onClick={() => setPaymentInvoice({ accountId: a.id, invoiceId: invoice.id })}>{paymentMode === 'test' ? 'Test payment for' : 'Pay'} {invoice.invoiceNumber}</button>))}</section>}
     {activePayment && <InvoicePayment key={`${user.uid}:${selectedAccount.id}:${activePayment}`} invoiceId={activePayment} functionClient={portalFunctions} onClose={() => setPaymentInvoice(null)} onRefresh={() => { if (identity.current?.uid === user.uid && selection.current === paymentInvoice.accountId) load(); }} />}
   </main>;

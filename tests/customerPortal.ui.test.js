@@ -3,6 +3,10 @@ const assert = require('node:assert/strict'), fs = require('node:fs'), path = re
 const { createRequire } = require('node:module');
 const mobile = createRequire(path.resolve(__dirname, '../routeLogisticsMobile/package.json')), web = createRequire(path.resolve(__dirname, '../routeLogisticsWeb/package.json'));
 const React = mobile('react'), { create, act } = mobile('react-test-renderer'), { transformSync } = web('esbuild');
+const {createWorkspaceQueryMock,selectControlMock}=require('./support/workspaceQueryMock.cjs');
+const workspaceHooks=createWorkspaceQueryMock(React,{scopeId:'test-workspace'});
+const {createPrincipalQueryMock}=require('./support/principalQueryMock.cjs');
+const principalHooks=createPrincipalQueryMock(React);
 global.IS_REACT_ACT_ENVIRONMENT = true;
 const client = { name: 'isolated-customer-functions' };
 let tree, user = { uid: 'synthetic-portal-user' }, listener, calls = [], accounts, pendingPortal = null, pendingFile = null, fileError = null, portalError = null, otpError = null, requestNumber = 0, paymentProps = [], allowDiscard = true;
@@ -21,6 +25,10 @@ const call = async (name, data, functionClient) => {
 };
 const mock = name => {
   if (name === 'react') return React;
+    if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
+    if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
+    if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found','user-changed'].includes(String(error?.code||'').split('/').pop())};
+    if(name.endsWith('/usePrincipalQuery'))return principalHooks;
   if (name === 'react-router-dom') return { Link: ({ children, to, ...props }) => React.createElement('a', { ...props, href: to }, children) };
   if (name === 'react-helmet-async') return { Helmet: props => React.createElement(React.Fragment, null, props.children) };
   if (name === 'firebase/auth') return {
@@ -31,7 +39,7 @@ const mock = name => {
   if (name === 'firebase/functions') return { httpsCallable: (functionClient, endpoint) => async data => ({ data: await call(endpoint, data, functionClient) }) };
   if (name.endsWith('/services/portal')) return { portalAuth, portalFunctions: client, portalReady: Promise.resolve() };
   if (name.endsWith('/services/paymentConfig')) return { paymentsConfigured: true, paymentMode: 'test' };
-  if (name.endsWith('/components/CustomerReviews')) return { __esModule: true, default: props => React.createElement('section', { 'aria-label': 'Selected provider review scope', 'data-review-account': props.accountId, 'data-review-user': props.userId }) };
+  if (name.endsWith('/components/CustomerReviews')) return { __esModule: true, default: props => { const [draft,setDraft]=React.useState('');return React.createElement('section', { 'aria-label': 'Selected provider review scope', 'data-review-account': props.accountId, 'data-review-user': props.userId },React.createElement('input',{'aria-label':'Unsent synthetic review',value:draft,onChange:event=>setDraft(event.target.value)})); } };
   if (name.endsWith('/hooks/useUnsavedChanges')) return { useConfirmUnsavedChanges: () => async () => allowDiscard };
   if (name.endsWith('/components/InvoicePayment')) return { __esModule: true, default: props => { React.useEffect(() => { paymentProps.push(props); }, [props]); return React.createElement('div', { role: 'dialog', 'aria-label': 'Invoice payment', 'data-payment-invoice': props.invoiceId, 'data-isolated-client': props.functionClient === client }, React.createElement('button', { onClick: props.onClose }, 'Close test payment')); } };
   if (name.endsWith('/components/PaymentHistory')) return { __esModule: true, default: props => { React.useEffect(() => { call('rlGetInvoicePaymentHistory', { invoiceId: props.invoiceId }, props.functionClient); }, [props.invoiceId, props.functionClient]); return React.createElement('section', { 'aria-label': 'Payment history', 'data-history-invoice': props.invoiceId, 'data-isolated-client': props.functionClient === client }, 'Payment history'); } };
@@ -89,6 +97,16 @@ test('refresh removes revoked associations and preserves a selected provider onl
   accounts = [a]; await act(async () => button('Refresh visits and invoices').props.onClick());
   assert.equal(tree.root.findByType('select').props.value, a.id);
   assert.equal(tree.root.findAllByProps({ role: 'dialog' }).length, 0); assert.doesNotMatch(text(), /Provider B service visit|INV-B/);
+});
+
+test('automatic provider refresh preserves unsent feedback until the selected association is revoked',async()=>{
+  await mount();await choose(b.id);
+  await act(async()=>tree.root.findByProps({'aria-label':'Unsent synthetic review'}).props.onChange({target:{value:'Unsent feedback for provider B'}}));allowDiscard=false;
+  accounts=[a,{...b,jobs:[...b.jobs,{id:'visit-new',serviceType:'New authorized provider B visit',date:'2026-11-16',time:'09:00',status:'scheduled'}]}];
+  await act(async()=>principalHooks.refresh(['rl-customer-portal']));
+  assert.equal(tree.root.findByType('select').props.value,b.id);assert.equal(tree.root.findByProps({'aria-label':'Unsent synthetic review'}).props.value,'Unsent feedback for provider B');assert.match(text(),/New authorized provider B visit/);
+  accounts=[a];await act(async()=>principalHooks.refresh(['rl-customer-portal']));
+  assert.equal(tree.root.findByType('select').props.value,a.id);assert.equal(tree.root.findByProps({'aria-label':'Unsent synthetic review'}).props.value,'');assert.doesNotMatch(text(),/New authorized provider B visit|INV-B/);
 });
 
 test('late file responses cannot render data after a provider switch', async () => {

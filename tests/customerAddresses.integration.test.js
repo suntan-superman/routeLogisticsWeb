@@ -131,10 +131,11 @@ test('unconfigured legacy job-address inputs are Google verified; unchanged ETA/
   await f.work.manageJob(f.request({ action: 'update', id: result.id, job: { time: '09:11', date: '2030-01-03', notes: 'No geographic change' } }));
   assert.equal(f.calls(), 1); assert.equal((await db.doc(`jobs/${result.id}`).get()).get('time'), '09:11');
 });
-test('job scheduling forwards Google suggestion details without overwriting either job or customer', async () => {
+test('internal job scheduling returns a nonblocking Google suggestion while preserving the entered address and customer record', async () => {
   const f = await fixture();
-  await assert.rejects(f.work.manageJob(f.request({ action: 'create', job: { customerId: f.customerId, serviceProperty: { address: CORRECTION }, date: '2030-01-02', time: '09:00' } })), error => error.details.addressValidation.suggestedAddress === VALID);
-  assert.equal((await db.collection('jobs').where('companyId', '==', f.id).get()).size, 0);
+  const result = await f.work.manageJob(f.request({ action: 'create', job: { customerId: f.customerId, serviceProperty: { address: CORRECTION }, date: '2030-01-02', time: '09:00' } }));
+  assert.equal(result.serviceArea.addressValidation.suggestedAddress, VALID); assert.equal(result.serviceArea.eligible, false); assert.match(result.addressWarning, /unverified/);
+  const job = await db.doc(`jobs/${result.id}`).get(); assert.equal(job.get('address'), CORRECTION); assert.equal(job.get('serviceProperty.validated'), false); assert.equal(job.get('latitude'), null);
   assert.deepEqual((await db.doc(`customers/${f.customerId}`).get()).data(), f.original);
 });
 

@@ -5,15 +5,17 @@ import { useTheme } from '../theme/ThemeProvider';
 import { callWorkspace } from '../services/workspaceApi';
 import { cachedRead, queuedWork, saveServiceFormOffline, subscribeOffline } from '../services/offline';
 import { Card, SectionHeader, PrimaryButton, SecondaryButton, FormField, InlineNotice } from './MobileUI';
+import { useJobResourceRefresh } from '../services/useJobResources';
 const { validateAnswers } = require('../../functions/shared/serviceFormSchema');
 
-export default function ServiceChecklist({ job, readOnly = false, onBusyChange, onDraftChange, draftActionsRef }) {
+export default function ServiceChecklist({ job, readOnly = false, onBusyChange, onDraftChange, draftActionsRef, active = true }) {
   const { permissions } = useAuth(), { palette } = useTheme();
   const [data, setData] = useState(null), [catalog, setCatalog] = useState([]), [answers, setAnswers] = useState({}), [pending, setPending] = useState(null);
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [dirty, setDirty] = useState(false), [loading, setLoading] = useState(true);
+  const [ready, setReady] = useState(null), refresh = useRef(null);
   const mounted = useRef(false), sequence = useRef(0), lock = useRef(false), dirtyRef = useRef(false), currentJob = useRef(job), callbacks = useRef({ onBusyChange, onDraftChange }), formRef = useRef(null);
   currentJob.current = job; callbacks.current = { onBusyChange, onDraftChange };
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ query = false } = {}) => {
     const id = currentJob.current?.id, ticket = ++sequence.current;
     try {
       const [result, rows] = await Promise.all([cachedRead(`service-form:${id}`, () => callWorkspace('rlServiceForms', { action: 'read', jobId: id })), queuedWork()]);
@@ -21,17 +23,27 @@ export default function ServiceChecklist({ job, readOnly = false, onBusyChange, 
       const saved = rows.find(row => row.kind === 'service-form' && row.jobId === id && !['synced','discarded'].includes(row.state));
       setPending(saved || null);
       if (dirtyRef.current && formRef.current?.assignmentVersion !== result.form?.assignmentVersion) { setError('The assigned template changed online. Your draft is retained. Save it for review or discard it explicitly before refreshing.'); return; }
+      if (dirtyRef.current && formRef.current?.responseVersion !== result.form?.responseVersion) { setError('The saved report changed online. Your answers and original revision are retained. Save for conflict review or discard unsaved answers to load the latest report.'); return result; }
       setData(result); formRef.current = result.form;
       if (!dirtyRef.current) setAnswers(saved?.record.answers || result.form?.answers || {});
       setError('');
+      return result;
     } catch (failure) {
       if (mounted.current && ticket === sequence.current) { if (['permission-denied','unauthenticated'].includes(String(failure.code || '').split('/').pop())) setData(null); setError(failure.message || 'Service form could not be loaded. Open it while connected first.'); }
+      if (query) throw failure;
     } finally { if (mounted.current && ticket === sequence.current) setLoading(false); }
   }, []);
+  const resource = useJobResourceRefresh('service-form', job?.id, load, { enabled: ready === job?.id && active }); refresh.current = resource.refetch;
+  const loadCatalog = useCallback(async () => {
+    const id = currentJob.current?.id;
+    const result = await cachedRead('service-template-catalog', () => callWorkspace('rlServiceForms', { action: 'catalog' }));
+    if (mounted.current && currentJob.current?.id === id) setCatalog(result.templates || []);
+    return result;
+  }, []);
+  useJobResourceRefresh('service-catalog', job?.id, loadCatalog, { enabled: ready === job?.id && active && permissions.canManage && data?.enabled && !data?.form, interval: 120000 });
   useEffect(() => {
     mounted.current = true; setData(null); setAnswers({}); setPending(null); setError(''); setNotice(''); setDirty(false); dirtyRef.current = false; formRef.current = null; setLoading(true); setCatalog([]);
-    load(); const unsubscribe = subscribeOffline(load);
-    if (permissions.canManage) cachedRead('service-template-catalog', () => callWorkspace('rlServiceForms', { action: 'catalog' })).then(result => { if (mounted.current) setCatalog(result.templates || []); }).catch(() => {});
+    setReady(job?.id); const unsubscribe = subscribeOffline(() => refresh.current?.());
     return () => { mounted.current = false; sequence.current++; unsubscribe(); callbacks.current.onBusyChange?.(false); callbacks.current.onDraftChange?.(false); };
   }, [job.id, load, permissions.canManage]);
   useEffect(() => { callbacks.current.onDraftChange?.(dirty); }, [dirty]);

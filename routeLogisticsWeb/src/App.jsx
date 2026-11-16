@@ -1,6 +1,8 @@
 import React, { Suspense, lazy } from 'react';
 import { createBrowserRouter, RouterProvider, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { createWorkspaceQueryClient } from './services/workspaceQueryClient';
+import { WorkspaceQueryBoundary } from './hooks/useWorkspaceQuery';
 import { Toaster } from 'react-hot-toast';
 import { Helmet, HelmetProvider } from 'react-helmet-async';
 import { registerLicense } from '@syncfusion/ej2-base';
@@ -51,14 +53,7 @@ if (import.meta.env.VITE_SYNCFUSION_LICENSE_KEY) {
   registerLicense(import.meta.env.VITE_SYNCFUSION_LICENSE_KEY);
 }
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      refetchOnWindowFocus: false,
-    },
-  },
-});
+const queryClient = createWorkspaceQueryClient();
 
 // Shows the marketing landing page to signed-out visitors, and the dashboard
 // to signed-in users, without changing either route's own loading/redirect logic.
@@ -222,9 +217,11 @@ function App() {
     <HelmetProvider>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
+          <WorkspaceQueryBoundary>
           <ConfirmProvider>
             <RouterProvider router={router} />
           </ConfirmProvider>
+          </WorkspaceQueryBoundary>
         </AuthProvider>
       </QueryClientProvider>
     </HelmetProvider>

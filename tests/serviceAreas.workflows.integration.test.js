@@ -36,10 +36,35 @@ test('new jobs use the explicit validated service property, never billing coordi
  const job=(await db.doc('jobs/'+saved.id).get()).data();assert.equal(job.address,INSIDE);assert.equal(job.serviceProperty.address,INSIDE);assert.equal(job.latitude,35);assert.equal(job.serviceAreaEligibility.settingsRevision,1);assert.equal(job.serviceAreaEligibility.status,'inside');assert.deepEqual((await db.doc('customers/'+f.customerId).get()).data(),customerBefore);
 });
 
-test('configured job creation fails safely for outside, absent or unvalidated properties despite forged client flags',async()=>{
+test('configured job creation still rejects known outside and absent properties despite forged client flags',async()=>{
  const f=await fixture();
- for(const property of [{address:OUTSIDE},undefined,{address:''},{address:'500 Unresolved Service Road, Example, CA 93301'}])await assert.rejects(f.work.manageJob(f.request({action:'create',job:f.job({serviceProperty:property,address:property===undefined?undefined:INSIDE,latitude:35,longitude:-119,eligible:true})})),{code:'failed-precondition'});
+ for(const property of [{address:OUTSIDE},undefined,{address:''}])await assert.rejects(f.work.manageJob(f.request({action:'create',job:f.job({serviceProperty:property,address:property===undefined?undefined:INSIDE,latitude:35,longitude:-119,eligible:true})})),{code:'failed-precondition'});
  assert.equal((await db.collection('jobs').where('companyId','==',f.id).get()).size,0);
+});
+test('authorized internal scheduling can continue with an unverified address warning without fabricating coordinates or coverage',async()=>{
+ for(const configured of[true,false]){
+  const f=await fixture({configured}),address='500 Unresolved Service Road, Example, CA 93301';
+  const saved=await f.work.manageJob(f.request({action:'create',job:f.job({serviceProperty:{address,latitude:0,longitude:0,validated:true},latitude:0,longitude:0,location:{latitude:0,longitude:0}})},f.manager));
+  const job=await db.doc('jobs/'+saved.id).get();assert.equal(saved.serviceArea.eligible,false);assert.equal(saved.serviceArea.status,'address-unverified');assert.equal(saved.serviceArea.internalContinuation,true);assert.match(saved.addressWarning,/save.*internal job/i);
+  assert.equal(job.get('address'),address);assert.equal(job.get('serviceProperty.validated'),false);assert.equal(job.get('serviceProperty.source'),'operator-entered');assert.equal(job.get('latitude'),null);assert.equal(job.get('longitude'),null);assert.equal(job.get('location'),null);assert.equal(job.get('serviceAreaEligibility.eligible'),false);
+  assert.equal((await db.doc('customers/'+f.customerId).get()).get('address'),OUTSIDE);
+ }
+});
+test('public requests, bookings and estimates remain strict when an address cannot be verified, even with a forged continuation flag',async()=>{
+ const f=await fixture(),propertyAddress='500 Unresolved Service Road, Example, CA 93301';
+ for(const purpose of['public-request','booking','estimate']){
+  const result=await f.area.checkForWorkflow({companyId:f.id,uid:f.uid,propertyAddress,serviceCategory:'Pest Control',purpose,allowUnverifiedAddress:true});assert.equal(result.eligible,false);assert.notEqual(result.internalContinuation,true);
+ }
+ const forcedPublic=await f.area.checkForWorkflow({companyId:f.id,uid:f.uid,propertyAddress,serviceCategory:'Pest Control',purpose:'scheduling',publicRequest:true,allowUnverifiedAddress:true});assert.equal(forcedPublic.eligible,false);assert.notEqual(forcedPublic.internalContinuation,true);
+ await assert.rejects(f.saveEstimate(f.draft({serviceProperty:{address:propertyAddress}})),{code:'failed-precondition'});
+});
+test('internal address warnings do not bypass configured category requirements, outside boundaries or transaction policy changes',async()=>{
+ const f=await fixture(),propertyAddress='500 Unresolved Service Road, Example, CA 93301';
+ await f.saveSettings({categoryOverrides:[{serviceCategory:'Pool Cleaning',method:'zip',zipCodes:['90001'],radiusMiles:25}]});
+ await assert.rejects(f.work.manageJob(f.request({action:'create',job:f.job({serviceCategory:'Unknown',serviceProperty:{address:propertyAddress}})})),{code:'failed-precondition'});
+ await assert.rejects(f.work.manageJob(f.request({action:'create',job:f.job({serviceProperty:{address:OUTSIDE}})})),{code:'failed-precondition'});
+ f.onGeocode(()=>db.doc('rlServiceAreas/'+f.id).update({revision:3}));
+ await assert.rejects(f.work.manageJob(f.request({action:'create',job:f.job({serviceProperty:{address:propertyAddress}})})),{code:'aborted'});
 });
 
 test('service category overrides are enforced instead of falling back to a broader base territory',async()=>{

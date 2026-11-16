@@ -94,6 +94,19 @@ test('transaction fence accepts a trusted current check and rejects a forged/clo
   await assert.rejects(db.runTransaction(tx => f.service.assertWorkflowCurrent(tx, { ...input, result: { ...result } })), { code: 'failed-precondition' });
   await assert.rejects(db.runTransaction(tx => f.service.assertWorkflowCurrent(tx, { ...input, propertyAddress: OUTSIDE })), { code: 'failed-precondition' });
 });
+test('internal unverified continuation is server issued, cannot be cloned or promoted to public eligibility', async () => {
+  const f = await fixture(); await f.save();
+  const propertyAddress = '999 Unresolved Street, Example, CA 93312';
+  const result = await f.service.checkForWorkflow({ companyId: f.companyId, uid: f.ownerUid, propertyAddress, serviceCategory: 'Pest Control', purpose: 'scheduling', allowUnverifiedAddress: true });
+  assert.equal(result.eligible, false); assert.equal(result.internalContinuation, true);
+  const prepared = { companyId: f.companyId, result, propertyAddress, serviceCategory: 'Pest Control', purpose: 'scheduling' };
+  await db.runTransaction(tx => f.service.assertWorkflowCurrent(tx, prepared));
+  await assert.rejects(db.runTransaction(tx => f.service.assertWorkflowCurrent(tx, { ...prepared, result: JSON.parse(JSON.stringify(result)) })), { code: 'failed-precondition' });
+  await assert.rejects(db.runTransaction(tx => f.service.assertWorkflowCurrent(tx, { ...prepared, publicRequest: true })), { code: 'failed-precondition' });
+  await assert.rejects(db.runTransaction(tx => f.service.assertWorkflowCurrent(tx, { ...prepared, purpose: 'booking' })), { code: 'failed-precondition' });
+  result.eligible = true;
+  await assert.rejects(db.runTransaction(tx => f.service.assertWorkflowCurrent(tx, prepared)), { code: 'failed-precondition' });
+});
 test('a newly configured policy fences an earlier unconfigured check before a new record can be created', async () => {
   const f = await fixture(), result = await f.check(); await f.save();
   await assert.rejects(db.runTransaction(tx => f.service.assertWorkflowCurrent(tx, { companyId: f.companyId, result, propertyAddress: INSIDE, serviceCategory: 'Pest Control', purpose: 'scheduling' })), { code: 'aborted' });

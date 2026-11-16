@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import CustomerService from '../services/customerService';
@@ -6,6 +6,8 @@ import JobManagementService from '../services/jobManagementService';
 import EstimateTemplateService from '../services/estimateTemplateService';
 import { can } from '../services/tenancy';
 import { motion as Motion } from 'framer-motion';
+import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
+import { summarizeJobs, calendarDay } from '../utils/jobSummary';
 import { 
   BuildingOfficeIcon, 
   UsersIcon, 
@@ -20,31 +22,14 @@ const formatMoney = (n) =>
 
 const HomePage = () => {
   const { userProfile } = useAuth();
-  const [counts, setCounts] = useState({ customers: 0, activeJobs: 0, monthRevenue: 0, templates: 0 });
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const [cust, jobs, tmpl] = await Promise.all([
-        CustomerService.getCustomerStats(),
-        JobManagementService.getJobs(500),
-        EstimateTemplateService.getTemplateStats()
-      ]).catch(() => [null, null, null]);
-      if (cancelled) return;
-      const now = new Date();
-      const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-      const list = jobs?.success ? jobs.jobs : [];
-      setCounts({
-        customers: cust?.success ? cust.stats.totalCustomers : 0,
-        activeJobs: list.filter(j => j.status === 'scheduled' || j.status === 'in-progress').length,
-        monthRevenue: list
-          .filter(j => j.status === 'completed' && String(j.date || '').startsWith(monthKey))
-          .reduce((sum, j) => sum + (Number(j.totalCost) || 0), 0),
-        templates: tmpl?.success ? tmpl.stats.totalTemplates : 0
-      });
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  const customersQuery=useWorkspaceQuery(['customer-stats'],()=>CustomerService.getCustomerStats());
+  const jobsQuery=useWorkspaceQuery(['jobs',500],()=>JobManagementService.getJobs(500));
+  const templatesQuery=useWorkspaceQuery(['template-stats'],()=>EstimateTemplateService.getTemplateStats());
+  const todayKey=new Date().toLocaleDateString('en-CA');
+  const counts=useMemo(()=>{const summary=jobsQuery.data?summarizeJobs(jobsQuery.data.jobs,calendarDay(todayKey)||new Date()):null;return{
+    customers:customersQuery.data?.stats?.totalCustomers??null,activeJobs:summary?.activeJobs??null,
+    monthRevenue:summary?.monthRevenue??null,templates:templatesQuery.data?.stats?.totalTemplates??null,
+  };},[jobsQuery.data,customersQuery.data,templatesQuery.data,todayKey]);
 
   const quickActions = [
     {
@@ -71,14 +56,19 @@ const HomePage = () => {
   ];
 
   const stats = [
-    { name: 'Total Customers', value: String(counts.customers), icon: UsersIcon },
-    { name: 'Active Jobs', value: String(counts.activeJobs), icon: ClockIcon },
-    ...(can('reports.financial') ? [{ name: 'Monthly Revenue', value: formatMoney(counts.monthRevenue), icon: CurrencyDollarIcon }] : []),
-    { name: 'Estimate Templates', value: String(counts.templates), icon: DocumentTextIcon },
+    { name: 'Total Customers', value: counts.customers??'—', icon: UsersIcon },
+    { name: 'Active Jobs', value: counts.activeJobs??'—', icon: ClockIcon },
+    ...(can('reports.financial') ? [{ name: 'Monthly Revenue', value: counts.monthRevenue==null?'—':formatMoney(counts.monthRevenue), icon: CurrencyDollarIcon }] : []),
+    { name: 'Estimate Templates', value: counts.templates??'—', icon: DocumentTextIcon },
   ];
 
   return (
     <div className="space-y-6">
+      {[customersQuery,jobsQuery,templatesQuery].some(query=>query.error)&&<div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        <p>{[customersQuery,jobsQuery,templatesQuery].find(query=>query.error)?.error?.message||'Dashboard information could not refresh.'} Saved information remains visible; unavailable counts show a dash.</p>
+        <button type="button" className="mt-2 underline" onClick={()=>Promise.all([customersQuery.refetch(),jobsQuery.refetch(),templatesQuery.refetch()])}>Retry dashboard refresh</button>
+      </div>}
+      {jobsQuery.data?.hasMore&&<p role="status" className="text-sm text-amber-900">Job summaries cover the first 500 loaded jobs.</p>}
       {/* Welcome Section */}
       <Motion.div
         initial={{ opacity: 0, y: 20 }}

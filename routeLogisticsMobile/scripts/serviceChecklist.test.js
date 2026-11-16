@@ -10,6 +10,7 @@ const file=path.resolve(__dirname,'../components/ServiceChecklist.js'),moduleUnd
 const requireMock=name=>{
   if(name.startsWith('@babel/runtime/'))return require(name);
   if(name==='react')return React;
+  if(name.endsWith('/services/useJobResources'))return{useJobResourceRefresh:(_resource,id,loader,{enabled})=>{React.useEffect(()=>{if(enabled)loader({query:true}).catch(()=>{});},[id,enabled]);return{refetch:()=>loader().catch(()=>{})};}};
   if(name==='react-native')return{View:'View',Text:'Text',Pressable:'Pressable'};
   if(name.endsWith('/contexts/AuthContext'))return{useAuth:()=>({permissions:{canManage:manager}})};
   if(name.endsWith('/theme/ThemeProvider'))return{useTheme:()=>({palette:{text:'#FFF',secondary:'#CCC',accent:'#0F0'}})};
@@ -44,6 +45,16 @@ test('refresh preserves an unsaved draft and changed template requires explicit 
   await render();await input('pH reading','7.8');server={...server,form:{...server.form,answers:{ph:7.2}}};await press('Refresh service checklist');
   assert.equal(tree.root.findByProps({accessibilityLabel:'pH reading'}).props.value,'7.8');
   server={...server,form:{...server.form,assignmentVersion:2}};await press('Refresh service checklist');assert.match(text(),/assigned template changed online/);assert.equal(drafts.at(-1),true);
+});
+
+test('a refreshed report cannot silently rebase unsaved answers onto a newer server revision',async()=>{
+  await render(); await input('pH reading','7.8');
+  server={...server,form:{...server.form,responseVersion:1,answers:{ph:7.2}}};
+  await press('Refresh service checklist');
+  assert.match(text(),/saved report changed online/);
+  assert.equal(tree.root.findByProps({accessibilityLabel:'pH reading'}).props.value,'7.8');
+  await press('Save service draft');
+  assert.equal(saves.length,1); assert.equal(saves[0].record.expectedVersion,0); assert.equal(saves[0].record.answers.ph,7.8);
 });
 test('disabled or closed jobs keep read-only reports without service submission controls',async()=>{
   server.enabled=false;await render();assert.match(text(),/not enabled yet/);assert.equal(control('Save service draft'),undefined);assert.equal(control('Finalize service report'),undefined);

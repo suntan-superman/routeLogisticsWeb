@@ -9,9 +9,14 @@ import { ScreenHeader } from '../components/MobileUI';
 import { formatPhone, displayPhone } from '../services/phoneFormat';
 import NativePushSettings from '../components/NativePushSettings';
 import LegalAccountSettings from '../components/LegalAccountSettings';
+import { useJobResourceRefresh } from '../services/useJobResources';
+import { readWorkspace } from '../services/workspaceApi';
+import { companyProfile } from '../services/workspacePolicy';
 
-export default function SettingsScreen({ navigation, embedded = false }) {
-  const { user, permissions, updateUserProfile, signOut, refreshUser } = useAuth();
+export default function SettingsScreen({ navigation, embedded = false, active = true }) {
+  const { user: account, permissions, updateUserProfile, signOut } = useAuth();
+  const metadata = useJobResourceRefresh('company-profile', account.companyId, async () => companyProfile((await readWorkspace('company')).company), { enabled: active && !!account.companyId, interval: 60000 });
+  const user = metadata.data && account.companyId ? { ...account, ...metadata.data } : account;
   const { palette, mode, changeMode } = useTheme();
   const [name, setName] = useState(user.name || ''), [phone, setPhone] = useState(displayPhone(user.phoneNumber));
   const [businessName, setBusinessName] = useState(user.businessName || ''), [address, setAddress] = useState(user.businessAddress || '');
@@ -21,7 +26,7 @@ export default function SettingsScreen({ navigation, embedded = false }) {
   const [notificationsExpanded, setNotificationsExpanded] = useState(false);
   const [notificationsVisited, setNotificationsVisited] = useState(false);
   const [dirty, setDirty] = useState(false);
-  useEffect(() => { if (dirty) return; setName(user.name || ''); setPhone(displayPhone(user.phoneNumber)); setBusinessName(user.businessName || ''); setAddress(user.businessAddress || ''); setNotifications({ emailNotifications: user.emailNotifications ?? true, smsNotifications: user.smsNotifications ?? false }); }, [user, dirty]);
+  useEffect(() => { if (dirty) return; setName(account.name || ''); setPhone(displayPhone(account.phoneNumber)); setBusinessName(user.businessName || ''); setAddress(user.businessAddress || ''); setNotifications({ emailNotifications: account.emailNotifications ?? true, smsNotifications: account.smsNotifications ?? false }); }, [account, metadata.data, dirty]);
   const save = async extra => {
     setBusy(true); setMessage(''); setError('');
     try {
@@ -53,7 +58,7 @@ export default function SettingsScreen({ navigation, embedded = false }) {
         {sectionToggle('Services', servicesExpanded, () => setServicesExpanded(value => !value), user.services?.length || 0)}
         {servicesExpanded && <View style={{ gap: 12 }}>{user.services?.length ? user.services.map(service => <View key={service} style={{ flexDirection: 'row', gap: 9, alignItems: 'flex-start' }}><Ionicons name="checkmark-circle-outline" size={18} color={palette.accent} /><Text style={{ flex: 1, color: palette.secondary, lineHeight: 21 }}>{service}</Text></View>) : <Text style={{ color: palette.secondary }}>No services have been configured.</Text>}
         {!user.companyId && permissions.canManage && <GlassButton secondary title="Manage services" icon="construct-outline" onPress={() => setSelectServices(true)} />}</View>}
-        {user.companyId && <GlassButton secondary title="Refresh company information" icon="refresh-outline" disabled={busy} onPress={async () => { setBusy(true); const result = await refreshUser(); if (!result.success) setError(result.error?.message); setBusy(false); }} />}
+        {user.companyId && <GlassButton secondary title="Refresh company information" icon="refresh-outline" disabled={busy} onPress={async () => { setBusy(true); try { const result = await metadata.refetch(); if (result?.error) setError(result.error.message); } finally { setBusy(false); } }} />}
       </GlassCard>
       {title('Your profile')}
       <GlassCard><GlassInput label="Display name" value={name} onChangeText={value => { setDirty(true); setName(value); }} editable={!busy} /><GlassInput label="Your phone number" value={phone} onChangeText={value => { setDirty(true); setPhone(formatPhone(value)); }} keyboardType="phone-pad" autoComplete="tel" textContentType="telephoneNumber" placeholder="(661) 555-0123" editable={!busy} /></GlassCard>
@@ -63,6 +68,7 @@ export default function SettingsScreen({ navigation, embedded = false }) {
         <GlassCard>{[['emailNotifications','Email notifications'],['smsNotifications','SMS notifications']].map(([key,label]) => <View key={key} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}><Text style={{ color: palette.text, flex: 1 }}>{label}</Text><Switch accessibilityLabel={label} value={!!notifications[key]} disabled={busy} onValueChange={value => { setDirty(true); setNotifications(current => ({ ...current, [key]: value })); }} trackColor={{ false: palette.border, true: palette.button }} thumbColor="#FFFFFF" /></View>)}</GlassCard>
       </View>}
       {!!error && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{error}</Text>}{!!message && <Text accessibilityLiveRegion="polite" style={{ color: palette.accent }}>{message}</Text>}
+      {!!metadata.error && <Text accessibilityRole="alert" style={{ color: palette.danger }}>Company information could not refresh. {metadata.error.message}</Text>}
       <GlassButton title="Save profile & preferences" busy={busy} onPress={() => save()} icon="checkmark" />
       <LegalAccountSettings />
       <GlassButton secondary title="Sign out" icon="log-out-outline" disabled={busy} onPress={() => Alert.alert('Sign out?', 'Your appearance preference stays on this device.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign out', onPress: signOut }])} />

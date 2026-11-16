@@ -3,6 +3,8 @@ const assert = require('node:assert/strict'), fs = require('node:fs'), path = re
 const { createRequire } = require('node:module');
 const mobile = createRequire(path.resolve(__dirname, '../routeLogisticsMobile/package.json')), web = createRequire(path.resolve(__dirname, '../routeLogisticsWeb/package.json'));
 const React = mobile('react'), { create, act } = mobile('react-test-renderer'), { transformSync } = web('esbuild');
+const {createWorkspaceQueryMock,selectControlMock}=require('./support/workspaceQueryMock.cjs');
+const workspaceHooks=createWorkspaceQueryMock(React,{scopeId:'test-workspace'});
 global.IS_REACT_ACT_ENVIRONMENT = true;
 let tree, env;
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -39,6 +41,9 @@ async function estimates(name,data) {
 }
 const mock = name => {
   if(name==='react')return React;
+    if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
+    if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
+    if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found','workspace-changed'].includes(String(error?.code||'').split('/').pop())};
   if(name.endsWith('/components/TimeSelect'))return{__esModule:true,default:props=>React.createElement('label',null,props.label,React.createElement('input',{type:'time','aria-label':props.label,value:props.value,disabled:props.disabled,onChange:event=>props.onChange(event.target.value)}))};
   if(name==='react-hot-toast')return{__esModule:true,default:{success:message=>env.toasts.push({kind:'success',message}),error:message=>env.toasts.push({kind:'error',message})}};
   if(name.endsWith('/hooks/useUnsavedChanges'))return{useUnsavedChanges:dirty=>{env.dirty=dirty;return{confirmDiscard:async()=>{env.confirmCalls++;return env.confirm;}};}};
@@ -50,6 +55,7 @@ const mock = name => {
   if(name==='./MyWorkPage'||name==='./ServiceTemplateEditor')return{__esModule:true,default:()=>null};
   if(name.endsWith('/contexts/AuthContext'))return{useAuth:()=>({currentUser:{uid:'user-1'},company:{id:'company-1',ownerId:'user-1',serviceCategories:['Pest Control','Pool Cleaning']},role:env.kind==='estimates-geography'?'owner':'technician',can:capability=>env.kind.startsWith('estimates')&&(capability==='estimates.manage'||env.kind==='estimates-geography'&&['customers.manage','jobs.schedule'].includes(capability))})};
   if(name.endsWith('/services/workspaceApi'))return{callWorkspace:async(name,data)=>{
+    if(env.kind==='route')return routing(name,data);
     if(name!=='rlServiceAreas')return service(name,data);
     env.calls.push({name,data});
     if(data.action==='status')return{settings:{configured:true,revision:1,allowOutOfAreaRequests:true},canApproveExceptions:true,availableCategories:['Pest Control','Pool Cleaning']};
@@ -124,6 +130,18 @@ test('checklist discard requires confirmation and retains answers when cancelled
   env.confirm=true;await click('Discard unsaved service answers');assert.equal(control('service-job-1-notes').props.value,'Saved note');assert.equal(env.dirty,false);
 });
 
+test('service checklist background reads update clean answers but preserve dirty answers and their save version',async()=>{
+  reset('checklist');await render('components/ServiceChecklist.jsx',{job:{id:'job-1',status:'scheduled'}});
+  env.answers={...env.answers,notes:'Updated server observation'};env.version=2;
+  await act(async()=>workspaceHooks.useInvalidateWorkspace()(['service-forms']));
+  assert.equal(control('service-job-1-notes').props.value,'Updated server observation');
+  await act(async()=>control('service-job-1-notes').props.onChange({target:{value:'Unsaved field observation'}}));
+  env.answers={...env.answers,notes:'Another server observation'};env.version=3;
+  await act(async()=>workspaceHooks.useInvalidateWorkspace()(['service-forms']));
+  assert.equal(control('service-job-1-notes').props.value,'Unsaved field observation');assert.equal(env.dirty,true);
+  await click('Save service draft');assert.equal(env.calls.find(row=>row.name==='save').data.expectedVersion,2);
+});
+
 test('template publishing requires changed content and cancellation can retain unpublished edits',async()=>{
   reset('template');let cancelled=0;await render('components/ServiceTemplateEditor.jsx',{starter:template,busy:false,onCancel:()=>cancelled++,onPublish:()=>{}});
   assert.equal(button('Publish new version').props.disabled,true);await act(async()=>inputFor('Template name').props.onChange({target:{value:'Changed template'}}));assert.equal(env.dirty,true);
@@ -143,6 +161,15 @@ test('estimate transport failures preserve the exact uncertain operation for saf
   reset('estimates');await render('pages/EstimatesPage.jsx');await click('Open estimate');await act(async()=>inputFor('Estimate title').props.onChange({target:{value:'Changed title'}}));env.failSave=true;await click('Save estimate version');
   const first=env.calls.find(row=>row.name==='save').data;assert.equal(env.dirty,true);assert.equal(env.toasts.at(-1).kind,'error');
   env.failSave=false;await click('Retry saved request');assert.deepEqual(env.calls.filter(row=>row.name==='save')[1].data,first);assert.equal(env.dirty,false);assert.equal(env.toasts.at(-1).kind,'success');assert.doesNotMatch(text(),/Estimate save failed/);
+});
+
+test('estimate background list refresh never replaces an open dirty estimate or its captured version',async()=>{
+  reset('estimates');await render('pages/EstimatesPage.jsx');await click('Open estimate');
+  await act(async()=>inputFor('Estimate title').props.onChange({target:{value:'Unsaved estimate draft'}}));
+  env.estimate={...env.estimate,title:'Changed by another manager',version:2};
+  await act(async()=>workspaceHooks.useInvalidateWorkspace()(['estimates','estimate']));
+  assert.equal(inputFor('Estimate title').props.value,'Unsaved estimate draft');assert.equal(env.dirty,true);
+  await click('Save estimate version');assert.equal(env.calls.find(row=>row.name==='save').data.expectedVersion,1);
 });
 
 test('estimate property selection is explicit and saves only server-checkable property fields',async()=>{

@@ -159,7 +159,7 @@ export default function WorkspaceScreen() {
       </RetainedPage>
       <RetainedPage visible={fieldVisible && tab === 'schedule'}><ScheduleScreen user={user} query={schedule} period={period} onPeriodChange={setPeriod} onOpenJob={openJob} /></RetainedPage>
       <RetainedPage visible={fieldVisible && tab === 'route'}><RouteScreen user={user} active={fieldVisible && tab === 'route' && !currentSelection} onOpenJob={openJob} /></RetainedPage>
-      <RetainedPage visible={fieldVisible && tab === 'settings'}><SettingsScreen navigation={navigation} embedded /></RetainedPage>
+      <RetainedPage visible={fieldVisible && tab === 'settings'}><SettingsScreen navigation={navigation} embedded active={fieldVisible && tab === 'settings' && !currentSelection} /></RetainedPage>
       {!companyField && permissions.can('estimates.manage') && <RetainedPage visible={fieldVisible && tab === 'estimates'}><EstimatesScreen active={fieldVisible && tab === 'estimates' && !currentSelection} onInteractionChange={onInteractionChange} /></RetainedPage>}
       {eligible && <RetainedPage visible={!fieldVisible}><ManagementScreen user={user} permissions={permissions} active={!fieldVisible && !currentSelection} view={managementTab} onViewChange={requestManagementTab} onOpenJob={openJob} onChanged={refreshWork} onInteractionChange={onInteractionChange} /></RetainedPage>}
     </View>

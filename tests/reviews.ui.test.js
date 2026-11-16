@@ -2,6 +2,9 @@ const { test, afterEach } = require('node:test');
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path'), { createRequire } = require('node:module');
 const mobile = createRequire(path.resolve(__dirname, '../routeLogisticsMobile/package.json')), web = createRequire(path.resolve(__dirname, '../routeLogisticsWeb/package.json'));
 const React = mobile('react'), { create, act } = mobile('react-test-renderer'), { transformSync } = web('esbuild');
+const { createWorkspaceQueryMock, selectControlMock } = require('./support/workspaceQueryMock.cjs');
+const queryMock = createWorkspaceQueryMock(React, { scopeId: () => `${env.companyId}:${env.role}` });
+const principalMock = require('./support/principalQueryMock.cjs').createPrincipalQueryMock(React);
 global.IS_REACT_ACT_ENVIRONMENT = true;
 let tree, env;
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -17,12 +20,14 @@ async function customer(action, data) {
   if (env.fail === action) throw Error('Controlled ' + action + ' failure. Please retry.');
   if (action === 'list') return env.customerPages ? clone(env.customerPages[data.reviewCursor || 'first']) : { eligibleVisits: clone(env.eligible), reviews: clone(env.customerRows), hasMore: false };
   if (action === 'submit') { env.review = { ...env.review, ...data }; env.customerRows = [env.review]; env.eligible = []; return { review: clone(env.review), existing: false }; }
-  if (action === 'consent') { env.review.publicConsent = data.publicConsent; return { review: clone(env.review) }; }
+  if (action === 'consent') { env.review.publicConsent = data.publicConsent; env.customerRows = env.customerRows.map(row => row.id === env.review.id ? clone(env.review) : row); if (env.customerPages) for (const page of Object.values(env.customerPages)) page.reviews = page.reviews.map(row => row.id === env.review.id ? clone(env.review) : row); return { review: clone(env.review) }; }
   throw Error('Unexpected customer action');
 }
 async function provider(action, data) {
   env.calls.push({ name: 'provider', action, data: clone(data || {}) });
-  if (env.fail === action) throw Error('Controlled ' + action + ' failure. Please retry.');
+  if (env.providerPending && action === 'list') return env.providerPending;
+  if (env.fail === action) throw Object.assign(Error('Controlled ' + action + ' failure. Please retry.'),{code:env.failureCode});
+  if (action === 'list' && env.providerPages) return clone(env.providerPages[data.cursor || 'first']);
   if (action === 'list') return { reviews: [clone(env.review)], stats: { count: 1, averageRating: 2 }, serviceTypes: ['Inspection'], hasMore: false };
   if (action === 'history') return { history: [{ id: 'audit-one', action: 'provider.moderate', status: 'approved', reason: 'Authentic negative feedback preserved.', createdAt: '2026-11-14T19:00:00Z' }], hasMore: false };
   if (action === 'respond') env.review.providerResponse = { text: data.response };
@@ -35,6 +40,10 @@ function load(relative) {
   const file = path.resolve(__dirname, '../routeLogisticsWeb/src', relative); if (cache.has(file)) return cache.get(file);
   const module = { exports: {} }, mocked = name => {
     if (name === 'react') return React;
+    if (name.endsWith('/hooks/useWorkspaceQuery')) return queryMock;
+    if (name.endsWith('/hooks/usePrincipalQuery')) return principalMock;
+    if (name.endsWith('/services/portal')) return { portalAuth: { currentUser: { uid: 'portal-user' } } };
+    if (name.endsWith('/components/SelectControl')) return {__esModule:true,default:selectControlMock(React)};
     if (name === 'react-hot-toast') return { __esModule: true, default: { success: message => env.toasts.push({ kind: 'success', message }), error: message => env.toasts.push({ kind: 'error', message }) } };
     if (name === 'react-router-dom') return { Link: ({ to, children, ...props }) => React.createElement('a', { href: to, ...props }, children) };
     if (name === 'react-helmet-async') return { Helmet: ({ children }) => React.createElement(React.Fragment, null, children) };
@@ -131,4 +140,51 @@ test('expired invitations display an actionable portal path with no review form'
 });
 test('synthetic acceptance feedback is clearly excluded from real verified-service and public display claims',async()=>{
   reset();await render('components/ReviewSummary.jsx',{review:{...review(),synthetic:true,publicConsent:true,publicEligible:false}});assert.match(text(),/Synthetic test feedback/);assert.match(text(),/excluded from public display/);assert.doesNotMatch(text(),/Verified completed service/);
+});
+
+
+test('provider review background refresh preserves filters, selected review and all entered management drafts',async()=>{
+  reset();await render('pages/ReviewsPage.jsx');await click('Manage review');
+  await act(async()=>field('Provider review response').props.onChange({target:{value:'Retain this response draft'}}));
+  await act(async()=>field('Internal review note').props.onChange({target:{value:'Retain internal note'}}));
+  await act(async()=>field('Review moderation status').props.onChange({target:{value:'flagged'}}));
+  await act(async()=>field('Review moderation reason').props.onChange({target:{value:'Retain reason'}}));
+  await act(async()=>field('Review rating filter').props.onChange({target:{value:'4'}}));
+  env.review={...env.review,providerResponse:{text:'Another manager response'},moderationStatus:'approved',internalNotes:[{text:'New saved note'}]};
+  await act(async()=>queryMock.useInvalidateWorkspace()(['reviews']));
+  assert.equal(field('Provider review response').props.value,'Retain this response draft');assert.equal(field('Internal review note').props.value,'Retain internal note');
+  assert.equal(field('Review moderation status').props.value,'flagged');assert.equal(field('Review moderation reason').props.value,'Retain reason');assert.equal(field('Review rating filter').props.value,'4');
+  assert.match(text(),/New saved note/);assert.ok(button('Close review management'));assert.equal(env.calls.filter(row=>row.name==='provider'&&row.action!=='list').length,0);
+});
+
+test('loaded provider review pages refresh without losing pagination or duplicating rows',async()=>{
+  reset();const first=review(),older={...review(),id:'older-review',comment:'Older provider review'};
+  env.providerPages={first:{reviews:[first],stats:{count:2,averageRating:2},serviceTypes:['Inspection'],hasMore:true,cursor:first.id},[first.id]:{reviews:[first,older],hasMore:false,cursor:null}};
+  await render('pages/ReviewsPage.jsx');await click('Load more reviews');assert.match(text(),/Older provider review/);
+  env.providerPages[first.id].reviews[1].comment='Older feedback refreshed';await act(async()=>queryMock.useInvalidateWorkspace()(['reviews']));
+  assert.match(text(),/Older feedback refreshed/);assert.equal(tree.root.findAll(node=>node.type==='button'&&node.children.join('')==='Manage review').length,2);
+  assert.deepEqual(env.calls.filter(row=>row.name==='provider'&&row.action==='list').slice(-2).map(row=>row.data.cursor||null),[null,'review-one']);
+});
+
+test('transient review polling errors retain drafts while revoked access hides them',async()=>{
+  reset();await render('pages/ReviewsPage.jsx');await click('Manage review');await act(async()=>field('Provider review response').props.onChange({target:{value:'Private response draft'}}));
+  env.fail='list';await act(async()=>queryMock.useInvalidateWorkspace()(['reviews']));assert.equal(field('Provider review response').props.value,'Private response draft');assert.match(text(),/Controlled list failure/);
+  env.failureCode='functions/permission-denied';await act(async()=>queryMock.useInvalidateWorkspace()(['reviews']));assert.equal(tree.root.findAllByProps({'aria-label':'Provider review response'}).length,0);assert.doesNotMatch(text(),/Private response draft|An honest concern/);assert.equal(tree.root.findAllByProps({'aria-label':'Review invitation preferences'}).length,0);
+});
+
+test('provider scope changes cannot surface a late previous company read',async()=>{
+  reset();let release;env.providerPending=new Promise(resolve=>{release=resolve;});await render('pages/ReviewsPage.jsx');
+  env.providerPending=null;env.companyId='company-two';env.review={...env.review,id:'second-review',comment:'SECOND PROVIDER'};
+  const Page=load('pages/ReviewsPage.jsx').default;await act(async()=>tree.update(React.createElement(Page)));
+  await act(async()=>release({reviews:[{...review(),comment:'STALE FIRST PROVIDER'}],stats:{count:1},serviceTypes:[]}));
+  assert.match(text(),/SECOND PROVIDER/);assert.doesNotMatch(text(),/STALE FIRST PROVIDER/);
+});
+
+
+test('a review moving out of the current result page cannot discard its unsaved management draft',async()=>{
+  reset();const first=review();env.providerPages={first:{reviews:[first],stats:{count:1,averageRating:2},serviceTypes:['Inspection'],hasMore:false}};
+  await render('pages/ReviewsPage.jsx');await click('Manage review');await act(async()=>field('Provider review response').props.onChange({target:{value:'Keep this response even after remote filtering'}}));
+  env.providerPages.first.reviews=[];await act(async()=>queryMock.useInvalidateWorkspace()(['reviews']));
+  assert.equal(field('Provider review response').props.value,'Keep this response even after remote filtering');assert.match(text(),/no longer in the current results/);assert.match(text(),/eligibility is unconfirmed/);assert.ok(button('Close review management'));
+  env.fail='list';env.failureCode='functions/permission-denied';await act(async()=>queryMock.useInvalidateWorkspace()(['reviews']));assert.equal(tree.root.findAllByProps({'aria-label':'Provider review response'}).length,0);
 });

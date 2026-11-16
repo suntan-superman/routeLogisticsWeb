@@ -3,12 +3,17 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const {createRequire}=require('node:module');
 const mobile=createRequire(path.resolve(__dirname,'../routeLogisticsMobile/package.json')),web=createRequire(path.resolve(__dirname,'../routeLogisticsWeb/package.json'));
 const React=mobile('react'),{create,act}=mobile('react-test-renderer'),{transformSync}=web('esbuild');
+const {createWorkspaceQueryMock,selectControlMock}=require('./support/workspaceQueryMock.cjs');
+const workspaceHooks=createWorkspaceQueryMock(React,{scopeId:()=>companyId+':'+owner});
 global.IS_REACT_ACT_ENVIRONMENT=true;
 let tree,owner=true,calls=[],data,companyId='co',dirty=false,toasts=[],saveFailure=null,pendingSave=null,companyUpdates=[];
 let companyProfile={id:'co',ownerId:'owner',name:'Acme',serviceCategories:['Pest control']};
 const modules=new Map();
 function load(relative){const file=path.resolve(__dirname,'../routeLogisticsWeb/src',relative);if(modules.has(file))return modules.get(file);const module={exports:{}};const mock=name=>{
   if(name==='react')return React;
+    if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
+    if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
+    if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found','workspace-changed'].includes(String(error?.code||'').split('/').pop())};
   if(name==='react-hot-toast')return {__esModule:true,default:{success:message=>toasts.push({type:'success',message}),error:message=>toasts.push({type:'error',message})}};
   if(name.endsWith('/AuthContext'))return {useAuth:()=>({company:{id:companyId,ownerId:'owner'},currentUser:{uid:owner?'owner':'manager'},role:owner?'owner':'manager',updateUserProfile:async()=>{},refreshSession:async()=>{}})};
   if(name.endsWith('/useUnsavedChanges'))return {useUnsavedChanges:value=>{dirty=value;return {confirmDiscard:async()=>true};}};
@@ -61,6 +66,18 @@ test('refreshing provider suppression never restores stopped consent or silently
   assert.equal(tree.root.findByType('fieldset').props.disabled,false);
   assert.equal(calls.some(call=>call.params.action==='grant'),false);
   assert.match(text(),/No message was sent/);
+});
+
+test('background customer consent refresh updates suppression without overwriting unfinished consent evidence',async()=>{
+  data=status();await act(async()=>{tree=create(React.createElement(Consent,{customer:{id:'customer'}}));});
+  await act(async()=>tree.root.findAllByType('input').filter(node=>node.props.type==='checkbox')[0].props.onChange({target:{checked:true}}));
+  await act(async()=>tree.root.findByProps({'aria-label':'SMS consent evidence reference'}).props.onChange({target:{value:'Unfinished written agreement reference'}}));
+  data={...status(),suppressed:true,consent:{status:'stopped',purposes:['pre-visit']}};
+  await act(async()=>workspaceHooks.useInvalidateWorkspace()(['sms-consent']));
+  assert.equal(tree.root.findByProps({'aria-label':'SMS consent evidence reference'}).props.value,'Unfinished written agreement reference');
+  assert.equal(tree.root.findAllByType('input').filter(node=>node.props.type==='checkbox')[0].props.checked,true);
+  assert.equal(tree.root.findByType('fieldset').props.disabled,true);assert.match(text(),/Staff cannot override STOP/);
+  assert.equal(calls.some(call=>call.params.action==='grant'),false);
 });
 
 const button=label=>tree.root.findAll(node=>node.type==='button'&&node.children.join('')===label)[0];

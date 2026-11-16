@@ -1,27 +1,18 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useState, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { uploadJobPhoto, listJobPhotos, deleteJobPhoto, readJobPhoto } from '../services/photoService';
 import { canManage } from '../services/tenancy';
 import { useConfirm } from './ConfirmProvider';
+import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
 
 const JobPhotos = ({ job }) => {
-  const [photos, setPhotos] = useState([]);
+  const photosQuery = useWorkspaceQuery(['job-photos', job.id], () => listJobPhotos(job.id));
+  const photos = photosQuery.data || [];
   const [busy, setBusy] = useState(false);
   const inputRef = useRef(null);
   const confirm = useConfirm();
 
-  const load = useCallback(async () => {
-    try {
-      setPhotos(await listJobPhotos(job.id));
-    } catch (error) {
-      console.error(error);
-      toast.error('Could not load photos');
-    }
-  }, [job.id]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const load = () => photosQuery.refetch();
 
   const onFiles = async (event) => {
     const files = Array.from(event.target.files || []);
@@ -48,7 +39,7 @@ const JobPhotos = ({ job }) => {
     if (!ok) return;
     try {
       await deleteJobPhoto(photo);
-      setPhotos((p) => p.filter((x) => x.id !== photo.id));
+      photosQuery.setData(previous => (previous || []).filter(row => row.id !== photo.id));
     } catch (error) {
       toast.error(error.message || 'Could not delete photo');
     }
@@ -68,6 +59,7 @@ const JobPhotos = ({ job }) => {
         </button>
         <input ref={inputRef} type="file" accept="image/*" multiple capture="environment" className="hidden" onChange={onFiles} />
       </div>
+      {photosQuery.error && <p role="alert" className="text-sm text-red-700">{photosQuery.error.message} <button className="underline" onClick={load}>Retry photo list</button></p>}
       {photos.length === 0 ? (
         <p className="text-sm text-gray-500">No photos yet.</p>
       ) : (

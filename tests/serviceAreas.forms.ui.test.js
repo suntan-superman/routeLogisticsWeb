@@ -1,8 +1,10 @@
 const {test,afterEach}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),{createRequire}=require('node:module');
 const mobile=createRequire(path.resolve(__dirname,'../routeLogisticsMobile/package.json')),web=createRequire(path.resolve(__dirname,'../routeLogisticsWeb/package.json'));
-const React=mobile('react'),{create,act}=mobile('react-test-renderer'),{transformSync}=web('esbuild');global.IS_REACT_ACT_ENVIRONMENT=true;
+const React=mobile('react'),{create,act}=mobile('react-test-renderer'),{transformSync}=web('esbuild');const {createWorkspaceQueryMock,selectControlMock}=require('./support/workspaceQueryMock.cjs');
+const workspaceHooks=createWorkspaceQueryMock(React,{scopeId:'test-workspace'});
+global.IS_REACT_ACT_ENVIRONMENT=true;
 global.window={addEventListener(){},removeEventListener(){}};
-let tree,jobProps,writes=[],planWrites=[],toasts=[],checker,configured=true,dirty=false,allowCustomerManage=true,writeFailure=null;
+let tree,jobProps,writes=[],planWrites=[],toasts=[],checker,configured=true,dirty=false,allowCustomerManage=true,writeFailure=null,writeWarning=null;
 const defaultCompany={id:'company',ownerId:'owner',serviceCategories:['Pest Control','Pool Cleaning']};
 let company=defaultCompany;
 const customer={id:'customer',name:'Authorized customer',phone:'555-0100',address:'100 Saved Customer Road',city:'Bakersfield',state:'CA',zipCode:'93312',latitude:35.36,longitude:-119.01,updatedAt:'2026-11-15T15:00:00.000Z'};
@@ -14,7 +16,10 @@ const toast=message=>toasts.push(message);toast.success=message=>toasts.push(mes
 function PropertyMock(props){checker=props;const addressLocked=props.addressReadOnly||props.fixedProperty;React.useEffect(()=>{props.onPolicyLoaded?.({settings:{configured,revision:2}});},[props.onPolicyLoaded]);return React.createElement('section',{'aria-label':'Mock service property'},React.createElement('input',{'aria-label':'Mock explicit property',value:props.value.address,readOnly:!!props.addressReadOnly,disabled:!!props.fixedProperty,onChange:event=>{if(!addressLocked)props.onChange({...props.value,address:event.target.value,serviceCategory:'Pest Control',exceptionId:null,confirmed:false});}}),React.createElement('button',{type:'button',disabled:!!addressLocked,onClick:()=>{if(!addressLocked)props.onChange({...props.value,address:props.billingAddress,serviceCategory:'Pest Control',exceptionId:null,confirmed:false});}},'Copy billing by explicit action'),React.createElement('button',{type:'button',onClick:()=>props.onChange({...props.value,confirmed:true})},'Confirm current property only'));}
 const cache=new Map();
 function load(relative){const file=path.resolve(__dirname,'../routeLogisticsWeb/src',relative);if(cache.has(file))return cache.get(file);const module={exports:{}};const mock=name=>{
- if(name==='react')return React;if(name==='react-hot-toast')return{__esModule:true,default:toast};
+ if(name==='react')return React;
+    if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
+    if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
+    if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found','workspace-changed'].includes(String(error?.code||'').split('/').pop())};if(name==='react-hot-toast')return{__esModule:true,default:toast};
  if(name.endsWith('/AuthContext'))return{useAuth:()=>({company,currentUser:{uid:'owner'},role:'owner',can:capability=>capability!=='customers.manage'||allowCustomerManage})};
  if(name.endsWith('/ServicePropertyEligibility'))return{__esModule:true,default:PropertyMock};
  if(name.endsWith('/TechnicianAvailability')||name.endsWith('/AppointmentRepeatOptions'))return{__esModule:true,default:()=>null};
@@ -24,7 +29,7 @@ function load(relative){const file=path.resolve(__dirname,'../routeLogisticsWeb/
  if(name.endsWith('/useUnsavedChanges'))return{useUnsavedChanges:value=>{dirty=value;return{confirmDiscard:async()=>true};}};
  if(name.endsWith('/ConfirmProvider'))return{useConfirm:()=>async()=>true};
  if(name.endsWith('/services/firebase'))return{auth:{currentUser:{uid:'owner',displayName:'Controlled owner'}}};
- if(name.endsWith('/jobManagementService'))return{__esModule:true,default:{createJob:async(value,options)=>{writes.push({action:'create',value,options});return writeFailure?{success:false,error:writeFailure}:{success:true,job:{id:'new-job',...value},...(options?.saveCustomerAddress?{customerAddressUpdated:true}:{})};},updateJob:async(id,value,expectedVersion,options)=>{writes.push({action:'update',id,value,expectedVersion,options});return writeFailure?{success:false,error:writeFailure}:{success:true,...(options?.saveCustomerAddress?{customerAddressUpdated:true}:{})};}}};
+ if(name.endsWith('/jobManagementService'))return{__esModule:true,default:{createJob:async(value,options)=>{writes.push({action:'create',value,options});return writeFailure?{success:false,error:writeFailure}:{success:true,job:{id:'new-job',...value},...(options?.saveCustomerAddress?{customerAddressUpdated:true}:{}),...(writeWarning?{addressWarning:writeWarning}:{})};},updateJob:async(id,value,expectedVersion,options)=>{writes.push({action:'update',id,value,expectedVersion,options});return writeFailure?{success:false,error:writeFailure}:{success:true,...(options?.saveCustomerAddress?{customerAddressUpdated:true}:{}),...(writeWarning?{addressWarning:writeWarning}:{})};}}};
  if(name.endsWith('/customerService'))return{__esModule:true,default:{getCustomers:async()=>({success:true,customers:[customer]})}};
  if(name.endsWith('/servicePlanService'))return{FREQUENCIES:[{days:90,label:'Quarterly'}],listServicePlans:async()=>({success:true,plans:[]}),createServicePlan:async value=>{planWrites.push(value);return{success:true};},updateServicePlan:async()=>({success:true}),deleteServicePlan:async()=>({success:true}),generateNextJob:async()=>({success:true})};
  if(name.endsWith('/serviceLogService'))return{listServiceLogs:async()=>({success:true,logs:[]}),logsToCsv:()=>''};
@@ -45,7 +50,7 @@ const enableAddressEditing=async()=>{assert.ok(button('Enable Editing'),'An expl
 const changeProperty=async value=>{if(checker.addressReadOnly)await enableAddressEditing();await act(async()=>propertyInput().props.onChange({target:{value}}));};
 const permanentCheckbox=()=>tree.root.findAll(node=>node.type==='input'&&node.props['aria-label']==="Update customer's saved address")[0];
 const choosePermanent=async value=>{assert.ok(permanentCheckbox(),'Permanent-address choice must be visible');await act(async()=>permanentCheckbox().props.onChange({target:{checked:value}}));};
-afterEach(async()=>{if(tree)await act(async()=>tree.unmount());tree=null;jobProps=null;writes=[];planWrites=[];toasts=[];checker=null;configured=true;dirty=false;allowCustomerManage=true;company=defaultCompany;writeFailure=null;});
+afterEach(async()=>{if(tree)await act(async()=>tree.unmount());tree=null;jobProps=null;writes=[];planWrites=[];toasts=[];checker=null;configured=true;dirty=false;allowCustomerManage=true;company=defaultCompany;writeFailure=null;writeWarning=null;});
 
 test('new jobs visibly reuse the selected customer saved address without retyping it',async()=>{
  await renderJob(undefined,{defaults:{serviceType:'Pest Control',date:'2030-01-02'}});
@@ -58,6 +63,12 @@ test('initial customer defaults populate the saved address and submit only the e
  await changeNotes('A scheduled visit at the displayed property');await submit();assert.equal(writes.length,1);
  const data=writes[0].value;assert.deepEqual(data.serviceProperty,{address:savedAddress});assert.equal(data.serviceAreaExceptionId,null);assert.equal(data.address,savedAddress);
  for(const key of ['confirmed','eligible','latitude','longitude','location','serviceAreaEligibility','serviceAreaManaged'])assert.equal(Object.hasOwn(data,key),false,`Client must not supply ${key}`);
+});
+test('an internal job saves with an address warning without requiring confirmed eligibility or another approval step',async()=>{
+ const created=[];writeWarning='Google could not confirm this address. Job saved using the entered address; map placement and coverage remain unverified.';
+ await renderJob(undefined,{onCreated:(...args)=>created.push(args)});assert.equal(checker.value.confirmed,false);
+ await changeNotes('Authorized operator continues with this service address');await submit();
+ assert.equal(writes.length,1);assert.equal(created.length,1);assert.equal(writes[0].value.serviceProperty.address,savedAddress);assert.equal(Object.hasOwn(writes[0].value,'eligible'),false);assert.match(toasts.at(-1),/unverified/);
 });
 test('a customer list arriving after the job form opens fills its untouched initial property',async()=>{
  await renderJob(undefined,{customers:[]});assert.equal(checker.value.address,'');

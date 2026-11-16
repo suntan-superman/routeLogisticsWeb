@@ -17,6 +17,7 @@ const {
 } = require('./routes');
 const { FieldValue } = require('firebase-admin/firestore');
 const { availabilityRef, availabilityView, assertAvailable } = require('./staffAvailability');
+const { servicePropertySite } = require('./serviceAreaWorkflows');
 const ms = value => value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : typeof value === 'string' ? Date.parse(value) : NaN;
 const iso = value => Number.isFinite(ms(value)) ? new Date(ms(value)).toISOString() : null;
 function policyFor(company) {
@@ -71,10 +72,11 @@ function distanceMeters(a, b) {
   const h = Math.sin(lat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(lng / 2) ** 2;
   return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(Math.max(0, 1 - h)));
 }
-const jobPoint = job => coordinates(job) || coordinates({
-  latitude: job?.location?.lat,
-  longitude: job?.location?.lng
-});
+const jobPoint = job => {
+  const property = servicePropertySite(job);
+  if (property) return job?.serviceProperty?.validated === false ? null : coordinates(property);
+  return coordinates(job) || coordinates({ latitude: job?.location?.lat, longitude: job?.location?.lng });
+};
 function validFix(data) {
   return typeof data?.latitude === 'number' && typeof data?.longitude === 'number' && typeof data?.accuracy === 'number'
     && Number.isFinite(data.accuracy) && data.accuracy >= 0 && data.accuracy <= 5000 && coordinates(data);
@@ -175,7 +177,7 @@ function workTrackingHandlers(db, legacy, {
           if (member.get('status') !== 'active' || member.get('uid') !== staff.uid || member.get('companyId') !== staff.company.id || member.get('role') !== staff.role) return 0;
         }
         let target = jobPoint(job.data());
-        if (!target && job.get('customerId')) {
+        if (!target && !servicePropertySite(job.data()) && job.get('customerId')) {
           const customer = await tx.get(db.doc(`customers/${documentId(job.get('customerId'), 'customer')}`));
           if (customer.get('companyId') === staff.company.id) target = jobPoint(customer.data());
         }
@@ -538,7 +540,7 @@ function workTrackingHandlers(db, legacy, {
           at = captureTime(payload.capturedAt, time, time - 300000, 1);
           if (time - at > 300000) throw new HttpsError('invalid-argument', 'Use a GPS fix captured within the last five minutes.');
           let target = jobPoint(job.data());
-          if (!target && job.get('customerId')) {
+          if (!target && !servicePropertySite(job.data()) && job.get('customerId')) {
             const customer = await tx.get(db.doc(`customers/${documentId(job.get('customerId'), 'customer')}`));
             if (customer.get('companyId') === staff.company.id) target = jobPoint(customer.data());
           }
@@ -602,5 +604,6 @@ module.exports = {
   shiftView,
   captureTime,
   distanceMeters,
-  transition
+  transition,
+  jobPoint
 };

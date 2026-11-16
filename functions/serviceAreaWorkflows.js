@@ -42,14 +42,22 @@ function serviceAreaWorkflow(db, config = {}) {
       const explicitProperty = input.serviceProperty !== undefined || input.propertyAddress !== undefined;
       const legacyAddressEdit = ['address', 'city', 'state', 'zipCode', 'postalCode'].some(key => input[key] !== undefined);
       const address = explicitProperty ? propertyAddress(input) : legacyAddressEdit ? legacyPropertyAddress({ ...before, ...input }) : propertyAddress(before);
-      if (!isNew && (explicitProperty || legacyAddressEdit) && !address && propertyAddress(before)) throw new HttpsError('failed-precondition', 'Enter a service property address that Google can verify before replacing the saved address.', { addressValidation: { status: 'invalid', message: 'Enter a service property address that Google can verify.' } });
+      if (!isNew && (explicitProperty || legacyAddressEdit) && !address && propertyAddress(before)) throw new HttpsError('failed-precondition', 'Enter a service property address before replacing the saved address.', { addressValidation: { status: 'invalid', message: 'Enter a service property address.' } });
       const category = typeof input.serviceCategory === 'string' ? input.serviceCategory.trim() : before.serviceCategory || '';
       const exceptionId = typeof input.serviceAreaExceptionId === 'string' && input.serviceAreaExceptionId.trim() ? input.serviceAreaExceptionId.trim() : undefined;
-      const result = await checker.checkForWorkflow({ companyId: scope.companyId, uid: scope.uid, propertyAddress: address, serviceCategory: category, purpose, ...(exceptionId ? { exceptionId } : {}) });
-      if (!result?.eligible) throw new HttpsError(result?.addressValidation?.status === 'unavailable' ? 'unavailable' : 'failed-precondition', result?.message || 'The service property could not be validated against this provider’s service area.', { serviceArea: { status: result?.status || 'unavailable', reason: result?.reason || 'validation-required' }, ...(result?.addressValidation ? { addressValidation: result.addressValidation } : {}) });
+      const allowUnverifiedAddress = purpose === 'scheduling' && !!scope.uid && ['owner', 'admin', 'manager'].includes(scope.role);
+      const result = await checker.checkForWorkflow({ companyId: scope.companyId, uid: scope.uid, propertyAddress: address, serviceCategory: category, purpose, ...(allowUnverifiedAddress ? { allowUnverifiedAddress: true } : {}), ...(exceptionId ? { exceptionId } : {}) });
+      const continueUnverified = allowUnverifiedAddress && result?.internalContinuation === true && result.status === 'address-unverified' && result.eligible === false;
+      if (!result?.eligible && !continueUnverified) throw new HttpsError(result?.addressValidation?.status === 'unavailable' ? 'unavailable' : 'failed-precondition', result?.message || 'The service property could not be validated against this provider’s service area.', { serviceArea: { status: result?.status || 'unavailable', reason: result?.reason || 'validation-required' }, ...(result?.addressValidation ? { addressValidation: result.addressValidation } : {}) });
       const patch = {};
       if (category || Object.hasOwn(input, 'serviceCategory')) patch.serviceCategory = category;
-      if (result.property) {
+      if (continueUnverified) {
+        const checkedAt = new Date().toISOString();
+        patch.serviceProperty = { address, formattedAddress: address, postalCode: '', latitude: null, longitude: null, validated: false, source: 'operator-entered', validationStatus: 'unverified', validationMessage: result.message, checkedAt };
+        Object.assign(patch, { address, city: '', state: '', zipCode: '', latitude: null, longitude: null, location: null });
+        patch.serviceAreaEligibility = { status: 'address-unverified', eligible: false, settingsRevision: result.settingsRevision, serviceCategory: category, purpose, checkedAt, exceptionId: null, warning: result.message };
+        patch.serviceAreaManaged = result.coverageConfigured === true;
+      } else if (result.property) {
         const property = result.property;
         if (!property || typeof property.formattedAddress !== 'string' || !property.formattedAddress || !Number.isFinite(property.latitude) || Math.abs(property.latitude) > 90 || !Number.isFinite(property.longitude) || Math.abs(property.longitude) > 180) throw new HttpsError('failed-precondition', 'A validated service property location is required.');
         patch.serviceProperty = { address: property.formattedAddress, formattedAddress: property.formattedAddress, postalCode: property.postalCode || '', latitude: property.latitude, longitude: property.longitude, validated: true, source: property.source || 'google-address-validation', validatedAt: property.validatedAt || new Date().toISOString() };

@@ -13,6 +13,8 @@ import { syncTenancy, loadClaims, getClaims, getWorkspace, can } from '../servic
 import { readWorkspace } from '../services/workspaceApi';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import toast from 'react-hot-toast';
+import { usePrincipalQuery } from '../hooks/usePrincipalQuery';
+import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 
 const AuthContext = createContext();
 
@@ -33,6 +35,12 @@ export const AuthProvider = ({ children }) => {
   const [company, setCompany] = useState(null);
   const generation = useRef(0);
   const queryClient = useQueryClient();
+  const claims = getClaims(), workspace = getWorkspace(), companyId = claims?.companyId;
+  const companyQuery = usePrincipalQuery('rl-company-context', currentUser?.uid, [companyId || '', claims?.role || '', claims?.membershipId || '', workspace?.status || ''], () => readWorkspace('company'), {
+    enabled: !loading && !!companyId && workspace?.status === 'company' && currentUser?.emailVerified === true, intervalMs: 60_000,
+    current: uid => auth.currentUser?.uid === uid && auth.currentUser?.emailVerified === true && getClaims()?.companyId === companyId && getClaims()?.role === claims?.role && getClaims()?.membershipId === claims?.membershipId && getWorkspace()?.status === 'company',
+  });
+  useEffect(() => { if (companyQuery.data) setCompany(companyQuery.data.company); }, [companyQuery.data]);
   const authorizedCompany = async () => {
     const id = getClaims()?.companyId;
     if (!id || getWorkspace()?.status !== 'company' || !auth.currentUser?.emailVerified) return null;
@@ -257,7 +265,7 @@ export const AuthProvider = ({ children }) => {
   }, [queryClient]);
 
   const value = {
-    currentUser, company,
+    currentUser, company: workspaceAccessError(companyQuery.error) ? null : company,
     workspace: getWorkspace(), can, role: getClaims()?.role || null,
     userProfile,
     loading,

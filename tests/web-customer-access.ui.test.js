@@ -9,6 +9,8 @@ const webRequire = createRequire(path.resolve(__dirname, '../routeLogisticsWeb/p
 const React = mobileRequire('react');
 const { create, act } = mobileRequire('react-test-renderer');
 const { transformSync } = webRequire('esbuild');
+const {createWorkspaceQueryMock,selectControlMock}=require('./support/workspaceQueryMock.cjs');
+const workspaceHooks=createWorkspaceQueryMock(React,{scopeId:()=>role||'owner'});
 global.IS_REACT_ACT_ENVIRONMENT = true;
 let role, customers, writes, dirty=false,discard=true,discardCalls=0,saveFailure=false,addressFailure=null,updateRequests=[];
 const keyListeners=new Set();
@@ -27,6 +29,9 @@ function load(relative) {
   const module = { exports: {} };
   const mockRequire = specifier => {
     if (specifier === 'react') return React;
+    if(specifier.endsWith('/useWorkspaceQuery'))return workspaceHooks;
+    if(specifier.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
+    if(specifier.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found','workspace-changed'].includes(String(error?.code||'').split('/').pop())};
     if (specifier === 'framer-motion') return { motion: { div: 'div' } };
     if (specifier === '@heroicons/react/24/outline') return new Proxy({}, { get: (_, key) => key });
     if (specifier === 'react-hot-toast') return { error() {}, success() {} };
@@ -183,4 +188,23 @@ for(const status of ['invalid','unavailable'])test(`customer ${status} address f
   await act(async()=>buttons(tree,'Cancel')[0].props.onClick());await act(async()=>buttons(tree,'Add Customer')[0].props.onClick());
   assert.equal(tree.root.findAll(node=>node.props['aria-label']==='Address validation').length,0);
   await act(async()=>tree.unmount());
+});
+
+test('customer background refresh retains all loaded cursor pages and the open editor save version',async()=>{
+  const original=service.getCustomers;
+  const pages=Array.from({length:200},(_,index)=>({id:`contact-${index}`,name:`Synthetic ${String(index).padStart(3,'0')}`,isActive:true,updatedAt:'saved-v1'}));
+  const requests=[];
+  service.getCustomers=async(limit,cursor)=>{requests.push({limit,cursor});const start=cursor?.offset||0;return{success:true,customers:pages.slice(start,start+100),lastDoc:{offset:start+100},hasMore:start+100<pages.length};};
+  let tree;
+  try{
+    tree=await render('manager');await act(async()=>buttons(tree,'Load more customers')[0].props.onClick());
+    assert.equal(icons(tree,'PencilIcon').length,200);
+    await act(async()=>icons(tree,'PencilIcon')[0].parent.props.onClick());await change(tree,'Enter customer name','Unfinished contact edit');
+    pages[0]={...pages[0],name:'Changed online',updatedAt:'saved-v2'};
+    await act(async()=>workspaceHooks.useInvalidateWorkspace()(['customers']));
+    assert.equal(field(tree,'Enter customer name').props.value,'Unfinished contact edit');assert.equal(dirty,true);
+    assert.equal(icons(tree,'PencilIcon').length,200);
+    assert.deepEqual(requests.slice(-2),[{limit:100,cursor:null},{limit:100,cursor:{offset:100}}]);
+    await act(async()=>buttons(tree,'Save Changes')[0].props.onClick());assert.equal(updateRequests[0].expectedVersion,'saved-v1');
+  }finally{if(tree)await act(async()=>tree.unmount());service.getCustomers=original;}
 });

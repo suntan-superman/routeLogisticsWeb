@@ -19,6 +19,7 @@ const apps = new Set(), networks = new Set();
 const appState = { currentState: 'active', addEventListener: (_event, listener) => { apps.add(listener); return { remove: () => apps.delete(listener) }; } };
 let currentAuth, connected, jobsLoader, routeLoader, detailLoader, refreshLoader, jobRequests, routeRequests, detailRequests, authRefreshes;
 let observedJobs, observedRoute, observedDetail, observedClient, observedScope, tree;
+let observedResource, resourceRequests, resourceLoader, resourceDraft, setResourceDraft, resourceMounts;
 const cached = new Map();
 function account(overrides = {}) {
   const user = { id: 'technician', companyId: 'acme', role: 'technician', membershipId: 'member', emailVerified: true, workspace: { status: 'company' }, ...overrides };
@@ -49,8 +50,10 @@ function load(relative) {
 const Provider = load('contexts/WorkQueryProvider.js').default;
 const { useWorkJobs, useMyDailyRoute, useWorkJob } = load('services/useWorkQueries.js');
 const { useWorkQueryScope } = load('contexts/WorkQueryProvider.js');
-function Probe({ period = 'day', route = true, detail = null, enabled = true }) {
-  observedJobs = useWorkJobs(period, { enabled });
+const { useJobResourceRefresh } = load('services/useJobResources.js');
+const { publishWorkWrite, writeResources } = load('services/workQueryEvents.js');
+function Probe({ period = 'day', route = true, detail = null, enabled = true, personal = false }) {
+  observedJobs = useWorkJobs(period, { enabled, personal });
   observedClient = useQueryClient(); observedScope = useWorkQueryScope();
   return React.createElement(React.Fragment, null, route ? React.createElement(RouteProbe, { enabled }) : null, detail !== null ? React.createElement(DetailProbe, { id: detail || null, enabled }) : null);
 }
@@ -64,7 +67,15 @@ function SharedJobsProbe({ enabled = true }) {
   observedClient = useQueryClient(); observedScope = useWorkQueryScope();
   return null;
 }
-const element = props => React.createElement(Provider, null, React.createElement(props?.shared ? SharedJobsProbe : Probe, props));
+function ResourceProbe({ enabled = true, resource = 'photos', id = 'job', interval = 30000, duplicate = false }) {
+  observedResource = useJobResourceRefresh(resource, id, async () => { resourceRequests.push({ resource, id }); return resourceLoader(resource, id); }, { enabled, interval });
+  useJobResourceRefresh(resource, id, async () => { resourceRequests.push({ resource, id }); return resourceLoader(resource, id); }, { enabled: duplicate && enabled, interval });
+  const [draft, updateDraft] = React.useState(''); resourceDraft = draft; setResourceDraft = updateDraft;
+  React.useEffect(() => { resourceMounts++; }, []);
+  observedClient = useQueryClient(); observedScope = useWorkQueryScope();
+  return null;
+}
+const element = props => React.createElement(Provider, null, React.createElement(props?.resourceOnly ? ResourceProbe : props?.shared ? SharedJobsProbe : Probe, props));
 async function settle(t) {
   for (let turn = 0; turn < 4; turn++) await act(async () => { await Promise.resolve(); t.mock.timers.tick(0); await Promise.resolve(); });
 }
@@ -81,6 +92,7 @@ beforeEach(t => {
   detailLoader = async ({ id }) => ({ job: { id, companyId: 'acme', assignedTo: 'member', status: 'scheduled' }, customer: { name: 'Assigned customer' } });
   refreshLoader = async () => ({ success: true, user: currentAuth.user, accessStatus: 'ready', authoritative: true });
   observedJobs = observedRoute = observedDetail = observedClient = observedScope = tree = null;
+  observedResource = null; resourceRequests = []; resourceLoader = async () => [{ id: 'initial-record' }]; resourceDraft = ''; resourceMounts = 0;
   focusManager.setFocused(true); onlineManager.setOnline(true); account();
 });
 afterEach(async t => {
@@ -341,4 +353,93 @@ test('a visible day observer recovers once from stale claims even when later ret
   await update(t, { shared: true, enabled: false }); const before = jobRequests.length;
   await act(async () => observedScope.refreshAccess()); await settle(t); await tick(t, 90_000);
   assert.equal(jobRequests.length, before); // no visible observer remains
+});
+
+test('job resource observers poll remote records without remounting or overwriting a local editor draft', async t => {
+  await mount(t, { resourceOnly: true }); assert.equal(resourceRequests.length, 1);
+  await act(async () => setResourceDraft('Unsaved photo caption and work draft'));
+  resourceLoader = async () => [{ id: 'new-remote-photo' }];
+  await tick(t, 30000);
+  assert.deepEqual(observedResource.data, [{ id: 'new-remote-photo' }]);
+  assert.equal(resourceDraft, 'Unsaved photo caption and work draft'); assert.equal(resourceMounts, 1);
+  const count = resourceRequests.length;
+  await update(t, { resourceOnly: true, enabled: false }); await tick(t, 90000);
+  assert.equal(resourceRequests.length, count);
+  await act(async () => observedResource.refetch()); await settle(t);
+  assert.equal(resourceRequests.length, count, 'queue notifications cannot refresh a retained hidden child');
+  await update(t, { resourceOnly: true }); assert.equal(resourceRequests.length, count + 1);
+});
+
+test('resource polling stops in background, offline and native picker sessions and refreshes when focus returns', async t => {
+  await mount(t, { resourceOnly: true, resource: 'visits' });
+  await foreground(t, 'background'); const backgroundCount = resourceRequests.length;
+  await tick(t, 90000); assert.equal(resourceRequests.length, backgroundCount);
+  await foreground(t, 'active'); assert.ok(resourceRequests.length > backgroundCount);
+  await network(t, false); const offlineCount = resourceRequests.length;
+  await tick(t, 90000); assert.equal(resourceRequests.length, offlineCount);
+  await network(t, true); assert.ok(resourceRequests.length > offlineCount);
+  const { beginNativeInteraction } = load('services/nativeInteraction.js');
+  let release; await act(async () => { release = beginNativeInteraction(); });
+  const pickerCount = resourceRequests.length; await tick(t, 90000); assert.equal(resourceRequests.length, pickerCount);
+  await act(async () => release()); await settle(t); assert.ok(resourceRequests.length > pickerCount);
+});
+
+test('duplicate resource observers deduplicate reads and catalogs use a slower two-minute cadence', async t => {
+  await mount(t, { resourceOnly: true, resource: 'service-catalog', interval: 120000, duplicate: true });
+  assert.equal(resourceRequests.length, 1);
+  await tick(t, 60000); assert.equal(resourceRequests.length, 1);
+  await tick(t, 60000); assert.equal(resourceRequests.length, 2);
+  assert.deepEqual(observedClient.getQueryCache().findAll()[0].queryKey.slice(0, observedScope.scope.length), observedScope.scope);
+});
+
+test('only matching successful scoped writes invalidate a resource and no read or GPS operation creates a refresh loop', async t => {
+  await mount(t, { resourceOnly: true });
+  const before = resourceRequests.length, scope = observedScope.scope;
+  assert.deepEqual(writeResources('rlReadWorkspace', { resource: 'photos' }, {}), []);
+  assert.deepEqual(writeResources('rlUpdateWorkLocation', { action: 'position' }, {}), []);
+  assert.deepEqual(writeResources('rlApplyJobOperation', {}, { status: 'conflict' }), []);
+  await act(async () => { publishWorkWrite({ scope: [...scope.slice(0, 3), 'foreign-company', ...scope.slice(4)], resources: ['photos'], jobId: 'job' }); publishWorkWrite({ scope, resources: ['photos'], jobId: 'another-job' }); });
+  await settle(t); assert.equal(resourceRequests.length, before);
+  await act(async () => publishWorkWrite({ scope, resources: writeResources('rlJobPhoto', { action: 'upload' }, {}), jobId: 'job' }));
+  await settle(t); assert.equal(resourceRequests.length, before + 1);
+});
+
+test('a confirmed job write replaces an older in-flight poll and cannot restore the pre-write schedule', async t => {
+  await mount(t, { route: false });
+  let release;
+  jobsLoader = () => new Promise(resolve => { release = resolve; });
+  await tick(t, 30000); assert.equal(jobRequests.length, 2);
+  jobsLoader = async () => ({ success: true, jobs: [{ id: 'job', status: 'completed' }] });
+  await act(async () => publishWorkWrite({ scope: observedScope.scope, resources: ['jobs'], jobId: 'job' }));
+  await settle(t); assert.equal(jobRequests.length, 3); assert.equal(observedJobs.jobs[0].status, 'completed');
+  await act(async () => release({ success: true, jobs: [{ id: 'job', status: 'scheduled' }] })); await settle(t);
+  assert.equal(observedJobs.jobs[0].status, 'completed');
+});
+
+test('a confirmed child-resource write replaces an older poll without discarding its local draft', async t => {
+  await mount(t, { resourceOnly: true });
+  await act(async () => setResourceDraft('Unsaved caption'));
+  let release;
+  resourceLoader = () => new Promise(resolve => { release = resolve; });
+  await tick(t, 30000); assert.equal(resourceRequests.length, 2);
+  resourceLoader = async () => [{ id: 'new-upload' }];
+  await act(async () => publishWorkWrite({ scope: observedScope.scope, resources: ['photos'], jobId: 'job' }));
+  await settle(t); assert.equal(resourceRequests.length, 3); assert.deepEqual(observedResource.data, [{ id: 'new-upload' }]);
+  await act(async () => release([{ id: 'old-photo-snapshot' }])); await settle(t);
+  assert.deepEqual(observedResource.data, [{ id: 'new-upload' }]); assert.equal(resourceDraft, 'Unsaved caption');
+});
+
+test('persistent resource permission errors stop polling after one authoritative access check', async t => {
+  resourceLoader = async () => { throw Object.assign(new Error('Job assignment changed.'), { code: 'functions/permission-denied' }); };
+  await mount(t, { resourceOnly: true }); await settle(t);
+  assert.equal(observedResource.data, undefined); assert.equal(authRefreshes, 1);
+  const count = resourceRequests.length; await tick(t, 120000); assert.equal(resourceRequests.length, count);
+});
+
+test('an off-duty manager still receives their canonical assigned job in Field Mode', async t => {
+  account({ role: 'manager', dutyStatus: 'off-duty', availability: { state: 'unavailable' } });
+  jobsLoader = async () => ({ success: true, jobs: [{ id: 'assigned-manager-job', companyId: 'acme', assignedTo: 'member', assignedToUid: currentAuth.user.id, status: 'scheduled' }] });
+  await mount(t, { personal: true, route: false });
+  assert.deepEqual(observedJobs.jobs.map(job => job.id), ['assigned-manager-job']);
+  assert.equal(jobRequests.length, 1);
 });

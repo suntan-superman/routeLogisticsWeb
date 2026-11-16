@@ -31,7 +31,7 @@ class JobManagementService {
       if (options.saveCustomerAddress === true) requireCapability('customers.manage');
       this.getCurrentUserId();
       const result = await callWorkspace('rlManageJob', { action: 'create', job: jobData, ...(options.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}), ...(options.recurring ? { recurring: options.recurring, operationId: options.operationId } : {}) });
-      return { success: true, jobId: result.id, ...(await readWorkspace('jobs', { id: result.id })), customerAddressUpdated: result.customerAddressUpdated === true, ...(result.servicePlanId ? { servicePlanId: result.servicePlanId, nextServiceDate: result.nextServiceDate } : {}) };
+      return { success: true, jobId: result.id, ...(await readWorkspace('jobs', { id: result.id })), customerAddressUpdated: result.customerAddressUpdated === true, ...(result.addressWarning ? { addressWarning: result.addressWarning } : {}), ...(result.serviceArea ? { serviceArea: result.serviceArea } : {}), ...(result.servicePlanId ? { servicePlanId: result.servicePlanId, nextServiceDate: result.nextServiceDate } : {}) };
     } catch (error) {
       console.error('Error creating job:', error);
       return { success: false, error: error.message, code: error.code, addressValidation: error.details?.addressValidation, scheduling: error.details?.scheduling };
@@ -137,7 +137,7 @@ class JobManagementService {
       if (options.saveCustomerAddress === true) requireCapability('customers.manage');
       this.getCurrentUserId();
       const result = await callWorkspace('rlManageJob', { action: 'update', id: jobId, job: updates, ...(expectedUpdatedAt !== undefined ? { expectedVersion: expectedUpdatedAt } : {}), ...(options.saveCustomerAddress === true ? { saveCustomerAddress: true, expectedCustomerVersion: options.expectedCustomerVersion ?? null } : {}) });
-      return { success: true, ...(await readWorkspace('jobs', { id: jobId })), customerAddressUpdated: result.customerAddressUpdated === true };
+      return { success: true, ...(await readWorkspace('jobs', { id: jobId })), customerAddressUpdated: result.customerAddressUpdated === true, ...(result.addressWarning ? { addressWarning: result.addressWarning } : {}), ...(result.serviceArea ? { serviceArea: result.serviceArea } : {}) };
     } catch (error) {
       console.error('Error updating job:', error);
       return {

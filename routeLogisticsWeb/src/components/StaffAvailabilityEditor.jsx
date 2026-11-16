@@ -1,3 +1,4 @@
+import SelectControl from './SelectControl';
 import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { callWorkspace } from '../services/workspaceApi';
@@ -61,7 +62,7 @@ function AvailabilityForm({ companyId, member, allowed = false, onChanged }) {
     </fieldset>}
     {open === 'availability' && <fieldset disabled={busy} className="space-y-3 rounded-lg border border-primary-100 bg-primary-50 p-3">
       <legend className="text-sm font-semibold">Availability for {member.name || 'staff member'}</legend>
-      <label className="block text-sm">Temporary status<select aria-label="Temporary staff status" className="mt-1 block w-full rounded border-gray-300" value={form.reason} onChange={event => setForm(previous => ({ ...previous, reason: event.target.value }))}>{Object.entries(reasons).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+      <label className="block text-sm">Temporary status<SelectControl aria-label="Temporary staff status" className="mt-1 block w-full rounded border-gray-300" value={form.reason} onChange={event => setForm(previous => ({ ...previous, reason: event.target.value }))}>{Object.entries(reasons).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</SelectControl></label>
       <div className="space-y-2"><label className="block text-sm">From date<input aria-label="Availability from date" type="date" className="mt-1 block w-full rounded border-gray-300" value={form.startDate} onChange={event => setForm(previous => ({ ...previous, startDate: event.target.value }))} /></label><TimeSelect label="From time" value={form.startTime} onChange={startTime => setForm(previous => ({ ...previous, startTime }))} /></div>
       <div className="space-y-2"><label className="block text-sm">Until date<input aria-label="Availability until date" type="date" className="mt-1 block w-full rounded border-gray-300" value={form.endDate} onChange={event => setForm(previous => ({ ...previous, endDate: event.target.value }))} /></label><TimeSelect label="Until time" value={form.endTime} onChange={endTime => setForm(previous => ({ ...previous, endTime }))} /></div>
       <p className="text-xs text-gray-700">Times use this device’s time zone. Marking unavailable ends an active shift and stops location sharing. Available never starts a shift, enables GPS or restores company access. Existing appointments stay scheduled for dispatcher review. An emergency window temporarily overrides an unavailable period.</p>

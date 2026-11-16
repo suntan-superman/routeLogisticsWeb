@@ -1,15 +1,16 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { listInvoices, markInvoiceSent, markInvoicePaid, voidInvoice, deleteDraftInvoice } from '../services/invoiceService';
 import { isOverdue } from '../services/invoiceMath';
 import { canManage } from '../services/tenancy';
 import { useConfirm } from '../components/ConfirmProvider';
 import { useAuth } from '../contexts/AuthContext';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '../services/firebase';
+import { callWorkspace } from '../services/workspaceApi';
 import InvoicePayment from '../components/InvoicePayment';
 import { paymentsConfigured, paymentMode } from '../services/paymentConfig';
 import PaymentHistory from '../components/PaymentHistory';
+import { useWorkspaceQuery, useInvalidateWorkspace } from '../hooks/useWorkspaceQuery';
+import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 
 const money = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -21,6 +22,7 @@ const BADGE = {
   void: 'bg-red-100 text-red-700',
   overdue: 'bg-amber-100 text-amber-800',
 };
+const EMPTY_INVOICES = [];
 
 function printInvoice(inv, businessName) {
   const w = window.open('', '_blank', 'width=800,height=900');
@@ -45,25 +47,18 @@ function printInvoice(inv, businessName) {
 
 const InvoicesPage = () => {
   const { userProfile } = useAuth();
-  const [invoices, setInvoices] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const invoiceQuery = useWorkspaceQuery(['invoices', 200], () => listInvoices());
+  const invoices = invoiceQuery.data?.invoices || EMPTY_INVOICES, loading = invoiceQuery.isPending;
+  const invalidate = useInvalidateWorkspace();
   const [filter, setFilter] = useState('all');
   const [paymentInvoice, setPaymentInvoice] = useState(null);
   const [historyInvoice, setHistoryInvoice] = useState(null);
   const manage = canManage();
   const confirm = useConfirm();
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const res = await listInvoices();
-    setLoading(false);
-    if (res.success) setInvoices(res.invoices);
-    else toast.error(res.error || 'Could not load invoices');
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const load = () => invalidate(['invoices', 'payments', 'reports']);
+  useEffect(() => { setPaymentInvoice(null); setHistoryInvoice(null); }, [invoiceQuery.scopeId]);
+  useEffect(() => { if (workspaceAccessError(invoiceQuery.error)) { setPaymentInvoice(null); setHistoryInvoice(null); } }, [invoiceQuery.error]);
 
   const act = async (fn, msg) => {
     const res = await fn();
@@ -72,7 +67,7 @@ const InvoicesPage = () => {
     load();
   };
   const email = async (invoiceId) => {
-    try { await httpsCallable(functions, 'emailInvoice')({ invoiceId }); toast.success('Invoice email queued'); await load(); }
+    try { await callWorkspace('emailInvoice', { invoiceId }); toast.success('Invoice email queued'); await load(); }
     catch (error) { toast.error(error.message); }
   };
 
@@ -111,10 +106,13 @@ const InvoicesPage = () => {
           </button>
         ))}
       </div>
+      {invoiceQuery.error && <p role="alert" className="rounded border border-red-200 bg-red-50 p-3 text-red-800">{invoiceQuery.error.message} <button className="underline" onClick={() => invoiceQuery.refetch()}>Retry invoice refresh</button></p>}
 
       <div className="bg-white rounded-lg border overflow-x-auto">
         {loading ? (
           <p className="p-6 text-gray-500">Loading…</p>
+        ) : !invoices.length && invoiceQuery.error ? (
+          <p className="p-6 text-gray-600">Invoices could not be loaded. Reconnect and retry the refresh.</p>
         ) : shown.length === 0 ? (
           <p className="p-6 text-gray-500">No invoices.</p>
         ) : (
@@ -135,7 +133,7 @@ const InvoicesPage = () => {
                     <td className="px-4 py-3 space-x-2 whitespace-nowrap">
                       {manage && inv.status === 'sent' && paymentsConfigured && <button className="text-primary-700 underline" onClick={() => setPaymentInvoice(inv.id)}>{paymentMode === 'test' ? 'Test card payment' : 'Card payment'}</button>}
                       {manage && <button className="text-primary-700 underline" onClick={() => setHistoryInvoice(inv.id)}>Payment history</button>}
-                      {manage && inv.paymentLock && <button className="text-amber-700 underline" onClick={async () => { if (!(await confirm({ title: 'Cancel payment attempt?', message: 'This cancels an uncompleted card payment and unlocks invoice changes. It does not issue a refund.', confirmText: 'Cancel attempt' }))) return; try { await httpsCallable(functions, 'rlCancelInvoicePayment')({ invoiceId: inv.id }); await load(); } catch (error) { toast.error(error.message); } }}>Cancel payment attempt</button>}
+                      {manage && inv.paymentLock && <button className="text-amber-700 underline" onClick={async () => { if (!(await confirm({ title: 'Cancel payment attempt?', message: 'This cancels an uncompleted card payment and unlocks invoice changes. It does not issue a refund.', confirmText: 'Cancel attempt' }))) return; try { await callWorkspace('rlCancelInvoicePayment', { invoiceId: inv.id }); await load(); } catch (error) { toast.error(error.message); } }}>Cancel payment attempt</button>}
                       {inv.testPaymentStatus && <span className="text-xs text-gray-500">Test: {inv.testPaymentStatus}</span>}
                       <button className="text-primary-600 hover:underline" onClick={() => printInvoice(inv, userProfile?.businessName)}>Print</button>
                       {manage && ['draft', 'sent'].includes(inv.status) && <button className="text-primary-600 hover:underline" onClick={() => email(inv.id)}>Email invoice</button>}

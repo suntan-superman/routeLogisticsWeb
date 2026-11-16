@@ -31,6 +31,7 @@ import { GlassScreen, GlassCard, GlassButton, IconButton } from '../components/G
 import { AuthContext } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { CustomerService, JobService, EstimateService } from '../services/firebase';
+import { useJobResourceRefresh } from '../services/useJobResources';
 import { FONT_SIZES, SPACING, BUTTON_SIZES, BORDER_RADIUS, ICON_SIZES, CARD_SIZES, WIDTHS, HEIGHTS, hp, wp, rf } from '../constants/responsiveSizes';
 
 // A job workspace is an ordinary view; native camera/gallery owns presentation.
@@ -154,10 +155,6 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
   const photos = [];
   const routes = [];
 
-  // Load customers and jobs when component mounts
-  useEffect(() => {
-    if (managing) loadCustomers();
-  }, [managing]);
 
   // Data availability checks
   const hasCustomers = customers.length > 0;
@@ -197,21 +194,25 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
   };
 
   // Load customers from Firebase
-  const loadCustomers = async () => {
+  const loadCustomers = async ({ query = false } = {}) => {
     setIsLoadingCustomers(true);
     try {
       const result = await CustomerService.getCustomers();
       if (result.success) {
         setCustomers(result.customers);
+        return result.customers;
       } else {
+        if (query) throw Object.assign(new Error(result.error?.message || result.error || 'Failed to load customers'), { code: result.code || result.error?.code });
         Alert.alert('Error', 'Failed to load customers');
       }
     } catch (error) {
+      if (query) throw error;
       Alert.alert('Error', 'Failed to load customers');
     } finally {
       setIsLoadingCustomers(false);
     }
   };
+  const customerRead = useJobResourceRefresh('customers', user.id, loadCustomers, { enabled: active && managing });
 
   // Temporary read errors must not tear down a native picker or discard drafts.
   // Authoritatively confirmed membership loss closes private details; a resource
@@ -756,6 +757,7 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
             <GlassButton secondary title="View schedule" icon="calendar-outline" onPress={handleSchedulePress} />
           </View>
           {!!jobsError && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{jobsError}</Text>}
+          {!!customerRead.error && <Text accessibilityRole="alert" style={{ color: palette.danger }}>Customers could not refresh. {customerRead.error.message}</Text>}
           {!isLoadingJobs && !jobsError && !jobs.length && <Text style={{ color: palette.secondary, lineHeight: 22 }}>{permissions.isTechnician ? 'No jobs assigned for this period. Your manager assigns your work.' : 'No jobs scheduled for this period.'}</Text>}
           {jobs.slice(0, 4).map(job => <TouchableOpacity key={job.id} accessibilityRole="button" onPress={() => handleJobSelection(job)} style={{ borderTopWidth: 1, borderColor: palette.border, paddingTop: 12, flexDirection: 'row', gap: 12, alignItems: 'center' }}>
             <View style={{ width: 44, height: 44, borderRadius: 15, backgroundColor: palette.input, alignItems: 'center', justifyContent: 'center' }}><Ionicons name={job.status === 'completed' ? 'checkmark-outline' : 'briefcase-outline'} size={21} color={palette.accent} /></View>

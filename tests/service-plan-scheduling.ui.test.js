@@ -2,6 +2,8 @@ const { test, afterEach } = require('node:test');
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path'), { createRequire } = require('node:module');
 const mobile = createRequire(path.resolve(__dirname, '../routeLogisticsMobile/package.json')), web = createRequire(path.resolve(__dirname, '../routeLogisticsWeb/package.json'));
 const React = mobile('react'), { create, act } = mobile('react-test-renderer'), { transformSync } = web('esbuild');
+const {createWorkspaceQueryMock,selectControlMock}=require('./support/workspaceQueryMock.cjs');
+const workspaceHooks=createWorkspaceQueryMock(React,{scopeId:'test-workspace'});
 global.IS_REACT_ACT_ENVIRONMENT = true;
 global.window = { addEventListener() {}, removeEventListener() {} };
 let tree, env;
@@ -17,6 +19,9 @@ function load(relative) {
   const module = { exports: {} };
   const mock = name => {
     if (name === 'react') return React;
+    if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
+    if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
+    if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found','workspace-changed'].includes(String(error?.code||'').split('/').pop())};
     if (name === 'react-hot-toast') return { __esModule: true, default: toast };
     if (name.endsWith('/contexts/AuthContext')) return { useAuth: () => ({ company: { id: 'company', timeZone: 'America/Los_Angeles' }, currentUser: { uid: 'owner' } }) };
     if (name.endsWith('/services/tenancy')) return { canManage: () => env.manage, scopeWhere: () => [] };

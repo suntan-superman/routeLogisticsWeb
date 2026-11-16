@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, BackHandler, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, BackHandler, Pressable, ScrollView, Text, View } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../theme/ThemeProvider';
 import { GlassCard, GlassButton, IconButton } from './Glass';
 import { refreshWorkShift, startWorkShift, stopShiftTracking, subscribeWorkTracking, workTrackingSnapshot } from '../services/workTracking';
+import { useJobResourceRefresh } from '../services/useJobResources';
 
 export default function WorkLocation({ active = true, disabled = false, onInteractionChange, children }) {
   const { palette } = useTheme(), { user, accessStatus = 'ready' } = useAuth();
@@ -17,12 +18,12 @@ export default function WorkLocation({ active = true, disabled = false, onIntera
   notify.current = onInteractionChange; current.current = { scope, active, dialogScope };
   const state = snapshot.scopeKey && snapshot.scopeKey !== scope ? workTrackingSnapshot(user) : snapshot;
   const visible = !!user?.companyId && active && dialogScope === scope;
-  const readStatus = useCallback(async () => {
+  const readStatus = useCallback(async ({ query = false } = {}) => {
     if (accessStatus !== 'ready' || !user?.companyId || locked.current || reading.current) return;
     const request = { scope, generation: generation.current }; reading.current = request;
-    setCheck({ scope, status: 'checking' });
+    if (!query) setCheck({ scope, status: 'checking' });
     try {
-      await refreshWorkShift(user);
+      await refreshWorkShift(user, { reconfigure: !query });
       if (alive.current && current.current.scope === scope && request.generation === generation.current) {
         setCheck({ scope, status: 'ready' });
       }
@@ -30,6 +31,7 @@ export default function WorkLocation({ active = true, disabled = false, onIntera
       if (alive.current && current.current.scope === scope && request.generation === generation.current) {
         setCheck({ scope, status: 'unavailable' }); setError(failure.message || 'Could not check your shift. Reconnect and retry.');
       }
+      if (query) throw failure;
     } finally { if (reading.current === request) reading.current = null; }
   }, [scope, accessStatus, user]);
   useEffect(() => {
@@ -49,13 +51,9 @@ export default function WorkLocation({ active = true, disabled = false, onIntera
     return () => { generation.current++; };
   }, [scope]);
   useEffect(() => {
-    if (active && accessStatus === 'ready') void readStatus();
-    else if (active && accessStatus !== 'ready') setCheck({ scope, status: 'unavailable' });
+    if (active && accessStatus !== 'ready') setCheck({ scope, status: 'unavailable' });
   }, [scope, accessStatus, active]);
-  useEffect(() => {
-    const subscription = AppState?.addEventListener?.('change', value => { if (value === 'active' && current.current.active) void readStatus(); });
-    return () => subscription?.remove();
-  }, [readStatus]);
+  useJobResourceRefresh('shift', user?.id, readStatus, { enabled: active && !!user?.companyId && accessStatus === 'ready' });
   // A denied/stopped tracking session needs a fresh server duty status. This is
   // event driven; it adds no polling loop or repeated native tracking setup.
   useEffect(() => { if (active && !state.tracking && state.error) void readStatus(); }, [scope, active, state.tracking, state.error]);

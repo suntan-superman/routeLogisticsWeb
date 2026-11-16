@@ -1,3 +1,4 @@
+const { selectValue, selectOptions } = require('./support/select');
 const { createHash } = require('node:crypto');
 const { test, expect, signIn, portalSignIn } = require('./support/fixtures');
 
@@ -10,7 +11,7 @@ const feedback = page => page.getByRole('region', { name: 'Service feedback', ex
 const editor = page => page.getByRole('form', { name: 'Platform content editor' });
 
 async function selectProvider(page, companyId) {
-  await page.getByRole('combobox', { name: 'Service provider' }).selectOption(`company:${companyId}`);
+  await selectValue(page.getByRole('combobox', { name: 'Service provider' }), `company:${companyId}`);
   await expect(records(page)).toBeVisible();
 }
 
@@ -99,7 +100,7 @@ test.describe('Customer portal — real Firebase emulator journeys', () => {
       scenario.readDoc(`jobs/${scenario.ids.jobId}`), scenario.readDoc(`jobs/${scenario.ids.otherJobId}`),
     ]);
     await enterPortal(page, scenario);
-    const options = page.getByRole('combobox', { name: 'Service provider' }).getByRole('option');
+    const options = await selectOptions(page.getByRole('combobox', { name: 'Service provider' }));
     await expect(options).toHaveCount(2);
     await expect(records(page).getByRole('heading', { name: company.name, exact: true })).toBeVisible();
     await expect(records(page).getByText('Matching customer records have been combined for this provider.', { exact: true })).toBeVisible();
@@ -115,6 +116,9 @@ test.describe('Customer portal — real Firebase emulator journeys', () => {
 
   test('PW-POR-03 retrieves authorized image/PDF bytes and clears the preview on provider switch', async ({ page, scenario }) => {
     await enterPortal(page, scenario);
+    // The independent feedback read expands content directly above the file
+    // controls. Wait for its actual ready state before a pointer click.
+    await expect(feedback(page).getByRole('button', { name: 'Refresh feedback', exact: true })).toBeEnabled();
     await records(page).getByRole('button', { name: 'View photo', exact: true }).click();
     const preview = page.getByRole('region', { name: 'Shared file preview' });
     await expect(preview.getByRole('img')).toHaveAttribute('src', /^data:image\/(?:png|jpeg|webp);base64,/);
@@ -195,7 +199,7 @@ test.describe('Customer portal — real Firebase emulator journeys', () => {
     await expect(preview.getByRole('alert')).toContainText(/association is no longer available|file is not available/i);
     await expect(preview.getByRole('img')).toHaveCount(0);
     await page.getByRole('button', { name: 'Refresh visits and invoices', exact: true }).click();
-    await expect(page.getByRole('combobox', { name: 'Service provider' }).getByRole('option')).toHaveCount(1);
+    await expect(await selectOptions(page.getByRole('combobox', { name: 'Service provider' }))).toHaveCount(1);
     await expect(records(page).getByRole('heading', { name: company.name, exact: true })).toHaveCount(0);
     await expect(records(page)).not.toContainText(job.serviceType);
     await expect(preview).toHaveCount(0);
@@ -216,7 +220,7 @@ test.describe('Platform content — genuine UI authorization and publication', (
       await signIn(page, scenario.accounts[role]);
       await page.goto('/platform-admin');
       await expect(page.getByRole('heading', { name: 'Platform access required', exact: true })).toBeVisible();
-      await expect(page.getByRole('alert')).toContainText('Company ownership and team roles do not grant this permission.');
+      await expect(page.getByRole('alert')).toContainText('Explicit Route Logistics platform administrator access is required.');
       await expect(editor(page)).toHaveCount(0);
     });
   }
@@ -249,7 +253,7 @@ test.describe('Platform content — genuine UI authorization and publication', (
     await editor(page).getByLabel('SEO title', { exact: true }).fill('Customer portal email sign-in | Route Logistics');
     await editor(page).getByLabel('Meta description', { exact: true }).fill('Customers sign in by email code and view only records shared by their authorized service providers.');
     await editor(page).getByLabel('Open Graph title', { exact: true }).fill('Customer portal sign-in');
-    await editor(page).getByRole('combobox', { name: 'Publication status', exact: true }).selectOption('published');
+    await selectValue(editor(page).getByRole('combobox', { name: 'Publication status', exact: true }), 'published');
     const published = await saveCms(page, 'Content published successfully.');
     expect(await scenario.readDoc(`rlPublicContent/${published.id}`)).toMatchObject({ status: 'published', slug: faq.slug });
     const sitemap = await page.request.get(scenario.functionUrl('rlPublicContent'), { params: { path: '/sitemap.xml' } });
@@ -269,7 +273,7 @@ test.describe('Platform content — genuine UI authorization and publication', (
       await expect(publicPage.locator('meta[name="robots"]')).toHaveAttribute('content', 'index,follow');
       const structured = await publicPage.locator('script[type="application/ld+json"]').textContent();
       expect(JSON.parse(structured)['@graph']).toEqual(expect.arrayContaining([expect.objectContaining({ '@type': 'FAQPage' })]));
-      await editor(page).getByRole('combobox', { name: 'Publication status', exact: true }).selectOption('archived');
+      await selectValue(editor(page).getByRole('combobox', { name: 'Publication status', exact: true }), 'archived');
       await saveCms(page, 'Content archived. It is no longer available publicly.');
       expect(await scenario.readDoc(`rlPublicContent/${published.id}`)).toBeNull();
       const archived = await page.request.get(scenario.functionUrl('rlPublicContent'), { params: { path: `/faqs/${faq.slug}` } });
@@ -307,7 +311,7 @@ test.describe('Platform content — genuine UI authorization and publication', (
     expect(await scenario.readDoc(`rlPublicContent/${saved.id}`)).toBeNull();
     const publicImage = await page.request.get(scenario.functionUrl('rlPublicContentImage'), { params: { id: imagePayload.result.image.id } });
     expect(publicImage.status()).toBe(404);
-    await editor(page).getByRole('combobox', { name: 'Publication status', exact: true }).selectOption('published');
+    await selectValue(editor(page).getByRole('combobox', { name: 'Publication status', exact: true }), 'published');
     await expect(page.getByText('Publishing requires authenticity confirmation, an evidence reference and the customer/company attribution above.', { exact: true })).toBeVisible();
     await expect(editor(page).getByRole('button', { name: 'Save content', exact: true })).toBeDisabled();
     await expect(page.getByRole('link', { name: 'View published page', exact: true })).toHaveCount(0);

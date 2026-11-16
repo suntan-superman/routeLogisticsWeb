@@ -153,3 +153,13 @@ test('retention clears raw GPS without ending an authorized shift or losing its 
   assert.equal((await f.fix(session.sessionId)).accepted, true);
   assert.equal((await f.handlers.list(f.request({},f.owner))).locations[0].state, 'live');
 });
+test('an explicit unverified property cannot create proximity evidence using old customer or root job coordinates', async () => {
+  const f = await fixture(), jobId = `${f.companyId}-unverified-job`, customerId = `${f.companyId}-old-location-customer`;
+  await db.doc(`customers/${customerId}`).set({ companyId: f.companyId, latitude: 35, longitude: -119 });
+  await db.doc(`jobs/${jobId}`).set({ companyId: f.companyId, userId: f.owner.uid, assignedTo: f.memberId, customerId, date: '2026-11-13', status: 'in-progress', latitude: 35, longitude: -119, serviceProperty: { address: 'Operator-entered unverified property', validated: false, latitude: null, longitude: null } });
+  const { shift } = await f.start(), session = await f.handlers.update(f.request({ action: 'start', shiftId: shift.id }));
+  assert.equal((await f.fix(session.sessionId)).visitEvidence.recorded, 0);
+  assert.equal((await f.handlers.visit(f.request({ action: 'list', jobId }))).events.length, 0);
+  const result = await f.handlers.visit(f.request({ action: 'record', jobId, type: 'arrived', note: 'Reported manually at the entered address', operationId: 'unverified-property-visit', latitude: 35, longitude: -119, accuracy: 10, capturedAt: new Date(f.time()).toISOString() }));
+  assert.equal(result.event.source, 'manual-gps'); assert.equal(result.event.distanceMeters, undefined); assert.equal(result.event.verifiedAccess, false);
+});

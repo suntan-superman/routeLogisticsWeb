@@ -8,6 +8,7 @@ const policy = require('../../functions/shared/capabilities.json');
 function fixture(role = 'manager') {
   const modules = new Map(), calls = [], operations = new Map(), listeners = new Set(); let sequence = 0;
   const env = { calls, record: null, photos: [], delivery: null, cancelled: false, uploadFailure: false, ambiguousSave: false, compressionFailure: false, interactions: 0, converted: 0, approvalGets: [], approvals: 0, changes: [], urls: [], revoked: [], role, customers: [{ id: 'customer', name: 'Existing customer', email: 'prospect@example.com' }] };
+  const queryMock = require('../../tests/support/workspaceQueryMock.cjs').createWorkspaceQueryMock(React);
   env.user = { id: 'manager', companyId: 'acme', membershipId: 'member', role, companyName: 'Acme', services: ['Pest Control'] };
   const can = capability => policy.roles[env.role]?.includes(capability);
   env.auth = () => ({ user: env.user, can, permissions: { can, canManage: can('jobs.schedule') }, accessStatus: 'ready', currentUser: { uid: env.user.id }, company: { id: env.user.companyId }, role: env.role });
@@ -37,6 +38,8 @@ function fixture(role = 'manager') {
     const module = { exports: {} }; modules.set(filename, module);
     const mockRequire = name => {
       if (name === 'react') return React;
+      if (name.endsWith('/hooks/useWorkspaceQuery')) return queryMock;
+      if (name.endsWith('/services/useJobResources')) return { useJobResourceRefresh: (_resource, id, loader, { enabled }) => { React.useEffect(() => { if (enabled) loader({ query: true }).catch(() => {}); }, [id, enabled]); return { refetch: () => loader().catch(() => {}) }; } };
       if (name === 'react-hot-toast') return { success() {}, error() {} };
       if (name.endsWith('/hooks/useUnsavedChanges')) return { useUnsavedChanges: () => ({ confirmDiscard: async () => false }) };
       if (name.startsWith('@babel/runtime/')) return require(name);

@@ -11,6 +11,7 @@ import { CustomerService } from '../services/firebase';
 import { beginNativeInteraction } from '../services/nativeInteraction';
 import { callEstimate, prepareEstimatePhoto, shareEstimatePdf } from '../services/estimateService';
 import { blankEstimate, blankLine, draftFromEstimate, estimateInput, money, conversionInput } from '../../functions/shared/estimateClient';
+import { useJobResourceRefresh } from '../services/useJobResources';
 
 export default function EstimatesScreen({ onInteractionChange, active = true }) {
   const { user, permissions, accessStatus = 'ready' } = useAuth(), { palette } = useTheme();
@@ -27,15 +28,17 @@ export default function EstimatesScreen({ onInteractionChange, active = true }) 
   const current = ticket => live.current && generation.current === ticket;
   const load = async () => {
     const ticket = generation.current; if (!allowed || accessStatus !== 'ready') return;
-    const result = await callEstimate('list'); if (!current(ticket)) return;
+    let result;
+    try { result = await callEstimate('list'); } catch (failure) { if (current(ticket)) setError(failure.message || 'Could not refresh estimates.'); throw failure; }
+    if (!current(ticket)) return;
     setRows(result.estimates || []); setEnabled(result.enabled === true); setEmailEnabled(result.emailEnabled === true);
     const customerResult = await CustomerService.getCustomers(); if (current(ticket) && customerResult.success) setCustomers(customerResult.customers || []);
+    return result;
   };
   useEffect(() => { live.current = true; generation.current++; setRows([]); setEditing(false); setPhotos([]); setRecord(null); setDirty(false); setUncertain(false); pendingSave.current = null;
-    if (allowed && active && accessStatus === 'ready') load().catch(failure => { if (live.current) setError(failure.message); });
     return () => { live.current = false; generation.current++; callbacks.current?.({ busy: false, hasDraft: false }); };
   }, [scope, allowed]);
-  useEffect(() => { if (active && allowed && accessStatus === 'ready' && !editing) load().catch(failure => { if (live.current) setError(failure.message); }); }, [active, accessStatus]);
+  useJobResourceRefresh('estimates', user.id, load, { enabled: active && allowed && accessStatus === 'ready' && !editing });
   const change = (name, value) => { if (locked.current || uncertain) return; setDraft(previous => ({ ...previous, [name]: value })); setDirty(true); };
   const run = async work => {
     if (locked.current || accessStatus !== 'ready') return;

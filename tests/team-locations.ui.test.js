@@ -5,6 +5,8 @@ const { createRequire } = require('node:module');
 const mobileRequire = createRequire(path.resolve(__dirname, '../routeLogisticsMobile/package.json'));
 const webRequire = createRequire(path.resolve(__dirname, '../routeLogisticsWeb/package.json'));
 const React = mobileRequire('react'), { create, act } = mobileRequire('react-test-renderer'), { transformSync } = webRequire('esbuild');
+const {createWorkspaceQueryMock,selectControlMock}=require('./support/workspaceQueryMock.cjs');
+const workspaceHooks=createWorkspaceQueryMock(React,{scopeId:'test-workspace'});
 global.IS_REACT_ACT_ENVIRONMENT = true;
 global.document = { visibilityState: 'visible' };
 let tree, owner, calls, result, toasts, unsaved, failSave;
@@ -15,6 +17,9 @@ function load(relative) {
   const module = { exports: {} };
   const mockRequire = name => {
     if (name === 'react') return React;
+    if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
+    if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
+    if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found','workspace-changed'].includes(String(error?.code||'').split('/').pop())};
     if (name.endsWith('/StaffAvailabilityEditor')) return { __esModule: true, default: () => null };
     if (name === 'react-hot-toast') return { __esModule: true, default: { success: message => toasts.push({type:'success',message}), error: message => toasts.push({type:'error',message}) } };
     if (name.endsWith('/useUnsavedChanges')) return { useUnsavedChanges: dirty => { unsaved=dirty; return {confirmDiscard:async()=>true}; } };

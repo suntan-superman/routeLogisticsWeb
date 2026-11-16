@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import SelectControl from '../components/SelectControl';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion as Motion } from 'framer-motion';
 import JobManagementService from '../services/jobManagementService';
 import CustomerService from '../services/customerService';
@@ -32,8 +33,14 @@ import { createInvoiceFromJob } from '../services/invoiceService';
 import { canManage, can } from '../services/tenancy';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { formatCalendarDate } from '../utils/calendarDate';
+import { useWorkspaceQuery, useInvalidateWorkspace } from '../hooks/useWorkspaceQuery';
+import { summarizeJobs, inJobPeriod, calendarDay, jobDateRange } from '../utils/jobSummary';
+import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 
 const statusInput = job => ({ status: job?.status || '', actualWorkDone: job?.actualWorkDone || '', actualHours: String(job?.actualHours ?? ''), completionNotes: job?.completionNotes || '', cancellationReason: job?.cancellationReason || '' });
+const EMPTY=[];
+const unknownStats=Object.fromEntries(Object.keys(summarizeJobs([])).map(key=>[key,'—']));
+const deniedJobRead=error=>workspaceAccessError(error)||/job not found|not assigned to your workspace|unauthorized to access this job/i.test(error?.message||'');
 
 const JobManagementPage = () => {
   const navigate = useNavigate();
@@ -47,26 +54,28 @@ const JobManagementPage = () => {
     navigate('/invoices');
   };
 
-  const [jobs, setJobs] = useState([]);
-  const [customers, setCustomers] = useState([]);
-  const [showNewJob, setShowNewJob] = useState(false);
-  const [filteredJobs, setFilteredJobs] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const jobsQuery=useWorkspaceQuery(['jobs',500],()=>JobManagementService.getJobs(500));
+  const customersQuery=useWorkspaceQuery(['customers',500],()=>CustomerService.getCustomers(500));
+  const invalidate=useInvalidateWorkspace();
+  const jobs=jobsQuery.data?.jobs||EMPTY,customers=customersQuery.data?.customers||EMPTY;
+  const setJobs=updater=>jobsQuery.setData(previous=>({...previous,jobs:typeof updater==='function'?updater(previous?.jobs||[]):updater}));
+  const setCustomers=updater=>customersQuery.setData(previous=>({...previous,customers:typeof updater==='function'?updater(previous?.customers||[]):updater}));
+  const [newJobScope,setNewJobScope]=useState(null);
+  const showNewJob=jobsQuery.readable&&!deniedJobRead(jobsQuery.error)&&newJobScope===jobsQuery.scopeId;
+  const setShowNewJob=value=>setNewJobScope(value?jobsQuery.scopeId:null);
+  const [saving, setIsLoading] = useState(false);
+  const isLoading=saving||(jobsQuery.isLoading&&!jobsQuery.data);
   const [searchTerm, setSearchTerm] = useState('');
   const [showViewModal, setShowViewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
-  const [selectedJob, setSelectedJob] = useState(null);
-  const [stats, setStats] = useState({
-    totalJobs: 0,
-    scheduledJobs: 0,
-    inProgressJobs: 0,
-    completedJobs: 0,
-    cancelledJobs: 0,
-    totalRevenue: 0,
-    thisWeekJobs: 0,
-    thisMonthJobs: 0
-  });
+  const [selection,setSelection]=useState(null);
+  const selectedSnapshot=jobsQuery.readable&&!deniedJobRead(jobsQuery.error)&&selection?.scopeId===jobsQuery.scopeId?selection.job:null;
+  const setSelectedJob=value=>setSelection(value?{scopeId:jobsQuery.scopeId,job:value}:null);
+  const detailQuery=useWorkspaceQuery(['job',selectedSnapshot?.id||null],()=>JobManagementService.getJob(selectedSnapshot.id),{enabled:showViewModal&&!!selectedSnapshot});
+  const selectedJob=showViewModal?(detailQuery.readable&&!deniedJobRead(detailQuery.error)?detailQuery.data?.job||jobs.find(row=>row.id===selectedSnapshot?.id)||selectedSnapshot:null):selectedSnapshot;
+  const todayKey=new Date().toLocaleDateString('en-CA');
+  const stats=useMemo(()=>jobsQuery.data?summarizeJobs(jobs,calendarDay(todayKey)||new Date()):unknownStats,[jobsQuery.data,jobs,todayKey]);
 
   // Filter states
   const [activeFilter, setActiveFilter] = useState('all'); // all, scheduled, in-progress, completed, cancelled
@@ -109,40 +118,7 @@ const JobManagementPage = () => {
     setCustomers(rows => rows.map(customer => customer.id === updated.id ? updated : customer));
   };
 
-  useEffect(() => {
-    loadJobs();
-    loadStats();
-    CustomerService.getCustomers(500).then((r) => r.success && setCustomers(r.customers));
-  }, []);
-
-  const loadJobs = async () => {
-    setIsLoading(true);
-    try {
-      const result = await JobManagementService.getJobs();
-      if (result.success) {
-        setJobs(result.jobs);
-      } else {
-        toast.error(result.error);
-      }
-    } catch (error) {
-      console.error('Error loading jobs:', error);
-      toast.error('Error loading jobs');
-    }
-    setIsLoading(false);
-  };
-
-  const loadStats = async () => {
-    try {
-      const result = await JobManagementService.getJobStats();
-      if (result.success) {
-        setStats(result.stats);
-      }
-    } catch (error) {
-      console.error('Error loading stats:', error);
-    }
-  };
-
-  const filterAndSortJobs = useCallback(() => {
+  const filteredJobs = useMemo(() => {
     let filtered = [...jobs];
 
     // Apply search filter
@@ -164,40 +140,17 @@ const JobManagementPage = () => {
     }
 
     // Apply date filter
-    if (dateFilter !== 'all') {
-      const today = new Date();
-      const startOfWeek = new Date(today);
-      startOfWeek.setDate(today.getDate() - today.getDay());
-      startOfWeek.setHours(0, 0, 0, 0);
-      
-      const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-
-      filtered = filtered.filter(job => {
-        const jobDate = new Date(job.date);
-        
-        switch (dateFilter) {
-          case 'today':
-            return jobDate.toDateString() === today.toDateString();
-          case 'week':
-            return jobDate >= startOfWeek;
-          case 'month':
-            return jobDate >= startOfMonth;
-          default:
-            return true;
-        }
-      });
-    }
+    if (dateFilter !== 'all') filtered = filtered.filter(job=>inJobPeriod(job,dateFilter,calendarDay(todayKey)||new Date()));
 
     // Apply sorting
     filtered.sort((a, b) => {
       switch (sortBy) {
         case 'date': {
-          const dateA = new Date(a.date);
-          const dateB = new Date(b.date);
-          if (dateA.getTime() === dateB.getTime()) {
+          const dateA = calendarDay(a.date),dateB=calendarDay(b.date);
+          if ((dateA?.getTime()||0) === (dateB?.getTime()||0)) {
             return (a.time || '').localeCompare(b.time || '');
           }
-          return dateB - dateA;
+          return (dateB?.getTime()||0)-(dateA?.getTime()||0);
         }
         case 'status':
           return (a.status || '').localeCompare(b.status || '');
@@ -210,10 +163,8 @@ const JobManagementPage = () => {
       }
     });
 
-    setFilteredJobs(filtered);
-  }, [jobs, searchTerm, activeFilter, dateFilter, sortBy]);
-
-  useEffect(() => { filterAndSortJobs(); }, [filterAndSortJobs]);
+    return filtered;
+  }, [jobs, searchTerm, activeFilter, dateFilter, sortBy,todayKey]);
 
   const handleStatusUpdate = async () => {
     if (statusSaving.current || !statusChanged || !selectedJob) return;
@@ -231,7 +182,7 @@ const JobManagementPage = () => {
           job.id === submittedJob.id ? result.job : job
         ));
         localAction.current++; resetStatus();
-        loadStats();
+        invalidate(['jobs','job','customer-stats']);
         toast.success('Job status updated successfully!');
       } else {
         toast.error(result.error || 'Job status was not saved. Your changes are retained.');
@@ -256,7 +207,7 @@ const JobManagementPage = () => {
       const result = await JobManagementService.deleteJob(jobId);
       if (result.success) {
         setJobs(prev => prev.filter(job => job.id !== jobId));
-        loadStats();
+        invalidate(['jobs','job','customer-stats']);
         toast.success('Job deleted successfully!');
       } else {
         toast.error(result.error);
@@ -307,33 +258,10 @@ const JobManagementPage = () => {
     }
   };
 
-  const getDateRange = (filter) => {
-    const today = new Date();
-    const startOfWeek = new Date(today);
-    startOfWeek.setDate(today.getDate() - today.getDay());
-    startOfWeek.setHours(0, 0, 0, 0);
-    
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-    endOfMonth.setHours(23, 59, 59, 999);
-
-    switch (filter) {
-      case 'today':
-        return { startDate: today, endDate: today };
-      case 'week': {
-        const endOfWeek = new Date(startOfWeek);
-        endOfWeek.setDate(startOfWeek.getDate() + 6);
-        endOfWeek.setHours(23, 59, 59, 999);
-        return { startDate: startOfWeek, endDate: endOfWeek };
-      }
-      case 'month':
-        return { startDate: startOfMonth, endDate: endOfMonth };
-      default:
-        return null;
-    }
-  };
+  const getDateRange = filter => filter==='all'?null:jobDateRange(filter);
 
   const formatCurrency = (amount) => {
+    if(amount==='—')return '—';
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD'
@@ -416,6 +344,13 @@ const JobManagementPage = () => {
           </div>
         </div>
       </div>
+
+      {(jobsQuery.error||customersQuery.error||(showViewModal&&detailQuery.error))&&<div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        <p>{jobsQuery.error?.message||customersQuery.error?.message||detailQuery.error?.message} {jobsQuery.data?'Previously loaded work stays visible while refresh is retried.':''}</p>
+        <button type="button" className="mt-2 underline" onClick={()=>Promise.all([jobsQuery.refetch(),customersQuery.refetch(),...(showViewModal&&selectedSnapshot?[detailQuery.refetch()]:[])])}>Retry job refresh</button>
+        {showViewModal&&!selectedJob&&<button type="button" className="ml-4 underline" onClick={closeView}>Close unavailable job</button>}
+      </div>}
+      {jobsQuery.data?.hasMore&&<p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Showing the first 500 jobs. Summary counts and totals apply to these loaded records.</p>}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
@@ -552,7 +487,8 @@ const JobManagementPage = () => {
           </div>
           
           <div className="flex gap-2">
-            <select
+            <SelectControl
+              aria-label="Job status filter"
               value={activeFilter}
               onChange={(e) => setActiveFilter(e.target.value)}
               className="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
@@ -562,9 +498,10 @@ const JobManagementPage = () => {
               <option value="in-progress">In Progress</option>
               <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
-            </select>
+            </SelectControl>
             
-            <select
+            <SelectControl
+              aria-label="Job date filter"
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value)}
               className="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
@@ -573,9 +510,10 @@ const JobManagementPage = () => {
               <option value="today">Today</option>
               <option value="week">This Week</option>
               <option value="month">This Month</option>
-            </select>
+            </SelectControl>
             
-            <select
+            <SelectControl
+              aria-label="Job sort order"
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
               className="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
@@ -584,7 +522,7 @@ const JobManagementPage = () => {
               <option value="status">Sort by Status</option>
               <option value="customer">Sort by Customer</option>
               <option value="cost">Sort by Cost</option>
-            </select>
+            </SelectControl>
           </div>
         </div>
       </div>
@@ -601,7 +539,7 @@ const JobManagementPage = () => {
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
           </div>
-        ) : filteredJobs.length === 0 ? (
+        ) : !jobsQuery.data ? <p role="status" className="p-6 text-sm text-gray-600">Jobs are not available yet. Retry the refresh when your workspace is ready.</p> : filteredJobs.length === 0 ? (
           <div className="text-center py-12">
             <ClipboardDocumentListIcon className="mx-auto h-12 w-12 text-gray-400" />
             <h3 className="mt-2 text-sm font-medium text-gray-900">No jobs found</h3>
@@ -848,7 +786,7 @@ const JobManagementPage = () => {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Status *</label>
-                  <select
+                  <SelectControl
                     disabled={isLoading}
                     value={statusData.status}
                     onChange={(e) => setStatusData(prev => ({ ...prev, status: e.target.value }))}
@@ -859,7 +797,7 @@ const JobManagementPage = () => {
                     <option value="in-progress">In Progress</option>
                     <option value="completed">Completed</option>
                     <option value="cancelled">Cancelled</option>
-                  </select>
+                  </SelectControl>
                 </div>
                 
                 {statusData.status === 'completed' && (
@@ -947,8 +885,8 @@ const JobManagementPage = () => {
             await refreshSavedCustomer(saved, metadata);
             setShowEditModal(false);
             setSelectedJob(null);
-            loadJobs();
-            loadStats();
+            if(saved?.id)setJobs(previous=>[saved,...previous.filter(row=>row.id!==saved.id)]);
+            invalidate(['jobs','job','customers','customer-stats']);
           }}
         />
       )}
@@ -960,8 +898,8 @@ const JobManagementPage = () => {
           onCreated={async (saved, metadata) => {
             await refreshSavedCustomer(saved, metadata);
             setShowNewJob(false);
-            loadJobs();
-            loadStats();
+            if(saved?.id)setJobs(previous=>[saved,...previous.filter(row=>row.id!==saved.id)]);
+            invalidate(['jobs','job','customers','customer-stats']);
           }}
         />
       )}

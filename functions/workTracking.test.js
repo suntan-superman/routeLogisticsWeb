@@ -1,6 +1,12 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { policyFor, active, shiftView, captureTime, distanceMeters, transition } = require('./workTracking');
+const { policyFor, active, shiftView, captureTime, distanceMeters, transition, jobPoint } = require('./workTracking');
+
+test('explicit unverified service properties never borrow stale job or customer coordinates for visit evidence', () => {
+  for (const serviceProperty of [{ address: 'Operator supplied property', validated: false }, { address: 'Operator supplied property', validated: false, latitude: 35, longitude: -119 }, { address: 'Property without a point' }]) assert.equal(jobPoint({ serviceProperty, latitude: 35, longitude: -119, location: { lat: 35, lng: -119 } }), null);
+  assert.deepEqual(jobPoint({ serviceProperty: { address: 'Verified property', validated: true, latitude: 36, longitude: -118 }, latitude: 35, longitude: -119 }), { lat: 36, lng: -118 });
+  assert.deepEqual(jobPoint({ latitude: 35, longitude: -119 }), { lat: 35, lng: -119 });
+});
 
 test('tracking policies allow only supported intervals and bounded retention', () => {
   assert.deepEqual(policyFor({}), { intervalMinutes: 3, retentionHours: 24, maxShiftHours: 12, freshAfterSeconds: 300 });

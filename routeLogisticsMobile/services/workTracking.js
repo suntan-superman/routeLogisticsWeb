@@ -231,7 +231,7 @@ export async function startWorkShift(user, { trackingConsent = false, background
   } catch (failure) { update({ error: failure.message || 'Your shift could not start. Check your connection and permissions.' }); throw failure; }
   finally { starting = false; release(); }
 }
-export async function refreshWorkShift(user) {
+export async function refreshWorkShift(user, { reconfigure = true } = {}) {
   await load();
   const scope = userScope(user);
   if (metadata && !sameScope(metadata, scope)) await stopShiftTracking({ reason: 'Work account changed. Location sharing is off.' });
@@ -257,7 +257,10 @@ export async function refreshWorkShift(user) {
       const background = current.backgroundConsent ? await Location.getBackgroundPermissionsAsync() : null;
       if (!currentRequest(ticket, key, account) || readSequence !== shiftReadSequence || metadata !== current) return workTrackingSnapshot(user);
       if (!foreground.granted || (current.backgroundConsent && !background?.granted)) await stopShiftTracking({ reason: 'Location permission changed. Confirm permissions to resume sharing.' });
-      else { current.intervalMinutes = policyFor(result.policy).intervalMinutes; await persist(); await configureTracking(); }
+      else {
+        const intervalMinutes = policyFor(result.policy).intervalMinutes, changed = current.intervalMinutes !== intervalMinutes;
+        if (changed || reconfigure) { current.intervalMinutes = intervalMinutes; await persist(); await configureTracking(); }
+      }
     }
   }
   return workTrackingSnapshot(user);

@@ -18,8 +18,16 @@ function fixture() {
   };
   const workspace = {
     readWorkspace: async (resource, data) => { assert.equal(resource, 'jobs'); assert.equal(data.id, job.id); assertAccess(); return { job: { ...job } }; },
-    callWorkspace: async (name, data) => { assertAccess(); calls.push({ name, ...data }); if (syncError) throw syncError; return name==='rlServiceForms'?serviceResult:{ status: 'synced' }; },
+    callWorkspace: async (name, data) => { calls.push({ name, ...data }); if(name==='rlApplyJobOperation') return applyJob(data); assertAccess(); if (syncError) throw syncError; return name==='rlServiceForms'?serviceResult:{ status: 'synced' }; },
   };
+  async function applyJob(data) {
+    if (hold) await hold;
+    assertAccess(); if (syncError) throw syncError;
+    if (operations.has(data.operationId)) return operations.get(data.operationId);
+    if (job.updatedAt !== data.expectedVersion) return { status: 'conflict', version: job.updatedAt, server: { status: job.status } };
+    Object.assign(job, data.patch, { updatedAt: '2026-11-13T10:01:00.000Z' });
+    const result = { status: 'synced', version: job.updatedAt }; operations.set(data.operationId, result); return result;
+  }
   function load(relative) {
     const filename = path.resolve(root, relative);
     if (modules.has(filename)) return modules.get(filename).exports;
@@ -40,12 +48,7 @@ function fixture() {
       if (name === './tenancy') return { getClaims: () => claims, requireWorkspace: () => { if (!auth.currentUser || !claims.companyId) throw new Error('Accept your company invitation or refresh your workspace before continuing.'); }, tenantFields: () => ({ userId: auth.currentUser.uid, companyId: claims.companyId }) };
       if (name === 'firebase/functions') return { httpsCallable: (_functions, name) => async data => {
         calls.push({ name, ...data });
-        if (hold) await hold;
-        assertAccess(); if (syncError) throw syncError;
-        if (operations.has(data.operationId)) return { data: operations.get(data.operationId) };
-        if (job.updatedAt !== data.expectedVersion) return { data: { status: 'conflict', version: job.updatedAt, server: { status: job.status } } };
-        Object.assign(job, data.patch, { updatedAt: '2026-11-13T10:01:00.000Z' });
-        const result = { status: 'synced', version: job.updatedAt }; operations.set(data.operationId, result); return { data: result };
+        return { data: await applyJob(data) };
       } };
       if (name.startsWith('.')) { const target = path.resolve(path.dirname(filename), name); return load(target.endsWith('.js') ? target : target + '.js'); }
       return localRequire(name);

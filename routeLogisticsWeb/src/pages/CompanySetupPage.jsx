@@ -1,3 +1,4 @@
+import SelectControl from '../components/SelectControl';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion as Motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
@@ -17,6 +18,8 @@ import { functions } from '../services/firebase';
 import { useConfirm } from '../components/ConfirmProvider';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import ServiceAreasSettings from '../components/ServiceAreasSettings';
+import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
+import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 
 const companyForm = (company = {}) => ({
   name: company.name || '', description: company.description || '', address: company.address || '', city: company.city || '', state: company.state || '', zipCode: company.zipCode || '',
@@ -40,7 +43,7 @@ const CompanySetupForm = () => {
   const [newOwnerId, setNewOwnerId] = useState('');
   const [loadError, setLoadError] = useState('');
   const [savedCompany, setSavedCompany] = useState(() => companySnapshot(companyForm(), []));
-  const alive = useRef(false), loadSequence = useRef(0), saving = useRef(false), dirtyRef = useRef(false);
+  const alive = useRef(false), saving = useRef(false), dirtyRef = useRef(false);
 
   // Form states
   const [companyData, setCompanyData] = useState(companyForm);
@@ -64,37 +67,23 @@ const CompanySetupForm = () => {
   dirtyRef.current = companyDirty;
   useUnsavedChanges(isOwner && (companyDirty || !!newCategory.trim()), { message: 'You have unsaved company settings. Leave without saving them?' });
 
-  const loadCompanyData = useCallback(async () => {
-    if (!companyId) return;
-    const sequence = ++loadSequence.current;
-    setIsLoading(true);
-    setLoadError('');
-    try {
-      const result = await CompanyService.getCompany(companyId);
-      if (!alive.current || sequence !== loadSequence.current) return;
-      if (result.success) {
-        setCompany(result.company);
-        const values = companyForm(result.company), categories = result.company.serviceCategories || [];
-        if (!dirtyRef.current) { setCompanyData(values); setServiceCategories(categories); }
-        setSavedCompany(companySnapshot(values, categories));
-        
-        // Load team members
-        const teamResult = result.company.ownerId === currentUser?.uid ? await CompanyService.getTeamMembers(companyId) : { success: false };
-        if (alive.current && sequence === loadSequence.current && teamResult.success) {
-          setTeamMembers(teamResult.teamMembers);
-        }
-      } else setLoadError(result.error || 'Unable to load company settings. Retry before editing.');
-    } catch (error) {
-      if (alive.current && sequence === loadSequence.current) setLoadError(error.message || 'Unable to load company settings. Retry before editing.');
-    }
-    finally { if (alive.current && sequence === loadSequence.current) setIsLoading(false); }
-  }, [companyId, currentUser?.uid]);
-
+  const companyQuery = useWorkspaceQuery(['company-settings', companyId], () => CompanyService.getCompany(companyId), { enabled: !!companyId, intervalMs: 60_000 });
+  const teamQuery = useWorkspaceQuery(['team', 'settings'], () => CompanyService.getTeamMembers(companyId), { enabled: !!companyId && role === 'owner' });
+  const refetchCompany = companyQuery.refetch, refetchTeam = teamQuery.refetch;
+  const loadCompanyData = useCallback(async () => { await Promise.all([refetchCompany(), ...(role === 'owner' ? [refetchTeam()] : [])]); }, [refetchCompany, refetchTeam, role]);
   useEffect(() => {
     alive.current = true;
-    loadCompanyData();
     return () => { alive.current = false; };
-  }, [loadCompanyData]);
+  }, []);
+  useEffect(() => {
+    if (!companyQuery.data) return;
+    const next = companyQuery.data.company, values = companyForm(next), categories = next.serviceCategories || [];
+    setCompany(next);
+    // A background refresh must not move the baseline beneath an open editor.
+    if (!dirtyRef.current) { setCompanyData(values); setServiceCategories(categories); setSavedCompany(companySnapshot(values, categories)); }
+  }, [companyQuery.data]);
+  useEffect(() => { if (teamQuery.data) setTeamMembers(teamQuery.data.teamMembers); }, [teamQuery.data]);
+  useEffect(() => { setLoadError(companyQuery.error?.message || teamQuery.error?.message || ''); }, [companyQuery.error, teamQuery.error]);
 
   const handleInputChange = (field, value) => {
     setCompanyData(prev => ({
@@ -126,6 +115,7 @@ const CompanySetupForm = () => {
       if (result.success) {
         setCompany(result.company);
         setSavedCompany(companySnapshot(companyForm(result.company || submitted), result.company?.serviceCategories || submitted.serviceCategories));
+        if (companyId) companyQuery.setData({ success: true, company: result.company || { ...company, ...submitted } });
         toast.success(company ? 'Company updated successfully!' : 'Company created successfully!');
       } else {
         toast.error(result.error);
@@ -392,7 +382,7 @@ const CompanySetupForm = () => {
           <div className="space-y-6">
             <div>
               <h3 className="text-lg font-medium text-gray-900 mb-4">Team Members</h3>
-              {isOwner && <div className="mb-5 rounded border p-3"><label className="block text-sm">Transfer ownership to an active administrator<select className="mt-2 block w-full rounded border-gray-300" value={newOwnerId} onChange={(e) => setNewOwnerId(e.target.value)}><option value="">Select administrator</option>{teamMembers.filter((m) => m.status === 'active' && m.role === 'admin').map((m) => <option key={m.id} value={m.id}>{m.email}</option>)}</select></label><button type="button" disabled={!newOwnerId || isLoading} onClick={transferOwnership} className="mt-2 text-sm text-primary-700 underline disabled:opacity-50">Transfer ownership</button></div>}
+              {isOwner && <div className="mb-5 rounded border p-3"><label className="block text-sm">Transfer ownership to an active administrator<SelectControl className="mt-2 block w-full rounded border-gray-300" value={newOwnerId} onChange={(e) => setNewOwnerId(e.target.value)}><option value="">Select administrator</option>{teamMembers.filter((m) => m.status === 'active' && m.role === 'admin').map((m) => <option key={m.id} value={m.id}>{m.email}</option>)}</SelectControl></label><button type="button" disabled={!newOwnerId || isLoading} onClick={transferOwnership} className="mt-2 text-sm text-primary-700 underline disabled:opacity-50">Transfer ownership</button></div>}
               <p className="text-sm text-gray-600 mb-4">
                 Invite team members to join your company. They'll be able to access jobs and customers.
               </p>
@@ -406,7 +396,8 @@ const CompanySetupForm = () => {
                     className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                     placeholder="Enter email address"
                   />
-                  <select
+                  <SelectControl
+                    aria-label="Invitation role"
                     value={newMemberRole}
                     onChange={(e) => setNewMemberRole(e.target.value)}
                     className="rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
@@ -414,7 +405,7 @@ const CompanySetupForm = () => {
                     <option value="technician">Technician</option>
                     <option value="manager">Manager</option>
                     <option value="admin">Admin</option>
-                  </select>
+                  </SelectControl>
                   <button
                     type="button"
                     onClick={handleAddTeamMember}
@@ -439,10 +430,10 @@ const CompanySetupForm = () => {
                       </div>
                       <div className="ml-3">
                         <p className="text-sm font-medium text-gray-900">{member.email}</p>
-                        <select aria-label={`Role for ${member.email}`} value={member.role} disabled={isLoading || !isOwner} onChange={(e) => updateMember(member, { role: e.target.value })} className="mt-1 rounded border-gray-300 text-sm">
+                        <SelectControl aria-label={`Role for ${member.email}`} value={member.role} disabled={isLoading || !isOwner} onChange={(e) => updateMember(member, { role: e.target.value })} className="mt-1 rounded border-gray-300 text-sm">
                           {!['technician', 'manager', 'admin'].includes(member.role) && <option value={member.role}>Select an RL role</option>}
                           <option value="technician">Technician</option><option value="manager">Manager</option><option value="admin">Admin</option>
-                        </select>
+                        </SelectControl>
                       </div>
                     </div>
                     <div className="flex items-center space-x-2">
@@ -594,7 +585,8 @@ const CompanySetupForm = () => {
     }
   };
 
-  if (isLoading && !company) {
+  if (workspaceAccessError(companyQuery.error) || workspaceAccessError(teamQuery.error)) return <p role="alert">{loadError || 'Your company access changed. Refresh access before continuing.'}</p>;
+  if ((isLoading || (companyId && companyQuery.isPending && !companyQuery.error)) && !company) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>

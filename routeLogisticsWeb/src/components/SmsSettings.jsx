@@ -1,3 +1,4 @@
+import SelectControl from './SelectControl';
 import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -33,8 +34,8 @@ function SmsSettingsForm({ company, owner }) {
     {settings && <fieldset disabled={busy} className="space-y-4">
       <label className="flex gap-2"><input type="checkbox" checked={settings.enabled} onChange={event=>patch({enabled:event.target.checked})}/>Prepare company service messaging</label>
       <label className="block">Company time zone<input className="input-field block" value={settings.timeZone} onChange={event=>patch({timeZone:event.target.value})}/></label>
-      <label className="block">Pre-visit reminder<select className="input-field block" value={settings.reminderMinutes} onChange={event=>patch({reminderMinutes:Number(event.target.value)})}>{[[30,'30 minutes'],[60,'1 hour'],[120,'2 hours'],[1440,'1 day']].map(([value,label])=><option key={value} value={value}>{label} before the visit</option>)}</select></label>
-      <label className="block">Optional follow-up<select className="input-field block" value={settings.followUpMinutes} onChange={event=>patch({followUpMinutes:Number(event.target.value)})}>{[[60,'1 hour'],[1440,'1 day'],[2880,'2 days']].map(([value,label])=><option key={value} value={value}>{label} after completion</option>)}</select></label>
+      <label className="block">Pre-visit reminder<SelectControl className="input-field block" value={settings.reminderMinutes} onChange={event=>patch({reminderMinutes:Number(event.target.value)})}>{[[30,'30 minutes'],[60,'1 hour'],[120,'2 hours'],[1440,'1 day']].map(([value,label])=><option key={value} value={value}>{label} before the visit</option>)}</SelectControl></label>
+      <label className="block">Optional follow-up<SelectControl className="input-field block" value={settings.followUpMinutes} onChange={event=>patch({followUpMinutes:Number(event.target.value)})}>{[[60,'1 hour'],[1440,'1 day'],[2880,'2 days']].map(([value,label])=><option key={value} value={value}>{label} after completion</option>)}</SelectControl></label>
       <p className="text-sm text-gray-600">Templates support {'{date}'} and {'{time}'}. The company name and STOP/HELP instructions are added automatically. Keep customer details, account information, financial content and links out of templates.</p>
       {Object.entries(SMS_PURPOSE_LABELS).map(([purpose,label])=><div key={purpose} className="space-y-2"><label className="flex gap-2"><input type="checkbox" checked={settings.purposes.includes(purpose)} onChange={event=>patch({purposes:event.target.checked?[...settings.purposes,purpose]:settings.purposes.filter(value=>value!==purpose)})}/>{label}</label><textarea aria-label={`${label} template`} className="input-field w-full" maxLength={300} value={settings.templates[purpose]} onChange={event=>patch({templates:{...settings.templates,[purpose]:event.target.value}})}/></div>)}
       <button className="btn-primary" disabled={busy || !dirty} onClick={save}>{busy ? 'Saving…' : 'Save SMS settings'}</button>

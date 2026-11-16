@@ -7,16 +7,18 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { cachedRead, savePhotoOffline, queuedWork, subscribeOffline, resolveOffline } from '../services/offline';
 import { beginNativeInteraction } from '../services/nativeInteraction';
 import { useTheme } from '../theme/ThemeProvider';
+import { useJobResourceRefresh } from '../services/useJobResources';
 
 const accessDenied = error => ['functions/permission-denied', 'functions/unauthenticated', 'functions/not-found'].includes(error?.code);
 const photoState = state => ({ pending: 'Queued on this device', syncing: 'Uploading…', failed: 'Upload failed', conflict: 'Upload needs review' }[state] || state);
 
 // JobWorkflow keeps one instance mounted for its selected job. The native picker
 // is presented from that screen, never while swapping React Native modals.
-export default function JobPhotos({ job, onBusyChange, onDraftChange }) {
+export default function JobPhotos({ job, onBusyChange, onDraftChange, active = true }) {
   const { palette } = useTheme();
   const [photos, setPhotos] = useState([]), [busy, setBusy] = useState(false), [draft, setDraft] = useState(null);
   const [actionError, setActionError] = useState(''), [loadError, setLoadError] = useState(''), [message, setMessage] = useState('');
+  const [ready, setReady] = useState(null), refresh = useRef(null);
   const mounted = useRef(false), generation = useRef(0), loading = useRef(0), locked = useRef(false), selected = useRef(null), retrying = useRef(new Set());
   const deniedRead = useRef(null);
   const target = useRef(job), callbacks = useRef({ onBusyChange, onDraftChange });
@@ -24,7 +26,7 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange }) {
   const current = (ticket, id) => mounted.current && generation.current === ticket && target.current?.id === id;
   const activity = value => { locked.current = value; if (mounted.current) { setBusy(value); callbacks.current.onBusyChange?.(value); } };
   const remember = value => { selected.current = value; if (mounted.current) { setDraft(value); callbacks.current.onDraftChange?.(!!value); } };
-  const load = useCallback(async ({ force = false } = {}) => {
+  const load = useCallback(async ({ force = false, query = false } = {}) => {
     const id = target.current?.id, ticket = generation.current, request = ++loading.current;
     if (!id) return;
     if (force) deniedRead.current = null;
@@ -34,19 +36,24 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange }) {
     if (!current(ticket, id) || request !== loading.current) return;
     if (saved.status === 'rejected' && accessDenied(saved.reason)) {
       deniedRead.current = saved.reason;
-      setPhotos([]); setLoadError(saved.reason.message); return;
+      setPhotos([]); setLoadError(saved.reason.message); if (query) throw saved.reason; return;
     }
     const remote = saved.status === 'fulfilled' ? saved.value : [];
     const queued = local.status === 'fulfilled' ? local.value.filter(row => row.kind === 'photo' && row.jobId === id && !['synced', 'discarded'].includes(row.state)).map(row => ({ id: row.id, url: row.localUri, state: row.state, error: row.error, metadata: row.metadata })) : [];
-    setPhotos([...remote, ...queued.filter(row => !remote.some(photo => photo.id === row.id))]);
+    const merged = [...remote, ...queued.filter(row => !remote.some(photo => photo.id === row.id))];
+    setPhotos(merged);
     setLoadError([saved.status === 'rejected' ? `Could not load uploaded photos: ${saved.reason.message}` : '', local.status === 'rejected' ? `Could not read saved photos: ${local.reason.message}` : ''].filter(Boolean).join('\n'));
+    if (query && saved.status === 'rejected') throw saved.reason;
+    if (query && local.status === 'rejected') throw local.reason;
+    return merged;
   }, []);
+  const resource = useJobResourceRefresh('photos', job?.id, load, { enabled: ready === job?.id && active }); refresh.current = resource.refetch;
   useEffect(() => {
     mounted.current = true; generation.current++; locked.current = false; selected.current = null; deniedRead.current = null;
     setPhotos([]); setDraft(null); setBusy(false); setActionError(''); setLoadError(''); setMessage('');
     callbacks.current.onBusyChange?.(false); callbacks.current.onDraftChange?.(false);
-    if (job?.id) load();
-    const unsubscribe = subscribeOffline(load);
+    setReady(job?.id);
+    const unsubscribe = subscribeOffline(() => refresh.current?.());
     return () => {
       mounted.current = false; generation.current++; loading.current++; unsubscribe();
       callbacks.current.onBusyChange?.(false); callbacks.current.onDraftChange?.(false);

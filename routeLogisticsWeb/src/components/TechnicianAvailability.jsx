@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ThemedSelect from './ThemedSelect';
 import { formatClockTime } from '../utils/quarterHours';
 import { checkSchedulingAvailability, getSchedulingRoster, schedulingFingerprint } from '../services/schedulingService';
+import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
 
 const defaultWindow = { start: '08:00', end: '18:00', days: [0, 1, 2, 3, 4, 5, 6], source: 'default' };
 const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -12,9 +13,7 @@ const actionClass = 'rounded-lg border border-primary-200 bg-white px-3 py-2 tex
 
 export default function TechnicianAvailability({ companyId, memberId = '', memberName = '', date, time, estimatedDuration, jobId, servicePlanId, disabled = false, allowedWeekdays, isAlternativeAllowed, schedulingError, onMemberChange, onSelectAlternative }) {
   const scope = companyId || 'solo';
-  const [roster, setRoster] = useState({ scope: null, loading: true, technicians: [], error: '', metadata: null });
-  const [check, setCheck] = useState({ key: '', loading: false, result: null, error: '' });
-  const [rosterRetry, setRosterRetry] = useState(0), [checkRetry, setCheckRetry] = useState(0), [ignoredSaveError, setIgnoredSaveError] = useState(null);
+  const [ignoredSaveError, setIgnoredSaveError] = useState(null);
   const runtime = useRef({ mounted: false, key: '', scope }), labels = useRef({ scope, values: new Map() });
   const fingerprint = schedulingFingerprint({ companyId, memberId, date, time, estimatedDuration, jobId, servicePlanId });
   const weekdays = Array.isArray(allowedWeekdays) ? [...new Set(allowedWeekdays.map(Number).filter(value => Number.isInteger(value) && value >= 0 && value <= 6))].sort() : undefined;
@@ -22,8 +21,19 @@ export default function TechnicianAvailability({ companyId, memberId = '', membe
   runtime.current.key = requestKey;
   runtime.current.scope = scope;
   if (labels.current.scope !== scope) labels.current = { scope, values: new Map() };
-  const rosterCurrent = roster.scope === scope, rosterLoading = !rosterCurrent || roster.loading;
-  const knownMembers = rosterCurrent ? roster.technicians : [];
+  const rosterQuery = useWorkspaceQuery(['schedule-roster', companyId || 'solo'], () => getSchedulingRoster(companyId), { enabled: !disabled });
+  const knownMembers = useMemo(() => {
+    const rows = (Array.isArray(rosterQuery.data?.technicians) ? rosterQuery.data.technicians : []).filter(member => typeof member.id === 'string' && member.id && ['technician', 'owner', 'manager'].includes(member.role) && (!member.status || member.status === 'active')).map(member => {
+      const email = typeof member.email === 'string' ? member.email.trim() : '';
+      const name = typeof member.name === 'string' && member.name.trim() ? member.name.trim() : email || (member.role === 'owner' ? 'Company owner' : 'Technician');
+      const label = email && email.toLocaleLowerCase() !== name.toLocaleLowerCase() ? `${name} · ${email}` : name;
+      return { id: member.id, name, email, label, role: member.role, fieldWorkEnabled: member.fieldWorkEnabled !== false && member.availability?.fieldWorkEnabled !== false };
+    });
+    return [...new Map(rows.map(member => [member.id, member])).values()];
+  }, [rosterQuery.data]);
+  knownMembers.forEach(member => labels.current.values.set(member.id, member.label));
+  const rosterCurrent = !!rosterQuery.data, rosterLoading = rosterQuery.isPending && !rosterCurrent;
+  const roster = { error: rosterQuery.error?.message || '', loading: rosterLoading, metadata: rosterQuery.data };
   const technicians = knownMembers.filter(member => member.fieldWorkEnabled !== false);
   const officeOnly = knownMembers.some(member => member.id === memberId && member.fieldWorkEnabled === false);
   const selected = technicians.find(member => member.id === memberId);
@@ -32,41 +42,17 @@ export default function TechnicianAvailability({ companyId, memberId = '', membe
   if (memberId && !selected) options.push({ value: memberId, label: `${labels.current.values.get(memberId) || memberName || 'Previously assigned staff member'} (${rosterLoading ? 'loading…' : roster.error ? 'not confirmed' : officeOnly ? 'office only' : 'unavailable'})`, disabled: true });
   const slotValid = validDate(date) && validTime(time) && Number.isFinite(Number(estimatedDuration)) && Number(estimatedDuration) > 0;
   const mayCheck = !!memberId && !!selected && slotValid && !rosterLoading && !roster.error && !disabled;
+  const availabilityQuery = useWorkspaceQuery(['availability', requestKey], async () => {
+    const requestedWeekdays = JSON.parse(weekdaysKey);
+    const result = await checkSchedulingAvailability({ companyId, memberId, date, time, estimatedDuration, jobId, servicePlanId, ...(requestedWeekdays ? { allowedWeekdays: requestedWeekdays } : {}) });
+    if (typeof result?.available !== 'boolean') throw Error('Availability could not be confirmed. Try again.');
+    return result;
+  }, { enabled: mayCheck });
 
   useEffect(() => { runtime.current.mounted = true; const state = runtime.current; return () => { state.mounted = false; }; }, []);
-  useEffect(() => {
-    let active = true;
-    setRoster({ scope, loading: true, technicians: [], error: '', metadata: null });
-    getSchedulingRoster(companyId).then(result => {
-      if (!active || !runtime.current.mounted || runtime.current.scope !== scope) return;
-      const rows = (Array.isArray(result?.technicians) ? result.technicians : []).filter(member => typeof member.id === 'string' && member.id && ['technician', 'owner', 'manager'].includes(member.role) && (!member.status || member.status === 'active')).map(member => {
-        const email = typeof member.email === 'string' ? member.email.trim() : '';
-        const name = typeof member.name === 'string' && member.name.trim() ? member.name.trim() : email || (member.role === 'owner' ? 'Company owner' : 'Technician');
-        const label = email && email.toLocaleLowerCase() !== name.toLocaleLowerCase() ? `${name} · ${email}` : name;
-        return { id: member.id, name, email, label, role: member.role, fieldWorkEnabled: member.fieldWorkEnabled !== false && member.availability?.fieldWorkEnabled !== false };
-      });
-      const unique = [...new Map(rows.map(member => [member.id, member])).values()];
-      unique.forEach(member => labels.current.values.set(member.id, member.label));
-      setRoster({ scope, loading: false, technicians: unique, error: '', metadata: result });
-    }).catch(error => { if (active && runtime.current.mounted && runtime.current.scope === scope) setRoster({ scope, loading: false, technicians: [], error: error.message || 'Technicians could not be loaded. Try again.', metadata: null }); });
-    return () => { active = false; };
-  }, [companyId, scope, rosterRetry]);
-
-  useEffect(() => {
-    let active = true;
-    if (!mayCheck) { setCheck({ key: requestKey, loading: false, result: null, error: '' }); return () => { active = false; }; }
-    setCheck({ key: requestKey, loading: true, result: null, error: '' });
-    const requestedWeekdays = JSON.parse(weekdaysKey);
-    checkSchedulingAvailability({ companyId, memberId, date, time, estimatedDuration, jobId, servicePlanId, ...(requestedWeekdays ? { allowedWeekdays: requestedWeekdays } : {}) }).then(result => {
-      if (!active || !runtime.current.mounted || runtime.current.key !== requestKey) return;
-      if (typeof result?.available !== 'boolean') throw Error('Availability could not be confirmed. Try again.');
-      setCheck({ key: requestKey, loading: false, result, error: '' });
-    }).catch(error => { if (active && runtime.current.mounted && runtime.current.key === requestKey) setCheck({ key: requestKey, loading: false, result: null, error: error.message || 'Availability could not be checked. Try again.' }); });
-    return () => { active = false; };
-  }, [requestKey, mayCheck, checkRetry, companyId, memberId, date, time, estimatedDuration, jobId, servicePlanId, weekdaysKey]);
 
   const matchingSaveError = schedulingError && schedulingError !== ignoredSaveError && schedulingError.fingerprint === fingerprint ? schedulingError.result || schedulingError.scheduling || schedulingError.details?.scheduling : null;
-  const currentCheck = check.key === requestKey ? check : null;
+  const currentCheck = mayCheck ? { loading: availabilityQuery.isPending, result: availabilityQuery.data, error: availabilityQuery.error?.message || '' } : null;
   const outcome = matchingSaveError || currentCheck?.result;
   const metadata = { ...(rosterCurrent ? roster.metadata : {}), ...outcome };
   const window = metadata?.workWindow || defaultWindow;
@@ -78,13 +64,13 @@ export default function TechnicianAvailability({ companyId, memberId = '', membe
     try { return typeof isAlternativeAllowed !== 'function' || isAlternativeAllowed({ date: slot.date, time: slot.time }) === true; } catch { return false; }
   };
   const alternatives = [...new Map((Array.isArray(outcome?.alternatives) ? outcome.alternatives : []).filter(alternativeAllowed).map(slot => [`${slot.date}:${slot.time}`, { date: slot.date, time: slot.time }])).values()];
-  const retry = () => { if (!disabled) { setIgnoredSaveError(schedulingError); setCheckRetry(value => value + 1); } };
+  const retry = () => { if (!disabled && mayCheck) { setIgnoredSaveError(schedulingError); availabilityQuery.refetch(); } };
   return <section aria-label="Technician availability" className="space-y-3 rounded-xl border border-gray-200 bg-white p-4">
     <div><h3 className="font-semibold text-gray-900">Technician and schedule</h3><p className="mt-1 text-sm text-gray-600">Checks scheduled work; travel time is not included.</p></div>
     <ThemedSelect label="Assigned technician" value={memberId || ''} options={options} disabled={disabled || rosterLoading} onChange={id => { if (!disabled && (id === '' || technicians.some(member => member.id === id))) onMemberChange?.(id); }} />
-    <button type="button" className="text-sm font-medium text-primary-700 underline disabled:opacity-50" disabled={disabled || rosterLoading} onClick={() => { if (!disabled && !rosterLoading) setRosterRetry(value => value + 1); }}>Refresh technicians</button>
+    <button type="button" className="text-sm font-medium text-primary-700 underline disabled:opacity-50" disabled={disabled || rosterLoading} onClick={() => { if (!disabled && !rosterLoading) rosterQuery.refetch(); }}>Refresh technicians</button>
     {rosterLoading && <p role="status" className="text-sm text-gray-600">Loading technicians…</p>}
-    {rosterCurrent && roster.error && <div role="alert" className="space-y-2 rounded-lg bg-red-50 p-3 text-sm text-red-800"><p>{roster.error}</p><button type="button" className={actionClass} disabled={disabled} onClick={() => { if (!disabled) setRosterRetry(value => value + 1); }}>Retry technicians</button></div>}
+    {roster.error && <div role="alert" className="space-y-2 rounded-lg bg-red-50 p-3 text-sm text-red-800"><p>{roster.error}</p><button type="button" className={actionClass} disabled={disabled} onClick={() => { if (!disabled) rosterQuery.refetch(); }}>Retry technicians</button></div>}
     {!rosterLoading && !roster.error && !technicians.length && <p role="status" className="text-sm text-gray-600">No active technicians are available for assignment. Leave this appointment unassigned or refresh the team.</p>}
     {legacy && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{officeOnly ? 'This staff member is now office-only. Existing appointments remain assigned; choose field-enabled staff for a new or rescheduled appointment.' : 'This saved assignment is no longer available. Choose an active technician or Unassigned.'}</p>}
     {!memberId && !rosterLoading && <p role="status" className="text-sm text-gray-600">Unassigned appointments can be assigned later from dispatch.</p>}

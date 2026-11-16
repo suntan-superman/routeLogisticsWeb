@@ -1,3 +1,4 @@
+import SelectControl from './SelectControl';
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import JobManagementService from '../services/jobManagementService';
@@ -69,6 +70,7 @@ const formSnapshot = form => JSON.stringify(Object.fromEntries(Object.entries(fo
 const propertyFor = (source, customer) => ({ address: (typeof source?.serviceProperty === 'string' ? source.serviceProperty : source?.serviceProperty?.address || source?.serviceProperty?.formattedAddress) || (typeof source?.address === 'string' ? source.address : customerAddress({ address: source?.address })) || customerAddress(customer), serviceCategory: source?.serviceCategory || '', exceptionId: source?.serviceAreaExceptionId || source?.serviceAreaEligibility?.exceptionId || null, confirmed: false });
 const propertySnapshot = property => JSON.stringify([property.address.trim(), property.serviceCategory.trim(), property.exceptionId || null]);
 const customerVersion = customer => typeof customer?.updatedAt === 'string' ? customer.updatedAt : legacyDate(customer?.updatedAt)?.toISOString() || null;
+const savedAddressWarning = response => response?.addressWarning || (response?.job?.serviceAreaEligibility?.status === 'address-unverified' ? response.job.serviceAreaEligibility.warning || 'The job was saved with the entered address. Google could not verify it; map placement and coverage remain unconfirmed.' : '');
 
 const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
   const { company, can } = useAuth();
@@ -198,7 +200,7 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
     setSchedulingError(null);
     if (saveCustomerAddress && (!addressEditing || addressEditCustomer.current?.id !== customer.id || !canSaveCustomerAddress)) { savingRef.current = false; setSaving(false); return toast.error('Review the customer address before saving it permanently.'); }
     if (saveCustomerAddress) { details.serviceProperty = { address: currentAddress.trim() }; if (company?.id) { details.serviceCategory = property.serviceCategory.trim(); details.serviceAreaExceptionId = property.exceptionId || null; } }
-    let saved, savedCustomer, customerAddressUpdated = false;
+    let saved, savedCustomer, customerAddressUpdated = false, addressWarning = '';
     try { if (isEdit) {
       const by = auth.currentUser?.displayName || auth.currentUser?.email || 'Unknown';
       const edit = buildJobEdit(job, details, { by, reason });
@@ -212,15 +214,18 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
       setSavedForm(formSnapshot(form));setSavedProperty(propertySnapshot(property));setReason('');setSaveCustomerAddress(false);
       customerAddressUpdated = res.customerAddressUpdated === true;
       savedCustomer = res.customer;
+      addressWarning = res.addressWarning || (locationChanged || saveCustomerAddress ? savedAddressWarning(res) : '');
       toast.success(customerAddressUpdated ? 'Job and customer address updated.' : 'Job updated – flagged as modified from original');
-      saved={...job,...(edit || details)};
+      saved=res.job || {...job,...(edit || details)};
     } else {
       const result = await JobManagementService.createJob(details, options);
       if (!alive.current)return;
       if (!result.success) throw Object.assign(Error(result.error || 'Could not create job'), { addressValidation: result.addressValidation, scheduling: result.scheduling });
+      addressWarning = savedAddressWarning(result);
       setSavedForm(formSnapshot(form));setSavedProperty(propertySnapshot(property));setSavedRepeat(repeatSnapshot);setReason('');setSaveCustomerAddress(false);customerAddressUpdated = result.customerAddressUpdated === true;savedCustomer=result.customer;toast.success(repeatSelection ? customerAddressUpdated ? 'Recurring appointment and customer address saved.' : 'Recurring appointment scheduled.' : customerAddressUpdated ? 'Job scheduled and customer address updated.' : 'Job scheduled');saved=result.job;
     } } catch(error) { if(alive.current) { setAddressValidation(error.addressValidation || null); if (error.scheduling) setSchedulingError({ fingerprint: requestedSchedule, result: error.scheduling }); toast.error(error.message || 'Unable to save this job. Your changes are available to retry.'); }return; }
     finally { savingRef.current=false;if(alive.current)setSaving(false); }
+    if (addressWarning) toast(addressWarning, { icon: '⚠️', duration: 7000 });
     try { await onCreated(saved, { customerAddressUpdated, ...(savedCustomer ? { customer: customerView(savedCustomer.id, savedCustomer) } : {}) }); } catch { if(alive.current)toast.error('The job was saved, but the job list could not refresh. Refresh the page to see it.'); }
   };
 
@@ -310,11 +315,11 @@ const JobFormModal = ({ customers, defaults, job, onClose, onCreated }) => {
             </div>
             <div>
               <label className={label}>Priority</label>
-              <select value={form.priority} onChange={(e) => set('priority', e.target.value)} className={input}>
+              <SelectControl aria-label="Priority" value={form.priority} onChange={(e) => set('priority', e.target.value)} className={input}>
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
-              </select>
+              </SelectControl>
             </div>
           </div>
 

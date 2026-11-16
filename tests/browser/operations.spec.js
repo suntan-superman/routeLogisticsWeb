@@ -1,3 +1,4 @@
+import { selectValue, selectOptions, expectSelectValue } from './support/select.js';
 import { readFile } from 'node:fs/promises';
 import { test, expect, signIn } from './support/fixtures.js';
 
@@ -36,6 +37,51 @@ async function chooseTechnician(scope, name = 'Synthetic technician') {
   await expect(option).toHaveCount(1);
   await option.click();
 }
+
+test('PW-UI-01 @smoke dropdowns use green searchable options and preserve keyboard, empty and nested-label selection',async({page,scenario})=>{
+  await signIn(page,scenario.accounts.owner);await page.goto('/jobs');
+  const status=page.getByRole('combobox',{name:'Job status filter',exact:true});await expect(status).toBeVisible();
+  await selectValue(status,'completed');await expectSelectValue(status,'completed');
+  const options=await selectOptions(status),selected=options.filter({has:page.locator('span').filter({hasText:/^Completed$/})});
+  await expect(selected).toHaveAttribute('aria-selected','true');await selected.hover();
+  await expect.poll(()=>selected.evaluate(element=>{const[r,g,b]=getComputedStyle(element).backgroundColor.match(/[\d.]+/g).map(Number);return g>r&&g>b;})).toBe(true);
+  await status.press('ArrowDown');await status.press('Escape');await expectSelectValue(status,'completed');await expect(status).toHaveValue('Completed');
+  await status.click();await status.fill('no-such-status-option');await expect(page.getByRole('listbox').getByRole('option')).toHaveCount(0);await status.press('Escape');await expectSelectValue(status,'completed');
+  await expect(page.locator('select')).toHaveCount(0);
+  await page.getByRole('button',{name:'New Job',exact:true}).click();const form=page.locator('form').filter({has:page.getByRole('heading',{name:'Schedule New Job',exact:true})});
+  const customer=form.getByRole('combobox',{name:'Customer',exact:true});await expect(customer).toHaveAttribute('aria-required','true');
+  expect(await customer.evaluate(element=>element.validity.valid)).toBe(false);
+  const priority=form.getByRole('combobox',{name:'Priority',exact:true});await selectValue(priority,'high');await expectSelectValue(priority,'high');await expect(priority).toHaveValue('High');
+  const repeat=form.getByRole('combobox',{name:'Appointment type',exact:true});await selectValue(repeat,'recurring');await expectSelectValue(repeat,'recurring');
+  await expect(form.getByRole('listbox')).toHaveCount(0);await expect(form.getByRole('combobox',{name:'Repeat frequency',exact:true})).toBeVisible();
+});
+
+test('PW-SYNC-01 @smoke an authorized field completion refreshes Jobs counts without reload or losing a scheduling draft',async({page,browser,scenario})=>{
+  test.setTimeout(90000);
+  await signIn(page,scenario.accounts.owner);await page.goto('/jobs');
+  const statistic=name=>page.locator('dl').filter({has:page.locator('dt').filter({hasText:new RegExp(`^${name}$`)})}).locator('dd');
+  await expect(statistic('Scheduled')).toHaveText('1');await expect(statistic('Completed')).toHaveText('1');
+  await page.getByRole('button',{name:'New Job',exact:true}).click();
+  const form=page.locator('form').filter({has:page.getByRole('heading',{name:'Schedule New Job',exact:true})});
+  const draft=form.getByPlaceholder('Gate code, pets, areas of concern…',{exact:true});await draft.fill('Keep this unsaved dispatch instruction');
+  let navigations=0;page.on('framenavigated',frame=>{if(frame===page.mainFrame())navigations++;});
+  // A second browser context is a separate signed-in field session. Its actual
+  // UI submits the ordinary authorized job-operation callable, without mocks.
+  const fieldContext=await browser.newContext({baseURL:'http://127.0.0.1:4173',serviceWorkers:'block'});
+  try{
+    const field=await fieldContext.newPage();await signIn(field,scenario.accounts.technician);await field.goto('/my-work');
+    await field.getByLabel('Service date',{exact:true}).fill(scenario.jobDate);
+    await field.getByRole('button').filter({has:field.getByText(scenario.jobTitle,{exact:true})}).click();
+    await field.getByRole('textbox',{name:'Work notes',exact:true}).fill('Synthetic field completion for automatic refresh acceptance');
+    await field.getByRole('button',{name:'Complete job',exact:true}).click();
+    await expect.poll(async()=>(await scenario.read('jobs',scenario.ids.jobId)).status).toBe('completed');
+    // Returning focus must immediately refresh authorized reads; the periodic
+    // observer is the fallback. Neither path remounts the open scheduling form.
+    await page.bringToFront();await expect(statistic('Completed')).toHaveText('2',{timeout:45000});await expect(statistic('Scheduled')).toHaveText('0');
+    await expect(draft).toHaveValue('Keep this unsaved dispatch instruction');await expect(form).toBeVisible();expect(navigations).toBe(0);
+    expect(await scenario.read('jobs',scenario.ids.foreignJobId)).toMatchObject({companyId:scenario.ids.otherCompanyId,status:'scheduled'});
+  }finally{await fieldContext.close();}
+});
 
 async function openSeedEstimate(page, scenario) {
   await page.goto('/estimates');
@@ -104,7 +150,7 @@ test('PW-OPS-02 @smoke company owner sees operational data without inheriting pl
   await expect(page.getByRole('button', { name: 'Add Customer', exact: true })).toBeEnabled();
   await page.goto('/platform-admin');
   await expect(page.getByRole('heading', { name: 'Platform access required', exact: true })).toBeVisible();
-  await expect(page.getByRole('alert')).toContainText('This account does not have platform administration access.');
+  await expect(page.getByRole('alert')).toContainText('Explicit Route Logistics platform administrator access is required.');
   await expect(page.getByRole('button', { name: /Create FAQ|New FAQ|Publish/i })).toHaveCount(0);
 });
 
@@ -252,7 +298,7 @@ test('PW-OPS-06 manager schedules an eligible property and the job appears on di
   await page.getByLabel('Service date', { exact: true }).fill(date);
   const card = page.locator('article').filter({ has: page.getByRole('button', { name: `${scenario.customerName} · ${service}`, exact: true }) });
   await expect(card).toBeVisible();
-  await expect(card.getByLabel(`Assign ${scenario.customerName}`, { exact: true })).toHaveValue('');
+  await expectSelectValue(card.getByLabel(`Assign ${scenario.customerName}`, { exact: true }), '');
   expect((await scenario.read('jobs', jobs[0].id)).date).toBe(date);
 });
 });
@@ -266,15 +312,15 @@ test('PW-OPS-07 dispatch assignment persists and details reopen without changing
   const title = `${scenario.customerName} · ${scenario.jobTitle}`;
   const card = page.locator('article').filter({ has: page.getByRole('button', { name: title, exact: true }) });
   const assignment = card.getByLabel(`Assign ${scenario.customerName}`, { exact: true });
-  await expect(assignment).toHaveValue(scenario.accounts.technician.membershipId);
-  await assignment.selectOption('');
+  await expectSelectValue(assignment, scenario.accounts.technician.membershipId);
+  await selectValue(assignment, '');
   await expect.poll(async () => (await scenario.read('jobs', scenario.ids.jobId)).assignedTo).toBeFalsy();
   await expect(assignment).toBeEnabled();
-  await assignment.selectOption(scenario.accounts.technician.membershipId);
+  await selectValue(assignment, scenario.accounts.technician.membershipId);
   await expect.poll(async () => (await scenario.read('jobs', scenario.ids.jobId)).assignedTo).toBe(scenario.accounts.technician.membershipId);
   await page.reload();
   await page.getByLabel('Service date', { exact: true }).fill(scenario.jobDate);
-  await expect(assignment).toHaveValue(scenario.accounts.technician.membershipId);
+  await expectSelectValue(assignment, scenario.accounts.technician.membershipId);
   await card.getByRole('button', { name: title, exact: true }).click();
   await expect(page.getByRole('dialog', { name: title, exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Close details', exact: true }).click();
@@ -312,7 +358,7 @@ test('PW-OPS-09 owner creates an estimate with server-calculated tax and persist
   await page.goto('/estimates');
   await page.getByRole('button', { name: 'New photo estimate', exact: true }).click();
   const title = `Browser estimate ${scenario.ids.companyId}`;
-  await page.getByRole('combobox', { name: 'Company customer', exact: true }).selectOption(scenario.ids.customerId);
+  await selectValue(page.getByRole('combobox', { name: 'Company customer', exact: true }), scenario.ids.customerId);
   await page.getByLabel('Estimate title', { exact: true }).fill(title);
   await page.getByLabel('Service type', { exact: true }).fill('Synthetic browser maintenance');
   await page.getByLabel('Scope of work', { exact: true }).fill('Synthetic emulator-only scope. No actual service or accounting export.');
@@ -561,10 +607,10 @@ test('PW-OPS-16 weekly scheduling creates the first assigned visit and plan toge
   await chooseTime(form, 'Start time', '09:00');
   await checkProperty(form, insideAddress(scenario), 'Property is inside coverage');
   await chooseTechnician(form);
-  await form.getByRole('combobox', { name: 'Appointment type', exact: true }).selectOption('recurring');
-  await form.getByRole('combobox', { name: 'Repeat frequency', exact: true }).selectOption('weekly');
+  await selectValue(form.getByRole('combobox', { name: 'Appointment type', exact: true }), 'recurring');
+  await selectValue(form.getByRole('combobox', { name: 'Repeat frequency', exact: true }), 'weekly');
   await expect(form.getByText('Every Thursday', { exact: true })).toBeVisible();
-  await form.getByRole('combobox', { name: 'Recurring technician fallback', exact: true }).selectOption('auto');
+  await selectValue(form.getByRole('combobox', { name: 'Recurring technician fallback', exact: true }), 'auto');
   await expect(form.getByText('Available for this appointment', { exact: true })).toBeVisible();
   await form.getByRole('button', { name: 'Schedule Job', exact: true }).click();
   await expect(page.getByText('Recurring appointment scheduled.', { exact: true })).toBeVisible();
@@ -740,7 +786,7 @@ test.describe('Temporary staff availability', () => {
     const row = technicianRow(page);
     await expect(row).toBeVisible();
     await row.getByRole('button', { name: 'Change availability', exact: true }).click();
-    await row.getByRole('combobox', { name: 'Temporary staff status', exact: true }).selectOption(reason);
+    await selectValue(row.getByRole('combobox', { name: 'Temporary staff status', exact: true }), reason);
     await row.getByLabel('Availability from date', { exact: true }).fill(date);
     await chooseTime(row, 'From time', start);
     await row.getByLabel('Availability until date', { exact: true }).fill(date);

@@ -5,7 +5,7 @@ const settle=async()=>{for(let i=0;i<4;i++)await new Promise(done=>setImmediate(
 const shift=(id,status='on-duty')=>({id,status,trackingConsent:true,startedAt:new Date(Date.now()-60000).toISOString(),expiresAt:new Date(Date.now()+3600000).toISOString()});
 function harness(){
  const store=new Map(),calls=[],intervals=new Map(),timeouts=new Map();let timer=0;
- const env={store,calls,intervals,timeouts,permissions:0,native:false,user:null,claims:null,auth:{app:{options:{projectId:'synthetic-scope-tests'}},authStateReady:async()=>{},currentUser:null}};
+ const env={store,calls,intervals,timeouts,permissions:0,native:false,nativeStarts:0,user:null,claims:null,auth:{app:{options:{projectId:'synthetic-scope-tests'}},authStateReady:async()=>{},currentUser:null}};
  env.setUser=(id,companyId='acme',role='technician',membershipId='member',keepAccount=false)=>{
   env.user={id,companyId,role,membershipId};env.claims={companyId,role,membershipId};
   if(!keepAccount||!env.auth.currentUser)env.auth.currentUser={uid:id,emailVerified:true,getIdTokenResult:async()=>({claims:env.claims})};
@@ -18,7 +18,7 @@ function harness(){
  const load=name=>{
   if(name==='@react-native-async-storage/async-storage')return{getItem:async key=>store.get(key)||null,setItem:async(key,value)=>store.set(key,value),removeItem:async key=>store.delete(key)};
   if(name==='react-native')return{AppState:{currentState:'active',addEventListener:()=>({remove(){}})}};
-  if(name==='expo-location')return{Accuracy:{Balanced:'balanced'},requestForegroundPermissionsAsync:async()=>{env.permissions++;return{granted:true};},requestBackgroundPermissionsAsync:async()=>{env.permissions++;return{granted:true};},getForegroundPermissionsAsync:async()=>({granted:true}),getBackgroundPermissionsAsync:async()=>({granted:true}),getCurrentPositionAsync:async()=>({timestamp:Date.now(),coords:{latitude:35,longitude:-119,accuracy:10}}),hasStartedLocationUpdatesAsync:async()=>env.native,stopLocationUpdatesAsync:async()=>{env.native=false;},startLocationUpdatesAsync:async()=>{env.native=true;}};
+  if(name==='expo-location')return{Accuracy:{Balanced:'balanced'},requestForegroundPermissionsAsync:async()=>{env.permissions++;return{granted:true};},requestBackgroundPermissionsAsync:async()=>{env.permissions++;return{granted:true};},getForegroundPermissionsAsync:async()=>({granted:true}),getBackgroundPermissionsAsync:async()=>({granted:true}),getCurrentPositionAsync:async()=>({timestamp:Date.now(),coords:{latitude:35,longitude:-119,accuracy:10}}),hasStartedLocationUpdatesAsync:async()=>env.native,stopLocationUpdatesAsync:async()=>{env.native=false;},startLocationUpdatesAsync:async()=>{env.native=true;env.nativeStarts++;}};
   if(name==='firebase/auth')return{onIdTokenChanged:()=>()=>{}};
   if(name==='../constants/firebase')return{auth:env.auth};
   if(name==='./workspaceApi')return{callWorkspace:async(name,data)=>{calls.push({name,...data,uid:env.auth.currentUser?.uid,companyId:env.claims?.companyId});return env.rpc(name,data);}};
@@ -77,6 +77,18 @@ test('same-user company change ignores an old End reply and does not send an add
  old.resolve({shift:shift('initial-shift','off-duty'),policy});await pending;
  assert.equal(env.service.workTrackingSnapshot(b).shift.id,'new-company-shift');assert.equal(env.calls.filter(call=>call.action==='end').length,1);assert.equal(env.permissions,0);
 });
+test('metadata-only duty refresh does not start GPS or repeatedly restart consented native tracking',async()=>{
+ const env=harness();let currentPolicy={...policy},status='on-duty';
+ env.rpc=async(name,data)=>name==='rlWorkShift'?{shift:shift('same-shift',status),policy:currentPolicy}:data.action==='start'?{sessionId:'same-session',policy:currentPolicy}:{accepted:true,policy:currentPolicy};
+ await env.service.refreshWorkShift(env.user,{reconfigure:false});assert.equal(env.nativeStarts,0);assert.equal(env.permissions,0);
+ await env.service.startWorkShift(env.user,{trackingConsent:true,backgroundConsent:true});await settle();
+ const starts=env.nativeStarts,permissions=env.permissions;
+ await env.service.refreshWorkShift(env.user,{reconfigure:false});await env.service.refreshWorkShift(env.user,{reconfigure:false});
+ assert.equal(env.nativeStarts,starts);assert.equal(env.permissions,permissions);
+ currentPolicy={...policy,intervalMinutes:5};await env.service.refreshWorkShift(env.user,{reconfigure:false});assert.equal(env.nativeStarts,starts+1);
+ status='off-duty';await env.service.refreshWorkShift(env.user,{reconfigure:false});assert.equal(env.native,false);assert.equal(env.service.workTrackingSnapshot(env.user).tracking,false);
+});
+
 test('offline End still clears local consent and exposes its unconfirmed server failure',async()=>{
  const env=harness();await env.service.startWorkShift(env.user,{trackingConsent:true,backgroundConsent:true});await settle();env.store.set('job-queue','preserve');
  env.rpc=async()=>{throw new Error('Network offline');};await assert.rejects(env.service.stopShiftTracking({endShift:true}),/Network offline/);

@@ -1,3 +1,4 @@
+import SelectControl from '../components/SelectControl';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { readWorkspace, callWorkspace } from '../services/workspaceApi';
@@ -12,19 +13,27 @@ import StaffAvailabilityEditor from '../components/StaffAvailabilityEditor';
 import { LOCATION_LABELS, locationState, nearestOnDuty } from '../utils/workLocations';
 import { addressKey, createDispatchAddressResolver, mapPoint } from '../utils/dispatchMap';
 import { useConfirmUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
+import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 
 const today = () => new Date().toLocaleDateString('en-CA');
 const locationLabels = LOCATION_LABELS;
+const EMPTY_ROWS = [];
 export default function DispatchPage() {
   const { company, can, role } = useAuth();
   const confirmDiscard = useConfirmUnsavedChanges();
-  const [date, setDate] = useState(today), [jobs, setJobs] = useState([]), [team, setTeam] = useState([]), [locations, setLocations] = useState([]);
-  const [roster, setRoster] = useState([]), [policy, setPolicy] = useState({ intervalMinutes: 3, freshAfterSeconds: 300 }), [nearbyJob, setNearbyJob] = useState(null);
+  const [date, setDate] = useState(today), [nearbyJob, setNearbyJob] = useState(null);
+  const jobsQuery = useWorkspaceQuery(['jobs', date, 500], () => readWorkspace('jobs', { date, limit: 500 }));
+  const teamQuery = useWorkspaceQuery(['team'], () => callWorkspace('rlGetRoutingTeam'));
+  const locationsQuery = useWorkspaceQuery(['team-locations'], () => callWorkspace('rlGetTeamLocations'));
+  const jobs = jobsQuery.data?.jobs || EMPTY_ROWS, team = teamQuery.data?.team || EMPTY_ROWS, locations = locationsQuery.data?.locations || EMPTY_ROWS;
+  const roster = locationsQuery.data?.roster || [], policy = locationsQuery.data?.policy || { intervalMinutes: 3, freshAfterSeconds: 300 };
+  const more = jobsQuery.data?.hasMore === true;
   const [member, setMember] = useState('all'), [status, setStatus] = useState('all'), [area, setArea] = useState('');
-  const [error, setError] = useState(''), [busy, setBusy] = useState(false), [more, setMore] = useState(false), [selected, setSelected] = useState(null), [routeMember, setRouteMember] = useState('');
+  const [error, setError] = useState(''), [busy, setBusy] = useState(false), [selected, setSelected] = useState(null), [routeMember, setRouteMember] = useState('');
   const [mapReady, setMapReady] = useState(false), [resolved, setResolved] = useState({}), [now, setNow] = useState(() => new Date());
   const [mapBusy, setMapBusy] = useState(false), [mapError, setMapError] = useState(''), [markerCount, setMarkerCount] = useState(0), [lookupRequest, setLookupRequest] = useState({ id: 0, retry: false });
-  const element = useRef(null), map = useRef(null), markers = useRef([]), generation = useRef(0), resolver = useRef(null), mapJobs = useRef([]), mapAnchor = useRef(null), fitKey = useRef(''), opener = useRef(null), heading = useRef(null), mapOpening = useRef(false), mapLifetime = useRef(0);
+  const element = useRef(null), map = useRef(null), markers = useRef([]), resolver = useRef(null), mapJobs = useRef([]), mapAnchor = useRef(null), fitKey = useRef(''), opener = useRef(null), heading = useRef(null), mapOpening = useRef(false), mapLifetime = useRef(0);
   const localAction = useRef(0), viewState = useRef(null); viewState.current = { selected, routeMember, date, companyId: company?.id };
   if (!resolver.current) resolver.current = createDispatchAddressResolver(loadMaps);
   const transition = useCallback(async (change, resetsForm, scope) => {
@@ -40,18 +49,16 @@ export default function DispatchPage() {
   const changeRoute = value => { if (value !== routeMember) return transition(() => setRouteMember(value), !!routeMember, 'route-planner'); };
   const changeDate = value => { if (value !== date) return transition(() => setDate(value), !!(selected || routeMember)); };
   useEffect(() => { const lifetimeCounter = mapLifetime, actionCounter = localAction, lifetime = ++lifetimeCounter.current; return () => { actionCounter.current++; if (lifetimeCounter.current === lifetime) lifetimeCounter.current++; markers.current.forEach(marker => { marker.map = null; }); }; }, []);
-  const load = useCallback(async () => {
-    const ticket = ++generation.current; setBusy(true); setError('');
-    try {
-      const [work, staff, positions] = await Promise.all([readWorkspace('jobs', { date, limit: 500 }), callWorkspace('rlGetRoutingTeam'), callWorkspace('rlGetTeamLocations')]);
-      if (ticket !== generation.current) return;
-      setJobs(work.jobs); setMore(work.hasMore); setTeam(staff.team); setLocations(positions.locations); setRoster(positions.roster || []); setPolicy(positions.policy || { intervalMinutes: 3, freshAfterSeconds: 300 }); setNow(new Date());
-    } catch (e) { if (ticket === generation.current) setError(e.message); }
-    finally { if (ticket === generation.current) setBusy(false); }
-  }, [date]);
-  useEffect(() => { const lifecycle = generation; setJobs([]); setSelected(null); load(); return () => { lifecycle.current++; }; }, [load]);
+  const load = async () => {
+    setError('');
+    await Promise.all([jobsQuery.refetch(), teamQuery.refetch(), locationsQuery.refetch()]);
+    setNow(new Date());
+  };
+  useEffect(() => { setSelected(null); setNearbyJob(null); }, [date, jobsQuery.scopeId]);
+  useEffect(() => {
+    if ([jobsQuery.error, teamQuery.error, locationsQuery.error].some(workspaceAccessError)) { setSelected(null); setNearbyJob(null); }
+  }, [jobsQuery.error, teamQuery.error, locationsQuery.error]);
   useEffect(() => { const timer = setInterval(() => setNow(new Date()), 60000); return () => clearInterval(timer); }, []);
-  useEffect(() => { const timer = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 30000); return () => clearInterval(timer); }, [load]);
   const filtered = useMemo(() => jobs.filter(job => (member === 'all' || (member === 'unassigned' ? !job.assignedTo : job.assignedTo === member)) && (status === 'all' || job.status === status) && (!area || `${job.serviceArea || ''} ${job.city || ''} ${job.zipCode || ''}`.toLowerCase().includes(area.toLowerCase()))), [jobs, member, status, area]);
   const assignableTeam = useMemo(() => team.filter(row => ['owner', 'manager', 'technician'].includes(row.role) && row.fieldWorkEnabled !== false && row.availability?.fieldWorkEnabled !== false), [team]);
   const position = job => jobPosition(job) || resolved[addressKey(jobAddress(job))];
@@ -115,7 +122,7 @@ export default function DispatchPage() {
   const assign = async (job, memberId) => {
     if (!can('jobs.assign')) return;
     setBusy(true); setError('');
-    try { await callWorkspace('rlManageJob', { action: 'assign', id: job.id, memberId: memberId || null, expectedVersion: job.updatedAt || null }); await load(); }
+    try { await callWorkspace('rlManageJob', { action: 'assign', id: job.id, memberId: memberId || null, expectedVersion: job.updatedAt || null }); await jobsQuery.refetch(); }
     catch (e) { setError(e.message); } finally { setBusy(false); }
   };
   const currentSelection = selected && (jobs.find(job => job.id === selected.id) || selected);
@@ -124,12 +131,12 @@ export default function DispatchPage() {
     <div><h1 ref={heading} tabIndex={-1} className="text-2xl font-bold">Dispatch Board</h1><p className="text-gray-600">{company?.name} · Daily field operations</p></div>
     <div className="flex flex-wrap items-end gap-3 rounded border bg-white p-4">
       <label>Service date<input className="block rounded border-gray-300" type="date" value={date} onChange={e => changeDate(e.target.value)} /></label>
-      <label>Technician<select className="block rounded border-gray-300" value={member} onChange={e => setMember(e.target.value)}><option value="all">All technicians</option><option value="unassigned">Unassigned</option>{team.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
-      <label>Status<select className="block rounded border-gray-300" value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option>{Object.keys(STATUS_COLORS).map(value => <option key={value}>{value}</option>)}</select></label>
+      <label>Technician<SelectControl className="block rounded border-gray-300" value={member} onChange={e => setMember(e.target.value)}><option value="all">All technicians</option><option value="unassigned">Unassigned</option>{team.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</SelectControl></label>
+      <label>Status<SelectControl className="block rounded border-gray-300" value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option>{Object.keys(STATUS_COLORS).map(value => <option key={value}>{value}</option>)}</SelectControl></label>
       <label>Service area<input className="block rounded border-gray-300" value={area} onChange={e => setArea(e.target.value)} placeholder="Area, city or ZIP" /></label>
       <button className="rounded border px-4 py-2" onClick={load} disabled={busy}>Refresh</button>
     </div>
-    {error && <p role="alert" className="text-red-700">{error}</p>}
+    {(error || jobsQuery.error || teamQuery.error || locationsQuery.error) && <p role="alert" className="text-red-700">{error || (jobsQuery.error || teamQuery.error || locationsQuery.error).message}</p>}
     <div className="rounded border bg-white p-4 space-y-3">
       <div className="flex flex-wrap items-center gap-3">{!mapReady && <button className="rounded bg-primary-600 px-4 py-2 text-white" disabled={mapBusy} onClick={openMap}>{mapBusy ? 'Opening dispatch map…' : 'Show dispatch map'}</button>}{mapReady && lookup.pending > 0 && <button className="rounded border px-4 py-2" disabled={mapBusy} onClick={() => setLookupRequest(previous => ({ id: previous.id + 1, retry: false }))}>Locate next 25 service addresses</button>}{mapReady && lookup.failed > 0 && <button className="rounded border px-4 py-2" disabled={mapBusy} onClick={() => setLookupRequest(previous => ({ id: previous.id + 1, retry: true }))}>Retry unresolved addresses</button>}<span className="whitespace-nowrap">{filtered.length} jobs · {jobs.filter(job => !job.assignedTo).length} unassigned</span></div>
       {mapError && <p role="alert" className="text-red-700">{mapError}</p>}
@@ -145,7 +152,7 @@ export default function DispatchPage() {
       {filtered.map(job => <article key={job.id} className="rounded border bg-white p-4 space-y-2" style={{ borderLeft: `5px solid ${STATUS_COLORS[job.status] || '#6b7280'}` }}>
         <button className="font-semibold underline" onClick={event => openDetails(job, event.currentTarget)}>{job.customerName || 'Customer'} · {job.serviceType}</button><p>{job.time || 'Time not set'} · {job.status} · {jobAddress(job) || 'Service address not set'}</p>
         {scheduleWarning(job, now, company?.timeZone) && <p className="text-amber-800">{scheduleWarning(job, now, company?.timeZone)} · schedule-based, not a traffic prediction</p>}
-        <label>Assigned to <select aria-label={`Assign ${job.customerName || job.id}`} className="rounded border-gray-300" value={job.assignedTo || ''} disabled={busy} onChange={e => assign(job, e.target.value)}><option value="">Unassigned</option>{job.assignedTo && !assignableTeam.some(row => row.id === job.assignedTo) && <option value={job.assignedTo} disabled>{job.assignedToName || team.find(row => row.id === job.assignedTo)?.name || 'Previously assigned technician'} (review assignment)</option>}{assignableTeam.map(row => <option value={row.id} key={row.id}>{row.name}</option>)}</select></label>
+        <label>Assigned to <SelectControl aria-label={`Assign ${job.customerName || job.id}`} className="rounded border-gray-300" value={job.assignedTo || ''} disabled={busy} onChange={e => assign(job, e.target.value)}><option value="">Unassigned</option>{job.assignedTo && !assignableTeam.some(row => row.id === job.assignedTo) && <option value={job.assignedTo} disabled>{job.assignedToName || team.find(row => row.id === job.assignedTo)?.name || 'Previously assigned technician'} (review assignment)</option>}{assignableTeam.map(row => <option value={row.id} key={row.id}>{row.name}</option>)}</SelectControl></label>
         {job.assignmentNeedsAttention && <p role="status" className="text-sm font-medium text-amber-800">{job.assignmentReview || 'A dispatcher needs to assign this visit.'}</p>}
         {(jobAddress(job) || position(job)) && <a className="ml-3 underline" href={googleNavigation([{ ...job, address: jobAddress(job), location: position(job) }])} target="_blank" rel="noreferrer">Navigate</a>}
         <button className="ml-3 underline" onClick={() => setNearbyJob(job)}>Find nearby on-duty staff</button>
@@ -166,7 +173,8 @@ export default function DispatchPage() {
 
 function DispatchJobDetails({ job, onClose, returnFocus, fallbackFocus, destination }) {
   const panel = useRef(null), close = useRef(null);
-  const [visits, setVisits] = useState([]), [error, setError] = useState(''), [loading, setLoading] = useState(false), [retry, setRetry] = useState(0);
+  const visitsQuery = useWorkspaceQuery(['job-visits', job.id], () => callWorkspace('rlJobVisit', { action: 'list', jobId: job.id }));
+  const visits = visitsQuery.data?.events || [], error = visitsQuery.error?.message || '', loading = visitsQuery.isPending;
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden'; close.current?.focus();
@@ -186,19 +194,13 @@ function DispatchJobDetails({ job, onClose, returnFocus, fallbackFocus, destinat
     window.addEventListener('keydown', onKey);
     return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = previousOverflow; const target = returnFocus?.isConnected === false ? fallbackFocus : returnFocus || fallbackFocus; target?.focus?.({ preventScroll: true }); };
   }, [onClose, returnFocus, fallbackFocus]);
-  useEffect(() => {
-    let active = true; setLoading(true); setError('');
-    callWorkspace('rlJobVisit', { action: 'list', jobId: job.id }).then(result => { if (active) setVisits(result.events || []); })
-      .catch(failure => { if (active) { setVisits([]); setError(failure.message || 'Visit records could not be loaded. Retry while connected.'); } }).finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [job.id, retry]);
   return <div className="fixed inset-0 z-50 flex justify-end bg-gray-900/50" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }} data-testid="job-details-backdrop">
     <section ref={panel} role="dialog" aria-modal="true" aria-labelledby="dispatch-job-title" tabIndex={-1} className="h-[100dvh] w-full max-w-lg overflow-y-auto bg-white p-5 shadow-2xl sm:p-6">
       <div className="mb-5 flex items-start justify-between gap-4"><div><p className="text-sm text-gray-500">Job details</p><h2 id="dispatch-job-title" className="text-xl font-bold">{job.customerName || 'Customer'} · {job.serviceType || 'Service visit'}</h2></div><button ref={close} className="min-h-11 rounded border px-3 py-2" onClick={onClose}>Close details</button></div>
       <div className="space-y-5"><div className="space-y-2 rounded border p-4"><p className="font-semibold" style={{ color: STATUS_COLORS[job.status] || '#374151' }}>Status: {job.status || 'Not set'}</p><p>{job.date} · {job.time || 'Time not set'}</p><p>{jobAddress(job) || 'Service address not set'}</p>{(destination || jobAddress(job)) && <a className="inline-block underline" href={googleNavigation([{ ...job, address: jobAddress(job), location: destination }])} target="_blank" rel="noreferrer">Navigate to service location</a>}</div>
         {!!(job.workNotes || job.notes) && <section><h3 className="mb-2 font-semibold">Work notes</h3><p className="whitespace-pre-wrap">{job.workNotes || job.notes}</p></section>}
         {!!(job.actualWorkDone || job.completionNotes) && <section><h3 className="mb-2 font-semibold">Completed work</h3><p className="whitespace-pre-wrap">{job.actualWorkDone}</p><p className="whitespace-pre-wrap">{job.completionNotes}</p></section>}
-        <section><h3 className="mb-2 font-semibold">Visit record</h3><p className="mb-2 text-xs text-gray-600">Manual reports and GPS evidence do not independently verify access to the property.</p>{loading && <p role="status">Loading visit records…</p>}{error && <div><p role="alert" className="text-red-700">{error}</p><button className="mt-2 underline" onClick={() => setRetry(value => value + 1)}>Retry visit records</button></div>}{!loading && !error && !visits.length && <p>No visit events recorded.</p>}
+        <section><h3 className="mb-2 font-semibold">Visit record</h3><p className="mb-2 text-xs text-gray-600">Manual reports and GPS evidence do not independently verify access to the property.</p>{loading && <p role="status">Loading visit records…</p>}{error && <div><p role="alert" className="text-red-700">{error}</p><button className="mt-2 underline" onClick={() => visitsQuery.refetch()}>Retry visit records</button></div>}{!loading && !error && !visits.length && <p>No visit events recorded.</p>}
           {visits.map(visit => <article key={visit.id} className="mb-3 rounded border p-3"><strong>{{ arrived: 'Arrived', departed: 'Departed', 'access-blocked': 'Couldn’t access property' }[visit.type] || 'Visit event'}</strong><p className="text-sm">{new Date(visit.capturedAt || visit.recordedAt).toLocaleString()} · {{ manual: 'Reported manually', 'manual-gps': 'Reported manually with GPS', 'gps-evidence': 'Estimated from GPS evidence' }[visit.source] || 'Visit report'}</p>{Number.isFinite(visit.accuracy) && <p className="text-sm">GPS accuracy: ±{Math.round(visit.accuracy)} m</p>}{visit.note && <p className="whitespace-pre-wrap">{visit.note}</p>}</article>)}
         </section><JobPhotos key={job.id} job={job} /><ServiceChecklist key={'form-' + job.id} job={job} />
       </div>

@@ -7,42 +7,76 @@ import ServiceChecklist from '../components/ServiceChecklist';
 import JobApplicationLog from '../components/JobApplicationLog';
 import WorkLocation from '../components/WorkLocation';
 import { readWorkQueue, updateWorkQueue, settleWorkOperation } from '../utils/workQueue';
+import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
+import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 const localDate = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
 const navigation = address => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
+const observedWorkNotes = (job, role) => typeof job?.workNotes === 'string' ? job.workNotes : role === 'technician' && typeof job?.notes === 'string' ? job.notes : '';
 export default function MyWorkPage() {
   const { currentUser, company, role } = useAuth();
   const claims = getClaims();
   const scope = `rl-my-work-v2:${currentUser.uid}:${claims?.companyId || 'solo'}:${role}:${claims?.membershipId || ''}`;
-  const [date, setDate] = useState(localDate), [jobs, setJobs] = useState([]), [selected, setSelected] = useState(null), [customer, setCustomer] = useState(null);
-  const [route, setRoute] = useState([]), [queue, setQueue] = useState(() => readWorkQueue(localStorage, `${scope}:queue`));
+  const [date, setDate] = useState(localDate), [selected, setSelected] = useState(null), [customer, setCustomer] = useState(null);
+  const [queue, setQueue] = useState(() => readWorkQueue(localStorage, `${scope}:queue`));
   const synchronizing = useRef(null);
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [notes, setNotes] = useState('');
+  const notesBaseline = useRef(''), currentDetail = useRef(null); currentDetail.current = { selected, notes };
+  const cached = key => { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; } };
+  const jobsQuery = useWorkspaceQuery(['jobs', 'assigned', date, 500], () => readWorkspace('jobs', { assignedTo: 'self', date, limit: 500 }));
+  const memberId = claims?.membershipId || currentUser.uid;
+  const routeQuery = useWorkspaceQuery(['route', memberId, date], () => callWorkspace('rlGetDailyRoute', { memberId, date }), { enabled: !!claims?.companyId });
+  const detailQuery = useWorkspaceQuery(['job', selected?.id], () => readWorkspace('jobs', { id: selected.id }), { enabled: !!selected?.id });
+  const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+  const jobs = jobsQuery.data?.jobs || (offline && jobsQuery.canRead && !workspaceAccessError(jobsQuery.error) ? cached(`${scope}:jobs:${date}`) : null) || [];
+  const ids = routeQuery.data?.saved?.jobIds || [];
+  const route = routeQuery.data ? [...routeQuery.data.stops].sort((a,b) => (ids.includes(a.id) ? ids.indexOf(a.id) : 10000) - (ids.includes(b.id) ? ids.indexOf(b.id) : 10000)) : (offline && routeQuery.canRead && !workspaceAccessError(routeQuery.error) ? cached(`${scope}:route:${date}`) : null) || [];
+  useEffect(() => {
+    try { if (jobsQuery.data && jobsQuery.canRead) localStorage.setItem(`${scope}:jobs:${date}`, JSON.stringify(jobsQuery.data.jobs)); }
+    catch { setMessage('Browser storage is unavailable. Keep this page open while connected.'); }
+  }, [jobsQuery.data, jobsQuery.canRead, scope, date]);
+  useEffect(() => {
+    if (!routeQuery.data || !routeQuery.canRead) return;
+    const order = routeQuery.data.saved?.jobIds || [];
+    const stops = [...routeQuery.data.stops].sort((a,b) => (order.includes(a.id) ? order.indexOf(a.id) : 10000) - (order.includes(b.id) ? order.indexOf(b.id) : 10000));
+    try { localStorage.setItem(`${scope}:route:${date}`, JSON.stringify(stops)); }
+    catch { setMessage('Browser storage is unavailable. Keep this page open while connected.'); }
+  }, [routeQuery.data, routeQuery.canRead, scope, date]);
+  const queries = useRef(null); queries.current = { jobsQuery, routeQuery, companyId: claims?.companyId };
   const persist = async change => { const rows = await updateWorkQueue(localStorage, `${scope}:queue`, change); setQueue(rows); return rows; };
   const load = useCallback(async () => {
     setBusy(true); setMessage('');
     try {
-      const result = await readWorkspace('jobs', { date, limit: 500 });
-      setJobs(result.jobs); localStorage.setItem(`${scope}:jobs:${date}`, JSON.stringify(result.jobs));
-      if (result.hasMore) setMessage('Showing the first 500 assigned jobs.');
-      if (claims?.companyId) {
-        const data = await callWorkspace('rlGetDailyRoute', { memberId: claims.membershipId || currentUser.uid, date });
-        const ids = data.saved?.jobIds || [];
-        const stops = [...data.stops].sort((a,b) => (ids.includes(a.id) ? ids.indexOf(a.id) : 10000) - (ids.includes(b.id) ? ids.indexOf(b.id) : 10000));
-        setRoute(stops); localStorage.setItem(`${scope}:route:${date}`, JSON.stringify(stops));
-      }
+      if (!navigator.onLine) { setMessage('Offline: showing your saved assigned work. Updates will be checked again when you reconnect.'); return; }
+      const source = queries.current;
+      await Promise.all([source.jobsQuery.refetch(), ...(source.companyId ? [source.routeQuery.refetch()] : [])]);
     } catch (e) {
-      if (!navigator.onLine) { setJobs(JSON.parse(localStorage.getItem(`${scope}:jobs:${date}`) || '[]')); setRoute(JSON.parse(localStorage.getItem(`${scope}:route:${date}`) || '[]')); setMessage('Offline: showing your saved assigned work. Updates will be checked again when you reconnect.'); }
-      else { setJobs([]); setRoute([]); setSelected(null); setCustomer(null); setMessage(e.message); }
+      setMessage(e.message);
     } finally { setBusy(false); }
-  }, [date, scope, claims?.companyId, claims?.membershipId, currentUser.uid]);
-  useEffect(() => { setSelected(null); setCustomer(null); load(); }, [load]);
-  const open = async job => {
+  }, []);
+  useEffect(() => { setSelected(null); setCustomer(null); setMessage(''); }, [date, scope]);
+  useEffect(() => {
+    const result = detailQuery.data, detail = currentDetail.current;
+    if (!result?.job || result.job.id !== detail?.selected?.id) return;
+    try { localStorage.setItem(`${scope}:detail:${result.job.id}`, JSON.stringify(result)); }
+    catch { setMessage('Browser storage is unavailable. Keep this page open while connected.'); }
+    // A fresh server snapshot must not replace typed observations or silently
+    // advance their optimistic concurrency version.
+    if (detail.notes !== notesBaseline.current) {
+      if (result.job.updatedAt !== detail.selected.updatedAt) setMessage('This job changed. Your work notes are retained; review the latest job before submitting.');
+      return;
+    }
+    const observations = observedWorkNotes(result.job, role);
+    setSelected(result.job); setCustomer(result.customer); setNotes(observations); notesBaseline.current = observations;
+  }, [detailQuery.data, selected?.id, scope, role]);
+  useEffect(() => {
+    if ([jobsQuery.error, detailQuery.error].some(workspaceAccessError)) { setSelected(null); setCustomer(null); setNotes(''); notesBaseline.current = ''; }
+  }, [jobsQuery.error, detailQuery.error]);
+  const open = job => {
     setMessage('');
     try {
-      let result;
-      if (navigator.onLine) { result = await readWorkspace('jobs', { id: job.id }); localStorage.setItem(`${scope}:detail:${job.id}`, JSON.stringify(result)); }
-      else result = JSON.parse(localStorage.getItem(`${scope}:detail:${job.id}`) || 'null') || { job, customer: null };
-      setSelected(result.job); setCustomer(result.customer); setNotes(result.job.notes || '');
+      const result = !navigator.onLine && cached(`${scope}:detail:${job.id}`) || { job, customer: null };
+      const observations = observedWorkNotes(result.job, role);
+      setSelected(result.job); setCustomer(result.customer); setNotes(observations); notesBaseline.current = observations;
     } catch (e) { setSelected(null); setCustomer(null); setMessage(e.message); }
   };
   const sync = useCallback(() => {
@@ -76,6 +110,8 @@ export default function MyWorkPage() {
   return <div className="space-y-5"><header><h1 className="text-2xl font-bold">My Work</h1><p>{company?.name} · Assigned field work</p></header>
     <div className="flex gap-3"><label>Service date <input type="date" value={date} onChange={e => setDate(e.target.value)} /></label><button className="underline" disabled={busy} onClick={load}>Refresh work</button></div>
     {message && <p role="status" className="rounded border p-3">{message}</p>}
+    {(jobsQuery.error || routeQuery.error || detailQuery.error) && <p role="alert" className="rounded border border-red-200 p-3">{(jobsQuery.error || routeQuery.error || detailQuery.error).message}</p>}
+    {jobsQuery.data?.hasMore && <p role="status">Showing the first 500 assigned jobs.</p>}
     <section className="rounded border bg-white p-4"><h2 className="text-lg font-semibold">My daily route</h2><p className="text-sm text-gray-600">Stop order is managed by dispatch.</p>{route.length ? <ol className="mt-3 space-y-2">{route.map((stop,index) => <li key={stop.id}>{index+1}. {stop.customerName} · {stop.time} <a className="underline" href={navigation(stop.address)} target="_blank" rel="noreferrer">Navigate</a></li>)}</ol> : <p>No route stops for this date.</p>}</section>
     <section className="grid gap-3 md:grid-cols-2">{jobs.map(job => <button key={job.id} onClick={() => open(job)} className="rounded border bg-white p-4 text-left"><strong>{job.serviceType || job.title}</strong><p>{job.customerName}</p><p>{job.time} · {job.status}</p><p className="text-sm">{job.address}</p></button>)}{!busy && !jobs.length && <p>No assigned jobs for this date.</p>}</section>
     {selected && <section className="space-y-5 rounded border bg-white p-5"><div className="flex justify-between"><h2 className="text-xl font-semibold">{selected.serviceType}</h2><button className="underline" onClick={() => setSelected(null)}>Close job</button></div><p>{customer?.name || selected.customerName} · {customer?.phone || customer?.phoneNumber || selected.customerPhone}</p><p>{selected.address || customer?.address}</p>{customer?.serviceInstructions && <p>{customer.serviceInstructions}</p>}<a className="underline" href={navigation(selected.address || customer?.address || '')} target="_blank" rel="noreferrer">Open navigation</a>

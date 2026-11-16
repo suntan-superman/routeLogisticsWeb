@@ -14,26 +14,26 @@ import {
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
+import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 
 const templateForm = (template = {}) => ({name:template.name || '',description:template.description || '',serviceType:template.serviceType || '',scopeOfWork:template.scopeOfWork || '',materials:template.materials || '',laborHours:template.laborHours ?? '',laborRate:template.laborRate ?? '',materialCost:template.materialCost ?? '',totalCost:template.totalCost ?? '',notes:template.notes || '',terms:template.terms || '',validityDays:template.validityDays ?? 30,isActive:template.isActive !== false});
 const templateSnapshot = data => JSON.stringify(Object.fromEntries(Object.entries(templateForm(data)).map(([field,value])=>[field,['laborHours','laborRate','materialCost','totalCost','validityDays'].includes(field)?Number(value || 0):value])));
 
 const EstimateTemplatesPage = () => {
   const confirm = useConfirm();
-  const [templates, setTemplates] = useState([]);
+  const templatesQuery = useWorkspaceQuery(['templates'], () => EstimateTemplateService.getTemplates(), { intervalMs: 60_000 });
+  const templates = templatesQuery.data?.templates || [];
+  const setTemplates = update => templatesQuery.setData(previous => ({ success: true, templates: typeof update === 'function' ? update(previous?.templates || []) : update }));
   const [isLoading, setIsLoading] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
-  const [stats, setStats] = useState({
-    totalTemplates: 0,
-    activeTemplates: 0,
-    inactiveTemplates: 0,
-    totalUsage: 0,
-    mostUsedTemplate: null
-  });
+  const stats = { totalTemplates: templates.length, activeTemplates: templates.filter(row => row.isActive).length,
+    inactiveTemplates: templates.filter(row => !row.isActive).length, totalUsage: templates.reduce((sum, row) => sum + (row.usageCount || 0), 0),
+    mostUsedTemplate: templates.reduce((best, row) => (row.usageCount || 0) > (best?.usageCount || 0) ? row : best, null) };
 
   // Form states
   const [templateData, setTemplateData] = useState(templateForm);
@@ -44,37 +44,7 @@ const EstimateTemplatesPage = () => {
   const closeEditor = useCallback(async()=>{if(saving.current||closing.current)return;closing.current=true;try{if(formDirty&&!(await confirmDiscard()))return;setShowAddModal(false);setShowEditModal(false);setSelectedTemplate(null);const empty=templateForm();setTemplateData(empty);setSavedTemplate(templateSnapshot(empty));}finally{closing.current=false;}},[formDirty,confirmDiscard]);
   useEffect(()=>{if(!showAddModal&&!showEditModal)return;const onKey=event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();closeEditor();}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[showAddModal,showEditModal,closeEditor]);
 
-  useEffect(() => {
-    loadTemplates();
-    loadStats();
-  }, []);
-
-  const loadTemplates = async () => {
-    setIsLoading(true);
-    try {
-      const result = await EstimateTemplateService.getTemplates();
-      if (result.success) {
-        setTemplates(result.templates);
-      } else {
-        toast.error(result.error);
-      }
-    } catch (error) {
-      console.error('Error loading templates:', error);
-      toast.error('Error loading templates');
-    }
-    setIsLoading(false);
-  };
-
-  const loadStats = async () => {
-    try {
-      const result = await EstimateTemplateService.getTemplateStats();
-      if (result.success) {
-        setStats(result.stats);
-      }
-    } catch (error) {
-      console.error('Error loading stats:', error);
-    }
-  };
+  const loadStats = () => templatesQuery.refetch();
 
   const handleInputChange = (field, value) => {
     setTemplateData(prev => ({
@@ -238,6 +208,7 @@ const EstimateTemplatesPage = () => {
     });
   };
 
+  if (workspaceAccessError(templatesQuery.error)) return <p role="alert">{templatesQuery.error.message}</p>;
   return (
     <Motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -245,6 +216,7 @@ const EstimateTemplatesPage = () => {
       transition={{ duration: 0.5 }}
       className="space-y-6"
     >
+      {templatesQuery.error && <p role="alert">{templatesQuery.error.message}</p>}
       {/* Header */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between">
@@ -353,7 +325,7 @@ const EstimateTemplatesPage = () => {
           </h3>
         </div>
         
-        {isLoading ? (
+        {(isLoading || (templatesQuery.isPending && !templatesQuery.error)) ? (
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
           </div>

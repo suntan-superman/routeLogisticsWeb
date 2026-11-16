@@ -262,12 +262,13 @@ function workDataHandlers(db, config = {}) {
           const validated = property?.validated === true && Number.isFinite(property.latitude) && Number.isFinite(property.longitude);
           const verifiedProperty = area.result.property;
           const addressPatch = { address: property?.address || savedAddress, city: '', state: '', zipCode: '', postalCode: '', latitude: validated ? property.latitude : null, longitude: validated ? property.longitude : null, location: validated ? { latitude: property.latitude, longitude: property.longitude } : null,
-            addressValidation: { source: 'google-address-validation', validatedAt: verifiedProperty.validatedAt, postalCode: verifiedProperty.postalCode, placeId: verifiedProperty.placeId || '' } };
+            addressValidation: validated ? { source: 'google-address-validation', validatedAt: verifiedProperty.validatedAt, postalCode: verifiedProperty.postalCode, placeId: verifiedProperty.placeId || '' }
+              : { source: 'operator-entered', validated: false, status: 'unverified', validatedAt: null, checkedAt: property?.checkedAt || updatedAt, postalCode: '', placeId: '' } };
           const original = Object.fromEntries(['address', 'city', 'state', 'zipCode', 'postalCode', 'latitude', 'longitude', 'location', 'addressValidation'].filter(field => customer.get(field) !== undefined).map(field => [field, customer.get(field)]));
           tx.update(customer.ref, { ...addressPatch, updatedAt });
           tx.create(db.collection('rlAudit').doc(), { action: 'customer.address.update', companyId: scope.companyId, customerId: customer.id, jobId: ref.id, actorId: scope.uid, original, changes: addressPatch, createdAt: updatedAt });
         }
-        const result = { id: ref.id, updatedAt, ...(plan ? { servicePlanId: planRef.id, nextServiceDate: plan.nextServiceDate } : {}), ...(area ? { serviceArea: area.result } : {}), ...(saveCustomerAddress ? { customerAddressUpdated: true, customerUpdatedAt: updatedAt } : {}) };
+        const result = { id: ref.id, updatedAt, ...(plan ? { servicePlanId: planRef.id, nextServiceDate: plan.nextServiceDate } : {}), ...(area ? { serviceArea: area.result, ...(area.result.internalContinuation ? { addressWarning: area.result.message } : {}) } : {}), ...(saveCustomerAddress ? { customerAddressUpdated: true, customerUpdatedAt: updatedAt } : {}) };
         if (operationRef) tx.create(operationRef, { actorId: scope.uid, companyId: scope.companyId || null, fingerprint: operationFingerprint, result, createdAt: updatedAt });
         return result;
       });

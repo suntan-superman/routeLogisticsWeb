@@ -125,7 +125,7 @@ function modulesFixture() {
       if (mocks[name]) return mocks[name];
       if (name === '../constants/firebase') return { auth, functions: {} };
       if (name === './tenancy') return { requireWorkspace() {}, getClaims: () => claims, tenantFields: () => ({ userId: account.uid, companyId: claims.companyId }) };
-      if (name === './workspaceApi') return { readWorkspace: async () => ({ job: { id: 'job', updatedAt: 1 } }), callWorkspace: async () => ({ status: 'synced' }) };
+        if (name === './workspaceApi') return { readWorkspace: async () => ({ job: { id: 'job', updatedAt: 1 } }), callWorkspace: async (functionName, data) => functionName === 'rlApplyJobOperation' ? (await invoke(data)).data : { status: 'synced' } };
       if (name === './workTracking') return { stopShiftTracking: async () => {} };
       if (name === './nativePush') return { signOutNativePush: async () => {}, purgeDeletedAccountPush: async () => {} };
       if (name.startsWith('.')) { const resolved = path.resolve(path.dirname(filename), name); return load(resolved.endsWith('.js') ? resolved : resolved + '.js'); }

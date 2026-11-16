@@ -3,6 +3,8 @@ const assert = require('node:assert/strict'), fs = require('node:fs'), path = re
 const { createRequire } = require('node:module');
 const mobile = createRequire(path.resolve(__dirname, '../routeLogisticsMobile/package.json')), web = createRequire(path.resolve(__dirname, '../routeLogisticsWeb/package.json'));
 const React = mobile('react'), { create, act } = mobile('react-test-renderer'), { transformSync } = web('esbuild');
+const {createWorkspaceQueryMock,selectControlMock}=require('./support/workspaceQueryMock.cjs');
+const workspaceHooks=createWorkspaceQueryMock(React,{scopeId:'test-workspace'});
 global.IS_REACT_ACT_ENVIRONMENT = true;
 const settle = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
@@ -16,6 +18,9 @@ function compile(relative) {
   const module = { exports: {} };
   const mock = name => {
     if (name === 'react') return React;
+    if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
+    if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
+    if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found','workspace-changed'].includes(String(error?.code||'').split('/').pop())};
     if (name.endsWith('/workspaceApi')) return { callWorkspace: async (name, data) => { env.calls.push({ name, data }); return env.handler(name, data); } };
     if (name === './ThemedSelect') return { __esModule: true, default: value => React.createElement('label', null, value.label, React.createElement('select', { 'aria-label': value.label, disabled: value.disabled, value: value.value, onChange: event => value.onChange(event.target.value) }, value.options.map(option => React.createElement('option', { key: option.value, value: option.value, disabled: option.disabled }, option.label)))) };
     if (name.startsWith('.')) { const file = path.resolve(path.dirname(path.resolve(__dirname, '../routeLogisticsWeb/src', relative)), name); return compile(path.relative(path.resolve(__dirname, '../routeLogisticsWeb/src'), path.extname(file) ? file : fs.existsSync(file + '.jsx') ? file + '.jsx' : file + '.js')); }
@@ -179,10 +184,10 @@ test('orphaned saved assignments retain their label but cannot be chosen as acti
   await act(async () => select().props.onChange({ target: { value: '' } })); assert.deepEqual(env.members, ['']);
 });
 
-test('refreshing technicians preserves the saved member and its known name after offboarding', async () => {
+test('background roster refresh preserves the editor and then marks an offboarded member unavailable', async () => {
   let attempts = 0; const refresh = deferred();
   reset((_name, data) => data.action === 'check' ? available : ++attempts === 1 ? roster : refresh.promise);
-  await render(); await click('Refresh technicians'); assert.equal(select().props.value, 'tech-1'); assert.equal(select().props.disabled, true); assert.match(text(), /Technician One.*loading/);
+  await render(); await click('Refresh technicians'); assert.equal(select().props.value, 'tech-1'); assert.equal(select().props.disabled, false); assert.match(text(), /Technician One/);
   await act(async () => refresh.resolve({ technicians: [roster.technicians[0]] })); await act(settle);
   assert.equal(select().props.value, 'tech-1'); assert.match(text(), /Technician One.*unavailable/); assert.match(text(), /saved assignment is no longer available/);
   assert.deepEqual(env.members, []); assert.equal(env.calls.filter(call => call.data.action === 'check').length, 1);

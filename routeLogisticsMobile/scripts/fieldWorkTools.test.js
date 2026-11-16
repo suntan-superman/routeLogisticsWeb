@@ -10,6 +10,7 @@ const filename = path.resolve(__dirname, '../components/FieldWorkTools.js'), mod
 const requireMock = name => {
   if (name.startsWith('@babel/runtime/')) return require(name);
   if (name === 'react') return React;
+  if (name.endsWith('/services/useJobResources')) return { useJobResourceRefresh: (_resource, id, loader, { enabled }) => { React.useEffect(() => { if (enabled) loader({ query: true }).catch(() => {}); }, [id, enabled]); return { refetch: () => loader().catch(() => {}) }; } };
   if (name === 'react-native') return { View: 'View', Text: 'Text', Pressable: 'Pressable', AppState: { currentState: 'active' }, Linking: { openURL: async () => {} } };
   if (name === 'expo-crypto') return { randomUUID: () => `visit-operation-${++operationSequence}` };
   if (name === 'expo-location') return { Accuracy: { Balanced: 3 }, getForegroundPermissionsAsync: async () => { permissionRequests++; return gpsPermission; }, getCurrentPositionAsync: async () => { gpsRequests++; return gpsFix; }, requestForegroundPermissionsAsync: () => { throw new Error('Visit records must not request permission.'); } };

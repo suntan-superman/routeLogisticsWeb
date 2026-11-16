@@ -2,6 +2,8 @@ const {test,afterEach}=require('node:test');
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),{createRequire}=require('node:module');
 const mobile=createRequire(path.resolve(__dirname,'../routeLogisticsMobile/package.json')),web=createRequire(path.resolve(__dirname,'../routeLogisticsWeb/package.json'));
 const React=mobile('react'),{create,act}=mobile('react-test-renderer'),{transformSync}=web('esbuild');
+const {createWorkspaceQueryMock,selectControlMock}=require('./support/workspaceQueryMock.cjs');
+const workspaceHooks=createWorkspaceQueryMock(React,{scopeId:()=>companyId+':'+role});
 global.IS_REACT_ACT_ENVIRONMENT=true;
 let tree,role='owner',uid='owner',companyId='co',calls=[],dirty=false,toasts=[],policy,saveFailure=null,statusFailure=null,checkFailure=null,approvalFailure=null,pendingSave=null,pendingCheck=null,allowDiscard=true,latestValue=null,mapsLoads=0,circles=[];
 const clone=x=>JSON.parse(JSON.stringify(x));
@@ -12,6 +14,9 @@ function load(relative){
  const file=path.resolve(__dirname,'../routeLogisticsWeb/src',relative);if(modules.has(file))return modules.get(file);const module={exports:{}};
  const mocked=name=>{
   if(name==='react')return React;
+    if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
+    if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
+    if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found','workspace-changed'].includes(String(error?.code||'').split('/').pop())};
   if(name==='react-hot-toast')return{__esModule:true,default:{success:message=>toasts.push({type:'success',message}),error:message=>toasts.push({type:'error',message})}};
   if(name.endsWith('/AuthContext'))return{useAuth:()=>({company:{id:companyId,ownerId:'owner',serviceCategories:['Pest Control','Pool Cleaning']},currentUser:{uid},role})};
   if(name.endsWith('/useUnsavedChanges'))return{useUnsavedChanges:changed=>{dirty=changed;return{confirmDiscard:async()=>allowDiscard};}};
@@ -63,6 +68,18 @@ test('a failed save retains edits and allows a visible retry',async()=>{
  await mountSettings();await act(async()=>field('Default company coverage ZIP codes').props.onChange({target:{value:'93311'}}));saveFailure=Error('Address validation unavailable. Retry later.');await act(async()=>button('Save service areas').props.onClick());assert.equal(field('Default company coverage ZIP codes').props.value,'93311');assert.equal(dirty,true);assert.equal(toasts.at(-1).type,'error');assert.match(text(),/Address validation unavailable/);
  saveFailure=null;await act(async()=>button('Save service areas').props.onClick());assert.equal(dirty,false);assert.equal(toasts.at(-1).type,'success');
 });
+
+test('background coverage refresh updates clean settings and preserves a dirty territory revision',async()=>{
+ await mountSettings();policy={...policy,settings:{...policy.settings,revision:5,zipCodes:['93311']}};
+ await act(async()=>workspaceHooks.useInvalidateWorkspace()(['service-areas']));
+ assert.equal(field('Default company coverage ZIP codes').props.value,'93311');assert.equal(dirty,false);
+ await act(async()=>field('Default company coverage ZIP codes').props.onChange({target:{value:'93310'}}));
+ policy={...policy,settings:{...policy.settings,revision:6,zipCodes:['93309']}};
+ await act(async()=>workspaceHooks.useInvalidateWorkspace()(['service-areas']));
+ assert.equal(field('Default company coverage ZIP codes').props.value,'93310');assert.equal(dirty,true);
+ await act(async()=>button('Save service areas').props.onClick());
+ assert.equal(calls.find(row=>row.data.action==='save').data.expectedRevision,5);
+});
 test('duplicate saves are blocked and a late response cannot overwrite another company',async()=>{
  await mountSettings();await act(async()=>field('Default company coverage ZIP codes').props.onChange({target:{value:'93311'}}));let release;pendingSave=new Promise(resolve=>{release=resolve;});const save=button('Save service areas').props.onClick;
  await act(async()=>{save();save();});assert.equal(calls.filter(c=>c.data.action==='save').length,1);
@@ -98,6 +115,13 @@ test('a late property-check response is ignored after the address changes',async
 });
 test('address validation failures are actionable and do not permit an exception',async()=>{
  await mountProperty({address:'Incomplete synthetic address'});checkFailure=Error('Enter a complete service property street address.');await act(async()=>button('Check service property').props.onClick());assert.match(text(),/complete service property street address/);assert.equal(button('Approve this out-of-area property'),undefined);assert.equal(latestValue.confirmed,undefined);
+});
+test('an internal unverified-address check warns without changing the entered address or claiming geographic eligibility',async()=>{
+ const message='Google could not confirm this address. You can save this internal job using the entered address. Coverage and map location remain unverified.';
+ pendingCheck=Promise.resolve({eligible:false,status:'address-unverified',internalContinuation:true,message,addressValidation:{status:'invalid',message,warningOnly:true}});
+ await mountProperty({address:'Operator supplied service property'});await act(async()=>button('Check service property').props.onClick());
+ assert.match(text(),/save this internal job/);assert.equal(latestValue.address,'Operator supplied service property');assert.equal(latestValue.confirmed,false);assert.equal(button('Approve this out-of-area property'),undefined);assert.doesNotMatch(text(),/Property is inside coverage/);
+ assert.equal(calls.filter(call=>call.data.action==='check').length,1);
 });
 test('a failed initial policy request is visible and retryable',async()=>{
  statusFailure=Error('Service-area policy is temporarily unavailable.');await mountProperty({address:'Synthetic property'});assert.match(text(),/temporarily unavailable/);assert.equal(button('Check service property').props.disabled,true);statusFailure=null;await act(async()=>button('Retry service-area settings').props.onClick());assert.equal(button('Check service property').props.disabled,false);

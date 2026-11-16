@@ -4022,6 +4022,28 @@ Initial browser attempts exposed test setup issues rather than a broader date re
 
 All mutations used disposable local emulators and synthetic fixtures. No production job dates, customer records, calendars, Firebase timestamps or other scheduling data were modified. Production verification used public Netlify metadata/assets, anonymous login/portal startup with non-read HTTP methods blocked, and offline evaluation of the validated pure formatter; it did not sign in or inspect customer jobs. Broader physical-device and real-provider manual cases retain their existing statuses.
 
+### Scoped data refresh, address warnings and green dropdowns — November 15, 2026
+
+Operational web and mobile reads now use identity/company/role/membership-scoped query caches. Visible operational controls poll every 30 seconds and refresh on foreground/reconnect; slower company/report metadata uses 60 seconds and mobile template metadata uses 120 seconds. Known successful writes invalidate matching resources. A write cancels an older pending read so its stale result cannot overwrite the committed state. Background reads preserve forms, selected jobs, photos, offline work and checklist revision baselines; they do not reload the page. Existing notification listeners remain in place.
+
+Customer-portal OTP and platform administration use independent principal caches; ordinary company roles do not grant platform access. Permission failures hide protected cached data. Polling does not initiate Google lookups, OAuth, payments, accounting exports, messages, uploads, PDFs or publications. Invoice list reads require a server-confirmed snapshot: a connection failure displays retry feedback rather than silently presenting an empty offline cache as an empty company.
+
+Internal scheduling by authorized owners/managers/admins can save an entered address when Google cannot confirm it. The server records the address and coverage as unverified, returns a visible warning and clears stale coordinates. Required address syntax, public booking eligibility, known coverage restrictions, customer-update authorization and explicit permanent-address intent remain enforced. Google suggestions stay optional. No production job/customer records were changed during verification.
+
+All application-owned web dropdowns now use accessible green DOM options, including priority and nested scheduling choices; third-party calendar popup selections have scoped green styles. The source audit finds no native `<select>` in application JSX. OS-owned mobile permission dialogs and native pickers remain device-controlled.
+
+| Verification | Actual evidence | Remaining acceptance |
+| --- | --- | --- |
+| Web service/UI regressions | 399/399 pass, including real query observers, stale-read/write ordering, draft retention, portal revocation, payment-client auth, pagination and invoice offline feedback | None of these tests certifies external provider delivery |
+| Mobile regressions | 329/329 pass; query/API subset 32/32; Expo Doctor 18/18; compatibility/configuration checks and iOS bundle export pass | Install rebuilt iOS/Android apps; verify foreground/background and mode switching on physical devices |
+| Functions units | 182 pass; one emulator-only case skipped by the unit command | Targeted emulator checks are recorded separately |
+| Address/authorization emulators | 80 unique targeted address cases pass; additional scheduling, working owner/manager and job-instruction subset 28/28 passes; no production data mutations | Operator saves the intended real appointment through the normal UI |
+| Green browser controls | PW-UI-01 passes Chromium, Firefox and WebKit with computed green colors, search, keyboard, empty-required and nested-label checks | Visual/device preference inspection remains physical acceptance |
+| Cross-session browser updates | PW-SYNC-01 passes Chromium, Firefox and WebKit: a separate assigned technician session uses the normal completion callable; owner Jobs counts update without navigation/reload while a scheduling draft stays open | Rebuilt physical mobile session remains separate acceptance |
+| Full browser coverage | 105 distinct cases verified across three engines. Initial matrix: 94 pass/11 fail; all 11 pass on the final-source rerun. Nine failures were outdated denial-copy assertions, one exposed the corrected invoice cache fallback, and one required explicit feedback-layout readiness before the photo click. Final last-run has no failed IDs and emulator configuration is restored | This is combined executed coverage, not a claim that the original matrix was entirely green |
+
+The production read-only investigation found David's active, verified Acme manager account and correct company/member claims, but no job assigned to his membership or UID. Acme retained seven job records. Off-duty state is not a filter for assigned-job reads. The operator confirmed that this was the appointment blocked by the address-correction requirement, so no assignment was missing from synchronization. No assignment was invented or rewritten. Existing historical appointments and all manual acceptance statuses remain intact.
+
 ## F. Physical-device checklist
 
 | Operator action | Cases | Record / pass condition |

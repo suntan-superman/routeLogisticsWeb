@@ -6,6 +6,8 @@ import { createRequire } from 'node:module';
 
 const webRequire = createRequire(import.meta.url), mobileRequire = createRequire(new URL('../../../routeLogisticsMobile/package.json', import.meta.url));
 const React = mobileRequire('react'), { create, act } = mobileRequire('react-test-renderer'), { transformSync } = webRequire('esbuild');
+const {createWorkspaceQueryMock,selectControlMock}=webRequire('../../../tests/support/workspaceQueryMock.cjs');
+const workspaceHooks=createWorkspaceQueryMock(React);
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const source = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
 let tree, jobs, positions, requests, markerRows, mapRows, imports, responder, nodes, keyListeners, focusCalls, extraDialogs;
@@ -33,6 +35,9 @@ function load(filename) {
   const module = { exports: {} }; modules.set(filename, module);
   const requireMock = name => {
     if (name === 'react') return React;
+    if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
+    if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
+    if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found'].includes(String(error?.code||'').split('/').pop())};
     if (name === 'react/jsx-runtime') return mobileRequire(name);
     if (name.endsWith('/hooks/useUnsavedChanges')) return { useConfirmUnsavedChanges: () => async () => true, useUnsavedChanges: () => ({ confirmDiscard: async () => true }) };
     if (name.endsWith('/contexts/AuthContext')) return { useAuth: () => ({ company: { id: 'acme', name: 'Acme Pest Control' }, can: () => true }) };

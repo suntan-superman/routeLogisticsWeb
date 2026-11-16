@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion as Motion } from 'framer-motion';
 import { ScheduleComponent, ViewsDirective, ViewDirective, Day, Week, WorkWeek, Month, Agenda, Inject, Resize, DragAndDrop } from '@syncfusion/ej2-react-schedule';
 import JobManagementService from '../services/jobManagementService';
@@ -13,7 +13,9 @@ import {
   PencilIcon,
   PlusIcon
 } from '@heroicons/react/24/outline';
-import toast from 'react-hot-toast';
+import { useWorkspaceQuery, useInvalidateWorkspace } from '../hooks/useWorkspaceQuery';
+import { calendarDay } from '../utils/jobSummary';
+import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 import '@syncfusion/ej2-base/styles/tailwind.css';
 import '@syncfusion/ej2-buttons/styles/tailwind.css';
 import '@syncfusion/ej2-popups/styles/tailwind.css';
@@ -27,89 +29,41 @@ import '@syncfusion/ej2-react-schedule/styles/tailwind.css';
 import './calendar.css';
 import JobFormModal from '../components/JobFormModal';
 import { canManage } from '../services/tenancy';
+const EMPTY=[];
+const statusColors={scheduled:'#3B82F6','in-progress':'#F59E0B',completed:'#10B981',cancelled:'#EF4444','on-hold':'#8B5CF6'};
+const getStatusColor=status=>statusColors[status]||'#6B7280';
+const deniedJobRead=error=>workspaceAccessError(error)||/job not found|not assigned to your workspace|unauthorized to access this job/i.test(error?.message||'');
 
 const CalendarPage = () => {
-  const [scheduleData, setScheduleData] = useState([]);
-  const [customers, setCustomers] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [selectedJob, setSelectedJob] = useState(null);
+  const jobsQuery=useWorkspaceQuery(['jobs',500],()=>JobManagementService.getJobs(500));
+  const customersQuery=useWorkspaceQuery(['customers',500],()=>CustomerService.getCustomers(500));
+  const invalidate=useInvalidateWorkspace(),jobs=jobsQuery.data?.jobs||EMPTY,customers=customersQuery.data?.customers||EMPTY;
+  const isLoading=jobsQuery.isLoading&&!jobsQuery.data;
+  const [selection,setSelection]=useState(null);
+  const selectedSnapshot=jobsQuery.readable&&!deniedJobRead(jobsQuery.error)&&selection?.scopeId===jobsQuery.scopeId?selection.job:null;
+  const setSelectedJob=value=>setSelection(value?{scopeId:jobsQuery.scopeId,job:value}:null);
   const [showJobModal, setShowJobModal] = useState(false);
-  const [showNewJob, setShowNewJob] = useState(false);
+  const [newJobScope,setNewJobScope]=useState(null);
+  const showNewJob=jobsQuery.readable&&!deniedJobRead(jobsQuery.error)&&newJobScope===jobsQuery.scopeId;
+  const setShowNewJob=value=>setNewJobScope(value?jobsQuery.scopeId:null);
   const [newJobDefaults, setNewJobDefaults] = useState({});
   const [today] = useState(() => new Date());
 
-  useEffect(() => {
-    loadJobsAndCustomers();
-  }, []);
-
-  const loadJobsAndCustomers = async () => {
-    setIsLoading(true);
-    try {
-      const [jobsResult, customersResult] = await Promise.all([
-        JobManagementService.getJobs(),
-        CustomerService.getCustomers()
-      ]);
-
-      if (jobsResult.success && customersResult.success) {
-        const jobs = jobsResult.jobs;
-        const customersData = customersResult.customers;
-
-        // Transform jobs data for Syncfusion Schedule
-        const scheduleEvents = jobs.filter(job => job.date).map(job => {
-          const customer = customersData.find(c => c.id === job.customerId);
-          const startDate = new Date(`${job.date}T${job.time || '09:00'}`);
-          const endDate = new Date(startDate.getTime() + (parseFloat(job.estimatedDuration) || 2) * 60 * 60 * 1000);
-
-          return {
-            Id: job.id,
-            Subject: `${job.serviceType} - ${customer?.name || 'Unknown Customer'}`,
-            StartTime: startDate,
-            EndTime: endDate,
-            Location: job.address || customer?.address || 'Location TBD',
-            Description: job.notes || '',
-            IsAllDay: false,
-            RecurrenceRule: '',
-            RecurrenceID: null,
-            RecurrenceException: '',
-            StartTimezone: '',
-            EndTimezone: '',
-            CategoryColor: getStatusColor(job.status),
-            // Custom fields for job data
-            JobData: {
-              ...job,
-              customer: customer,
-              status: job.status,
-              totalCost: job.totalCost,
-              estimatedDuration: job.estimatedDuration,
-              actualHours: job.actualHours,
-              assignedTo: job.assignedTo,
-              priority: job.priority || 'medium'
-            }
-          };
-        });
-
-        setScheduleData(scheduleEvents);
-        setCustomers(customersData);
-      } else {
-        toast.error('Failed to load jobs and customers');
-      }
-    } catch (error) {
-      console.error('Error loading jobs and customers:', error);
-      toast.error('Error loading calendar data');
-    }
-    setIsLoading(false);
-  };
-
-  const getStatusColor = (status) => {
-    const colors = {
-      'scheduled': '#3B82F6', // Blue
-      'in-progress': '#F59E0B', // Amber
-      'completed': '#10B981', // Green
-      'cancelled': '#EF4444', // Red
-      'on-hold': '#8B5CF6' // Purple
-    };
-    return colors[status] || '#6B7280'; // Gray default
-  };
+  const detailQuery=useWorkspaceQuery(['job',selectedSnapshot?.id||null],()=>JobManagementService.getJob(selectedSnapshot.id),{enabled:showJobModal&&!!selectedSnapshot});
+  const latestJob=detailQuery.readable&&!deniedJobRead(detailQuery.error)?(detailQuery.data?.job||jobs.find(row=>row.id===selectedSnapshot?.id)||selectedSnapshot):null;
+  const selectedJob=latestJob?{...latestJob,customer:detailQuery.data?.customer||customers.find(customer=>customer.id===latestJob.customerId)||selectedSnapshot?.customer}:null;
+  const scheduleData=useMemo(()=>jobs.filter(job=>job.date).flatMap(job=>{
+    const customer=customers.find(row=>row.id===job.customerId),startDate=calendarDay(job.date);
+    if(!startDate)return[];
+    const match=/^(\d{1,2}):([0-5]\d)(?:\s*(AM|PM))?$/i.exec(job.time||'09:00');
+    if(!match)return[];
+    let hour=Number(match[1]);if(match[3])hour=hour%12+(match[3].toUpperCase()==='PM'?12:0);if(hour>23)return[];
+    startDate.setHours(hour,Number(match[2]),0,0);
+    const endDate=new Date(startDate.getTime()+(parseFloat(job.estimatedDuration??job.duration)||2)*3600000);
+    return[{Id:job.id,Subject:`${job.serviceType||'Service'} - ${customer?.name||job.customerName||'Unknown Customer'}`,StartTime:startDate,EndTime:endDate,
+      Location:job.address||customer?.address||'Location TBD',Description:job.notes||'',IsAllDay:false,RecurrenceRule:'',RecurrenceID:null,RecurrenceException:'',StartTimezone:'',EndTimezone:'',CategoryColor:getStatusColor(job.status),
+      JobData:{...job,customer,priority:job.priority||'medium'}}];
+  }),[jobs,customers]);
 
   const getStatusText = (status) => {
     const statusTexts = {
@@ -162,12 +116,12 @@ const CalendarPage = () => {
   };
 
   const formatDate = (date) => {
-    return new Date(date).toLocaleDateString('en-US', {
+    return calendarDay(date)?.toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
       day: 'numeric'
-    });
+    })||'Date unavailable';
   };
 
   const formatTime = (time) => {
@@ -193,6 +147,12 @@ const CalendarPage = () => {
       transition={{ duration: 0.5 }}
       className="space-y-6"
     >
+      {(jobsQuery.error||customersQuery.error||(showJobModal&&detailQuery.error))&&<div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        <p>{jobsQuery.error?.message||customersQuery.error?.message||detailQuery.error?.message} Previously loaded events remain visible when available.</p>
+        <button type="button" className="mt-2 underline" onClick={()=>Promise.all([jobsQuery.refetch(),customersQuery.refetch(),...(showJobModal&&selectedSnapshot?[detailQuery.refetch()]:[])])}>Retry calendar refresh</button>
+        {showJobModal&&!selectedJob&&<button type="button" className="ml-4 underline" onClick={()=>{setShowJobModal(false);setSelectedJob(null);}}>Close unavailable job</button>}
+      </div>}
+      {jobsQuery.data?.hasMore&&<p role="status" className="text-sm text-amber-900">The calendar shows the first 500 loaded jobs.</p>}
       {/* Header */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between">
@@ -423,7 +383,7 @@ const CalendarPage = () => {
           onClose={() => setShowNewJob(false)}
           onCreated={() => {
             setShowNewJob(false);
-            loadJobsAndCustomers();
+            invalidate(['jobs','job','customers','customer-stats']);
           }}
         />
       )}

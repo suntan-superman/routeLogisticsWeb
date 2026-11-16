@@ -4,8 +4,12 @@ const { createRequire } = require('node:module');
 const mobile = createRequire(path.resolve(__dirname, '../routeLogisticsMobile/package.json'));
 const web = createRequire(path.resolve(__dirname, '../routeLogisticsWeb/package.json'));
 const React = mobile('react'), { create, act } = mobile('react-test-renderer'), { transformSync } = web('esbuild');
+const {createWorkspaceQueryMock,selectControlMock}=require('./support/workspaceQueryMock.cjs');
+const workspaceHooks=createWorkspaceQueryMock(React,{scopeId:'test-workspace'});
+const {createPrincipalQueryMock}=require('./support/principalQueryMock.cjs');
+const principalHooks=createPrincipalQueryMock(React);
 global.IS_REACT_ACT_ENVIRONMENT = true;
-let tree, authorized = true, user = { uid: 'platform-user', email: 'admin@example.invalid', emailVerified: true }, calls = [], dirty = false, discard = true, toasts = [], saveFailure = null, pendingSave = null, verificationEmails = 0, publicError = null, params = {}, publicItems = [], records = new Map();
+let tree, authorized = true, user = { uid: 'platform-user', email: 'admin@example.invalid', emailVerified: true }, calls = [], dirty = false, discard = true, toasts = [], saveFailure = null, pendingSave = null, verificationEmails = 0, publicError = null, contentError = null, params = {}, publicItems = [], records = new Map();
 const modules = new Map();
 function load(relative) {
   const file = path.resolve(__dirname, '../routeLogisticsWeb/src', relative);
@@ -13,6 +17,10 @@ function load(relative) {
   const module = { exports: {} };
   const mock = name => {
     if (name === 'react') return React;
+    if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
+    if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
+    if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found','user-changed'].includes(String(error?.code||'').split('/').pop())};
+    if(name.endsWith('/usePrincipalQuery'))return principalHooks;
     if (name === 'react-router-dom') return { Link: ({ children, to, ...props }) => React.createElement('a', { ...props, href: to }, children), useParams: () => params };
     if (name === 'react-helmet-async') return { Helmet: props => React.createElement(React.Fragment, null, props.children) };
     if (name === 'react-hot-toast') return { __esModule: true, default: { success: message => toasts.push({ type: 'success', message }), error: message => toasts.push({ type: 'error', message }) } };
@@ -25,6 +33,7 @@ function load(relative) {
       if (name === 'rlReadPublicContent') { if (publicError) throw publicError; return data.action === 'get' ? { item: publicItems.find(item => item.slug === data.slug) || null } : { items: publicItems }; }
       if (name === 'rlPlatformContentImage') return { image: { id: data.imageId || 'private-image', contentType: 'image/png', data: 'cHJpdmF0ZQ==', alt: 'An approved image' } };
       if (data.action === 'status') { if (!authorized) throw Object.assign(Error('Platform access denied.'), { code: 'functions/permission-denied' }); return { authorized: true, role: 'admin' }; }
+      if(contentError&&['dashboard','list'].includes(data.action))throw contentError;
       if (data.action === 'dashboard') return { counts: { faq: { draft: records.size, published: 0, archived: 0 } }, recentAudit: [] };
       if (data.action === 'list') return { items: [...records.values()].filter(item => item.type === data.type && (!data.status || item.status === data.status)) };
       if (data.action === 'get') return { item: records.get(data.id) };
@@ -55,12 +64,12 @@ const mountAdmin = async () => { await act(async () => { tree = create(React.cre
 const faq = overrides => ({ id: 'faq-one', type: 'faq', status: 'draft', title: 'A synthetic acceptance question', slug: 'acceptance-question', body: 'Synthetic draft content used only by this local test.', revision: 2, ...overrides });
 afterEach(async () => {
   if (tree) await act(async () => tree.unmount());
-  tree = null; authorized = true; user = { uid: 'platform-user', email: 'admin@example.invalid', emailVerified: true }; calls = []; dirty = false; discard = true; toasts = []; saveFailure = null; pendingSave = null; verificationEmails = 0; publicError = null; params = {}; publicItems = []; records = new Map();
+  tree = null; authorized = true; user = { uid: 'platform-user', email: 'admin@example.invalid', emailVerified: true }; calls = []; dirty = false; discard = true; toasts = []; saveFailure = null; pendingSave = null; verificationEmails = 0; publicError = null; contentError = null; params = {}; publicItems = []; records = new Map();
 });
 
 test('company ownership never bypasses denied platform authorization', async () => {
   authorized = false; await mountAdmin();
-  assert.match(text(), /Platform access required/); assert.match(text(), /Company ownership and team roles do not grant/);
+  assert.match(text(), /Platform access required/); assert.match(text(), /Platform access denied/);
   assert.equal(calls.some(call => ['list', 'dashboard', 'save'].includes(call.data.action)), false);
   assert.equal(tree.root.findAllByType('form').length, 0);
 });
@@ -93,6 +102,15 @@ test('a save failure preserves edits and permits retry instead of reporting a si
   await act(async () => tree.root.findByType('form').props.onSubmit({ preventDefault() {} }));
   assert.equal(dirty, true); assert.equal(input('Question').props.value, 'A draft question'); assert.equal(toasts.at(-1).type, 'error');
   assert.match(text(), /Reload its current revision/); assert.equal(button('Save content').props.disabled, false);
+});
+
+test('CMS background refresh retains an unfinished draft but authorization denial hides all editor content',async()=>{
+  await mountAdmin();await act(async()=>input('Question').props.onChange({target:{value:'Unpublished local question'}}));
+  records.set('faq-one',faq());await act(async()=>principalHooks.refresh(['rl-platform-content']));
+  assert.equal(input('Question').props.value,'Unpublished local question');assert.equal(dirty,true);assert.match(text(),/A synthetic acceptance question/);
+  contentError=Error('Temporary CMS read failure');await act(async()=>principalHooks.refresh(['rl-platform-content']));assert.equal(input('Question').props.value,'Unpublished local question');
+  contentError=Object.assign(Error('Platform permission revoked'),{code:'functions/permission-denied'});await act(async()=>principalHooks.refresh(['rl-platform-content']));
+  assert.match(text(),/Platform access could not be confirmed/);assert.equal(tree.root.findAllByType('form').length,0);assert.doesNotMatch(text(),/Unpublished local question|A synthetic acceptance question/);
 });
 
 test('switching content types asks to discard dirty content and cannot publish testimonials without authenticity evidence', async () => {

@@ -3,6 +3,8 @@ const assert = require('node:assert/strict'), fs = require('node:fs'), path = re
 const { createRequire } = require('node:module');
 const mobile = createRequire(path.resolve(__dirname, '../routeLogisticsMobile/package.json')), web = createRequire(path.resolve(__dirname, '../routeLogisticsWeb/package.json'));
 const React = mobile('react'), { create, act } = mobile('react-test-renderer'), { transformSync } = web('esbuild');
+const {createWorkspaceQueryMock,selectControlMock}=require('./support/workspaceQueryMock.cjs');
+const queryMock=createWorkspaceQueryMock(React);
 global.IS_REACT_ACT_ENVIRONMENT = true;
 const listeners = new Set();
 global.window = { addEventListener: (_name, handler) => listeners.add(handler), removeEventListener: (_name, handler) => listeners.delete(handler) };
@@ -20,6 +22,8 @@ function compile(relative) {
   const module = { exports: {} };
   const mock = name => {
     if (name === 'react') return React;
+    if(name.endsWith('/useWorkspaceQuery'))return queryMock;
+    if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
     if (name === 'react-hot-toast') { const toast = message => env.toasts.push(message); toast.success = toast; toast.error = toast; return { __esModule: true, default: toast }; }
     if (name === 'firebase/firestore') return new Proxy({}, { get: () => () => { throw Error('Scheduling must use the authorized callable, not direct Firestore writes.'); } });
     if (name.endsWith('/firebase')) return { auth: { currentUser: { uid: 'owner', displayName: 'Synthetic owner', email: 'owner@example.test' } }, db: {} };

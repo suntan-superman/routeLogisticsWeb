@@ -6,6 +6,7 @@ import { useAuth } from './AuthContext';
 import { createWorkQueryClient, allowWorkReads, blockWorkReads } from '../services/workQueryClient';
 import { localDay, workScopeKey, needsWorkspaceValidation } from '../services/workQueryPolicy';
 import { isNativeInteractionActive, subscribeNativeInteraction } from '../services/nativeInteraction';
+import { subscribeWorkWrites, matchesWrite } from '../services/workQueryEvents';
 
 const WorkQueryContext = createContext(null);
 export const useWorkQueryScope = () => useContext(WorkQueryContext);
@@ -28,6 +29,12 @@ function WorkspaceQueries({ user, canAccess, refreshUser, authStatus, authError,
   const [validationStatus, setValidationStatus] = useState(null), [validationError, setValidationError] = useState('');
   const accessHandler = useRef(null);
   const [client] = useState(() => createWorkQueryClient((error, query) => accessHandler.current?.(error, query), query => attempted.current.delete(query.queryHash)));
+  useEffect(() => subscribeWorkWrites(event => {
+    if (!live.current || JSON.stringify(event.scope) !== identity.current) return;
+    // A poll may already contain a snapshot from before this committed write.
+    // Replace that read so the mutation cannot coalesce with its stale result.
+    return client.invalidateQueries({ predicate: query => matchesWrite(query.queryKey, event) }, { cancelRefetch: true });
+  }), [client]);
   const refetchVisible = useCallback(() => {
     if (AppState.currentState !== 'active' || isNativeInteractionActive()) return;
     for (const query of client.getQueryCache().findAll({ queryKey: ['rl-work'] })) {

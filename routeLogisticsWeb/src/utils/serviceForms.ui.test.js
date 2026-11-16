@@ -8,6 +8,8 @@ const require=createRequire(import.meta.url),mobileRequire=createRequire(new URL
 const React=mobileRequire('react'),{create,act}=mobileRequire('react-test-renderer'),{transformSync}=require('esbuild');
 const {validateTemplate}=require('../../../functions/shared/serviceFormSchema');
 const template=validateTemplate(require('../../../functions/shared/serviceTemplates.json').find(row=>row.id==='pool-maintenance'));
+const {createWorkspaceQueryMock,selectControlMock}=require('../../../tests/support/workspaceQueryMock.cjs');
+const workspaceHooks=createWorkspaceQueryMock(React);
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 let tree,role,data,stored,calls,listeners,saveHandler;
 const modules=new Map(),root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -16,6 +18,9 @@ function load(filename){
   const module={exports:{}};modules.set(filename,module);
   const mock=name=>{
     if(name==='react')return React;
+    if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
+    if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
+    if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found'].includes(String(error?.code||'').split('/').pop())};
     if(name==='react/jsx-runtime')return mobileRequire(name);
     if(name==='react-hot-toast')return{__esModule:true,default:{success(){},error(){}}};
     if(name.endsWith('/hooks/useUnsavedChanges'))return{useUnsavedChanges:()=>({confirmDiscard:async()=>true})};

@@ -91,3 +91,26 @@
 .custom-schedule .e-appointment .e-location {
   opacity: 0.9;
 }
+
+/* Keep the embedded calendar's app-owned menu/selection states green too. */
+.custom-schedule.e-schedule .e-selected-cell,
+.custom-schedule .e-header-popup .e-calendar .e-content td.e-focused-date:not(.e-selected) span.e-day {
+  background-color: #dcfce7;
+  color: #065f46;
+}
+
+.custom-schedule .e-header-popup .e-calendar .e-content td.e-selected span.e-day,
+.custom-schedule .e-header-popup .e-calendar .e-content td.e-selected:hover span.e-day {
+  background-color: #047857;
+  border-color: #047857;
+  color: #fff;
+}
+
+.custom-schedule .e-header-popup .e-calendar .e-content td.e-today:not(.e-selected) span.e-day {
+  color: #047857;
+  border-color: #047857;
+}
+
+.custom-schedule .e-toolbar-pop .e-active-view .e-tbar-btn {
+  background-color: #047857;
+}

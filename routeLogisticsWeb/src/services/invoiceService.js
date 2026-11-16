@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy, limit, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, getDocs, getDocsFromServer, addDoc, updateDoc, deleteDoc, query, where, orderBy, limit, serverTimestamp } from 'firebase/firestore';
 import { db } from './firebase';
 import { scopeWhere, tenantFields } from './tenancy';
 import { computeTotals, generateInvoiceNumber, addDays } from './invoiceMath';
@@ -7,12 +7,14 @@ const today = () => new Date().toISOString().slice(0, 10);
 const ok = (data = {}) => ({ success: true, ...data });
 const fail = (error) => {
   console.error(error);
-  return { success: false, error: error.message || String(error) };
+  return { success: false, error: error.message || String(error), ...(error.code ? { code: error.code } : {}) };
 };
 
 export async function listInvoices(max = 200) {
   try {
-    const snap = await getDocs(query(collection(db, 'invoices'), scopeWhere(), orderBy('createdAt', 'desc'), limit(max)));
+    // An unavailable server must not turn an empty local cache into a successful
+    // "No invoices" result. React Query retains the last confirmed snapshot.
+    const snap = await getDocsFromServer(query(collection(db, 'invoices'), scopeWhere(), orderBy('createdAt', 'desc'), limit(max)));
     return ok({ invoices: snap.docs.map((d) => ({ id: d.id, ...d.data() })) });
   } catch (error) {
     return fail(error);

@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import SelectControl from '../components/SelectControl';
+import React, { useState } from 'react';
+import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
 import { motion as Motion } from 'framer-motion';
 import ReportingService from '../services/reportingService';
 import { 
@@ -18,7 +20,6 @@ import { can } from '../services/tenancy';
 import OperationsReportsPage from './OperationsReportsPage';
 
 const ReportsPage = () => {
-  const [analytics, setAnalytics] = useState(null);
   const [report, setReport] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedDateRange, setSelectedDateRange] = useState('month');
@@ -39,25 +40,8 @@ const ReportsPage = () => {
     { value: 'customers', label: 'Customer Analytics', icon: UsersIcon }
   ];
 
-  useEffect(() => {
-    loadAnalytics();
-  }, [selectedDateRange]);
-
-  const loadAnalytics = async () => {
-    setIsLoading(true);
-    try {
-      const result = await ReportingService.getBusinessAnalytics(selectedDateRange);
-      if (result.success) {
-        setAnalytics(result.analytics);
-      } else {
-        toast.error(result.error);
-      }
-    } catch (error) {
-      console.error('Error loading analytics:', error);
-      toast.error('Error loading analytics');
-    }
-    setIsLoading(false);
-  };
+  const analyticsQuery = useWorkspaceQuery(['analytics', selectedDateRange], () => ReportingService.getBusinessAnalytics(selectedDateRange), { intervalMs: 60_000 });
+  const analytics = analyticsQuery.data?.analytics;
 
   const generateReport = async () => {
     setIsLoading(true);
@@ -156,7 +140,7 @@ const ReportsPage = () => {
     return `${value.toFixed(1)}%`;
   };
 
-  if (isLoading && !analytics) {
+  if (analyticsQuery.isPending && !analyticsQuery.error) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
@@ -171,6 +155,7 @@ const ReportsPage = () => {
       transition={{ duration: 0.5 }}
       className="space-y-6"
     >
+      {analyticsQuery.error && <p role="alert">{analyticsQuery.error.message}</p>}
       {/* Header */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between">
@@ -182,7 +167,8 @@ const ReportsPage = () => {
             </div>
           </div>
           <div className="flex space-x-3">
-            <select
+            <SelectControl
+              aria-label="Report date range"
               value={selectedDateRange}
               onChange={(e) => setSelectedDateRange(e.target.value)}
               className="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
@@ -190,7 +176,7 @@ const ReportsPage = () => {
               {dateRanges.map(range => (
                 <option key={range.value} value={range.value}>{range.label}</option>
               ))}
-            </select>
+            </SelectControl>
             <button
               onClick={generateReport}
               disabled={isLoading}

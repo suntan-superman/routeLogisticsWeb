@@ -1,3 +1,6 @@
+import SelectControl from '../components/SelectControl';
+import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
+import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { collection, getDocs, query, limit } from 'firebase/firestore';
@@ -77,7 +80,11 @@ function IntegrationsWorkspace({ scopeKey, owner }) {
     if (!current()) throw new Error('Your company access changed. Reopen Integrations before continuing.');
     return result;
   }, [current]);
-  const load = useCallback(async () => { const value = await invoke('Status'); setStatus(value); return value; }, [invoke]);
+  const statusQuery = useWorkspaceQuery(['quickbooks-status'], () => call('Status'), { intervalMs: 60_000 });
+  const refetchStatus = statusQuery.refetch;
+  const load = useCallback(async () => { const result = await refetchStatus(); if (result.error) throw result.error; return result.data; }, [refetchStatus]);
+  useEffect(() => { if (statusQuery.data) setStatus(statusQuery.data); }, [statusQuery.data]);
+  useEffect(() => { if (statusQuery.error) setError(statusQuery.error.message); }, [statusQuery.error]);
   const loadOptions = useCallback(async () => {
     const connection = activeConnection.current, request = ++optionsRequest.current;
     if (!owner || !connection || !current()) return;
@@ -97,9 +104,8 @@ function IntegrationsWorkspace({ scopeKey, owner }) {
     mounted.current = true;
     const params = new URLSearchParams(window.location.search), code = params.get('qbError');
     if (code) { setError(oauthErrors[code] || oauthErrors.failed); params.delete('qbError'); window.history.replaceState(window.history.state, '', window.location.pathname + (params.size ? '?' + params.toString() : '') + window.location.hash); }
-    load().catch(e => { if (current()) setError(e.message); });
     return () => { mounted.current = false; };
-  }, [load, current]);
+  }, []);
   useEffect(() => {
     if (!status?.disconnecting) return;
     const supplied = Number(status.disconnectRetryAfterMs);
@@ -114,7 +120,12 @@ function IntegrationsWorkspace({ scopeKey, owner }) {
     setOptions(null); setOptionsError(''); setOptionsLoading(false); setAccount(''); setItem('');
     if (owner && connectionKey && !status?.reconnectRequired && !status?.credentialMismatch) loadOptions();
   }, [connectionKey, owner, status?.reconnectRequired, status?.credentialMismatch, loadOptions]);
-  useEffect(() => { let active = true; setLocalId(''); setRemoteId(''); setPreview(null); setRecords([]); if (current()) getDocs(query(collection(db, collections[type]), scopeWhere(), limit(500))).then((snap) => { if (active && current()) setRecords(snap.docs.map((row) => ({ id: row.id, name: row.get('name') || row.get('invoiceNumber') || row.get('serviceType') || row.get('title') || 'Name not provided', legacyId: row.get('quickbooksCustomerId') || row.get('quickbooksId') || '' }))); }).catch((e) => { if (active && current()) setError(e.message); }); return () => { active = false; }; }, [type, current]);
+  const recordsQuery = useWorkspaceQuery(['quickbooks-records', type], async () => {
+    const snap = await getDocs(query(collection(db, collections[type]), scopeWhere(), limit(500)));
+    return snap.docs.map(row => ({ id: row.id, name: row.get('name') || row.get('invoiceNumber') || row.get('serviceType') || row.get('title') || 'Name not provided', legacyId: row.get('quickbooksCustomerId') || row.get('quickbooksId') || '' }));
+  }, { intervalMs: 60_000 });
+  useEffect(() => { setLocalId(''); setRemoteId(''); setPreview(null); }, [type]);
+  useEffect(() => { setRecords(recordsQuery.data || []); }, [recordsQuery.data]);
   const run = async (action) => { if (locked.current || !current()) return; locked.current = true; setBusy(true); setError(''); setNotice(''); try { await action(); } catch (e) { if (current()) setError(e.message || 'The QuickBooks request failed. Retry or reconnect your company.'); } finally { locked.current = false; if (current()) setBusy(false); } };
   const selected = records.find((record) => record.id === localId);
   const accountAvailable = !!options?.accounts.some(option => option.id === account), itemAvailable = !!options?.items.some(option => option.id === item);
@@ -139,6 +150,7 @@ function IntegrationsWorkspace({ scopeKey, owner }) {
     try { await load(); }
     catch { if (current()) setError('Accounting defaults were saved, but connection status could not be refreshed. Use Refresh connection status to retry.'); }
   });
+  if (workspaceAccessError(statusQuery.error) || workspaceAccessError(recordsQuery.error)) return <p role="alert">Your company integration access changed. Refresh access before continuing.</p>;
   return <div className="space-y-6 max-w-4xl"><h1 className="text-2xl font-bold">Company integrations</h1>{error && <p role="alert" className="text-red-700">{error}</p>}{notice && <p role="status">{notice}</p>}<section className="bg-white rounded-lg border p-6 space-y-4"><h2 className="text-xl font-semibold">QuickBooks Online</h2><p>{status?.connected ? `Connected to ${status.companyName || 'QuickBooks company'} (${status.realmId})` : 'Not connected'} · {status?.environment || 'sandbox'} · {status?.writesEnabled ? 'Accounting exports enabled' : 'Accounting exports disabled'}</p><p>Each company authorizes its own QuickBooks connection using platform-managed credentials.</p>{!status && <p>Loading connection status…</p>}<button className="btn-secondary" disabled={busy} onClick={() => run(load)}>Refresh connection status</button>{healthMessages[status?.health] && <p>{healthMessages[status.health]}</p>}{status?.credentialMismatch && <p className="text-amber-800">The platform accounting credentials changed. Reconnect your company before using QuickBooks.</p>}{status?.reconnectRequired && status?.health !== 'reconnect-required' && <p className="text-amber-800">Your QuickBooks authorization needs to be renewed. Use Reconnect to restore access.</p>}{status?.lastError && <p role="alert" className="text-amber-800">{status.lastError}</p>}{status?.disconnectWarning && <p className="text-amber-800">{status.disconnectWarning}</p>}{status?.disconnecting && <p>QuickBooks is disconnected locally. Reconnection is briefly paused while the previous revocation request settles; the status will refresh automatically.</p>}{owner && <div className="flex gap-3"><button className="btn-primary" disabled={busy || !status?.enabled || status?.disconnecting} onClick={() => run(async () => { const result = await invoke('Connect'); if (current()) window.location.assign(result.url); })}>{status?.connected || status?.reconnectRequired ? 'Reconnect' : 'Connect QuickBooks'}</button>{status?.connected && <button className="btn-secondary" disabled={busy || status?.disconnecting} onClick={() => run(async () => { if (await confirm({ title: 'Disconnect QuickBooks?', message: 'Sync will stop. Saved mappings and accounting records will be retained.' })) { const result = await invoke('Disconnect'), value = await load(), warning = result.warning || result.disconnectWarning; setNotice(warning && warning === value.disconnectWarning ? '' : warning || 'QuickBooks disconnected. Your company can reconnect when ready.'); } })}>Disconnect</button>}</div>}</section>
     {status?.connected && <><section aria-label="Accounting defaults" className="bg-white rounded-lg border p-6 space-y-4"><h2 className="text-lg font-semibold">Accounting defaults</h2><p>Select the existing QuickBooks income account and service item used for invoice lines without a specific service mapping. This saves your company preferences without changing QuickBooks records.</p>
       {!owner ? <><p>Only the company owner can change accounting defaults.</p><p>Default income account: {status.incomeAccountName || (status.incomeAccountId ? 'Selection needs owner review' : 'Not selected')}</p><p>Default service item: {status.defaultItemName || (status.defaultItemId ? 'Selection needs owner review' : 'Not selected')}</p></> : <>
@@ -157,7 +169,7 @@ function IntegrationsWorkspace({ scopeKey, owner }) {
         <button className="btn-primary" aria-busy={savingDefaults} disabled={defaultsUnavailable || !accountAvailable || !itemAvailable || !defaultsChanged} onClick={saveDefaults}>{savingDefaults ? 'Saving…' : 'Save defaults'}</button>
       </>}
     </section>
-    <section className="bg-white rounded-lg border p-6 space-y-4"><h2 className="text-lg font-semibold">Record mapping and review</h2><select aria-label="Record type" value={type} onChange={(e) => setType(e.target.value)}>{Object.keys(collections).map((value) => <option key={value}>{value}</option>)}</select><select className="ml-3 max-w-full" aria-label="Route Logistics record" value={localId} onChange={(e) => { setLocalId(e.target.value); setPreview(null); }}>{[<option key="" value="">Select a record (up to 500 shown)</option>, ...records.map((record) => <option key={record.id} value={record.id}>{record.name}</option>)]}</select>{selected?.legacyId && <p>Legacy accounting reference: {selected.legacyId}. Verify this reference against the connected company before adopting it.</p>}
+    <section className="bg-white rounded-lg border p-6 space-y-4"><h2 className="text-lg font-semibold">Record mapping and review</h2><SelectControl aria-label="Record type" value={type} onChange={(e) => setType(e.target.value)}>{Object.keys(collections).map((value) => <option key={value}>{value}</option>)}</SelectControl><SelectControl className="ml-3 max-w-full" aria-label="Route Logistics record" value={localId} onChange={(e) => { setLocalId(e.target.value); setPreview(null); }}>{[<option key="" value="">Select a record (up to 500 shown)</option>, ...records.map((record) => <option key={record.id} value={record.id}>{record.name}</option>)]}</SelectControl>{selected?.legacyId && <p>Legacy accounting reference: {selected.legacyId}. Verify this reference against the connected company before adopting it.</p>}
     <div className="flex gap-3 flex-wrap"><input aria-label="Existing QuickBooks record ID" placeholder="Existing QuickBooks record ID" value={remoteId} onChange={(e) => setRemoteId(e.target.value)} /><button className="btn-secondary" disabled={busy || !localId || !remoteId || !owner} onClick={() => run(async () => { if (await confirm({ title: 'Adopt this accounting record?', message: 'Confirm that this is the same customer, service or invoice in the connected QuickBooks company. This saves a mapping without changing QuickBooks.' })) { await invoke('Adopt', { type, localId, remoteId }); setPreview(null); await load(); } })}>Adopt existing record</button><button className="btn-secondary" disabled={busy || !localId} onClick={() => run(async () => setPreview(await invoke('Preview', { type, localId })))}>Preview export</button>{type === 'Invoice' && <button className="btn-secondary" disabled={busy || !localId} onClick={() => run(async () => { await invoke('Reconcile', { localId }); await load(); })}>Check payment balance</button>}</div>
     {preview && <div><p>{preview.action} · {preview.environment}</p><pre className="overflow-auto bg-gray-50 p-4">{JSON.stringify(preview.payload, null, 2)}</pre><button className="btn-primary" disabled={busy || !status.writesEnabled || !owner} onClick={() => run(async () => { if (await confirm({ title: 'Export to QuickBooks?', message: `This will ${preview.action} this accounting record in ${preview.environment}.` })) { await invoke('Sync', { type, localId, fingerprint: preview.fingerprint }); setPreview(null); await load(); } })}>Export reviewed record</button></div>}</section>
     <section className="bg-white rounded-lg border p-6"><h2 className="font-semibold">Saved mappings</h2><div className="overflow-auto"><table className="w-full text-left"><thead><tr><th>Record</th><th>QuickBooks ID</th><th>Status</th><th>Last export</th></tr></thead><tbody>{status.mappings.map((row) => <tr key={`${row.type}:${row.localId}`}><td>{row.type} · {records.find((record) => record.id === row.localId)?.name || row.localId}</td><td>{row.remoteId}</td><td>{row.status}</td><td>{row.lastSyncedAt ? new Date(row.lastSyncedAt).toLocaleString() : '—'}</td></tr>)}</tbody></table></div></section></>}

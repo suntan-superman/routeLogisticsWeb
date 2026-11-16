@@ -1,3 +1,4 @@
+import SelectControl from './SelectControl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -6,6 +7,8 @@ import { loadMaps } from '../services/maps';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import ServicePropertyEligibility from './ServicePropertyEligibility';
 import AddressValidationNotice from './AddressValidationNotice';
+import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
+import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 
 const inputClass = 'mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500';
 const actionClass = 'rounded-lg bg-primary-700 px-4 py-2 font-medium text-white hover:bg-primary-800 disabled:cursor-not-allowed disabled:opacity-50';
@@ -49,6 +52,8 @@ function ServiceAreasForm({ company, allowed }) {
   const [preview, setPreview] = useState(false), [previewCategory, setPreviewCategory] = useState(''), [property, setProperty] = useState({ address: '', serviceCategory: '' });
   const runtime = useRef({ mounted: false, sequence: 0, busy: false });
   const dirty = allowed && !!form && JSON.stringify(form) !== saved;
+  const dirtyRef = useRef(dirty); dirtyRef.current = dirty;
+  const settingsQuery = useWorkspaceQuery(['service-areas', company?.id], () => callWorkspace('rlServiceAreas', { action: 'status', companyId: company.id }), { enabled: allowed, intervalMs: 60000 });
   const { confirmDiscard } = useUnsavedChanges(dirty, { message: 'You have unsaved service-area changes. Leave without saving them?', scope: `service-areas:${company?.id || ''}` });
   const invoke = useCallback(async (kind, operation, onSuccess) => {
     const state = runtime.current;
@@ -74,9 +79,16 @@ function ServiceAreasForm({ company, allowed }) {
   useEffect(() => {
     const state = runtime.current;
     state.mounted = true;
-    if (allowed) invoke('load', () => callWorkspace('rlServiceAreas', { action: 'status', companyId: company.id }), accept);
     return () => { state.mounted = false; state.sequence++; state.busy = false; };
-  }, [allowed, company?.id, invoke, accept]);
+  }, [allowed, company?.id]);
+  useEffect(() => {
+    if (!settingsQuery.data || dirtyRef.current || runtime.current.busy) return;
+    const next = formFor(settingsQuery.data.settings);
+    setData(settingsQuery.data); setForm(next); setSaved(JSON.stringify(next));
+    // Property-check input is an independent draft; polling settings must not
+    // erase the address the dispatcher is currently checking.
+  }, [settingsQuery.data, busy]);
+  useEffect(() => { if (workspaceAccessError(settingsQuery.error)) { setForm(null); setData(null); setPreview(false); } }, [settingsQuery.error]);
   if (!allowed) return <section className="rounded-xl border border-gray-200 bg-white p-6"><h2 className="text-xl font-semibold">Service Areas</h2><p className="mt-2">Company owners and managers manage service territories. Technicians cannot change coverage or approve exceptions.</p></section>;
   const categories = (company.serviceCategories || []).filter(value => typeof value === 'string' && value.trim());
   const validationError = form ? validation(form) : '';
@@ -85,14 +97,14 @@ function ServiceAreasForm({ company, allowed }) {
   const save = () => {
     if (!dirty || validationError) return;
     invoke('save', () => callWorkspace('rlServiceAreas', { action: 'save', companyId: company.id, expectedRevision: data.settings?.revision || 0, settings: payloadFor(form) }), response => {
-      accept(response); setMessage('Service areas saved. Existing appointments and history are unchanged.'); toast.success('Service areas saved.');
+      settingsQuery.setData(response); accept(response); setMessage('Service areas saved. Existing appointments and history are unchanged.'); toast.success('Service areas saved.');
     });
   };
-  const reload = async () => { if (dirty && !await confirmDiscard()) return; invoke('load', () => callWorkspace('rlServiceAreas', { action: 'status', companyId: company.id }), accept); };
+  const reload = async () => { if (dirty && !await confirmDiscard()) return; invoke('load', async () => { const result = await settingsQuery.refetch(); if (result.error) throw result.error; return result.data; }, accept); };
   const previewRule = data?.settings?.categoryOverrides?.find(row => row.serviceCategory === previewCategory) || data?.settings;
   return <section aria-label="Service area settings" className="space-y-6 rounded-xl border border-gray-200 bg-white p-5 sm:p-6">
     <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-xl font-semibold">Service Areas</h2><p className="mt-1 max-w-3xl text-sm text-gray-600">Define coverage around the service property. Changes apply to future checks and do not rewrite existing appointments, customer locations or service history.</p></div><button type="button" className="text-sm font-medium text-primary-700 underline disabled:opacity-50" disabled={!!busy} onClick={reload}>Reload service areas</button></div>
-    {error && !addressValidation && <p role="alert" className="rounded-lg bg-red-50 p-3 text-red-800">{error}</p>}
+    {(error || settingsQuery.error) && !addressValidation && <p role="alert" className="rounded-lg bg-red-50 p-3 text-red-800">{error || settingsQuery.error.message}</p>}
     <AddressValidationNotice validation={addressValidation} onAccept={operatingAddress => patch({ operatingAddress })} disabled={!!busy || !allowed || !form} />
     {message && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-emerald-900">{message}</p>}
     {!form && !error && <p role="status">Loading service areas…</p>}
@@ -105,7 +117,7 @@ function ServiceAreasForm({ company, allowed }) {
           <div><h3 className="font-semibold">Service-category overrides</h3><p className="text-sm text-gray-600">A category override replaces default coverage for that category. Other services use default company coverage.</p></div>
           {!categories.length && <p className="text-sm text-gray-600">Add service categories in company settings before creating an override.</p>}
           {form.categoryOverrides.map((row, index) => <div className="space-y-3 rounded-lg bg-gray-50 p-4" key={index}>
-            <label className="block text-sm font-medium">Override {index + 1} service category<select aria-label={`Override ${index + 1} service category`} className={inputClass} value={row.serviceCategory} onChange={event => updateOverride(index, { serviceCategory: event.target.value })}><option value="">Choose a category</option>{categories.map(category => <option key={category} value={category}>{category}</option>)}</select></label>
+            <label className="block text-sm font-medium">Override {index + 1} service category<SelectControl aria-label={`Override ${index + 1} service category`} className={inputClass} value={row.serviceCategory} onChange={event => updateOverride(index, { serviceCategory: event.target.value })}><option value="">Choose a category</option>{categories.map(category => <option key={category} value={category}>{category}</option>)}</SelectControl></label>
             <CoverageFields rule={row} label={`Override ${index + 1}`} onChange={change => updateOverride(index, change)} />
             <button type="button" className="text-sm text-red-800 underline" onClick={() => patch({ categoryOverrides: form.categoryOverrides.filter((_row, position) => position !== index) })}>Remove override {index + 1}</button>
           </div>)}
@@ -120,7 +132,7 @@ function ServiceAreasForm({ company, allowed }) {
       <section aria-label="Saved coverage preview" className="space-y-3 border-t border-gray-200 pt-5">
         <h3 className="font-semibold">Saved coverage preview</h3>
         <p className="text-sm text-gray-600">{dirty ? 'Save your changes to update this preview and property checks.' : 'Preview uses the last saved, server-validated coverage.'}</p>
-        {!!data.settings?.categoryOverrides?.length && <label className="block text-sm font-medium">Preview service category<select aria-label="Preview service category" className={inputClass} value={previewCategory} onChange={event => setPreviewCategory(event.target.value)}><option value="">Default company coverage</option>{data.settings.categoryOverrides.map(row => <option key={row.serviceCategory} value={row.serviceCategory}>{row.serviceCategory}</option>)}</select></label>}
+        {!!data.settings?.categoryOverrides?.length && <label className="block text-sm font-medium">Preview service category<SelectControl aria-label="Preview service category" className={inputClass} value={previewCategory} onChange={event => setPreviewCategory(event.target.value)}><option value="">Default company coverage</option>{data.settings.categoryOverrides.map(row => <option key={row.serviceCategory} value={row.serviceCategory}>{row.serviceCategory}</option>)}</SelectControl></label>}
         {previewRule?.method === 'zip' ? <div className="flex flex-wrap gap-2" aria-label="Saved ZIP-code coverage">{previewRule.zipCodes?.length ? previewRule.zipCodes.map(zip => <span className="rounded bg-emerald-50 px-3 py-1 text-sm text-emerald-900" key={zip}>{zip}</span>) : <p className="text-sm text-gray-600">No ZIP codes saved.</p>}</div> : <p>{previewRule?.radiusMiles} mile radius from the validated operating location.</p>}
         {data.settings?.operatingLocation?.formattedAddress && <p className="text-sm">Operating location: {data.settings.operatingLocation.formattedAddress}</p>}
         <button type="button" className="text-sm font-medium text-primary-700 underline disabled:opacity-50" disabled={dirty || !data.settings?.configured || !data.settings?.operatingLocation} onClick={() => setPreview(value => !value)}>{preview ? 'Hide coverage map' : 'Show coverage map'}</button>
@@ -133,7 +145,7 @@ function ServiceAreasForm({ company, allowed }) {
 
 function CoverageFields({ rule, label, onChange }) {
   return <div className="grid gap-4 sm:grid-cols-2">
-    <label className="block text-sm font-medium">{label} method<select aria-label={`${label} method`} className={inputClass} value={rule.method} onChange={event => onChange({ method: event.target.value })}><option value="zip">ZIP codes</option><option value="radius">Radius from operating location</option></select></label>
+    <label className="block text-sm font-medium">{label} method<SelectControl aria-label={`${label} method`} className={inputClass} value={rule.method} onChange={event => onChange({ method: event.target.value })}><option value="zip">ZIP codes</option><option value="radius">Radius from operating location</option></SelectControl></label>
     {rule.method === 'zip' ? <label className="block text-sm font-medium">{label} ZIP codes<textarea aria-label={`${label} ZIP codes`} className={inputClass} value={rule.zipCodesText} maxLength={6000} rows={3} onChange={event => onChange({ zipCodesText: event.target.value })} placeholder="93312, 93311" /><span className="mt-1 block text-sm font-normal text-gray-600">US ZIP codes, separated by commas or spaces. ZIP+4 entries are normalized to five digits.</span></label> : <label className="block text-sm font-medium">{label} radius in miles<input aria-label={`${label} radius in miles`} className={inputClass} type="number" min="0.1" max="300" step="0.1" value={rule.radiusMiles} onChange={event => onChange({ radiusMiles: event.target.value })} /></label>}
   </div>;
 }

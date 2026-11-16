@@ -4,6 +4,8 @@ const { createRequire } = require('node:module');
 const mobile = createRequire(path.resolve(__dirname, '../routeLogisticsMobile/package.json'));
 const web = createRequire(path.resolve(__dirname, '../routeLogisticsWeb/package.json'));
 const React = mobile('react'), { create, act } = mobile('react-test-renderer'), { transformSync } = web('esbuild');
+const {createWorkspaceQueryMock,selectControlMock}=require('./support/workspaceQueryMock.cjs');
+const workspaceHooks=createWorkspaceQueryMock(React,{scopeId:()=>[env.uid,env.company,env.role,env.membershipId].join(':')});
 global.IS_REACT_ACT_ENVIRONMENT = true;
 let tree, env;
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -19,6 +21,9 @@ const firebase = { db: {}, functions: {}, auth: { get currentUser() { return { u
 const tenancy = { getClaims: claims, can: capability => capability === 'integrations.read' && ['owner', 'admin'].includes(env.role), scopeWhere: () => ({ field: 'companyId', value: env.company }) };
 const mock = name => {
   if (name === 'react') return React;
+    if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
+    if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
+    if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found','user-changed'].includes(String(error?.code||'').split('/').pop())};
   if (name === 'react-hot-toast') return { __esModule: true, default: { success: message => env.toasts.push({ type: 'success', message }), error: message => env.toasts.push({ type: 'error', message }) } };
   if (name.endsWith('/hooks/useUnsavedChanges')) return { useUnsavedChanges: dirty => { env.unsaved = dirty; return { confirmDiscard: async () => true }; } };
   if (name === 'firebase/functions') return { httpsCallable: (_functions, fullName) => async data => {
@@ -215,7 +220,7 @@ test('unchanged and reverted accounting defaults disable Save and remove the uns
 test('successful defaults save remains successful when the following status refresh fails', async () => {
   reset(); await render(); await select('Default income account','Other'); env.failStatusAfterSave=true;
   await act(async()=>button('Save defaults').props.onClick()); await act(settle);
-  assert.match(text(),/Accounting defaults were saved, but connection status could not be refreshed/);
+  assert.match(text(),/Accounting defaults saved/); assert.match(text(),/Connection status unavailable/);
   assert.equal(button('Save defaults').props.disabled,true); assert.equal(env.unsaved,false);
   assert.deepEqual(env.toasts,[{type:'success',message:'Accounting defaults saved.'}]);
 });

@@ -12,7 +12,7 @@ const root = path.resolve(__dirname, '..'), cache = new Map(), AuthContext = Rea
 let currentAuth, changes = [], sent = [], verified = [], stored = new Map();
 let jobRequests = [], jobLoader = async () => ({ success: true, jobs: [] }), detailLoader, authRefreshes = 0;
 let nativePushMounts = 0;
-let customerRows = [], customerSaves = [], jobSaves = [], customerSave, jobSave;
+let customerRows = [], customerSaves = [], jobSaves = [], customerSave, jobSave, companySnapshot = null;
 const mounted = new Set();
 const appListeners = new Set(), networkListeners = new Set(), backListeners = new Set();
 const pass = ({ children }) => children;
@@ -45,6 +45,7 @@ function load(relative) {
     if (specifier === '@react-native-community/datetimepicker') return 'NativeDatePicker';
     if (specifier === '@react-native-community/netinfo') return { addEventListener: listener => { networkListeners.add(listener); listener({ isConnected: true, isInternetReachable: true }); return () => networkListeners.delete(listener); } };
     if (specifier === '@react-native-async-storage/async-storage') return { getItem: async key => stored.get(key) || null, setItem: async (key, value) => stored.set(key, value), removeItem: async key => stored.delete(key) };
+    if (specifier.endsWith('/services/workspacePolicy')) return require('../services/workspacePolicy');
     if (specifier === './AuthContext' || specifier.endsWith('/contexts/AuthContext')) return { AuthContext, AuthProvider: pass, useAuth: () => currentAuth };
     if (specifier.endsWith('/contexts/LanguageContext')) return { LanguageProvider: pass, useLanguage: () => ({ t: key => key, language: 'en', changeLanguage() {} }) };
     if (specifier.endsWith('/theme/ThemeProvider')) return { ThemeProvider: pass, useTheme: () => ({ palette, colors: load('constants/colors.js').COLORS, isDark: true, ready: true, mode: 'dark', changeMode: async value => changes.push(value), reduceTransparency: false }) };
@@ -60,7 +61,7 @@ function load(relative) {
       React.createElement('Text', null, job.customerName), React.createElement('Pressable', { accessibilityLabel: 'Close job details', onPress: onClose }, 'Close'));
     if (specifier.endsWith('/services/tenancy')) return { canManage: () => currentAuth.permissions.canManage, localDate: () => '2026-11-13' };
     if (specifier === './offline' || specifier.endsWith('/services/offline')) return { cachedRead: (_key, loader) => loader(), readCache: async () => null, overlayJobs: async jobs => jobs };
-    if (specifier === './workspaceApi' || specifier.endsWith('/services/workspaceApi')) return { callWorkspace: async () => ({ stops: [], saved: null }), readWorkspace: async (resource, options) => { assert.equal(resource, 'jobs'); return detailLoader(options); } };
+    if (specifier === './workspaceApi' || specifier.endsWith('/services/workspaceApi')) return { callWorkspace: async () => ({ stops: [], saved: null }), readWorkspace: async (resource, options) => { if (resource === 'company') return { company: companySnapshot || { name: currentAuth.user.businessName, phone: currentAuth.user.businessPhone, address: currentAuth.user.businessAddress, services: currentAuth.user.services } }; assert.equal(resource, 'jobs'); return detailLoader(options); } };
     if (specifier === './firebase' || specifier.endsWith('/services/firebase')) return { CustomerService: { getCustomers: async () => ({ success: true, customers: customerRows.map(row => ({ ...row })) }), addCustomer: async data => { customerSaves.push({ action: 'create', data }); return customerSave({ action: 'create', data }); }, updateCustomer: async (id, data, expectedVersion) => { customerSaves.push({ action: 'update', id, data, expectedVersion }); return customerSave({ action: 'update', id, data, expectedVersion }); } }, JobService: { addJob: async (data, options) => { jobSaves.push({ action: 'create', data, options }); return jobSave(); }, updateJob: async (id, data, expectedVersion, options) => { jobSaves.push({ action: 'update', id, data, expectedVersion, options }); return jobSave(); }, getJobsByDateRange: async (startDate, endDate) => { const range = { startDate, endDate }; jobRequests.push(range); return jobLoader(range); } }, EstimateService: {} };
     if (specifier.startsWith('.')) {
       const resolved = path.resolve(path.dirname(filename), specifier);
@@ -75,7 +76,7 @@ function load(relative) {
 function account(role = 'technician', status = 'company') {
   jobRequests = []; jobLoader = async () => ({ success: true, jobs: [] }); native.AppState.currentState = 'active'; authRefreshes = 0;
   nativePushMounts = 0; native.Linking.openURL = async () => {}; native.Alert.alert = () => {};
-  customerRows = []; customerSaves = []; jobSaves = []; customerSave = async () => ({ success: true }); jobSave = async () => ({ success: true });
+  customerRows = []; customerSaves = []; jobSaves = []; companySnapshot = null; customerSave = async () => ({ success: true }); jobSave = async () => ({ success: true });
   detailLoader = async ({ id }) => ({ job: { id, companyId: 'acme', assignedTo: 'membership', customerName: 'Assigned customer', status: 'scheduled' }, customer: null });
   const user = { id: 'luis', name: 'Luis Gonzales', email: 'luis@example.com', emailVerified: true, companyId: status === 'company' ? 'acme' : null, role: status === 'company' ? role : null, membershipId: status === 'company' ? 'membership' : null,
     workspace: { status, invitations: [{ id: 'invite', companyName: 'Acme Pest Control', role: 'technician' }] }, companyName: 'Acme Pest Control', businessName: 'Acme Pest Control', businessPhone: '555-0100', businessAddress: '1 Main St', services: ['Termite Inspection', 'Rodent Control'] };
@@ -231,6 +232,19 @@ test('Settings formats personal phone input and saves the displayed number witho
   assert.equal(phone().props.keyboardType, 'phone-pad');
   await press(tree, 'Save profile & preferences');
   assert.equal(saved.phoneNumber, '(661) 555-0123'); assert.equal(saved.businessName, undefined);
+});
+
+test('company metadata refresh updates shared services while retaining unsaved personal Settings input', async () => {
+  account('manager');
+  const tree = await render('screens/SettingsScreen.js');
+  const phone = () => tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Your phone number')[0];
+  await act(async () => phone().props.onChangeText('6615550199'));
+  companySnapshot = { name: 'Acme Updated', phone: '6615550134', address: '2 New St', services: ['Updated service'] };
+  await press(tree, 'Refresh company information'); await press(tree, 'Services');
+  assert.match(textOf(tree), /Acme Updated/); assert.match(textOf(tree), /Updated service/);
+  assert.doesNotMatch(textOf(tree), /Termite Inspection|Rodent Control/);
+  assert.equal(phone().props.value, '(661) 555-0199');
+  assert.equal(authRefreshes, 0, 'metadata reads must not rehydrate authorization or unmount the workspace');
 });
 
 test('Settings starts with services and notifications collapsed and hides the inactive language selector', async () => {

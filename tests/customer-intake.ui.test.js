@@ -75,7 +75,7 @@ test('existing identity and selected rental property survive inquiry save and es
   const created = env.calls.find(row => row.action === 'create'); assert.equal(created.customerId, customer.id); assert.equal(created.propertyId, property.id); assert.equal(Object.hasOwn(created, 'customer'), false); assert.equal(created.inquiry.followUpMemberId, 'manager-one');
   assert.match(content(), /Inquiry saved/); await click('Schedule Estimate');
   assert.equal(env.schedule.defaults.customerId, customer.id); assert.equal(env.schedule.defaults.servicePropertyId, property.id); assert.equal(env.schedule.defaults.address, property.address); assert.equal(env.schedule.defaults.appointmentKind, 'estimate_visit'); assert.equal(env.schedule.defaults.totalCost, '0'); assert.equal(env.schedule.defaults.notes, 'Ask about treatment options'); assert.doesNotMatch(env.schedule.defaults.notes, /side entrance/); assert.match(env.schedule.defaults.operationId, /^[a-f0-9-]{36}$/i);
-  assert.equal(env.schedule.defaults.serviceAreaExceptionId, 'prior-owner-approval'); assert.equal(env.schedule.defaults.serviceCategory, 'Pest Control');
+  assert.equal(env.schedule.defaults.assignedTo, 'manager-one'); assert.equal(env.schedule.defaults.serviceAreaExceptionId, 'prior-owner-approval'); assert.equal(env.schedule.defaults.serviceCategory, 'Pest Control');
 });
 test('a new prospective customer can be started without performing an existing-customer search', async () => {
   await mount(); await click('New Inquiry'); await click('Create inquiry for a new prospect'); assert.equal(control('Find existing customer'), undefined); assert.ok(control('Prospect name')); assert.ok(button('Choose a different customer or prospect'));

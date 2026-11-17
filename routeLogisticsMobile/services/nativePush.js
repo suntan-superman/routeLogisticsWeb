@@ -9,10 +9,10 @@ import { auth } from '../constants/firebase';
 import { callWorkspace, readWorkspace } from './workspaceApi';
 import { beginNativeInteraction } from './nativeInteraction';
 
-const prefix = `rl-native-push-v1:${auth.app.options.projectId}`, registrationKey = `${prefix}:registration`, pendingKey = `${prefix}:open`, handledKey = `${prefix}:handled`, invalidationsKey = `${prefix}:invalidations`, installationKey = 'rl-native-push-installation-v1', sequenceKey = 'rl-native-push-sequence-v1';
+const prefix = `rl-native-push-v1:${auth.app.options.projectId}`, registrationKey = `${prefix}:registration`, pendingKey = `${prefix}:open`, handledKey = `${prefix}:handled`, invalidationsKey = `${prefix}:invalidations`, authorizedScopesKey = `${prefix}:authorized-scopes`, installationKey = 'rl-native-push-installation-v1', sequenceKey = 'rl-native-push-sequence-v1';
 const listeners = new Set(), openListeners = new Set(), receivedListeners = new Set();
 const defaults = { enabled: true, assignments: true, schedule: true, status: true };
-let context = null, accessStatus = 'signed-out', initialized = false, opening = false, generation = 0, registration = null, pending = null, handled = [], invalidations = [], loaded = false, loading, registering = null;
+let context = null, accessStatus = 'signed-out', initialized = false, opening = false, generation = 0, registration = null, pending = null, handled = [], invalidations = [], authorizedScopes = [], loaded = false, loading, registering = null;
 let state = { available: false, registered: false, permission: 'undetermined', preferences: defaults, busy: false, error: '', message: '' };
 const receivedIds = new Set();
 const key = user => [user?.id, user?.companyId, user?.role, user?.membershipId || ''].join(':');
@@ -25,12 +25,14 @@ const categoryEnabled = data => state.preferences.enabled && state.preferences[[
 async function load() {
   if (loaded) return;
   if (!loading) loading = (async () => {
-    const values = await Promise.all([registrationKey, pendingKey, handledKey, invalidationsKey].map(async item => { try { return JSON.parse(await AsyncStorage.getItem(item) || 'null'); } catch { return null; } }));
-    registration = values[0]; pending = safeData(values[1]); handled = Array.isArray(values[2]) ? values[2].slice(-100) : []; invalidations = Array.isArray(values[3]) ? values[3].slice(-20) : []; loaded = true;
+    const values = await Promise.all([registrationKey, pendingKey, handledKey, invalidationsKey, authorizedScopesKey].map(async item => { try { return JSON.parse(await AsyncStorage.getItem(item) || 'null'); } catch { return null; } }));
+    registration = values[0]; pending = safeData(values[1]); handled = Array.isArray(values[2]) ? values[2].slice(-100) : []; invalidations = Array.isArray(values[3]) ? values[3].slice(-20) : []; authorizedScopes = Array.isArray(values[4]) ? [...new Set(values[4].filter(value => typeof value === 'string' && value.length <= 500))].slice(-20) : []; loaded = true;
   })().finally(() => { loading = null; });
   await loading;
 }
 async function installationId() { let value = await SecureStore.getItemAsync(installationKey); if (!value) { value = Crypto.randomUUID(); await SecureStore.setItemAsync(installationKey, value); } return value; }
+async function rememberAuthorizedScope(user) { const value = key(user); authorizedScopes = [...authorizedScopes.filter(item => item !== value), value].slice(-20); await AsyncStorage.setItem(authorizedScopesKey, JSON.stringify(authorizedScopes)); }
+async function forgetAuthorizedScope(user) { const value = key(user); authorizedScopes = authorizedScopes.filter(item => item !== value); if (authorizedScopes.length) await AsyncStorage.setItem(authorizedScopesKey, JSON.stringify(authorizedScopes)); else await AsyncStorage.removeItem(authorizedScopesKey); }
 let sequenceWrites = Promise.resolve();
 function nextSequence() { const task = sequenceWrites.then(async () => { const next = Number(await SecureStore.getItemAsync(sequenceKey) || 0) + 1; await SecureStore.setItemAsync(sequenceKey, String(next)); return next; }); sequenceWrites = task.catch(() => {}); return task; }
 async function assertAccount(user) {
@@ -120,6 +122,7 @@ export async function refreshNativePush(user = context) {
   update({ available: result.available === true, preferences: result.preferences, permission: granted(permission) ? 'granted' : permission.status, registered: registration?.scope === key(user) && granted(permission), error: '', message: result.available ? '' : 'Native push awaits APNs/Android FCM credentials and production activation.' });
   if (registration?.scope === key(user) && (!granted(permission) || !result.preferences.enabled)) await invalidateNativePush({ unregisterNative: !result.preferences.enabled });
   else if (registration?.scope === key(user) && result.available && result.preferences.enabled && granted(permission)) await registerNativePush(user, false);
+  else if (!registration && authorizedScopes.includes(key(user)) && result.available && result.preferences.enabled && granted(permission)) await registerNativePush(user, false);
 }
 async function registerNativePush(user, askPermission) {
   if (registering?.scope === key(user) && registering.generation === generation) return registering.promise;
@@ -141,7 +144,7 @@ async function registerNativePush(user, askPermission) {
     const registrationSequence = await nextSequence(), proof = await installationId(); if (!current(user, ticket)) return;
     const result = await callWorkspace('rlNativePush', { action: 'register', token, projectId, platform: Platform.OS, installationId: proof, registrationSequence }, { timeout: 8000 });
     if (!current(user, ticket)) return;
-    registration = { deviceId: result.deviceId, registrationSequence: result.registrationSequence, scope: key(user), uid: user.id }; await AsyncStorage.setItem(registrationKey, JSON.stringify(registration));
+    registration = { deviceId: result.deviceId, registrationSequence: result.registrationSequence, scope: key(user), uid: user.id }; await Promise.all([AsyncStorage.setItem(registrationKey, JSON.stringify(registration)), rememberAuthorizedScope(user)]);
     update({ registered: true, permission: 'granted', preferences: result.preferences, error: '', message: 'Native work notifications are enabled for this company account.' });
   })();
   const active = { promise: task, scope: key(user), generation }; registering = active; try { return await task; } finally { if (registering === active) registering = null; }
@@ -158,7 +161,7 @@ export async function saveNativePushPreferences(preferences) {
   const result = await callWorkspace('rlNativePush', { action: 'preferences', preferences });
   if (!current(user, ticket)) return;
   update({ preferences: result.preferences, error: '', message: 'Native notification preferences saved.' });
-  if (preferences.enabled === false) await invalidateNativePush();
+  if (preferences.enabled === false) { await forgetAuthorizedScope(user); await invalidateNativePush(); }
 }
 export async function invalidateNativePush({ unregisterNative = true } = {}) {
   await load(); generation++; const previous = registration; registration = null; pending = null;
@@ -186,6 +189,8 @@ export async function purgeDeletedAccountPush(uid) {
     await Promise.all([AsyncStorage.removeItem(pendingKey), AsyncStorage.removeItem(handledKey)]);
   }
   if (registration?.uid === uid) { registration = null; await AsyncStorage.removeItem(registrationKey); }
+  authorizedScopes = authorizedScopes.filter(value => !value.startsWith(`${uid}:`));
+  if (authorizedScopes.length) await AsyncStorage.setItem(authorizedScopesKey, JSON.stringify(authorizedScopes)); else await AsyncStorage.removeItem(authorizedScopesKey);
 }
 export function initializeNativePush() {
   if (initialized) return; initialized = true;

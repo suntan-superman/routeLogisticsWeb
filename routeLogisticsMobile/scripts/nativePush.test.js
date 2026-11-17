@@ -107,10 +107,15 @@ test('Android notification permission denial obtains no token and creates no bac
     assert.equal(env.asks, 1, 'rendering Settings must not prompt again or override the denied permission');
   } finally { if (tree) await act(async () => tree.unmount()); }
 });
-test('offline sign-out unregisters locally and persists a scoped server invalidation retry', async () => {
+test('offline sign-out unregisters locally, retries invalidation and restores a previously authorized same-account registration', async () => {
   const env = fixture(); await ready(env); await env.api.enableNativePush(); env.invalidationFailure = new Error('offline'); await env.api.signOutNativePush();
   assert.equal(env.nativeUnregisters, 1); assert.equal(env.api.nativePushSnapshot().registered, false); assert.ok([...env.store.keys()].some(item => item.endsWith(':invalidations'))); assert.equal(env.calls.find(item => item.action === 'invalidate').options.timeout, 5000);
-  env.invalidationFailure = null; await ready(env); assert.equal(env.calls.filter(item => item.action === 'invalidate').length, 2); assert.equal(env.calls.filter(item => item.action === 'register').length, 1); assert.equal(JSON.parse([...env.store].find(([item]) => item.endsWith(':invalidations'))[1]).length, 0);
+  env.invalidationFailure = null; await ready(env); assert.equal(env.calls.filter(item => item.action === 'invalidate').length, 2); assert.equal(env.calls.filter(item => item.action === 'register').length, 2); assert.equal(JSON.parse([...env.store].find(([item]) => item.endsWith(':invalidations'))[1]).length, 0); assert.equal(env.api.nativePushSnapshot().registered, true);
+});
+test('explicit notification opt-out is remembered and cannot auto-register after sign-out or account restoration', async () => {
+  const env = fixture(); await ready(env); await env.api.enableNativePush(); await env.api.saveNativePushPreferences({ enabled: false });
+  assert.equal(env.api.nativePushSnapshot().registered, false); assert.equal(env.preferences.enabled, false); const registrations = env.calls.filter(item => item.action === 'register').length;
+  await env.api.signOutNativePush(); await ready(env); assert.equal(env.calls.filter(item => item.action === 'register').length, registrations); assert.equal(env.api.nativePushSnapshot().registered, false);
 });
 test('role or tenant change invalidates the prior device scope without silently enabling the new scope', async () => {
   const env = fixture(); await ready(env); await env.api.enableNativePush(); env.user = { ...env.user, companyId: 'other' }; env.claims = { ...env.claims, companyId: 'other' }; await ready(env);

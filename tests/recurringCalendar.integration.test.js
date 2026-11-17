@@ -108,3 +108,34 @@ test('calendar generation looks fourteen days ahead while legacy day-count plans
   assert.equal((await db.collection('jobs').where('servicePlanId', '==', legacy.id).get()).size, 0);
   assert.equal((await legacy.get()).get('nextServiceDate'), legacyFirst);
 });
+
+test('recurring plans can skip once, pause through a period, pause indefinitely and resume without deleting history', async () => {
+  const f = await fixture(), api = recurringHandlers(db);
+  const once = await f.save('pause-once');
+  const skipped = await api.manageServicePlan(f.request({ action: 'pause', id: once.id, pause: { mode: 'once', reason: 'Customer away' } }));
+  assert.equal(skipped.active, true); assert.equal(skipped.nextServiceDate, '2030-01-10');
+  let saved = await once.get(); assert.equal(saved.get('active'), true); assert.equal(saved.get('lastPause.mode'), 'once'); assert.equal(saved.get('lastPause.fromDate'), DATE); assert.equal(saved.get('pauseHistory').length, 1);
+  assert.equal((await db.collection('jobs').where('servicePlanId', '==', once.id).get()).size, 0);
+
+  const period = await f.save('pause-period', { preferredTechnicianId: f.tech2 });
+  const held = await api.manageServicePlan(f.request({ action: 'pause', id: period.id, pause: { mode: 'through', throughDate: '2030-01-17', reason: 'Seasonal hold' } }));
+  assert.equal(held.nextServiceDate, '2030-01-24'); assert.equal((await period.get()).get('active'), true);
+
+  const indefinite = await f.save('pause-indefinite', { preferredTechnicianId: null });
+  const paused = await api.manageServicePlan(f.request({ action: 'pause', id: indefinite.id, pause: { mode: 'indefinite' } }));
+  assert.equal(paused.active, false); assert.equal((await indefinite.get()).get('pauseState.mode'), 'indefinite');
+  await assert.rejects(generateVisit(db, indefinite.id, DATE), { code: 'failed-precondition' });
+  const resumed = await api.manageServicePlan(f.request({ action: 'resume', id: indefinite.id }));
+  assert.equal(resumed.active, true); saved = await indefinite.get(); assert.equal(saved.get('active'), true); assert.equal(saved.get('pauseState'), null); assert.equal(saved.get('nextServiceDate'), DATE);
+  const audits = await db.collection('rlAudit').where('companyId', '==', f.id).get();
+  assert.ok(audits.docs.some(row => row.get('action') === 'servicePlan.pause')); assert.ok(audits.docs.some(row => row.get('action') === 'servicePlan.resume'));
+});
+
+test('recurring pause validates dates, versions, roles and tenant ownership', async () => {
+  const f = await fixture(), foreign = await fixture(), api = recurringHandlers(db), plan = await f.save('pause-guard', { updatedAt: '2030-01-01T00:00:00.000Z' });
+  await assert.rejects(api.manageServicePlan(f.request({ action: 'pause', id: plan.id, expectedVersion: 'stale', pause: { mode: 'once' } })), { code: 'aborted' });
+  await assert.rejects(api.manageServicePlan(f.request({ action: 'pause', id: plan.id, pause: { mode: 'through', throughDate: '2029-12-31' } })), { code: 'invalid-argument' });
+  await assert.rejects(api.manageServicePlan(f.request({ action: 'pause', id: plan.id, pause: { mode: 'once' } }, 'technician')), { code: 'permission-denied' });
+  await assert.rejects(api.manageServicePlan(foreign.request({ action: 'pause', id: plan.id, pause: { mode: 'once' } })), { code: 'permission-denied' });
+  assert.equal((await plan.get()).get('nextServiceDate'), DATE);
+});

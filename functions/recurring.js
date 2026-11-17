@@ -64,6 +64,37 @@ function nextVisit(plan) {
   start.setUTCDate(start.getUTCDate() + days);
   return { date, nextServiceDate: start.toISOString().slice(0, 10) };
 }
+function firstPlanDateAfter(plan, throughDate) {
+  calendarDate(throughDate);
+  if (plan.recurrence?.version === 1) {
+    const rule = normalizeRecurrence(plan.recurrence, plan.recurrence.anchorDate);
+    return firstOccurrenceOnOrAfter(rule, nextRecurrenceDate(rule, throughDate));
+  }
+  const days = Number(plan.frequencyDays);
+  if (!Number.isInteger(days) || days < 1 || days > 3660) throw new HttpsError('failed-precondition', 'Service plan has an invalid frequency.');
+  let date = String(plan.nextServiceDate || '');
+  calendarDate(date);
+  for (let count = 0; date <= throughDate && count < 10000; count++) {
+    const parsed = calendarDate(date); parsed.setUTCDate(parsed.getUTCDate() + days); date = parsed.toISOString().slice(0, 10);
+  }
+  if (date <= throughDate) throw new HttpsError('failed-precondition', 'The pause period is too long for this service plan.');
+  return date;
+}
+function resumePlanDate(plan, today) {
+  calendarDate(today);
+  const current = String(plan.nextServiceDate || '');
+  calendarDate(current);
+  if (current >= today) return current;
+  if (plan.recurrence?.version === 1) return firstOccurrenceOnOrAfter(normalizeRecurrence(plan.recurrence, plan.recurrence.anchorDate), today);
+  const days = Number(plan.frequencyDays);
+  if (!Number.isInteger(days) || days < 1 || days > 3660) throw new HttpsError('failed-precondition', 'Service plan has an invalid frequency.');
+  let date = current;
+  for (let count = 0; date < today && count < 10000; count++) {
+    const parsed = calendarDate(date); parsed.setUTCDate(parsed.getUTCDate() + days); date = parsed.toISOString().slice(0, 10);
+  }
+  if (date < today) throw new HttpsError('failed-precondition', 'The paused service plan is too far behind to resume automatically.');
+  return date;
+}
 async function generateVisit(db, id, expectedDate, authorize = async () => {}, options = {}) {
   const ref = db.collection('servicePlans').doc(documentId(id, 'plan'));
   const scheduling = options.scheduling || require('./scheduling').schedulingHandlers(db);
@@ -111,11 +142,51 @@ function recurringHandlers(db, config = {}) {
     manageServicePlan: async request => {
       const scope = await requireCapability(db, request, 'jobs.schedule'), data = request.data || {}, action = data.action;
       await rateLimit(db, 'service-plan-manage', scope.uid, 40);
-      if (!['create', 'update'].includes(action)) throw new HttpsError('invalid-argument', 'Choose a service plan action.');
+      if (!['create', 'update', 'pause', 'resume'].includes(action)) throw new HttpsError('invalid-argument', 'Choose a service plan action.');
       const target = action === 'create' ? db.collection('servicePlans').doc() : db.doc(`servicePlans/${documentId(data.id, 'service plan')}`), input = data.plan || {};
       const initial = action === 'create' ? null : await target.get(), before = initial?.data() || {};
       const inScope = record => !!record && (scope.companyId ? record.companyId === scope.companyId : !record.companyId && record.userId === scope.uid);
       if (initial && !inScope(before)) throw new HttpsError('permission-denied', 'This service plan is not available in your workspace.');
+      if (action === 'pause' || action === 'resume') {
+        const expectedVersion = data.expectedVersion;
+        const pause = data.pause || {};
+        const mode = pause.mode;
+        if (action === 'pause' && !['once', 'through', 'indefinite'].includes(mode)) throw new HttpsError('invalid-argument', 'Choose whether to skip one visit, pause through a date, or pause indefinitely.');
+        const reason = String(pause.reason || '').trim();
+        if (reason.length > 500) throw new HttpsError('invalid-argument', 'Keep the pause reason under 500 characters.');
+        return db.runTransaction(async tx => {
+          const current = await tx.get(target);
+          if (!current.exists || !inScope(current.data())) throw new HttpsError('permission-denied', 'This service plan is not available in your workspace.');
+          if (expectedVersion !== undefined && version(current.get('updatedAt')) !== version(expectedVersion)) throw new HttpsError('aborted', 'This service plan changed. Refresh before saving.');
+          const plan = current.data();
+          if (action === 'pause' && plan.active === false) throw new HttpsError('failed-precondition', 'This service plan is already paused indefinitely. Resume it before choosing a different pause.');
+          const now = new Date().toISOString(), today = todayInZone(scope.company?.get?.('timeZone') || scope.company?.timeZone);
+          let nextServiceDate = plan.nextServiceDate, active = plan.active !== false, entry;
+          if (action === 'pause') {
+            const throughDate = mode === 'once' ? plan.nextServiceDate : mode === 'through' ? String(pause.throughDate || '') : null;
+            if (mode === 'through') {
+              calendarDate(throughDate);
+              if (throughDate < plan.nextServiceDate) throw new HttpsError('invalid-argument', 'Choose a pause-through date on or after the next recurring visit.');
+            }
+            if (mode === 'indefinite') active = false;
+            else nextServiceDate = firstPlanDateAfter(plan, throughDate);
+            entry = { mode, pausedAt: now, pausedBy: scope.uid, fromDate: plan.nextServiceDate, throughDate, nextServiceDate, reason };
+          } else {
+            active = true;
+            nextServiceDate = resumePlanDate(plan, today);
+          }
+          const next = { ...plan, active, nextServiceDate };
+          const prepared = await scheduling.prepare(tx, scope, { ...next, date: nextServiceDate, assignedTo: active ? next.preferredTechnicianId || null : null, status: active ? 'scheduled' : 'cancelled', servicePlanId: target.id, servicePlanDate: nextServiceDate }, { before: { ...plan, date: plan.nextServiceDate, assignedTo: plan.preferredTechnicianId || null }, jobId: `plan:${target.id}`, strict: true, force: true, excludeServicePlanId: target.id });
+          scheduling.commit(tx, prepared);
+          const updatedAt = new Date(Math.max(Date.now(), Date.parse(version(plan.updatedAt)) + 1 || 0)).toISOString();
+          const patch = action === 'pause'
+            ? { active, nextServiceDate, pauseState: mode === 'indefinite' ? entry : null, lastPause: entry, pauseHistory: [...(Array.isArray(plan.pauseHistory) ? plan.pauseHistory.slice(-19) : []), entry], updatedAt }
+            : { active: true, nextServiceDate, pauseState: null, resumedAt: now, resumedBy: scope.uid, updatedAt };
+          tx.update(target, patch);
+          tx.create(db.collection('rlAudit').doc(), { action: `servicePlan.${action}`, companyId: scope.companyId || null, actorId: scope.uid, servicePlanId: target.id, mode: action === 'pause' ? mode : null, fromDate: plan.nextServiceDate, nextServiceDate, reason, createdAt: updatedAt });
+          return { id: target.id, active: patch.active, nextServiceDate, updatedAt, ...(entry ? { pause: entry } : {}) };
+        });
+      }
       const patch = {};
       for (const [key, maximum] of [['customerId', 200], ['serviceType', 200], ['serviceCategory', 200], ['address', 500], ['notes', 3000]]) if (Object.hasOwn(input, key)) {
         if (typeof input[key] !== 'string' || input[key].length > maximum) throw new HttpsError('invalid-argument', `Enter a valid ${key}.`);

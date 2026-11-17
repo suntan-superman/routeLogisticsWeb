@@ -12,7 +12,7 @@ const { appointmentPatch, isEstimateVisit } = require('./shared/appointments');
 const { propertyFor, lifecycleFor, customerArchived } = require('./shared/customerLifecycle');
 const { prepareAppointmentLinks, commitAppointmentLinks } = require('./appointmentLinks');
 
-const JOB_FIELDS = ['userId', 'companyId', 'customerId', 'customerName', 'customerPhone', 'serviceType', 'serviceCategory', 'title', 'address', 'city', 'state', 'zipCode', 'serviceArea', 'date', 'time', 'windowStart', 'windowEnd', 'estimatedDuration', 'duration', 'priority', 'status', 'assignedTo', 'assignedToUid', 'assignedToName', 'assignmentNeedsAttention', 'assignmentReview', 'servicePlanId', 'servicePlanDate', 'workNotes', 'actualWorkDone', 'actualHours', 'completionNotes', 'completedAt', 'createdAt', 'updatedAt', 'appointmentKind', 'billable', 'estimateOutcome', 'inquiryId', 'servicePropertyId', 'propertyAccessInstructions'];
+const JOB_FIELDS = ['userId', 'companyId', 'customerId', 'customerName', 'customerPhone', 'serviceType', 'serviceCategory', 'title', 'address', 'city', 'state', 'zipCode', 'serviceArea', 'date', 'time', 'windowStart', 'windowEnd', 'estimatedDuration', 'duration', 'priority', 'status', 'assignedTo', 'assignedToUid', 'assignedToName', 'assignmentNeedsAttention', 'assignmentReview', 'servicePlanId', 'servicePlanDate', 'workNotes', 'actualWorkDone', 'actualHours', 'completionNotes', 'completedAt', 'cancelledAt', 'cancellationReason', 'cancelledBy', 'createdAt', 'updatedAt', 'appointmentKind', 'billable', 'estimateOutcome', 'inquiryId', 'servicePropertyId', 'propertyAccessInstructions'];
 const PRICING_FIELDS = ['totalCost', 'estimatedCost', 'laborRate', 'laborHours', 'materialCost', 'materials', 'scopeOfWork', 'notes', 'description', 'servicePlanId'];
 const CUSTOMER_FIELDS = ['userId', 'companyId', 'name', 'firstName', 'lastName', 'email', 'emailNormalized', 'phone', 'phoneNumber', 'address', 'city', 'state', 'zipCode', 'postalCode', 'isActive', 'status', 'createdAt', 'updatedAt', 'lastServiceDate', 'totalJobs', 'emailConsent', 'notes', 'serviceInstructions'];
 const APPLICATION_FIELDS = ['product', 'epaRegNo', 'activeIngredient', 'amount', 'unit', 'targetPest', 'areaTreated', 'method', 'applicatorLicense', 'notes'];
@@ -170,9 +170,9 @@ function workDataHandlers(db, config = {}) {
     },
     manageJob: async request => {
       const data = request.data || {}, action = data.action;
-      const scope = await requireCapability(db, request, action === 'assign' ? 'jobs.assign' : 'jobs.schedule');
+      const scope = await requireCapability(db, request, action === 'assign' ? 'jobs.assign' : ['cancel', 'delete'].includes(action) ? 'jobs.cancel' : 'jobs.schedule');
       await rateLimit(db, 'job-manage', scope.uid, 120);
-      if (!['create', 'update', 'delete', 'assign'].includes(action)) throw new HttpsError('invalid-argument', 'Invalid job operation.');
+      if (!['create', 'update', 'delete', 'assign', 'cancel'].includes(action)) throw new HttpsError('invalid-argument', 'Invalid job operation.');
       const recurring = data.recurring;
       if (recurring !== undefined && (action !== 'create' || !recurring || typeof recurring !== 'object' || Array.isArray(recurring))) throw new HttpsError('invalid-argument', 'Choose recurring appointments when creating the first visit. Existing visits are edited individually.');
       let operationRef, operationFingerprint, planRef;
@@ -198,12 +198,20 @@ function workDataHandlers(db, config = {}) {
       if (saveCustomerAddress && (!Object.hasOwn(data, 'expectedCustomerVersion') || data.expectedCustomerVersion !== null && (typeof data.expectedCustomerVersion !== 'string' || data.expectedCustomerVersion.length > 128))) throw new HttpsError('invalid-argument', 'Refresh the selected customer before updating its saved address.');
       const ref = action === 'create' ? recurring ? db.doc(`jobs/${planRef.id}`) : operationRef ? db.doc(`jobs/rl_booking_${operationRef.id}`) : db.collection('jobs').doc() : db.doc(`jobs/${documentId(data.id)}`);
       const input = { ...(data.job || {}) };
-      const permitted = [...JOB_FIELDS, ...PRICING_FIELDS, 'latitude', 'longitude', 'workNotes', 'cancelledAt', 'cancellationReason'];
-      const patch = action === 'assign' ? { assignedTo: data.memberId || null } : pick(input, permitted.filter(key => !['userId', 'companyId', 'createdAt', 'updatedAt', 'assignedToName', 'assignedToUid', 'assignmentNeedsAttention', 'assignmentReview', 'servicePlanId', 'servicePlanDate'].includes(key)));
+      const permitted = [...JOB_FIELDS, ...PRICING_FIELDS, 'latitude', 'longitude', 'workNotes'];
+      const patch = action === 'assign' ? { assignedTo: data.memberId || null } : pick(input, permitted.filter(key => !['userId', 'companyId', 'createdAt', 'updatedAt', 'assignedToName', 'assignedToUid', 'assignmentNeedsAttention', 'assignmentReview', 'servicePlanId', 'servicePlanDate', 'cancelledAt', 'cancellationReason', 'cancelledBy'].includes(key)));
       if (patch.status && !['scheduled', 'en-route', 'in-progress', 'completed', 'cancelled'].includes(patch.status)) throw new HttpsError('invalid-argument', 'Invalid job status.');
+      if (patch.status === 'cancelled' && !hasCapability(scope.role, 'jobs.cancel')) throw new HttpsError('permission-denied', 'Cancellation access is required.');
       const initial = action === 'create' ? null : await ref.get();
       if (initial) checkJob(scope, initial.data());
       if (action === 'delete' && isEstimateVisit(initial?.data())) throw new HttpsError('failed-precondition', 'Cancel the estimate appointment to preserve its inquiry and visit history.');
+      if (action === 'delete' && initial?.get('status') === 'in-progress') throw new HttpsError('failed-precondition', 'An in-progress appointment cannot be permanently deleted. Complete it or return it to scheduled work first.');
+      if ((action === 'cancel' || patch.status === 'cancelled') && ['in-progress', 'completed'].includes(initial?.get('status'))) throw new HttpsError('failed-precondition', `A ${initial.get('status')} appointment cannot be cancelled.`);
+      if (action === 'cancel' || patch.status === 'cancelled') {
+        const cancellationReason = String(data.reason ?? input.cancellationReason ?? '').trim();
+        if (cancellationReason.length > 1000) throw new HttpsError('invalid-argument', 'Keep the cancellation reason under 1,000 characters.');
+        Object.assign(patch, { status: 'cancelled', cancellationReason, cancelledAt: new Date().toISOString(), cancelledBy: scope.uid });
+      }
       Object.assign(patch, appointmentPatch(input, initial?.data() || {}, { create: action === 'create' }));
       if (isEstimateVisit(patch) && recurring) throw new HttpsError('invalid-argument', 'Estimate visits are one-time appointments. Use a service plan for recurring paid work.');
       if (action === 'create' && isEstimateVisit(patch) && !operationRef) throw new HttpsError('invalid-argument', 'A stable booking operation is required for an estimate visit.');
@@ -259,6 +267,14 @@ function workDataHandlers(db, config = {}) {
         }
         await serviceAreas.assertCurrent(tx, area);
         const before = existing.data() || {};
+        if (before.status === 'cancelled' && patch.status && patch.status !== 'cancelled') throw new HttpsError('failed-precondition', 'A cancelled appointment remains in history. Schedule a new appointment instead of reactivating it.');
+        if (action === 'delete') {
+          if (isEstimateVisit(before)) throw new HttpsError('failed-precondition', 'Cancel the estimate appointment to preserve its inquiry and visit history.');
+          if (before.status === 'in-progress') throw new HttpsError('failed-precondition', 'An in-progress appointment cannot be permanently deleted. Complete it or return it to scheduled work first.');
+          const linkedInvoices = await tx.get(db.collection('invoices').where('jobId', '==', ref.id).limit(1));
+          if (!linkedInvoices.empty) throw new HttpsError('failed-precondition', 'This appointment has an invoice and cannot be permanently deleted. Void or remove the invoice first, or cancel the appointment to retain its history.');
+        }
+        if ((action === 'cancel' || patch.status === 'cancelled') && ['in-progress', 'completed'].includes(before.status)) throw new HttpsError('failed-precondition', `A ${before.status} appointment cannot be cancelled.`);
         const slot = await scheduling.prepare(tx, scope, action === 'delete' ? null : { ...before, ...patch }, { before, jobId: ref.id, reviewStartedWork: data.reviewStartedWork === true });
         if (action !== 'delete' && (!slot.skipped || action === 'create' || action === 'assign')) Object.assign(patch, { assignedTo: slot.assignedTo || null, assignedToName: slot.assignedToName || null, assignedToUid: slot.assignedToUid || null, assignmentNeedsAttention: !slot.assignedTo, assignmentReview: slot.assignedTo ? null : 'This visit needs a technician assignment.' });
         const exceptionChange = action !== 'delete' ? await prepareAssignmentException(tx, db, scope, ref.id, before, { ...before, ...patch }) : null;
@@ -286,7 +302,7 @@ function workDataHandlers(db, config = {}) {
           tx.update(ref, { ...patch, updatedAt, lastModifiedAt: updatedAt, isModified: true, originalDetails: before.originalDetails || pick(before, [...JOB_FIELDS, ...PRICING_FIELDS]), revisions: [...(Array.isArray(before.revisions) ? before.revisions : []), revision] });
         }
         const audit = db.collection('rlAudit').doc();
-        tx.create(audit, { action: `job.${action}`, companyId: scope.companyId, actorId: scope.uid, jobId: ref.id, fromMemberId: before.assignedTo || null, toMemberId: patch.assignedTo ?? before.assignedTo ?? null, createdAt: updatedAt });
+        tx.create(audit, { action: `job.${action}`, companyId: scope.companyId, actorId: scope.uid, jobId: ref.id, fromMemberId: before.assignedTo || null, toMemberId: patch.assignedTo ?? before.assignedTo ?? null, ...(action === 'cancel' ? { reason: patch.cancellationReason || '' } : {}), createdAt: updatedAt });
         if (plan) {
           tx.create(planRef, { ...plan, lastJobId: ref.id, lastGeneratedFor: patch.date, createdAt: updatedAt, updatedAt });
           tx.create(db.collection('rlAudit').doc(), { action: 'servicePlan.create', companyId: scope.companyId, actorId: scope.uid, servicePlanId: planRef.id, jobId: ref.id, createdAt: updatedAt });

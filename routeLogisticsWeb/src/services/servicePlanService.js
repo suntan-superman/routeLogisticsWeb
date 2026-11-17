@@ -51,6 +51,20 @@ export async function updateServicePlan(id, patch, expectedVersion = undefined) 
   }
 }
 
+export async function pauseServicePlan(id, pause, expectedVersion = undefined) {
+  try {
+    const result = await httpsCallable(functions, 'rlManageServicePlan')({ action: 'pause', id, pause, ...(expectedVersion !== undefined ? { expectedVersion } : {}) });
+    return ok(result.data);
+  } catch (error) { return fail(error); }
+}
+
+export async function resumeServicePlan(id, expectedVersion = undefined) {
+  try {
+    const result = await httpsCallable(functions, 'rlManageServicePlan')({ action: 'resume', id, ...(expectedVersion !== undefined ? { expectedVersion } : {}) });
+    return ok(result.data);
+  } catch (error) { return fail(error); }
+}
+
 export async function deleteServicePlan(id) {
   try {
     await deleteDoc(doc(db, 'servicePlans', id));

@@ -12,7 +12,7 @@ const text = value => value === null || value === undefined ? '' : typeof value 
 const toast = message => env.toasts.push(message); toast.success = toast; toast.error = toast;
 const frequencies = [[7, 'Weekly'], [14, 'Every 2 weeks'], [30, 'Monthly'], [60, 'Every 2 months'], [90, 'Quarterly'], [180, 'Every 6 months'], [365, 'Annually']].map(([days, label]) => ({ days, label }));
 const originalPlan = () => ({ id: 'plan', customerId: 'customer', customerName: 'Synthetic customer', serviceType: 'Inspection', active: true, nextServiceDate: '2030-01-03', time: '09:15', estimatedDuration: 1.5, price: 95, frequencyDays: 7, recurrence: { version: 1, frequency: 'weekly', interval: 1, weekday: 4, anchorDate: '2030-01-03' }, preferredTechnicianId: 'tech1', assignmentFallback: 'unassigned', updatedAt: '2026-11-15T00:00:00Z' });
-function reset() { env = { plans: [], creates: [], updates: [], toasts: [], manage: true, dirty: false, confirmation: true, confirmCalls: 0, response: { success: true }, panel: null, rpc: [] }; }
+function reset() { env = { plans: [], creates: [], updates: [], pauses: [], resumes: [], toasts: [], manage: true, dirty: false, confirmation: true, confirmCalls: 0, response: { success: true }, panel: null, rpc: [] }; }
 const cache = new Map();
 function load(relative) {
   const file = path.resolve(__dirname, '../routeLogisticsWeb/src', relative); if (cache.has(file)) return cache.get(file);
@@ -28,7 +28,7 @@ function load(relative) {
     if (name.endsWith('/hooks/useUnsavedChanges')) return { useUnsavedChanges: dirty => { env.dirty = dirty; return { confirmDiscard: async () => { env.confirmCalls++; return env.confirmation; } }; } };
     if (name.endsWith('/components/ConfirmProvider')) return { useConfirm: () => async () => true };
     if (name.endsWith('/services/customerService')) return { __esModule: true, default: { getCustomers: async () => ({ success: true, customers: [{ id: 'customer', name: 'Synthetic customer' }] }) } };
-    if (name.endsWith('/services/servicePlanService')) return { FREQUENCIES: frequencies, listServicePlans: async () => ({ success: true, plans: env.plans }), createServicePlan: async data => { env.creates.push(data); return env.response; }, updateServicePlan: async (...args) => { env.updates.push(args); return env.response; }, deleteServicePlan: async () => ({ success: true }), generateNextJob: async () => ({ success: true }) };
+    if (name.endsWith('/services/servicePlanService')) return { FREQUENCIES: frequencies, listServicePlans: async () => ({ success: true, plans: env.plans }), createServicePlan: async data => { env.creates.push(data); return env.response; }, updateServicePlan: async (...args) => { env.updates.push(args); return env.response; }, pauseServicePlan: async (...args) => { env.pauses.push(args); return { ...env.response, nextServiceDate: '2030-02-07' }; }, resumeServicePlan: async (...args) => { env.resumes.push(args); return { ...env.response, nextServiceDate: '2030-01-03' }; }, deleteServicePlan: async () => ({ success: true }), generateNextJob: async () => ({ success: true }) };
     if (name.endsWith('/services/serviceLogService')) return { listServiceLogs: async () => ({ success: true, logs: [] }), logsToCsv: () => '' };
     if (name.endsWith('/services/schedulingService')) return { schedulingFingerprint: value => JSON.stringify(value) };
     if (name.endsWith('/components/TechnicianAvailability')) return { __esModule: true, default: props => { env.panel = props; return React.createElement('section', { 'aria-label': 'Mock technician availability' }, React.createElement('select', { 'aria-label': 'Preferred technician', value: props.memberId || '', disabled: props.disabled, onChange: event => props.onMemberChange(event.target.value) }, ...['', 'tech1', 'tech2'].map(id => React.createElement('option', { key: id, value: id }, id || 'Unassigned')))); } };
@@ -94,4 +94,14 @@ test('preference conflicts retain the selected draft, expose real scheduling fee
 });
 test('ordinary unauthorized viewers receive no plan or technician-preference mutation actions', async () => {
   reset(); env.manage = false; env.plans = [originalPlan()]; await render(); assert.equal(button('New plan'), undefined); assert.equal(button('Technician preference'), undefined); assert.equal(env.updates.length, 0);
+});
+
+test('active plans offer one-occurrence, date-range and indefinite pauses while inactive plans resume', async () => {
+  reset(); env.plans = [originalPlan()]; await render(); await click('Pause');
+  assert.match(text(tree.toJSON()), /Pause recurring service/); await change('Recurring pause option', 'through'); await change('Pause through date', '2030-01-31'); await change('Recurring pause reason', 'Seasonal customer hold');
+  await act(async () => dialog().props.onSubmit({ preventDefault() {} })); await settle();
+  assert.deepEqual(env.pauses, [['plan', { mode: 'through', throughDate: '2030-01-31', reason: 'Seasonal customer hold' }, '2026-11-15T00:00:00Z']]); assert.equal(dialog(), undefined); assert.ok(env.toasts.some(message => /paused through 2030-01-31/.test(message)));
+  await act(async () => tree.unmount()); tree = null;
+  reset(); env.plans = [{ ...originalPlan(), active: false, pauseState: { mode: 'indefinite' } }]; await render(); await click('Resume');
+  assert.deepEqual(env.resumes, [['plan', '2026-11-15T00:00:00Z']]); assert.ok(env.toasts.some(message => /resumed/.test(message)));
 });

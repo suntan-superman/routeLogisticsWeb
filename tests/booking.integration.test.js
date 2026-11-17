@@ -145,3 +145,31 @@ test('invalid recurring operation IDs cannot leave partially created records', a
   for (const operationId of ['', 'short', 'invalid/operation-id']) await assert.rejects(f.api.manageJob(f.request(f.booking({ operationId }))), { code: 'invalid-argument' });
   assert.equal((await f.rows('jobs')).length, 0); assert.equal((await f.rows('servicePlans')).length, 0);
 });
+
+test('managers can cancel scheduled appointments while technicians and started or completed work cannot be cancelled', async () => {
+  const f = await fixture(), created = await f.api.manageJob(f.request({ action: 'create', job: f.job() }));
+  await assert.rejects(f.api.manageJob(f.request({ action: 'cancel', id: created.id }, 'technician')), { code: 'permission-denied' });
+  const cancelled = await f.api.manageJob(f.request({ action: 'cancel', id: created.id, reason: 'Synthetic customer request', expectedVersion: created.updatedAt }, 'manager'));
+  const saved = await get(`jobs/${created.id}`); assert.equal(saved.status, 'cancelled'); assert.equal(saved.cancellationReason, 'Synthetic customer request'); assert.equal(saved.cancelledBy, `${f.manager}-uid`); assert.ok(saved.cancelledAt); assert.equal(cancelled.id, created.id);
+  const audit = (await f.rows('rlAudit')).find(row => row.get('action') === 'job.cancel'); assert.equal(audit.get('reason'), 'Synthetic customer request');
+  await assert.rejects(f.api.manageJob(f.request({ action: 'update', id: created.id, job: { status: 'scheduled' } }, 'manager')), { code: 'failed-precondition' });
+
+  const started = await f.api.manageJob(f.request({ action: 'create', job: f.job({ time: '11:00' }) })); await db.doc(`jobs/${started.id}`).update({ status: 'in-progress' });
+  await assert.rejects(f.api.manageJob(f.request({ action: 'cancel', id: started.id }, 'manager')), { code: 'failed-precondition' });
+  await assert.rejects(f.api.manageJob(f.request({ action: 'delete', id: started.id }, 'manager')), { code: 'failed-precondition' });
+  await db.doc(`jobs/${started.id}`).update({ status: 'completed' });
+  await assert.rejects(f.api.manageJob(f.request({ action: 'cancel', id: started.id }, 'manager')), { code: 'failed-precondition' });
+});
+
+test('permanent job deletion requires management cancellation access, rejects stale changes and preserves an audit record', async () => {
+  const f = await fixture(), created = await f.api.manageJob(f.request({ action: 'create', job: f.job() }));
+  await assert.rejects(f.api.manageJob(f.request({ action: 'delete', id: created.id }, 'technician')), { code: 'permission-denied' });
+  await assert.rejects(f.api.manageJob(f.request({ action: 'delete', id: created.id, expectedVersion: 'stale' }, 'manager')), { code: 'aborted' });
+  const invoicePath = `invoices/${f.id}-linked-invoice`;
+  await set(invoicePath, { companyId: f.id, userId: f.uid, customerId: f.customerId, jobId: created.id, status: 'draft', total: 95 });
+  await assert.rejects(f.api.manageJob(f.request({ action: 'delete', id: created.id, expectedVersion: created.updatedAt }, 'manager')), error => error.code === 'failed-precondition' && /invoice/.test(error.message));
+  await db.doc(invoicePath).delete();
+  await f.api.manageJob(f.request({ action: 'delete', id: created.id, expectedVersion: created.updatedAt }, 'manager'));
+  assert.equal((await db.doc(`jobs/${created.id}`).get()).exists, false);
+  assert.ok((await f.rows('rlAudit')).some(row => row.get('action') === 'job.delete' && row.get('jobId') === created.id));
+});

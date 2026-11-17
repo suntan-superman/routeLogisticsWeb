@@ -6,7 +6,6 @@ import {
   getDocs, 
   query, 
   where,
-  deleteDoc,
   orderBy,
   limit,
   startAfter
@@ -150,30 +149,27 @@ class JobManagementService {
     }
   }
 
-  // Delete job
-  static async deleteJob(jobId) {
+  static async cancelJob(jobId, reason = '', expectedUpdatedAt = undefined) {
     try {
-      requireCapability('jobs.schedule');
-      if (getClaims()?.companyId) { await callWorkspace('rlManageJob', { action: 'delete', id: jobId }); return { success: true }; }
-      this.getCurrentUserId();
-      
-      // Verify user owns the job
-      const jobResult = await this.getJob(jobId);
-      if (!jobResult.success) {
-        return jobResult;
-      }
+      requireCapability('jobs.cancel');
+      const result = await callWorkspace('rlManageJob', { action: 'cancel', id: jobId, reason, ...(expectedUpdatedAt !== undefined ? { expectedVersion: expectedUpdatedAt } : {}) });
+      return { success: true, ...(await readWorkspace('jobs', { id: jobId })), updatedAt: result.updatedAt };
+    } catch (error) {
+      console.error('Error cancelling job:', error);
+      return { success: false, error: error.message, code: error.code };
+    }
+  }
 
-      await deleteDoc(doc(db, 'jobs', jobId));
-
-      return {
-        success: true
-      };
+  // Permanent deletion remains server-authoritative so status, role, tenant and
+  // preserved estimate-history rules cannot be bypassed by a client write.
+  static async deleteJob(jobId, expectedUpdatedAt = undefined) {
+    try {
+      requireCapability('jobs.cancel');
+      await callWorkspace('rlManageJob', { action: 'delete', id: jobId, ...(expectedUpdatedAt !== undefined ? { expectedVersion: expectedUpdatedAt } : {}) });
+      return { success: true };
     } catch (error) {
       console.error('Error deleting job:', error);
-      return {
-        success: false,
-        error: error.message
-      };
+      return { success: false, error: error.message, code: error.code };
     }
   }
 

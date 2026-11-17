@@ -2,7 +2,7 @@ import SelectControl from '../components/SelectControl';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
 import CustomerService from '../services/customerService';
-import { listServicePlans, createServicePlan, updateServicePlan, deleteServicePlan, generateNextJob, FREQUENCIES } from '../services/servicePlanService';
+import { listServicePlans, createServicePlan, updateServicePlan, pauseServicePlan, resumeServicePlan, deleteServicePlan, generateNextJob, FREQUENCIES } from '../services/servicePlanService';
 import { listServiceLogs, logsToCsv } from '../services/serviceLogService';
 import { canManage } from '../services/tenancy';
 import { useConfirm } from '../components/ConfirmProvider';
@@ -43,6 +43,7 @@ const ServicePlansPage = () => {
   const [serviceProperty, setServiceProperty] = useState(emptyProperty), [serviceAreaPolicy, setServiceAreaPolicy] = useState(null);
   const [addressValidation, setAddressValidation] = useState(null);
   const [schedulingError, setSchedulingError] = useState(null), [preference, setPreference] = useState(null), [preferenceSaving, setPreferenceSaving] = useState(false);
+  const [pauseTarget, setPauseTarget] = useState(null), [pauseForm, setPauseForm] = useState({ mode: 'once', throughDate: '', reason: '' }), [pauseSaving, setPauseSaving] = useState(false);
   const preferenceSavingRef = useRef(false), preferenceClosingRef = useRef(false);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false), savingRef = useRef(false);
@@ -111,11 +112,27 @@ const ServicePlansPage = () => {
     load();
   };
 
-  const toggle = async (plan) => {
-    const res = await updateServicePlan(plan.id, { active: !plan.active }, planVersion(plan.updatedAt));
+  const resume = async plan => {
+    const res = await resumeServicePlan(plan.id, planVersion(plan.updatedAt));
     if (!res.success) return toast.error(res.error);
-    toast.success(plan.active ? 'Service plan paused' : 'Service plan resumed');
+    toast.success(`Service plan resumed; next visit ${res.nextServiceDate}`);
     load();
+  };
+  const openPause = plan => {
+    setPauseTarget({ ...plan });
+    setPauseForm({ mode: 'once', throughDate: plan.nextServiceDate || '', reason: '' });
+  };
+  const submitPause = async event => {
+    event.preventDefault();
+    if (!pauseTarget || pauseSaving) return;
+    setPauseSaving(true);
+    try {
+      const result = await pauseServicePlan(pauseTarget.id, { ...pauseForm, ...(pauseForm.mode === 'through' ? { throughDate: pauseForm.throughDate } : {}) }, planVersion(pauseTarget.updatedAt));
+      if (!result.success) return toast.error(result.error || 'The service plan could not be paused.');
+      setPauseTarget(null);
+      toast.success(pauseForm.mode === 'indefinite' ? 'Service plan paused indefinitely' : pauseForm.mode === 'once' ? `Next occurrence skipped; future visits resume ${result.nextServiceDate}` : `Recurring visits paused through ${pauseForm.throughDate}; next visit ${result.nextServiceDate}`);
+      load();
+    } finally { setPauseSaving(false); }
   };
 
   const openPreference = async plan => {
@@ -223,7 +240,7 @@ const ServicePlansPage = () => {
                   <td className="px-4 py-3 text-right">${Number(p.price || 0).toFixed(2)}</td>
                   <td className="px-4 py-3 space-x-2 whitespace-nowrap">
                     {manage && p.active && <button className="text-primary-600 hover:underline" onClick={() => generate(p)}>Schedule visit</button>}
-                    {manage && <button className="text-gray-600 hover:underline" onClick={() => toggle(p)}>{p.active ? 'Pause' : 'Resume'}</button>}
+                    {manage && (p.active ? <button className="text-gray-600 hover:underline" onClick={() => openPause(p)}>Pause</button> : <button className="text-primary-700 hover:underline" onClick={() => resume(p)}>Resume</button>)}
                     {manage && <button className="text-primary-700 hover:underline" onClick={() => openPreference(p)}>Technician preference</button>}
                     {manage && <button className="text-red-600 hover:underline" onClick={() => remove(p)}>Delete</button>}
                   </td>
@@ -233,6 +250,15 @@ const ServicePlansPage = () => {
           </table>
         )}
       </div>
+
+      {pauseTarget && <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-gray-900/50 p-4 sm:py-12"><form role="dialog" aria-modal="true" aria-label="Pause recurring service" onSubmit={submitPause} className="w-full max-w-lg space-y-4 rounded-xl bg-white p-5 shadow-xl">
+        <div className="flex items-center justify-between"><div><h2 className="text-lg font-semibold">Pause recurring service</h2><p className="text-sm text-gray-600">{pauseTarget.customerName} · {pauseTarget.serviceType}</p></div><button type="button" disabled={pauseSaving} onClick={() => setPauseTarget(null)} className="rounded px-2 py-1 text-gray-600 hover:bg-gray-100">Close</button></div>
+        <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900">Pausing preserves the service plan and its history. It affects future occurrences that have not yet been created. Any appointment already shown in Jobs remains individually manageable.</p>
+        <label className="block text-sm font-medium text-gray-700">Pause option<SelectControl aria-label="Recurring pause option" disabled={pauseSaving} className={input} value={pauseForm.mode} onChange={event => setPauseForm(previous => ({ ...previous, mode: event.target.value }))}><option value="once">Skip the next occurrence only</option><option value="through">Pause through a date</option><option value="indefinite">Pause indefinitely</option></SelectControl></label>
+        {pauseForm.mode === 'through' && <label className="block text-sm font-medium text-gray-700">Pause through<input aria-label="Pause through date" required type="date" min={pauseTarget.nextServiceDate} className={input} disabled={pauseSaving} value={pauseForm.throughDate} onChange={event => setPauseForm(previous => ({ ...previous, throughDate: event.target.value }))} /></label>}
+        <label className="block text-sm font-medium text-gray-700">Reason (optional)<textarea aria-label="Recurring pause reason" maxLength={500} rows={3} className={input} disabled={pauseSaving} value={pauseForm.reason} onChange={event => setPauseForm(previous => ({ ...previous, reason: event.target.value }))} placeholder="Vacation, seasonal hold, customer request…" /></label>
+        <div className="flex justify-end gap-3"><button type="button" disabled={pauseSaving} onClick={() => setPauseTarget(null)} className="rounded border px-4 py-2">Keep active</button><button type="submit" disabled={pauseSaving || pauseForm.mode === 'through' && !pauseForm.throughDate} className="rounded bg-primary-700 px-4 py-2 font-medium text-white disabled:opacity-50">{pauseSaving ? 'Saving pause…' : 'Save pause'}</button></div>
+      </form></div>}
 
       {preference && <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-gray-900/50 p-4 sm:py-12"><form role="dialog" aria-modal="true" aria-label="Technician preference" tabIndex={-1} onSubmit={savePreference} onKeyDown={event => { if (event.key !== 'Tab') return; const controls = [...event.currentTarget.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]')].filter(node => node.offsetParent !== null); if (!controls.length) { event.preventDefault(); return; } if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1).focus(); } else if (!event.shiftKey && document.activeElement === controls.at(-1)) { event.preventDefault(); controls[0].focus(); } }} className="w-full max-w-xl space-y-4 rounded-xl bg-white p-5 shadow-xl">
         <div className="flex items-center justify-between"><h2 className="text-lg font-semibold">Technician preference</h2><button type="button" aria-label="Close technician preference" autoFocus disabled={preferenceSaving} onClick={closePreference} className="rounded px-2 py-1 text-gray-600 hover:bg-gray-100">Close</button></div>

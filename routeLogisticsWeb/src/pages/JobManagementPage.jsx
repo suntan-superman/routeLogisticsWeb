@@ -213,7 +213,7 @@ const JobManagementPage = () => {
 
     setIsLoading(true);
     try {
-      const result = await JobManagementService.deleteJob(jobId);
+      const result = await JobManagementService.deleteJob(jobId, job.updatedAt);
       if (result.success) {
         setJobs(prev => prev.filter(job => job.id !== jobId));
         invalidate(['jobs','job','customer-stats']);
@@ -226,6 +226,25 @@ const JobManagementPage = () => {
       toast.error('Error deleting job');
     }
     setIsLoading(false);
+  };
+
+  const handleCancelJob = async job => {
+    if (!can('jobs.cancel')) return toast.error('Manager or owner access is required to cancel an appointment.');
+    const ok = await confirm({
+      title: 'Cancel this appointment?',
+      message: `${job.serviceType || 'This appointment'} for ${job.customerName || 'this customer'} will be cancelled and retained in history. An in-progress or completed appointment cannot be cancelled.`,
+      confirmText: 'Cancel appointment',
+    });
+    if (!ok) return;
+    setIsLoading(true);
+    try {
+      const result = await JobManagementService.cancelJob(job.id, '', job.updatedAt);
+      if (!result.success) return toast.error(result.error || 'The appointment could not be cancelled.');
+      setJobs(previous => previous.map(row => row.id === job.id ? result.job : row));
+      invalidate(['jobs', 'job', 'customer-stats', 'route']);
+      toast.success('Appointment cancelled');
+    } catch (error) { toast.error(error.message || 'The appointment could not be cancelled.'); }
+    finally { setIsLoading(false); }
   };
 
   const openViewModal = job => {
@@ -625,14 +644,23 @@ const JobManagementPage = () => {
                             <PencilIcon className="h-4 w-4" />
                           </button>
                         )}
-                        <button
+                        {job.status !== 'cancelled' && <button
                           onClick={() => openStatusModal(job)}
                           className="text-blue-600 hover:text-blue-900"
                           title="Update Status"
                         >
                           <CheckCircleIcon className="h-4 w-4" />
-                        </button>
-                        {canManage() && (
+                        </button>}
+                        {can('jobs.cancel') && ['scheduled', 'en-route'].includes(job.status) && (
+                          <button
+                            onClick={() => handleCancelJob(job)}
+                            className="text-amber-700 hover:text-amber-900"
+                            title="Cancel Appointment"
+                          >
+                            <XCircleIcon className="h-4 w-4" />
+                          </button>
+                        )}
+                        {can('jobs.cancel') && job.status !== 'in-progress' && !isEstimateVisit(job) && (
                           <button
                             onClick={() => handleDeleteJob(job)}
                             className="text-red-600 hover:text-red-900"
@@ -789,7 +817,6 @@ const JobManagementPage = () => {
                     <option value="scheduled">Scheduled</option>
                     <option value="in-progress">In Progress</option>
                     <option value="completed">Completed</option>
-                    <option value="cancelled">Cancelled</option>
                   </SelectControl>
                 </div>
                 {isEstimateVisit(selectedJob) && <label className="block text-sm font-medium">Estimate outcome<SelectControl aria-label="Estimate visit outcome" className="input-field mt-1 w-full" disabled={isLoading} value={statusData.estimateOutcome || 'estimate_pending'} onChange={event => setStatusData(previous => ({ ...previous, estimateOutcome: event.target.value }))}>{estimateOutcomes.map(row => <option key={row.value} value={row.value}>{row.label}</option>)}</SelectControl></label>}
@@ -834,19 +861,6 @@ const JobManagementPage = () => {
                   </>
                 )}
                 
-                {statusData.status === 'cancelled' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Cancellation Reason</label>
-                    <textarea
-                      disabled={isLoading}
-                      value={statusData.cancellationReason}
-                      onChange={(e) => setStatusData(prev => ({ ...prev, cancellationReason: e.target.value }))}
-                      rows={3}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                      placeholder="Reason for cancellation..."
-                    />
-                  </div>
-                )}
               </div>
               
               <div className="flex justify-end space-x-3 mt-6">

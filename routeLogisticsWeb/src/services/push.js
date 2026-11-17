@@ -1,7 +1,7 @@
 import { getMessaging, getToken, deleteToken, onMessage, isSupported } from 'firebase/messaging';
 import { doc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import app, { db, auth } from './firebase';
-import { waitForActiveServiceWorker } from './pushRegistration';
+import { getUnsupportedWebPushBrowser, waitForActiveServiceWorker } from './pushRegistration';
 
 const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY;
 const TOKEN_KEY = 'rl_push_token';
@@ -11,7 +11,11 @@ export const pushConfigured = () => !!VAPID_KEY;
 export const pushEnabled = () => typeof Notification !== 'undefined' && Notification.permission === 'granted' && !!localStorage.getItem(TOKEN_KEY);
 
 export async function pushSupported() {
-  return pushConfigured() && 'serviceWorker' in navigator && 'Notification' in window && (await isSupported().catch(() => false));
+  return !getUnsupportedWebPushBrowser()
+    && pushConfigured()
+    && 'serviceWorker' in navigator
+    && 'Notification' in window
+    && (await isSupported().catch(() => false));
 }
 
 const swUrl = () => {

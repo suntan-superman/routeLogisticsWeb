@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { waitForActiveServiceWorker } from './pushRegistration.js';
+import { getUnsupportedWebPushBrowser, waitForActiveServiceWorker } from './pushRegistration.js';
+
+test('DuckDuckGo on Windows is identified before attempting an unsupported push subscription', () => {
+  assert.equal(getUnsupportedWebPushBrowser({
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/151.0.0.0 Safari/537.36 DuckDuckGo/6',
+    platform: 'Win32',
+  }), 'duckduckgo-windows');
+  assert.equal(getUnsupportedWebPushBrowser({ userAgent: 'Mozilla/5.0 (Macintosh) Ddg/1.120.0', platform: 'MacIntel' }), null);
+  assert.equal(getUnsupportedWebPushBrowser({ userAgent: 'Mozilla/5.0 (Windows NT 10.0) Edg/151.0.0.0', platform: 'Win32' }), null);
+});
 
 test('web push uses an already-active service worker immediately', async () => {
   const registration = { active: { state: 'activated' } };

@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { pushSupported, pushEnabled, enablePush, disablePush, onForegroundMessage } from '../services/push';
+import { DUCKDUCKGO_PUSH_MESSAGE, getUnsupportedWebPushBrowser } from '../services/pushRegistration';
 
 const NotificationToggle = () => {
+  const unsupportedBrowser = getUnsupportedWebPushBrowser();
   const [supported, setSupported] = useState(false);
   const [enabled, setEnabled] = useState(pushEnabled());
   const [busy, setBusy] = useState(false);
@@ -10,6 +12,7 @@ const NotificationToggle = () => {
   useEffect(() => {
     let unsubscribe = () => {};
     let cancelled = false;
+    if (unsupportedBrowser) return () => { cancelled = true; };
     pushSupported().then(async (ok) => {
       if (cancelled) return;
       setSupported(ok);
@@ -25,7 +28,21 @@ const NotificationToggle = () => {
       cancelled = true;
       unsubscribe();
     };
-  }, [enabled]);
+  }, [enabled, unsupportedBrowser]);
+
+  if (unsupportedBrowser === 'duckduckgo-windows') {
+    return (
+      <button
+        type="button"
+        onClick={() => toast(DUCKDUCKGO_PUSH_MESSAGE, { icon: 'ℹ️' })}
+        aria-label="Web notifications unavailable"
+        title={DUCKDUCKGO_PUSH_MESSAGE}
+        className="shrink-0 whitespace-nowrap rounded-md px-3 py-2 text-left text-sm text-gray-600 hover:bg-gray-50"
+      >
+        <span aria-hidden="true">🔕</span><span className="hidden sm:inline"> Notifications unavailable</span>
+      </button>
+    );
+  }
 
   if (!supported) return null;
 

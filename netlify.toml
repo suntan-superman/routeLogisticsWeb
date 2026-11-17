@@ -6,6 +6,9 @@
 [build.environment]
   NODE_VERSION = "22"
   NPM_FLAGS = "--legacy-peer-deps"
+  # Operational Markdown is not published. Keep secret scanning enabled for
+  # application source and build output while excluding release evidence.
+  SECRETS_SCAN_OMIT_PATHS = "docs/**"
 
 [[redirects]]
   from = "/faqs"

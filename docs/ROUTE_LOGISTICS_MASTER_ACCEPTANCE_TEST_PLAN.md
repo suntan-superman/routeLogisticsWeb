@@ -8,6 +8,25 @@ Use the existing production site, Firebase project and corporate TestFlight app 
 
 Route Logistics has a tested field-work foundation suitable for a **controlled pilot after the short physical core workflow passes**. It is not yet certified across every browser, device, optional commercial feature or integration delivery path. Current automated results are recorded below; the original source/function inventory remains a dated acceptance baseline. Physical-device and genuine provider delivery acceptance remain separate.
 
+### November 16 — Batch B: technician estimate to customer decision
+
+[Technician estimates and customer approval](TECHNICIAN_ESTIMATES_AND_CUSTOMER_APPROVAL.md) adds the assigned estimate-visit handoff, durable offline quote/photo drafts, narrow technician authorization, exact-version management review, customer approve/decline/revision actions and an **Approved — scheduling needed** state. It reuses the existing estimate, private photo, PDF, mail, approval and conversion contracts. Draft/review/customer-decision operations do not create a job, invoice, payment or accounting export. Direct technician delivery is owner-controlled and off by default.
+
+Automated local evidence includes 14/14 focused Firestore estimate cases, 423/423 complete mobile cases, 475/475 web cases, clean web lint/build, 18/18 Expo Doctor checks and successful iOS/Android Hermes exports. The complete 45-scenario Playwright matrix executed in Chromium, Firefox and WebKit: 130/135 passed initially, and focused reruns passed all five affected executions after correcting an invoice locator and two asynchronous sign-out assumptions in the harness. These results do **not** pass the physical scenarios below:
+
+Implementation `8af151adcbc4e2573e99ba4ec306103a03d8e596` is on `main`. The two affected Route Logistics Functions are active as `rlestimate-00015-qib` and `rlestimateapproval-00007-yes`; no rules, indexes or unrelated Functions were deployed. Netlify deployment `6afbb76afbdc8c884804f099` is ready for that commit and its served Batch B assets passed read-only verification. Stripe live approval, QuickBooks writes/production approval and broad SMS remain disabled.
+
+| ID | Operator scenario | Status |
+| --- | --- | --- |
+| B-EST-01 | Android assigned technician prepares scope/lines/photo offline, terminates, restarts, restores and synchronizes exactly once | NOT RUN — physical Android required |
+| B-EST-02 | iOS corporate build repeats offline draft/photo restart and synchronization | NOT RUN — physical iPhone required |
+| B-EST-03 | Manager requests changes, technician revises, old approval cannot send, manager approves exact new version and sends once | NOT RUN — two-role operator flow required |
+| B-EST-04 | Customer phone reviews/downloads versioned PDF and separately approves, declines and requests revision on synthetic versions | NOT RUN — customer-device flow required |
+| B-EST-05 | Approved quote displays scheduling needed; no automatic job, invoice, charge or QB write occurs | NOT RUN — production UI observation required |
+| B-EST-06 | One explicitly authorized synthetic delivery has outbox, provider and inbox evidence | NOT RUN — real provider/recipient authorization required |
+
+Playwright/browser automation covers surrounding sign-in, role, customer, scheduling, portal and invoice regressions. The native offline lifecycle and genuine email receipt cannot be reclassified as browser-automated acceptance.
+
 Previously recorded browser coverage is **33 scenarios** (99 configured executions across Chromium, Firefox and WebKit). See the November 15 addenda below for execution evidence. Earlier evidence for the original 25 scenarios is retained, including the later clean 75/75 Jobs-date run. Newly added scenarios are not implied to have run by that baseline. Physical iPhone/Android and genuine provider acceptance remain separate.
 
 ### November 16 — web appearance

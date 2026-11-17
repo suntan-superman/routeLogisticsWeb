@@ -13,7 +13,8 @@ global.IS_REACT_ACT_ENVIRONMENT = true;
 
 let tree;
 let env;
-const message = 'DuckDuckGo for Windows does not support web push notifications. Use Chrome or Edge to receive browser notifications.';
+const duckDuckGoMessage = 'DuckDuckGo for Windows does not support web push notifications. Use Chrome or Edge to receive browser notifications.';
+const webViewMessage = 'This Windows browser uses WebView2, which does not support web push notifications. Use Chrome or Edge to receive browser notifications.';
 const toast = (text, options) => env.toasts.push({ text, options });
 toast.success = text => env.toasts.push({ text, success: true });
 toast.error = text => env.toasts.push({ text, error: true });
@@ -32,8 +33,8 @@ function loadControl() {
       onForegroundMessage: async () => () => {},
     };
     if (dependency.endsWith('/services/pushRegistration')) return {
-      DUCKDUCKGO_PUSH_MESSAGE: message,
       getUnsupportedWebPushBrowser: () => env.unsupportedBrowser,
+      getUnsupportedWebPushMessage: reason => reason === 'duckduckgo-windows' ? duckDuckGoMessage : webViewMessage,
     };
     throw new Error(`Unexpected notification control dependency: ${dependency}`);
   };
@@ -57,11 +58,22 @@ test('DuckDuckGo on Windows receives a visible explanation without attempting pu
   await act(async () => { tree = create(React.createElement(Control)); });
   const button = tree.root.findByProps({ 'aria-label': 'Web notifications unavailable' });
 
-  assert.equal(button.props.title, message);
+  assert.equal(button.props.title, duckDuckGoMessage);
   assert.match(button.findAllByType('span').flatMap(span => span.children).join(''), /Notifications unavailable/);
   assert.equal(env.supportChecks, 0);
   await act(async () => button.props.onClick());
-  assert.deepEqual(env.toasts, [{ text: message, options: { icon: 'ℹ️' } }]);
+  assert.deepEqual(env.toasts, [{ text: duckDuckGoMessage, options: { icon: 'ℹ️' } }]);
+});
+
+test('masked Windows WebView2 browsers receive the unsupported push explanation', async () => {
+  env.unsupportedBrowser = 'windows-webview2';
+  await act(async () => { tree = create(React.createElement(Control)); });
+  const button = tree.root.findByProps({ 'aria-label': 'Web notifications unavailable' });
+
+  assert.equal(button.props.title, webViewMessage);
+  assert.equal(env.supportChecks, 0);
+  await act(async () => button.props.onClick());
+  assert.deepEqual(env.toasts, [{ text: webViewMessage, options: { icon: 'ℹ️' } }]);
 });
 
 test('supported browsers retain the normal notification enable control', async () => {

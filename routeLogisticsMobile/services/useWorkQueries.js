@@ -7,6 +7,7 @@ import { callWorkspace, readWorkspace } from './workspaceApi';
 import { WORK_POLL_MS, periodRange, accessError, workScopeKey } from './workQueryPolicy';
 import { normalizeJobLocation } from './workPresentation';
 import { personalJobs, personalRouteMember } from './mobileMode';
+const JOB_DETAIL_TIMEOUT_MS = 12_000;
 
 function options(context, enabled) {
   return { enabled: !!enabled && context.canReadWork && context.active,
@@ -73,11 +74,11 @@ export function useWorkJob(jobId, { enabled = true } = {}) {
   const context = useWorkQueryScope();
   const queryKey = [...context.scope, 'job', jobId], visible = enabled && !!jobId;
   useVisibleWorkQuery(context, queryKey, visible);
-  const query = useQuery({ ...options(context, visible), queryKey, meta: { resource: 'job', jobId },
+  const query = useQuery({ ...options(context, visible), retry: false, queryKey, meta: { resource: 'job', jobId },
     queryFn: async ({ signal }) => {
       let serverRead = false, data;
       try {
-        data = await cachedRead(`job-detail:${jobId}`, async () => { serverRead = true; return readWorkspace('jobs', { id: jobId }); });
+        data = await cachedRead(`job-detail:${jobId}`, async () => { serverRead = true; return readWorkspace('jobs', { id: jobId }, { timeout: JOB_DETAIL_TIMEOUT_MS }); });
       } catch (error) {
         // Only use scoped saved bases for an actual offline-cache miss. Never
         // let a cached document conceal an online authorization response.

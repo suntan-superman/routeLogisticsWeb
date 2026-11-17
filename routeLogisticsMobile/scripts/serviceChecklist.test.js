@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),React=require('react'),{create,act}=require('react-test-renderer'),babel=require('@babel/core');
 global.IS_REACT_ACT_ENVIRONMENT=true;
 const template=require('../../functions/shared/serviceTemplates.json').find(row=>row.id==='pool-maintenance');
-let tree,server,rows,listeners,drafts,busyStates,saves,failure,manager,draftActionsRef;
+let tree,server,rows,listeners,drafts,busyStates,saves,failure,manager,draftActionsRef,workspaceCalls;
 const panel=({title,subtitle,children})=>React.createElement('View',null,title&&React.createElement('Text',null,title),subtitle&&React.createElement('Text',null,subtitle),children);
 const button=({title,onPress,disabled})=>React.createElement('Pressable',{accessibilityLabel:title,onPress,disabled},React.createElement('Text',null,title));
 const file=path.resolve(__dirname,'../components/ServiceChecklist.js'),moduleUnderTest={exports:{}};
@@ -14,7 +14,7 @@ const requireMock=name=>{
   if(name==='react-native')return{View:'View',Text:'Text',Pressable:'Pressable'};
   if(name.endsWith('/contexts/AuthContext'))return{useAuth:()=>({permissions:{canManage:manager}})};
   if(name.endsWith('/theme/ThemeProvider'))return{useTheme:()=>({palette:{text:'#FFF',secondary:'#CCC',accent:'#0F0'}})};
-  if(name.endsWith('/services/workspaceApi'))return{callWorkspace:async(_name,data)=>data.action==='catalog'?{templates:[template]}:server};
+  if(name.endsWith('/services/workspaceApi'))return{callWorkspace:async(name,data)=>{workspaceCalls.push({name,data});return data.action==='catalog'?{templates:[template]}:server;}};
   if(name.endsWith('/services/offline'))return{cachedRead:(_key,loader)=>loader(),queuedWork:async()=>rows,subscribeOffline:listener=>{listeners.add(listener);return()=>listeners.delete(listener);},saveServiceFormOffline:async(job,record)=>{if(failure)throw failure;saves.push({job,record});rows=[{id:'saved',kind:'service-form',jobId:job.id,record,state:'pending'}];}};
   if(name==='../../functions/shared/serviceFormSchema')return require('../../functions/shared/serviceFormSchema');
   if(name==='./MobileUI')return{Card:panel,SectionHeader:panel,PrimaryButton:button,SecondaryButton:button,FormField:({label,...props})=>React.createElement('TextInput',{accessibilityLabel:label,...props}),InlineNotice:({message})=>React.createElement('Text',null,message)};
@@ -28,11 +28,17 @@ const control=label=>tree.root.findAll(node=>node.type==='Pressable'&&node.props
 async function press(label){const node=control(label);assert.ok(node,label);assert.notEqual(node.props.disabled,true);await act(async()=>node.props.onPress());}
 async function input(label,value){await act(async()=>tree.root.findByProps({accessibilityLabel:label}).props.onChangeText(value));}
 const text=()=>JSON.stringify(tree.toJSON());
-beforeEach(()=>{tree=null;manager=false;draftActionsRef={current:null};server={enabled:true,form:{template,assignmentVersion:1,responseVersion:0,serviceDate:'2026-11-13',answers:{},status:'draft'},reports:[],photos:[{id:'private-photo-id',caption:'Equipment inspection'}]};rows=[];listeners=new Set();drafts=[];busyStates=[];saves=[];failure=null;});
+beforeEach(()=>{tree=null;manager=false;workspaceCalls=[];draftActionsRef={current:null};server={enabled:true,form:{template,assignmentVersion:1,responseVersion:0,serviceDate:'2026-11-13',answers:{},status:'draft'},reports:[],photos:[{id:'private-photo-id',caption:'Equipment inspection'}]};rows=[];listeners=new Set();drafts=[];busyStates=[];saves=[];failure=null;});
 afterEach(async()=>{if(tree)await act(async()=>tree.unmount());assert.equal(listeners.size,0);});
 test('technician service form renders safe units, choices and private photo labels without management or pricing',async()=>{
   await render();assert.match(text(),/Free chlorine/);assert.match(text(),/ppm/);assert.match(text(),/Equipment inspection/);assert.doesNotMatch(text(),/9999|private-photo-id|Use Pool maintenance/);
   assert.ok(control('Normal'));assert.ok(control('Skimmed'));assert.equal(tree.root.findByProps({accessibilityLabel:'Equipment inspection'}).props.accessibilityRole,'checkbox');
+});
+test('manager requests a job-scoped template catalog before offering an assignment',async()=>{
+  manager=true;server={enabled:true,form:null,reports:[],photos:[]};await render();
+  assert.ok(control('Use Pool maintenance v1'));
+  const catalog=workspaceCalls.find(row=>row.data.action==='catalog');
+  assert.deepEqual(catalog.data,{action:'catalog',jobId:'assigned'});
 });
 test('required validation and persistence errors retain answers until a durable service report is queued',async()=>{
   await render();await press('Finalize service report');assert.match(text(),/pH reading is required/);assert.equal(saves.length,0);

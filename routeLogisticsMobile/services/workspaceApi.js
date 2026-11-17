@@ -10,4 +10,4 @@ export const callWorkspace = async (name, data = {}, options) => {
   if (resources.length && JSON.stringify(before) === JSON.stringify(scope())) publishWorkWrite({ scope: before, resources, jobId: data.jobId || (name === 'rlManageJob' ? data.id || result?.id : undefined) });
   return result;
 };
-export const readWorkspace = (resource, options = {}) => callWorkspace('rlReadWorkspace', { resource, ...options });
+export const readWorkspace = (resource, data = {}, callableOptions) => callWorkspace('rlReadWorkspace', { resource, ...data }, callableOptions);

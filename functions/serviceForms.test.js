@@ -1,12 +1,18 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { BUILTINS } = require('./serviceForms');
+const { BUILTINS, matchingIndustries, relevantBuiltinTemplates } = require('./serviceForms');
 const { validateTemplate, validateAnswers, serviceReport } = require('./shared/serviceFormSchema');
 const pool = BUILTINS.find(row => row.id === 'pool-maintenance');
 test('eight versioned industry starters retain the specialized pest chemical log separately', () => {
   assert.equal(BUILTINS.length, 8); assert.equal(BUILTINS.filter(row => row.status === 'starter').length, 2);
   assert.ok(BUILTINS.every(row => row.version === 1 && row.fields.length > 0));
   assert.match(BUILTINS.find(row => row.id === 'pest-control').description, /Chemical application records remain separate/);
+});
+test('built-in choices are limited to the job category and otherwise the provider industry', () => {
+  assert.deepEqual([...matchingIndustries({ name: 'Acme Pest Control', services: ['Termite inspection'] })], ['pest']);
+  assert.deepEqual(relevantBuiltinTemplates({ name: 'Acme Pest Control' }, { serviceType: 'General Pest Control' }).map(row => row.id), ['pest-control']);
+  assert.deepEqual(relevantBuiltinTemplates({ name: 'Acme Pest Control' }, { serviceType: 'Pool maintenance' }).map(row => row.id), ['pool-maintenance']);
+  assert.deepEqual(relevantBuiltinTemplates({ name: 'Unconfigured provider' }, {}).map(row => row.id), []);
 });
 test('templates validate field types, immutable version identity, limits, choices and numeric units', () => {
   assert.equal(validateTemplate(pool).fields.find(field => field.id === 'freeChlorine').unit, 'ppm');

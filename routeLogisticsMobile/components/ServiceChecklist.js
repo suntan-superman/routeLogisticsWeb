@@ -10,7 +10,7 @@ const { validateAnswers } = require('../../functions/shared/serviceFormSchema');
 
 export default function ServiceChecklist({ job, readOnly = false, onBusyChange, onDraftChange, draftActionsRef, active = true }) {
   const { permissions } = useAuth(), { palette } = useTheme();
-  const [data, setData] = useState(null), [catalog, setCatalog] = useState([]), [answers, setAnswers] = useState({}), [pending, setPending] = useState(null);
+  const [data, setData] = useState(null), [catalog, setCatalog] = useState([]), [catalogChecked, setCatalogChecked] = useState(false), [answers, setAnswers] = useState({}), [pending, setPending] = useState(null);
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [dirty, setDirty] = useState(false), [loading, setLoading] = useState(true);
   const [ready, setReady] = useState(null), refresh = useRef(null);
   const mounted = useRef(false), sequence = useRef(0), lock = useRef(false), dirtyRef = useRef(false), currentJob = useRef(job), callbacks = useRef({ onBusyChange, onDraftChange }), formRef = useRef(null);
@@ -36,13 +36,13 @@ export default function ServiceChecklist({ job, readOnly = false, onBusyChange, 
   const resource = useJobResourceRefresh('service-form', job?.id, load, { enabled: ready === job?.id && active }); refresh.current = resource.refetch;
   const loadCatalog = useCallback(async () => {
     const id = currentJob.current?.id;
-    const result = await cachedRead('service-template-catalog', () => callWorkspace('rlServiceForms', { action: 'catalog' }));
-    if (mounted.current && currentJob.current?.id === id) setCatalog(result.templates || []);
+    const result = await cachedRead(`service-template-catalog:${id}`, () => callWorkspace('rlServiceForms', { action: 'catalog', jobId: id }));
+    if (mounted.current && currentJob.current?.id === id) { setCatalog(result.templates || []); setCatalogChecked(true); }
     return result;
   }, []);
   useJobResourceRefresh('service-catalog', job?.id, loadCatalog, { enabled: ready === job?.id && active && permissions.canManage && data?.enabled && !data?.form, interval: 120000 });
   useEffect(() => {
-    mounted.current = true; setData(null); setAnswers({}); setPending(null); setError(''); setNotice(''); setDirty(false); dirtyRef.current = false; formRef.current = null; setLoading(true); setCatalog([]);
+    mounted.current = true; setData(null); setAnswers({}); setPending(null); setError(''); setNotice(''); setDirty(false); dirtyRef.current = false; formRef.current = null; setLoading(true); setCatalog([]); setCatalogChecked(false);
     setReady(job?.id); const unsubscribe = subscribeOffline(() => refresh.current?.());
     return () => { mounted.current = false; sequence.current++; unsubscribe(); callbacks.current.onBusyChange?.(false); callbacks.current.onDraftChange?.(false); };
   }, [job.id, load, permissions.canManage]);
@@ -100,6 +100,7 @@ export default function ServiceChecklist({ job, readOnly = false, onBusyChange, 
       {dirty && <SecondaryButton title="Discard unsaved service answers" disabled={busy} onPress={() => { dirtyRef.current = false; setDirty(false); setAnswers(form.answers || {}); load(); }} />}
     </>}
     {!!data?.enabled && permissions.canManage && !readOnly && !form && catalog.map(template => <SecondaryButton key={`${template.id}:${template.version}`} title={`Use ${template.name} v${template.version}${template.status === 'foundation' ? ' (foundation)' : ''}`} disabled={busy} onPress={() => assign(template)} />)}
+    {!!data?.enabled && permissions.canManage && !readOnly && !form && catalogChecked && !catalog.length && <InlineNotice message="No service checklist matches this job’s service category. Configure or publish a company checklist before attaching one." />}
     <SecondaryButton title="Refresh service checklist" disabled={busy || loading} onPress={load} />
     {!!data?.reports?.length && <View style={{ gap: 8 }}><SectionHeader title="Saved service reports" />{data.reports.slice(0, 5).map(report => <View key={report.id} style={{ gap: 4 }}><Text style={{ color: palette.text, fontWeight: '600' }}>{report.report.templateName} v{report.report.templateVersion} · revision {report.responseVersion} · {report.status}</Text><Text style={{ color: palette.secondary }}>{new Date(report.createdAt).toLocaleString()}</Text>{report.report.fields.filter(field => field.value != null).map(field => <Text key={field.id} style={{ color: palette.secondary, lineHeight: 21 }}>{field.label}: {Array.isArray(field.value) ? field.type === 'photos' ? `${field.value.length} private photos` : field.value.join(', ') : String(field.value)}{field.unit ? ` ${field.unit}` : ''}</Text>)}</View>)}</View>}
   </Card>;

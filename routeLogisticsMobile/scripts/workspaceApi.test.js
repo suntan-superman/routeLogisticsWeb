@@ -1,18 +1,18 @@
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path'), babel = require('@babel/core');
 const events = require('../services/workQueryEvents');
-let received, detach, resolveCall, reply, rejected, claims, workspace;
+let received, detach, resolveCall, reply, rejected, claims, workspace, callableCalls;
 const auth = { currentUser: { uid: 'operator', emailVerified: true } }, moduleUnderTest = { exports: {} };
 const file = path.resolve(__dirname, '../services/workspaceApi.js');
 new Function('require', 'module', 'exports', babel.transformSync(fs.readFileSync(file, 'utf8'), { filename: file, configFile: false, babelrc: false, plugins: [require.resolve('@babel/plugin-transform-modules-commonjs')] }).code)(name => {
-  if (name === 'firebase/functions') return { httpsCallable: () => async () => { if (resolveCall) await resolveCall; if (rejected) throw rejected; return { data: reply }; } };
+  if (name === 'firebase/functions') return { httpsCallable: (_functions, name, options) => { callableCalls.push({ name, options }); return async () => { if (resolveCall) await resolveCall; if (rejected) throw rejected; return { data: reply }; }; } };
   if (name === '../constants/firebase') return { functions: {}, auth };
   if (name === './tenancy') return { getClaims: () => claims, getWorkspace: () => workspace };
   if (name === './workQueryPolicy') return require('../services/workQueryPolicy');
   if (name === './workQueryEvents') return events;
   throw Error(name);
 }, moduleUnderTest, moduleUnderTest.exports);
-beforeEach(() => { received = []; detach = events.subscribeWorkWrites(event => received.push(event)); resolveCall = null; rejected = null; reply = { status: 'synced' }; claims = { companyId: 'acme', role: 'manager', membershipId: 'member' }; workspace = { status: 'company' }; auth.currentUser = { uid: 'operator', emailVerified: true }; });
+beforeEach(() => { received = []; callableCalls = []; detach = events.subscribeWorkWrites(event => received.push(event)); resolveCall = null; rejected = null; reply = { status: 'synced' }; claims = { companyId: 'acme', role: 'manager', membershipId: 'member' }; workspace = { status: 'company' }; auth.currentUser = { uid: 'operator', emailVerified: true }; });
 afterEach(() => detach());
 test('successful writes emit only identifiers and resource categories under their verified identity scope', async () => {
   await moduleUnderTest.exports.callWorkspace('rlManageJob', { action: 'update', id: 'job', job: { notes: 'Private work note never broadcast' } });
@@ -24,6 +24,11 @@ test('reads, GPS samples, rejected writes and version conflicts never emit succe
   await moduleUnderTest.exports.readWorkspace('jobs'); await moduleUnderTest.exports.callWorkspace('rlWorkShift', { action: 'status' }); await moduleUnderTest.exports.callWorkspace('rlUpdateWorkLocation', { action: 'position' });
   reply = { status: 'conflict' }; await moduleUnderTest.exports.callWorkspace('rlApplyJobOperation', { jobId: 'job' });
   rejected = new Error('Rejected'); await assert.rejects(moduleUnderTest.exports.callWorkspace('rlManageJob', { action: 'assign' }));
+  assert.deepEqual(received, []);
+});
+test('read callers can set a narrow callable timeout without changing the request payload', async () => {
+  await moduleUnderTest.exports.readWorkspace('jobs', { id: 'job' }, { timeout: 12000 });
+  assert.deepEqual(callableCalls.at(-1), { name: 'rlReadWorkspace', options: { timeout: 12000 } });
   assert.deepEqual(received, []);
 });
 test('a late write response cannot invalidate another user or company after a scope switch', async () => {

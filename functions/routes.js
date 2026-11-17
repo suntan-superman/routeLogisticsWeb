@@ -3,6 +3,7 @@ const { hash, documentId, requireAuth, requireStaff, rateLimit } = require('./se
 const { hasCapability } = require('./access');
 const { servicePropertySite } = require('./serviceAreaWorkflows');
 const { availabilityRef, availabilityView } = require('./staffAvailability');
+const { projectJob } = require('./workData');
 function routeDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw new HttpsError('invalid-argument', 'Choose a valid service date.');
   return value;
@@ -54,15 +55,22 @@ function routeHandlers(db) {
       const scope = await routingScope(db, request);
       await rateLimit(db, 'route-read', request.auth.uid, 30);
       const snap = await db.collection('jobs').where('companyId', '==', scope.companyId).where('assignedTo', 'in', scope.memberAliases).where('date', '==', scope.date).limit(101).get();
+      const jobs = snap.docs.slice(0, 100).filter(job => {
+        const data = job.data();
+        return !['completed', 'cancelled'].includes(data.status) && (!data.assignedToUid || data.assignedToUid === scope.memberUid);
+      });
+      const customerIds = [...new Set(jobs.map(job => job.get('customerId')).filter(Boolean).map(id => documentId(id)))];
+      const customerRows = customerIds.length ? await db.getAll(...customerIds.map(id => db.doc(`customers/${id}`))) : [];
+      const customers = new Map(customerRows.filter(row => row.exists && row.get('companyId') === scope.companyId).map(row => [row.id, row.data()]));
       const stops = [];
-      for (const job of snap.docs.slice(0, 100)) {
-        const data = job.data(); if (['completed', 'cancelled'].includes(data.status) || data.assignedToUid && data.assignedToUid !== scope.memberUid) continue;
-        const customer = data.customerId ? await db.doc(`customers/${documentId(data.customerId)}`).get() : null;
-        const customerData = customer?.get('companyId') === scope.companyId ? customer.data() : {};
+      for (const job of jobs) {
+        const data = job.data(), customerData = customers.get(data.customerId) || {};
         const property = servicePropertySite(data);
         const address = property ? property.address : typeof data.address === 'string' && data.address.trim() ? data.address : [customerData.address, customerData.city, customerData.state, customerData.zipCode].filter((v) => typeof v === 'string' && v.trim()).join(', ');
         const hours = Number(data.estimatedDuration ?? data.duration ?? 0);
-        stops.push({ id: job.id, customerName: data.customerName || customerData.name || [customerData.firstName, customerData.lastName].filter(Boolean).join(' ') || 'Customer', serviceType: data.serviceType || 'Service', time: data.time || '', windowStart: data.windowStart || data.time || '', windowEnd: data.windowEnd || '', durationMinutes: Number.isFinite(hours) ? Math.max(0, hours * 60) : 0, location: property ? coordinates(property) : coordinates(data) || coordinates(customerData), address });
+        const customerName = data.customerName || customerData.name || [customerData.firstName, customerData.lastName].filter(Boolean).join(' ') || 'Customer';
+        const projected = projectJob(job.id, { ...data, customerName, customerPhone: data.customerPhone || customerData.phone || customerData.phoneNumber || '', address }, scope.role);
+        stops.push({ ...projected, customerName, serviceType: data.serviceType || 'Service', time: data.time || '', windowStart: data.windowStart || data.time || '', windowEnd: data.windowEnd || '', durationMinutes: Number.isFinite(hours) ? Math.max(0, hours * 60) : 0, location: property ? coordinates(property) : coordinates(data) || coordinates(customerData), address });
       }
       stops.sort((a, b) => a.time.localeCompare(b.time) || a.id.localeCompare(b.id));
       const saved = await db.doc(`rlRoutes/${hash(`${scope.companyId}:${scope.memberId}:${scope.date}`)}`).get();

@@ -69,6 +69,8 @@ test('daily routes enforce assignment and optimistic revision without provider c
   await db.doc('jobs/field-job').update({ estimatedDuration: 1.5 });
   const result = await routes.get(request(data));
   assert.equal(result.stops.length, 1); assert.equal(result.stops[0].durationMinutes, 90);
+  assert.equal(result.stops[0].companyId, 'field-co'); assert.equal(result.stops[0].assignedTo, 'field-member'); assert.equal(result.stops[0].status, 'in-progress');
+  assert.equal(result.stops[0].customerName, 'Test customer');
   await assert.rejects(routes.get(request({ ...data, memberId: owner.uid })), { code: 'permission-denied' });
   assert.equal((await routes.save(request({ ...data, jobIds: ['field-job'], revision: 0 }, owner))).revision, 1);
   await assert.rejects(routes.save(request({ ...data, jobIds: ['field-job'], revision: 0 }, owner)), { code: 'aborted' });

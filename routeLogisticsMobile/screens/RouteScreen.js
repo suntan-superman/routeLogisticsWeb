@@ -21,7 +21,7 @@ export default function RouteScreen({ user, active, onOpenJob }) {
       {route.stops.map((stop,index) => <Card key={stop.id}><SectionHeader title={`${index + 1}. ${stop.customerName || 'Assigned stop'}`} subtitle={[stop.time, stop.serviceType].filter(Boolean).join(' · ')} />
         <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>{stop.address || 'Address not provided'}</Text>
         <View style={{ gap: 10 }}>{!!jobDestination(stop) && <PrimaryButton title={`Navigate to stop ${index + 1}`} icon="navigate-outline" onPress={() => navigate(stop)} />}
-          <SecondaryButton title="Open work order" accessibilityLabel={`Open work order for stop ${index + 1}`} onPress={() => onOpenJob({ id: stop.id })} /></View>
+          <SecondaryButton title="Open work order" accessibilityLabel={`Open work order for stop ${index + 1}`} onPress={() => onOpenJob(stop)} /></View>
       </Card>)}
       {!route.isLoading && route.canReadWork !== false && !route.error && !route.stops.length && <EmptyState title="No remaining stops" message="Today’s eligible assigned visits appear here. Completed and cancelled jobs remain in Schedule." />}
     </ScrollView>

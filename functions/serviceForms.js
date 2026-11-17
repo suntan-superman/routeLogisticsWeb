@@ -4,6 +4,33 @@ const { requireCapability, checkJob, hasCapability } = require('./access');
 const { documentId, rateLimit } = require('./security');
 const { validateTemplate, validateAnswers, serviceReport } = require('./shared/serviceFormSchema');
 const BUILTINS = require('./shared/serviceTemplates.json').map(validateTemplate);
+const INDUSTRY_HINTS = {
+  pest: [/\bpest\b/i, /\btermite/i, /\brodent/i, /\binsect/i, /\bexterminat/i],
+  pool: [/\bpool\b/i, /\bspa\b/i],
+  hvac: [/\bhvac\b/i, /\bheating\b/i, /\bcooling\b/i, /air condition/i],
+  lawn: [/\blawn\b/i, /\byard\b/i, /\blandscap/i, /\bturf\b/i],
+  gutters: [/\bgutter/i],
+  windows: [/\bwindow/i],
+  cleaning: [/house cleaning/i, /home cleaning/i, /\bmaid\b/i, /\bjanitorial\b/i],
+  security: [/\bsecurity\b/i, /\balarm\b/i, /\bsurveillance\b/i],
+};
+const DESCRIPTOR_KEYS = ['name','businessName','industry','businessType','serviceType','serviceCategory','category','title','description','services','serviceCategories','selectedServices','categories'];
+function descriptorText(value, seen = new Set()) {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value !== 'object' || seen.has(value)) return '';
+  seen.add(value);
+  if (Array.isArray(value)) return value.map(row => descriptorText(row, seen)).join(' ');
+  return DESCRIPTOR_KEYS.map(key => descriptorText(value[key], seen)).join(' ');
+}
+function matchingIndustries(value) {
+  const text = descriptorText(value);
+  return new Set(Object.entries(INDUSTRY_HINTS).filter(([, patterns]) => patterns.some(pattern => pattern.test(text))).map(([industry]) => industry));
+}
+function relevantBuiltinTemplates(company, job) {
+  const jobIndustries = matchingIndustries(job);
+  const allowed = jobIndustries.size ? jobIndustries : matchingIndustries(company);
+  return allowed.size ? BUILTINS.filter(template => allowed.has(template.industry)) : [];
+}
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const invalid = error => { throw new HttpsError('invalid-argument', error.message); };
 const openJob = job => { if (['completed','cancelled','canceled'].includes(job.status)) throw new HttpsError('failed-precondition', 'This job is closed. Existing service reports remain available.'); };
@@ -27,8 +54,14 @@ function serviceFormsHandler(db, { enabled = () => false, now = () => new Date()
     if (!['catalog','read','publish','assign','save'].includes(action)) throw new HttpsError('invalid-argument', 'Choose a service-template action.');
     if (['publish','assign','save'].includes(action) && !enabled()) throw new HttpsError('failed-precondition', 'Service forms are not enabled yet. Existing work and chemical records are unchanged.');
     if (action === 'catalog') {
+      let job = null;
+      if (data.jobId) {
+        job = await db.doc(`jobs/${documentId(data.jobId, 'job')}`).get();
+        checkJob(scope, job.data());
+      }
       const heads = hasCapability(scope.role, 'jobs.schedule') ? await db.collection('rlServiceTemplateHeads').where('scopeKey', '==', scopeKey).limit(100).get() : { docs: [] };
-      return { enabled: enabled(), templates: [...BUILTINS, ...heads.docs.map(row => row.get('template'))] };
+      const builtins = relevantBuiltinTemplates(scope.company?.data(), job?.data());
+      return { enabled: enabled(), templates: [...builtins, ...heads.docs.map(row => row.get('template')).filter(Boolean)] };
     }
     if (action === 'publish') {
       let template; try { template = validateTemplate(data.template); } catch (error) { invalid(error); }
@@ -59,6 +92,7 @@ function serviceFormsHandler(db, { enabled = () => false, now = () => new Date()
       const form = await db.runTransaction(async tx => {
         await recheck(tx);
         const [job, current] = await Promise.all([tx.get(jobRef),tx.get(formRef)]); checkJob(scope, job.data()); openJob(job.data());
+        if (builtIn && !relevantBuiltinTemplates(scope.company?.data(), job.data()).some(row => row.id === builtIn.id && row.version === builtIn.version)) throw new HttpsError('failed-precondition', 'Choose a service template that matches this company and job.');
         if (Number(data.expectedVersion) !== (current.get('assignmentVersion') || 0)) throw new HttpsError('aborted', 'The service template changed. Refresh before assigning another version.');
         const next = { ...scopeFields, jobId, template, assignmentVersion: (current.get('assignmentVersion') || 0) + 1, responseVersion: current.get('responseVersion') || 0, answers: {}, status: 'draft', serviceDate: job.get('date') || null, updatedAt: now() };
         tx.set(formRef, next); tx.create(db.collection('rlAudit').doc(), { action: 'service-template.assign', ...scopeFields, actorId: scope.uid, jobId, templateId, templateVersion, createdAt: now() }); return next;
@@ -89,4 +123,4 @@ function serviceFormsHandler(db, { enabled = () => false, now = () => new Date()
     });
   };
 }
-module.exports = { serviceFormsHandler, BUILTINS, formView };
+module.exports = { serviceFormsHandler, BUILTINS, formView, matchingIndustries, relevantBuiltinTemplates };

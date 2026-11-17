@@ -5,7 +5,7 @@ const { initializeApp, deleteApp } = req('firebase-admin/app');
 const { getFirestore } = req('firebase-admin/firestore');
 const { initializeTestEnvironment,assertFails } = require('@firebase/rules-unit-testing');
 const { doc,getDoc,setDoc } = require('firebase/firestore');
-const { serviceFormsHandler } = require('../functions/serviceForms');
+const { serviceFormsHandler, BUILTINS } = require('../functions/serviceForms');
 let app, db, forms, rulesEnv;
 const owner = { uid:'service-owner',token:{ companyId:'service-co',role:'owner',email_verified:true } };
 const tech = { uid:'service-tech',token:{ companyId:'service-co',role:'technician',membershipId:'service-member',email_verified:true } };
@@ -14,14 +14,14 @@ const save = (jobId,answers,extra={}) => ({ action:'save',jobId,templateId:'pool
 before(async () => {
   if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('Emulator required');
   app = initializeApp({ projectId:'demo-routelogistics' },'service-forms-tests'); db = getFirestore(app); forms = serviceFormsHandler(db,{enabled:()=>true});
-  await db.doc('companies/service-co').set({ ownerId:owner.uid });
+  await db.doc('companies/service-co').set({ ownerId:owner.uid,name:'Synthetic Pool Service',serviceCategories:['Pool maintenance'] });
   await db.doc('teamMembers/service-member').set({ companyId:'service-co',uid:tech.uid,role:'technician',status:'active' });
   rulesEnv=await initializeTestEnvironment({projectId:'demo-routelogistics',firestore:{rules:require('node:fs').readFileSync(require('node:path').resolve(__dirname,'../firestore.rules'),'utf8')}});
 });
 after(async () => { await rulesEnv?.cleanup(); if(app)await deleteApp(app); });
 async function assigned(suffix, extra={}) {
   const jobId=`service-job-${suffix}`;
-  await db.doc(`jobs/${jobId}`).set({ companyId:'service-co',userId:owner.uid,assignedTo:'service-member',date:'2026-11-13',status:'in-progress',totalCost:900,...extra });
+  await db.doc(`jobs/${jobId}`).set({ companyId:'service-co',userId:owner.uid,assignedTo:'service-member',date:'2026-11-13',status:'in-progress',serviceType:'Pool maintenance',totalCost:900,...extra });
   await forms(request({action:'assign',jobId,templateId:'pool-maintenance',templateVersion:1,expectedVersion:0},owner)); return jobId;
 }
 const good = { ph:7.4,freeChlorine:3,equipment:'Normal' };
@@ -54,6 +54,8 @@ test('response conflicts and template reassignment retain immutable history with
   const jobId=await assigned('conflict'); await forms(request(save(jobId,good)));
   const stale=await forms(request(save(jobId,{...good,ph:7.8},{operationId:'service-operation-0002'})));
   assert.equal(stale.status,'conflict'); assert.equal(stale.version,1); assert.equal(stale.server.answers.ph,7.4);
+  await assert.rejects(forms(request({action:'assign',jobId,templateId:'pest-control',templateVersion:1,expectedVersion:1},owner)),{code:'failed-precondition'});
+  await db.doc(`jobs/${jobId}`).update({serviceType:'Pest control inspection'});
   await forms(request({action:'assign',jobId,templateId:'pest-control',templateVersion:1,expectedVersion:1},owner));
   await assert.rejects(forms(request(save(jobId,good,{operationId:'service-operation-0003'}))),{code:'failed-precondition'});
   assert.equal((await forms(request({action:'read',jobId}))).reports.length,1);
@@ -62,7 +64,7 @@ test('company template versions are immutable, tenant scoped and feature-disable
   const template={id:'company-pool',name:'Company pool check',industry:'pool',version:1,fields:[{id:'reading',label:'Water reading',type:'number',unit:'ppm',required:true,min:0,max:100}]};
   await forms(request({action:'publish',template},owner)); await assert.rejects(forms(request({action:'publish',template},owner)),{code:'already-exists'});
   await forms(request({action:'publish',template:{...template,version:2}},owner));
-  const catalog=await forms(request({action:'catalog'},owner)); assert.equal(catalog.templates.find(row=>row.id===template.id).version,2);
+  const catalog=await forms(request({action:'catalog'},owner)); assert.deepEqual(catalog.templates.filter(row=>BUILTINS.some(builtin=>builtin.id===row.id)).map(row=>row.id),['pool-maintenance']); assert.equal(catalog.templates.find(row=>row.id===template.id).version,2);
   const disabled=serviceFormsHandler(db,{enabled:()=>false}); const jobId=await assigned('disabled');
   await assert.rejects(disabled(request(save(jobId,good))),{code:'failed-precondition'}); assert.equal((await disabled(request({action:'read',jobId}))).enabled,false);
 });

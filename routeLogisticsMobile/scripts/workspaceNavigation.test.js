@@ -212,7 +212,8 @@ test('Route uses saved stop order, provides maps handoff and opens the correct w
   const shown = visibleText(); assert.ok(shown.indexOf('1. Saved first stop') < shown.indexOf('2. Saved second stop'));
   assert.match(shown, /An in-app route map is not available/);
   await press('Navigate to stop 1'); assert.equal(new URL(navigationCalls[0]).searchParams.get('destination'), '35,-119');
-  detail.job = route.stops[0]; await press('Open work order for stop 1'); assert.equal(workflowProps.job.id, 'second-stop');
+  detail = { ...detail, job: null, isLoading: true }; await press('Open work order for stop 1'); assert.equal(workflowProps.job.id, 'second-stop');
+  assert.equal(workflowProps.job.customerName, 'Saved first stop');
   assert.equal(hookCalls.filter(call => call.type === 'detail').at(-1).enabled, true);
   assert.equal(hookCalls.filter(call => call.type === 'route').at(-1).enabled, false);
   await press('Close job details'); assert.equal(button('Route tab').props.accessibilityState.selected, true);

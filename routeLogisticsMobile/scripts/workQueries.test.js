@@ -35,7 +35,7 @@ function load(relative) {
     if (specifier === '@react-native-community/netinfo') return { addEventListener: listener => { networks.add(listener); listener({ isConnected: connected, isInternetReachable: connected }); return () => networks.delete(listener); } };
     if (specifier.endsWith('/AuthContext')) return { useAuth: () => currentAuth };
     if (specifier === './firebase') return { JobService: { getJobsByDateRange: async (startDate, endDate) => { jobRequests.push({ startDate, endDate }); return jobsLoader(startDate, endDate); } } };
-    if (specifier === './workspaceApi') return { callWorkspace: async (name, data) => { routeRequests.push({ name, ...data }); return routeLoader(data); }, readWorkspace: async (resource, data) => { detailRequests.push({ resource, ...data }); return detailLoader(data); } };
+    if (specifier === './workspaceApi') return { callWorkspace: async (name, data) => { routeRequests.push({ name, ...data }); return routeLoader(data); }, readWorkspace: async (resource, data, callableOptions) => { detailRequests.push({ resource, ...data, callableOptions }); return detailLoader(data); } };
     if (specifier === './offline') return { cachedRead: async (name, loader) => {
       if (!connected) { if (!cached.has(name)) throw new Error('Open this view online once to save it for offline use.'); return cached.get(name); }
       const data = await loader(); cached.set(name, data); return data;
@@ -235,6 +235,7 @@ test('completed detail remains accessible when it disappears from the active sch
   detailLoader = async () => ({ job: { id: 'job', companyId: 'acme', assignedTo: 'member', status: 'completed' }, customer: null });
   await act(async () => observedJobs.refreshWork()); await settle(t);
   assert.deepEqual(observedJobs.jobs, []); assert.equal(observedDetail.job.status, 'completed');
+  assert.deepEqual(detailRequests.at(-1).callableOptions, { timeout: 12000 });
   assert.equal(observedDetail.dataChecked, true); assert.equal(observedDetail.canAccess, true); assert.equal(authRefreshes, 0);
 });
 

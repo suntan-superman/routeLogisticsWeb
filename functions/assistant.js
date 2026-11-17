@@ -127,6 +127,36 @@ function operationDocumentId(principal, clientMessageId) {
     .digest('hex');
 }
 
+function persistedSupportReceipt(payload, tenantId) {
+  const support = payload?.session || {};
+  const supportSessionId = safeText(support.id || support.sessionId, 200);
+  const transferState = safeText(support.transferState || support.handoff?.state, 80);
+  const supportProduct = safeText(support.product, 100);
+  const supportTenantId = safeText(support.tenantId, 200);
+  if (!supportSessionId || supportProduct !== PRODUCT || supportTenantId !== tenantId
+    || !['transfer_requested', 'human_takeover'].includes(transferState)) return null;
+  const routingStatus = safeText(support.routingStatus, 80) || 'queued';
+  const supportStatus = transferState === 'human_takeover'
+    ? 'human_takeover'
+    : routingStatus === 'queued_no_agent_available' ? 'waiting_for_agent'
+      : routingStatus === 'assigned' ? 'assigned_to_support' : 'received';
+  const acknowledgment = supportStatus === 'waiting_for_agent'
+    ? 'Your support request has been received by Workside Support and is waiting for a representative. An immediate live reply is not promised.'
+    : supportStatus === 'assigned_to_support'
+      ? 'Your support request has been received and assigned to a representative. An immediate live reply is not promised.'
+      : 'Your support request has been received by Workside Support. An immediate live reply is not promised.';
+  return {
+    supportSessionId,
+    supportProduct,
+    supportTenantId,
+    supportTransferState: transferState,
+    supportStatus,
+    supportRoutingStatus: routingStatus,
+    supportAvailabilityOutcome: safeText(support.availabilityOutcome, 100) || null,
+    acknowledgment,
+  };
+}
+
 function messageFingerprint(text) {
   return createHash('sha256').update(text).digest('hex');
 }
@@ -422,15 +452,25 @@ function assistantHandlers(db, { remoteRequest = defaultRemoteRequest, now = () 
     let payload;
     try { payload = await remoteRequest(`/chat/public/session/${encodeURIComponent(session.remoteSessionId)}/messages`); }
     catch (error) { return publicServiceError(error); }
+    const receipt = persistedSupportReceipt(payload, principal.workspaceReference);
+    if (receipt) {
+      await ref.set({
+        ...receipt,
+        escalationState: 'requested',
+        escalatedAt: session.escalatedAt || now(),
+        updatedAt: now(),
+      }, { merge: true });
+    }
     return {
       sessionId: ref.id,
+      supportSessionId: receipt?.supportSessionId || session.supportSessionId || null,
+      supportStatus: receipt?.supportStatus || session.supportStatus || null,
       messages: normalizeRemoteMessages(payload),
       acknowledgments: session.messageAcknowledgments || [],
-      escalationState: session.escalationState === 'requested' && session.supportSessionId
+      escalationState: receipt || (session.escalationState === 'requested' && session.supportSessionId
+        && session.supportProduct === PRODUCT && session.supportTenantId === principal.workspaceReference)
         ? 'requested'
         : session.escalationState === 'requesting' ? 'requesting' : 'not_requested',
-      supportSessionId: session.supportSessionId || null,
-      supportStatus: session.supportStatus || null,
     };
   }
 
@@ -531,51 +571,29 @@ function assistantHandlers(db, { remoteRequest = defaultRemoteRequest, now = () 
       await ref.set({ escalationState: 'failed', updatedAt: now() }, { merge: true });
       return publicServiceError(error);
     }
-    const support = payload?.session || {};
-    const supportSessionId = safeText(support.id || support.sessionId, 200);
-    const transferState = safeText(support.transferState || support.handoff?.state, 80);
-    const supportProduct = safeText(support.product, 100);
-    const supportTenantId = safeText(support.tenantId, 200);
-    if (!supportSessionId || supportProduct !== PRODUCT || supportTenantId !== principal.workspaceReference
-      || !['transfer_requested', 'human_takeover'].includes(transferState)) {
+    const receipt = persistedSupportReceipt(payload, principal.workspaceReference);
+    if (!receipt) {
       await ref.set({ escalationState: 'failed', updatedAt: now() }, { merge: true });
       throw new HttpsError('unavailable', 'Workside Support could not confirm that your request was received. Please retry.');
     }
-    const routingStatus = safeText(support.routingStatus, 80) || 'queued';
-    const supportStatus = transferState === 'human_takeover'
-      ? 'human_takeover'
-      : routingStatus === 'queued_no_agent_available' ? 'waiting_for_agent'
-        : routingStatus === 'assigned' ? 'assigned_to_support' : 'received';
-    const acknowledgment = supportStatus === 'waiting_for_agent'
-      ? 'Your support request has been received by Workside Support and is waiting for a representative. An immediate live reply is not promised.'
-      : supportStatus === 'assigned_to_support'
-        ? 'Your support request has been received and assigned to a representative. An immediate live reply is not promised.'
-        : 'Your support request has been received by Workside Support. An immediate live reply is not promised.';
     await ref.set({
+      ...receipt,
       escalationState: 'requested',
-      supportSessionId,
-      supportProduct,
-      supportTenantId,
-      supportTransferState: transferState,
-      supportStatus,
-      supportRoutingStatus: routingStatus,
-      supportAvailabilityOutcome: safeText(support.availabilityOutcome, 100) || null,
-      acknowledgment,
       escalatedAt: now(),
       updatedAt: now(),
     }, { merge: true });
     return {
       sessionId,
-      supportSessionId,
+      supportSessionId: receipt.supportSessionId,
       escalated: true,
       persisted: true,
       idempotent: payload?.idempotent === true,
-      supportStatus,
-      transferState,
-      routingStatus,
-      availabilityOutcome: safeText(support.availabilityOutcome, 100) || null,
+      supportStatus: receipt.supportStatus,
+      transferState: receipt.supportTransferState,
+      routingStatus: receipt.supportRoutingStatus,
+      availabilityOutcome: receipt.supportAvailabilityOutcome,
       messages: normalizeRemoteMessages(payload),
-      acknowledgment,
+      acknowledgment: receipt.acknowledgment,
     };
   }
 

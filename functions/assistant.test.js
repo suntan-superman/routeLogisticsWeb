@@ -145,6 +145,27 @@ test('history returns correlation acknowledgments for page refresh reconciliatio
   assert.equal(history.acknowledgments[0].clientMessageId, 'client-message-0001');
 });
 
+test('history repairs missing local handoff correlation from a persisted same-tenant support session', async () => {
+  const remoteRequest = async path => {
+    if (path === '/chat/public/session') return { session: { id: 'remote-history-repair' }, messages: [] };
+    if (path.endsWith('/messages')) return { session: {
+      id: 'remote-history-repair', product: PRODUCT, tenantId: 'company-a',
+      transferState: 'transfer_requested', routingStatus: 'queued_no_agent_available',
+      availabilityOutcome: 'no_available_agent',
+    }, messages: [] };
+    return { messages: [] };
+  };
+  const { db, handlers } = setup({ remoteRequest });
+  const created = await handlers.handle(request({ action: 'message', message: 'Refresh-safe support request' }));
+  const key = `rlAssistantSessions/${created.sessionId}`;
+  db.data.set(key, { ...db.data.get(key), escalationState: 'requested' });
+  const history = await handlers.handle(request({ action: 'history', sessionId: created.sessionId }));
+  assert.equal(history.escalationState, 'requested');
+  assert.equal(history.supportSessionId, 'remote-history-repair');
+  assert.equal(history.supportStatus, 'waiting_for_agent');
+  assert.equal(db.data.get(key).supportSessionId, 'remote-history-repair');
+});
+
 test('a conversation cannot be read or written from another tenant', async () => {
   const { db, handlers } = setup();
   const created = await handlers.handle(request({ action: 'message', message: 'Help', route: '/' }));

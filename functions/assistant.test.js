@@ -72,7 +72,14 @@ function setup(overrides = {}) {
       { id: 'visitor-1', role: 'visitor', text: options.body.message, createdAt: '2026-11-17T00:00:00Z' },
       { id: 'assistant-1', role: 'assistant', text: 'Verified Route Logistics guidance.', createdAt: '2026-11-17T00:00:01Z' },
     ] };
-    if (path.endsWith('/request-human')) return { session: { status: 'escalated' }, messages: [] };
+    if (path.endsWith('/request-human')) {
+      const remoteSessionId = path.match(/\/session\/([^/]+)\/request-human$/)?.[1];
+      return { session: {
+        id: remoteSessionId, product: PRODUCT, tenantId: 'company-a', status: 'escalated',
+        transferState: 'transfer_requested', routingStatus: 'queued_no_agent_available',
+        availabilityOutcome: 'no_available_agent',
+      }, messages: [] };
+    }
     if (options.method === 'POST') return { messages: [{ id: `assistant-${calls.length}`, role: 'assistant', text: 'Follow-up.', createdAt: '2026-11-17T00:00:02Z' }] };
     return { messages: [] };
   };
@@ -166,12 +173,52 @@ test('support escalation is idempotent and includes only explicit support metada
   const first = await handlers.handle(request(payload));
   const second = await handlers.handle(request(payload));
   assert.equal(first.escalated, true);
+  assert.equal(first.persisted, true);
+  assert.equal(first.supportSessionId, 'remote_1');
+  assert.equal(first.supportStatus, 'waiting_for_agent');
+  assert.match(first.acknowledgment, /received by Workside Support/);
   assert.equal(second.idempotent, true);
+  assert.equal(second.persisted, true);
+  assert.equal(second.supportSessionId, first.supportSessionId);
   assert.equal(calls.filter(call => call.path.endsWith('/request-human')).length, 1);
   const body = calls.find(call => call.path.endsWith('/request-human')).options.body;
   assert.match(body.message, /Page: \/dispatch/);
   assert.equal(body.product, PRODUCT);
   assert.equal(body.tenantId, 'company-a');
+  const history = await handlers.handle(request({ action: 'history', sessionId: created.sessionId }));
+  assert.equal(history.escalationState, 'requested');
+  assert.equal(history.supportSessionId, first.supportSessionId);
+});
+
+test('a 2xx response without a persisted same-product same-tenant support session is not acknowledged', async () => {
+  const { db, handlers } = setup({ remoteRequest: async (path, options = {}) => {
+    if (path === '/chat/public/session') return { session: { id: 'remote-unconfirmed' }, messages: [] };
+    if (path.endsWith('/request-human')) return { ok: true, session: { status: 'escalated' }, messages: [] };
+    return { messages: [] };
+  } });
+  const created = await handlers.handle(request({ action: 'message', message: 'Need support', route: '/dispatch' }));
+  await assert.rejects(handlers.handle(request({
+    action: 'escalate', sessionId: created.sessionId, operationId: 'operation-unconfirmed',
+    contactName: 'Owner User', contactEmail: 'owner@example.com', summary: 'Synthetic handoff', details: 'Test persistence confirmation.',
+  })), error => error.code === 'unavailable');
+  const stored = db.data.get(`rlAssistantSessions/${created.sessionId}`);
+  assert.equal(stored.escalationState, 'failed');
+  assert.equal(stored.supportSessionId, undefined);
+});
+
+test('a support session for a different product or tenant is rejected', async () => {
+  const { handlers } = setup({ remoteRequest: async (path, options = {}) => {
+    if (path === '/chat/public/session') return { session: { id: 'remote-mismatch' }, messages: [] };
+    if (path.endsWith('/request-human')) return { session: {
+      id: 'support-other-tenant', product: PRODUCT, tenantId: 'company-b', transferState: 'transfer_requested',
+    }, messages: [] };
+    return { messages: [] };
+  } });
+  const created = await handlers.handle(request({ action: 'message', message: 'Need support', route: '/dispatch' }));
+  await assert.rejects(handlers.handle(request({
+    action: 'escalate', sessionId: created.sessionId, operationId: 'operation-tenant-mismatch',
+    contactName: 'Owner User', contactEmail: 'owner@example.com', summary: 'Synthetic handoff', details: 'Test tenant isolation.',
+  })), error => error.code === 'unavailable');
 });
 
 test('invalid provider responses fail safely without persisting a local session', async () => {
@@ -198,7 +245,11 @@ test('a failed support handoff remains retryable and does not duplicate a succes
         error.status = 503;
         throw error;
       }
-      return { session: { status: 'escalated' }, messages: [] };
+      return { session: {
+        id: 'remote-retry', product: PRODUCT, tenantId: 'company-a', status: 'escalated',
+        transferState: 'transfer_requested', routingStatus: 'queued_no_agent_available',
+        availabilityOutcome: 'no_available_agent',
+      }, messages: [] };
     }
     return { messages: [] };
   };
@@ -212,7 +263,9 @@ test('a failed support handoff remains retryable and does not duplicate a succes
   const retried = await handlers.handle(request(payload));
   const repeated = await handlers.handle(request(payload));
   assert.equal(retried.escalated, true);
+  assert.equal(retried.supportSessionId, 'remote-retry');
   assert.equal(repeated.idempotent, true);
+  assert.equal(repeated.supportSessionId, 'remote-retry');
   assert.equal(handoffAttempts, 2);
 });
 

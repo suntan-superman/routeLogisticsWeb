@@ -426,7 +426,11 @@ function assistantHandlers(db, { remoteRequest = defaultRemoteRequest, now = () 
       sessionId: ref.id,
       messages: normalizeRemoteMessages(payload),
       acknowledgments: session.messageAcknowledgments || [],
-      escalationState: session.escalationState || 'not_requested',
+      escalationState: session.escalationState === 'requested' && session.supportSessionId
+        ? 'requested'
+        : session.escalationState === 'requesting' ? 'requesting' : 'not_requested',
+      supportSessionId: session.supportSessionId || null,
+      supportStatus: session.supportStatus || null,
     };
   }
 
@@ -475,11 +479,24 @@ function assistantHandlers(db, { remoteRequest = defaultRemoteRequest, now = () 
       ref = collection.doc(documentId(sessionId, 'assistant session'));
       session = assertSessionOwner(await ref.get(), principal);
     }
-    if (session.escalationState === 'requested') {
-      return { sessionId, escalated: true, idempotent: true, supportStatus: 'requested' };
+    if (session.escalationState === 'requested' && session.supportSessionId
+      && session.supportProduct === PRODUCT && session.supportTenantId === principal.workspaceReference) {
+      return {
+        sessionId,
+        supportSessionId: session.supportSessionId,
+        escalated: true,
+        persisted: true,
+        idempotent: true,
+        supportStatus: session.supportStatus || 'received',
+        acknowledgment: session.acknowledgment,
+      };
     }
     if (session.escalationState === 'requesting' && session.lastEscalationOperationId === operationId) {
-      return { sessionId, escalated: false, idempotent: true, supportStatus: 'requesting' };
+      return {
+        sessionId, escalated: false, persisted: false, idempotent: true,
+        supportStatus: 'requesting',
+        acknowledgment: 'Connecting your request to Workside Support. Please check again shortly.',
+      };
     }
     await ref.set({ escalationState: 'requesting', lastEscalationOperationId: operationId, updatedAt: now() }, { merge: true });
     const description = [
@@ -514,14 +531,51 @@ function assistantHandlers(db, { remoteRequest = defaultRemoteRequest, now = () 
       await ref.set({ escalationState: 'failed', updatedAt: now() }, { merge: true });
       return publicServiceError(error);
     }
-    await ref.set({ escalationState: 'requested', escalatedAt: now(), updatedAt: now() }, { merge: true });
+    const support = payload?.session || {};
+    const supportSessionId = safeText(support.id || support.sessionId, 200);
+    const transferState = safeText(support.transferState || support.handoff?.state, 80);
+    const supportProduct = safeText(support.product, 100);
+    const supportTenantId = safeText(support.tenantId, 200);
+    if (!supportSessionId || supportProduct !== PRODUCT || supportTenantId !== principal.workspaceReference
+      || !['transfer_requested', 'human_takeover'].includes(transferState)) {
+      await ref.set({ escalationState: 'failed', updatedAt: now() }, { merge: true });
+      throw new HttpsError('unavailable', 'Workside Support could not confirm that your request was received. Please retry.');
+    }
+    const routingStatus = safeText(support.routingStatus, 80) || 'queued';
+    const supportStatus = transferState === 'human_takeover'
+      ? 'human_takeover'
+      : routingStatus === 'queued_no_agent_available' ? 'waiting_for_agent'
+        : routingStatus === 'assigned' ? 'assigned_to_support' : 'received';
+    const acknowledgment = supportStatus === 'waiting_for_agent'
+      ? 'Your support request has been received by Workside Support and is waiting for a representative. An immediate live reply is not promised.'
+      : supportStatus === 'assigned_to_support'
+        ? 'Your support request has been received and assigned to a representative. An immediate live reply is not promised.'
+        : 'Your support request has been received by Workside Support. An immediate live reply is not promised.';
+    await ref.set({
+      escalationState: 'requested',
+      supportSessionId,
+      supportProduct,
+      supportTenantId,
+      supportTransferState: transferState,
+      supportStatus,
+      supportRoutingStatus: routingStatus,
+      supportAvailabilityOutcome: safeText(support.availabilityOutcome, 100) || null,
+      acknowledgment,
+      escalatedAt: now(),
+      updatedAt: now(),
+    }, { merge: true });
     return {
       sessionId,
+      supportSessionId,
       escalated: true,
+      persisted: true,
       idempotent: payload?.idempotent === true,
-      supportStatus: safeText(payload?.session?.routingStatus || payload?.session?.status, 80) || 'requested',
+      supportStatus,
+      transferState,
+      routingStatus,
+      availabilityOutcome: safeText(support.availabilityOutcome, 100) || null,
       messages: normalizeRemoteMessages(payload),
-      acknowledgment: 'Your request was sent to Workside Support. Replies are handled through the existing support workflow; this widget does not promise an immediate live response.',
+      acknowledgment,
     };
   }
 

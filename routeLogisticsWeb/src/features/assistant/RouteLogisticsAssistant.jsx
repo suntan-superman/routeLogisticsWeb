@@ -38,9 +38,10 @@ function readSavedConversation(key) {
       sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : '',
       messages: Array.isArray(parsed.messages) ? parsed.messages.slice(-MAX_ASSISTANT_MESSAGES) : [],
       escalated: parsed.escalated === true,
+      supportStatus: typeof parsed.supportStatus === 'string' ? parsed.supportStatus : '',
     };
   } catch {
-    return { sessionId: '', messages: [], escalated: false };
+    return { sessionId: '', messages: [], escalated: false, supportStatus: '' };
   }
 }
 
@@ -96,7 +97,7 @@ function SupportForm({ mode, currentEmail, defaultName, pathname, busy, onCancel
       <p className="text-xs text-gray-500">Page: {pathname}</p>
       <div className="flex gap-2">
         <button type="button" onClick={onCancel} className="btn-secondary flex-1" disabled={busy}>Back</button>
-        <button type="submit" className="btn-primary flex-1" disabled={!valid || busy}>{busy ? 'Sending…' : 'Send to support'}</button>
+        <button type="submit" className="btn-primary flex-1" disabled={!valid || busy}>{busy ? 'Connecting…' : 'Send to support'}</button>
       </div>
     </form>
   );
@@ -114,6 +115,7 @@ export default function RouteLogisticsAssistant() {
   const [sessionId, setSessionId] = useState(initial.sessionId);
   const [messages, setMessages] = useState(initial.messages);
   const [escalated, setEscalated] = useState(initial.escalated);
+  const [supportStatus, setSupportStatus] = useState(initial.supportStatus);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -134,7 +136,7 @@ export default function RouteLogisticsAssistant() {
   useEffect(() => {
     if (previousKeyRef.current !== key) {
       const next = readSavedConversation(key);
-      setSessionId(next.sessionId); setMessages(next.messages); setEscalated(next.escalated);
+      setSessionId(next.sessionId); setMessages(next.messages); setEscalated(next.escalated); setSupportStatus(next.supportStatus);
       setError(''); setLastAttempt(null); setPendingActions([]); setMode('chat'); setOpen(false);
       historyLoadedRef.current = ''; submissionRef.current = '';
       previousKeyRef.current = key;
@@ -142,8 +144,8 @@ export default function RouteLogisticsAssistant() {
   }, [key]);
 
   useEffect(() => {
-    sessionStorage.setItem(key, JSON.stringify({ sessionId, messages: messages.slice(-MAX_ASSISTANT_MESSAGES), escalated }));
-  }, [key, sessionId, messages, escalated]);
+    sessionStorage.setItem(key, JSON.stringify({ sessionId, messages: messages.slice(-MAX_ASSISTANT_MESSAGES), escalated, supportStatus }));
+  }, [key, sessionId, messages, escalated, supportStatus]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -164,7 +166,8 @@ export default function RouteLogisticsAssistant() {
     loadAssistantHistory(sessionId).then(result => {
       if (!active) return;
       setMessages(value => reconcileAssistantMessages(value, result.messages || [], { acknowledgments: result.acknowledgments || [] }));
-      setEscalated(result.escalationState === 'requested');
+      setEscalated(result.escalationState === 'requested' && !!result.supportSessionId);
+      setSupportStatus(result.supportStatus || '');
     }).catch(() => { if (active) historyLoadedRef.current = ''; });
     return () => { active = false; };
   }, [key, sessionId, workspaceReady]);
@@ -228,7 +231,7 @@ export default function RouteLogisticsAssistant() {
 
   const newConversation = async () => {
     const old = sessionId;
-    setSessionId(''); setMessages([]); setEscalated(false); setError(''); setPendingActions([]); setMode('chat');
+    setSessionId(''); setMessages([]); setEscalated(false); setSupportStatus(''); setError(''); setPendingActions([]); setMode('chat');
     setLastAttempt(null); historyLoadedRef.current = ''; submissionRef.current = '';
     sessionStorage.removeItem(key);
     if (old) closeAssistantSession(old).catch(() => {});
@@ -241,6 +244,8 @@ export default function RouteLogisticsAssistant() {
     try {
       const result = await loadAssistantHistory(sessionId);
       setMessages(value => reconcileAssistantMessages(value, result.messages, { acknowledgments: result.acknowledgments || [] }));
+      setEscalated(result.escalationState === 'requested' && !!result.supportSessionId);
+      setSupportStatus(result.supportStatus || '');
     } catch (requestError) { setError(assistantErrorMessage(requestError)); }
     finally { setBusy(false); }
   };
@@ -252,12 +257,20 @@ export default function RouteLogisticsAssistant() {
         ...form, sessionId: sessionId || null, operationId: crypto.randomUUID(),
         appVersion: import.meta.env.VITE_APP_VERSION || `web/${ROUTE_LOGISTICS_KNOWLEDGE_VERSION}`,
       });
-      setSessionId(result.sessionId || sessionId); setEscalated(true); setMode('chat');
+      setSessionId(result.sessionId || sessionId);
+      setEscalated(result.persisted === true && !!result.supportSessionId);
+      setSupportStatus(result.persisted === true ? (result.supportStatus || 'received') : 'requesting');
+      setMode('chat');
       setMessages(value => reconcileAssistantMessages(value, [
         ...(result.messages || []),
-        localMessage('system', result.acknowledgment || 'Your request was sent to Workside Support. This widget does not promise an immediate live response.'),
+        localMessage('system', result.acknowledgment || 'Connecting your request to Workside Support. Please check again shortly.'),
       ]));
-    } catch (requestError) { setError(assistantErrorMessage(requestError)); }
+    } catch (requestError) {
+      const code = String(requestError?.code || '').replace(/^functions\//, '');
+      setError(code === 'unavailable'
+        ? "We couldn't confirm that Workside Support received your request. Please retry."
+        : assistantErrorMessage(requestError));
+    }
     finally { setBusy(false); }
   };
 
@@ -298,7 +311,7 @@ export default function RouteLogisticsAssistant() {
           {pendingActions.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{pendingActions.map(action => <button key={action.id} type="button" onClick={() => navigateTo(action)} className="rounded-md bg-primary-600 px-3 py-2 text-xs font-semibold text-white hover:bg-primary-700">{action.label}</button>)}</div>}
           {busy && <div className="mt-3 flex items-center gap-2 text-sm text-gray-500" role="status"><ArrowPathIcon className="h-4 w-4 animate-spin" />Checking verified guidance…</div>}
           {error && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert"><div className="flex gap-2"><ExclamationTriangleIcon className="h-5 w-5 shrink-0" /><span>{error}</span></div>{lastAttempt && <button type="button" onClick={() => ask(lastQuestion, lastAttempt)} disabled={busy} className="mt-2 font-semibold underline">Retry</button>}</div>}
-          {escalated && <div className="mt-3 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-gray-800"><div className="flex items-start gap-2"><LifebuoyIcon className="h-5 w-5 shrink-0 text-primary-700" /><p>Workside Support handoff requested. Use Refresh to check for supported follow-up; an immediate live reply is not promised.</p></div><button type="button" onClick={refreshHistory} disabled={busy} className="mt-2 text-xs font-semibold text-primary-700 underline">Refresh conversation</button></div>}
+          {(escalated || supportStatus === 'requesting') && <div className="mt-3 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-gray-800"><div className="flex items-start gap-2"><LifebuoyIcon className="h-5 w-5 shrink-0 text-primary-700" /><p>{supportStatus === 'requesting' ? 'Connecting your request to Workside Support. Use Refresh to check again shortly.' : supportStatus === 'waiting_for_agent' ? 'Workside Support has received your request. It is waiting for a representative; an immediate live reply is not promised.' : supportStatus === 'assigned_to_support' ? 'Workside Support has received your request and assigned it to a representative. An immediate live reply is not promised.' : 'Workside Support has received your request. Use Refresh to check for supported follow-up; an immediate live reply is not promised.'}</p></div><button type="button" onClick={refreshHistory} disabled={busy} className="mt-2 text-xs font-semibold text-primary-700 underline">Refresh conversation</button></div>}
           <div ref={messageEndRef} />
         </>}
       </div>

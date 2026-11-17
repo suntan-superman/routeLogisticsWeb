@@ -1,6 +1,7 @@
 import { getMessaging, getToken, deleteToken, onMessage, isSupported } from 'firebase/messaging';
 import { doc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import app, { db, auth } from './firebase';
+import { waitForActiveServiceWorker } from './pushRegistration';
 
 const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY;
 const TOKEN_KEY = 'rl_push_token';
@@ -27,7 +28,8 @@ export async function enablePush() {
   if (!(await pushSupported())) throw new Error('Push notifications are not available in this browser');
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') throw new Error('Notification permission was not granted');
-  const registration = await navigator.serviceWorker.register(swUrl());
+  const registered = await navigator.serviceWorker.register(swUrl());
+  const registration = await waitForActiveServiceWorker(navigator.serviceWorker, registered);
   const token = await getToken(getMessaging(app), { vapidKey: VAPID_KEY, serviceWorkerRegistration: registration });
   if (!token) throw new Error('Could not get a notification token');
   const uid = auth.currentUser.uid;

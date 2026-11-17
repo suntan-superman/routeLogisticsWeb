@@ -1,6 +1,6 @@
 import { routeCapabilities } from '../../utils/routeAccess.js';
 
-export const ROUTE_LOGISTICS_KNOWLEDGE_VERSION = '2026-11-17.1';
+export const ROUTE_LOGISTICS_KNOWLEDGE_VERSION = '2026-11-17.2';
 
 export const assistantActions = Object.freeze({
   dashboard: { id: 'dashboard', label: 'Go to Dashboard', route: '/', capability: 'jobs.read' },
@@ -48,11 +48,20 @@ const registry = [
     actionIds: ['myWork', 'routes'],
   },
   {
+    id: 'approved-estimate-scheduling', route: null, displayName: 'Approved estimate scheduling', category: 'estimates',
+    description: 'Convert a customer-approved estimate into its linked service job without creating an unrelated appointment or changing approved pricing.',
+    requiredCapabilities: ['customers.manage', 'jobs.schedule'], supportedRoles: ['owner', 'admin', 'manager'], status: 'implemented',
+    keywords: ['approved estimate', 'schedule approved work', 'schedule work', 'scheduling needed', 'customer approves', 'customer approved'],
+    steps: ['Open Estimates and locate the customer-approved estimate with Approved — scheduling needed status.', 'Open the estimate and use Convert approved estimate.', 'Confirm the approved service property and category; supply only required missing property, category, or prospect-to-customer information.', 'Choose the service date and quarter-hour time, then select Convert approved estimate to job and explicitly confirm job conversion.', 'The conversion creates one unassigned job linked to the immutable approved estimate; verify the Converted job reference.', 'Open Jobs or Dispatch to select an eligible technician and review conflicts or alternatives. Technician selection is not currently part of the conversion dialog.'],
+    commonProblems: ['Do not create an unrelated new job when an approved estimate is waiting for conversion.', 'Approved pricing and property/category terms cannot be silently changed during conversion.', 'Conversion is idempotent and geographic checks still apply.'],
+    actionIds: ['estimates'],
+  },
+  {
     id: 'estimate-workflow', route: '/estimates', displayName: 'Estimates', category: 'estimates',
     description: 'Schedule and complete estimate visits, build versioned estimates, review them, send them, and schedule approved work.',
     requiredCapabilities: ['estimates.manage', 'estimates.prepareAssigned'], supportedRoles: ['owner', 'admin', 'manager', 'technician'], status: 'implemented',
     keywords: ['estimate', 'labor', 'material', 'management review', 'approve', 'decline', 'revision', 'approved work'],
-    steps: ['Start an estimate visit from the inquiry or assigned work.', 'Add labor, materials, notes, and photos, then save the draft.', 'A technician submits the exact version for management review; an authorized manager can request changes or send it to the customer.', 'After customer approval, authorized staff schedule the approved work.'],
+    steps: ['Start an estimate visit from the inquiry or assigned work.', 'Add labor, materials, notes, and photos, then save the draft.', 'A technician submits the exact version for management review; an authorized manager can request changes or send it to the customer.', 'After customer approval, use the estimate conversion workflow rather than creating an unrelated job.'],
     commonProblems: ['Approval applies to an exact estimate version; editing creates a newer version.', 'Technicians can prepare assigned estimates but do not receive unrestricted management access.'],
     actionIds: ['estimates', 'customers'],
   },

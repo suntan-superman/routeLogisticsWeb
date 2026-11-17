@@ -3,7 +3,7 @@ import { functions } from './firebase';
 
 const callAssistant = async data => (await httpsCallable(functions, 'rlAssistant')(data)).data;
 
-export const sendAssistantMessage = ({ sessionId, message, route }) => callAssistant({ action: 'message', sessionId: sessionId || null, message, route });
+export const sendAssistantMessage = ({ sessionId, message, route, clientMessageId }) => callAssistant({ action: 'message', sessionId: sessionId || null, message, route, clientMessageId });
 export const loadAssistantHistory = sessionId => callAssistant({ action: 'history', sessionId });
 export const closeAssistantSession = sessionId => callAssistant({ action: 'close', sessionId });
 export const escalateAssistantSession = data => callAssistant({ action: 'escalate', ...data });

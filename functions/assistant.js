@@ -13,7 +13,7 @@ const { workspaceStatus } = require('./workspace');
 const capabilityPolicy = require('./shared/capabilities.json');
 
 const PRODUCT = 'route-logistics';
-const KNOWLEDGE_VERSION = '2026-11-17.1';
+const KNOWLEDGE_VERSION = '2026-11-17.2';
 const MAX_MESSAGE_LENGTH = 1_000;
 const MAX_SESSION_MESSAGES = 30;
 const MAX_RETURNED_MESSAGES = 40;
@@ -104,6 +104,31 @@ function normalizeRemoteMessages(payload) {
     .map(normalizeRemoteMessage)
     .filter(Boolean)
     .slice(-MAX_RETURNED_MESSAGES);
+}
+
+function normalizeClientMessageId(value) {
+  const id = safeText(value, 100);
+  return /^[A-Za-z0-9_-]{16,100}$/.test(id) ? id : '';
+}
+
+function messageAcknowledgment(clientMessageId, messages = []) {
+  if (!clientMessageId) return null;
+  let visitorMessageId = null, assistantMessageId = null;
+  for (const message of messages) {
+    if (message.role === 'visitor') visitorMessageId = message.id;
+    if (message.role === 'assistant' || message.role === 'agent') assistantMessageId = message.id;
+  }
+  return { clientMessageId, visitorMessageId, assistantMessageId };
+}
+
+function operationDocumentId(principal, clientMessageId) {
+  return createHash('sha256')
+    .update(`${principal.uid}:${principal.workspaceReference}:${clientMessageId}`)
+    .digest('hex');
+}
+
+function messageFingerprint(text) {
+  return createHash('sha256').update(text).digest('hex');
 }
 
 function assistantEnabled() {
@@ -225,8 +250,81 @@ async function incrementMessageCount(db, ref, principal) {
 
 function assistantHandlers(db, { remoteRequest = defaultRemoteRequest, now = () => new Date().toISOString() } = {}) {
   const collection = db.collection('rlAssistantSessions');
+  const operations = db.collection('rlAssistantMessageOperations');
 
-  async function createRemoteSession(principal, context, text) {
+  async function beginMessageOperation(principal, clientMessageId, text, requestedSessionId) {
+    const ref = operations.doc(operationDocumentId(principal, clientMessageId));
+    const fingerprint = messageFingerprint(text);
+    return db.runTransaction(async (tx) => {
+      const snapshot = await tx.get(ref);
+      if (snapshot.exists) {
+        const existing = snapshot.data();
+        if (existing.userId !== principal.uid || existing.workspaceReference !== principal.workspaceReference || existing.messageFingerprint !== fingerprint) {
+          throw new HttpsError('invalid-argument', 'This message identity cannot be reused for different content.');
+        }
+        if (existing.status === 'completed') return { state: 'completed', ref, operation: existing };
+        if (existing.status === 'processing') return { state: 'processing', ref, operation: existing };
+      }
+      tx.set(ref, {
+        product: PRODUCT,
+        userId: principal.uid,
+        workspaceReference: principal.workspaceReference,
+        clientMessageId,
+        messageFingerprint: fingerprint,
+        requestedSessionId: requestedSessionId || null,
+        status: 'processing',
+        attempts: Number(snapshot.data()?.attempts || 0) + 1,
+        updatedAt: now(),
+        createdAt: snapshot.data()?.createdAt || now(),
+      });
+      return { state: 'started', ref };
+    });
+  }
+
+  async function completeMessageOperation(ref, sessionId, acknowledgment) {
+    await ref.set({ status: 'completed', sessionId, acknowledgment, completedAt: now(), updatedAt: now() }, { merge: true });
+  }
+
+  async function failMessageOperation(ref, error) {
+    await ref.set({
+      status: 'failed',
+      failureCode: safeText(error?.code || error?.name, 80) || 'unavailable',
+      failedAt: now(),
+      updatedAt: now(),
+    }, { merge: true }).catch(() => {});
+  }
+
+  async function recordMessageAcknowledgment(ref, principal, acknowledgment) {
+    if (!acknowledgment) return [];
+    return db.runTransaction(async (tx) => {
+      const snapshot = await tx.get(ref);
+      const session = assertSessionOwner(snapshot, principal);
+      const acknowledgments = (Array.isArray(session.messageAcknowledgments) ? session.messageAcknowledgments : [])
+        .filter(item => item?.clientMessageId !== acknowledgment.clientMessageId)
+        .concat(acknowledgment)
+        .slice(-MAX_SESSION_MESSAGES);
+      tx.update(ref, { messageAcknowledgments: acknowledgments, updatedAt: now() });
+      return acknowledgments;
+    });
+  }
+
+  async function replayCompletedOperation(operation, principal) {
+    const ref = collection.doc(documentId(operation.sessionId, 'assistant session'));
+    const session = assertSessionOwner(await ref.get(), principal);
+    let payload;
+    try { payload = await remoteRequest(`/chat/public/session/${encodeURIComponent(session.remoteSessionId)}/messages`); }
+    catch (error) { return publicServiceError(error); }
+    return {
+      sessionId: ref.id,
+      messages: normalizeRemoteMessages(payload),
+      acknowledgment: operation.acknowledgment || null,
+      acknowledgments: session.messageAcknowledgments || [],
+      replayed: true,
+      knowledgeVersion: KNOWLEDGE_VERSION,
+    };
+  }
+
+  async function createRemoteSession(principal, context, text, clientMessageId) {
     const ref = collection.doc();
     let payload;
     try {
@@ -238,6 +336,8 @@ function assistantHandlers(db, { remoteRequest = defaultRemoteRequest, now = () 
     const remoteSessionId = safeText(payload?.session?.id, 200);
     if (!remoteSessionId) throw new HttpsError('unavailable', 'The support service returned an invalid session.');
     const createdAt = now();
+    const messages = normalizeRemoteMessages(payload);
+    const acknowledgment = messageAcknowledgment(clientMessageId, messages);
     await ref.set({
       product: PRODUCT,
       userId: principal.uid,
@@ -250,11 +350,12 @@ function assistantHandlers(db, { remoteRequest = defaultRemoteRequest, now = () 
       knowledgeVersion: KNOWLEDGE_VERSION,
       remoteSessionId,
       messageCount: 1,
+      messageAcknowledgments: acknowledgment ? [acknowledgment] : [],
       escalationState: 'not_requested',
       createdAt,
       updatedAt: createdAt,
     });
-    return { sessionId: ref.id, payload };
+    return { sessionId: ref.id, messages, acknowledgment };
   }
 
   async function sendMessage(request, principal) {
@@ -263,18 +364,29 @@ function assistantHandlers(db, { remoteRequest = defaultRemoteRequest, now = () 
     if (!text) throw new HttpsError('invalid-argument', 'Enter a question.');
     if (String(request.data?.message || '').length > MAX_MESSAGE_LENGTH) throw new HttpsError('invalid-argument', `Questions are limited to ${MAX_MESSAGE_LENGTH} characters.`);
     if (containsRestrictedContent(text)) throw new HttpsError('invalid-argument', 'Do not include passwords, credentials, payment card details, or access tokens.');
-    await rateLimit(db, 'assistant-message', principal.uid, 12, 60_000);
     const context = sanitizeContext(request.data, principal);
     const sessionId = safeText(request.data?.sessionId, 200);
-    if (!sessionId) {
-      const created = await createRemoteSession(principal, context, text);
-      return { sessionId: created.sessionId, messages: normalizeRemoteMessages(created.payload), knowledgeVersion: KNOWLEDGE_VERSION };
-    }
-    const ref = collection.doc(documentId(sessionId, 'assistant session'));
-    const session = assertSessionOwner(await ref.get(), principal);
-    await incrementMessageCount(db, ref, principal);
-    let payload;
+    const clientMessageId = normalizeClientMessageId(request.data?.clientMessageId) || randomUUID();
+    const operation = await beginMessageOperation(principal, clientMessageId, text, sessionId);
+    if (operation.state === 'completed') return replayCompletedOperation(operation.operation, principal);
+    if (operation.state === 'processing') throw new HttpsError('aborted', 'This question is still being processed. Retry in a moment.');
     try {
+      await rateLimit(db, 'assistant-message', principal.uid, 12, 60_000);
+      if (!sessionId) {
+        const created = await createRemoteSession(principal, context, text, clientMessageId);
+        await completeMessageOperation(operation.ref, created.sessionId, created.acknowledgment);
+        return {
+          sessionId: created.sessionId,
+          messages: created.messages,
+          acknowledgment: created.acknowledgment,
+          acknowledgments: created.acknowledgment ? [created.acknowledgment] : [],
+          knowledgeVersion: KNOWLEDGE_VERSION,
+        };
+      }
+      const ref = collection.doc(documentId(sessionId, 'assistant session'));
+      const session = assertSessionOwner(await ref.get(), principal);
+      await incrementMessageCount(db, ref, principal);
+      let payload;
       payload = await remoteRequest(`/chat/public/session/${encodeURIComponent(session.remoteSessionId)}/messages`, {
         method: 'POST',
         body: {
@@ -286,11 +398,20 @@ function assistantHandlers(db, { remoteRequest = defaultRemoteRequest, now = () 
           featureAvailability: context.featureAvailability,
           knowledgeVersion: context.knowledgeVersion,
           visitorId: `rl_${ref.id}`,
+          clientMessageId,
         },
       });
-    } catch (error) { return publicServiceError(error); }
-    await ref.set({ route: context.route, pageCategory: context.pageCategory, updatedAt: now() }, { merge: true });
-    return { sessionId: ref.id, messages: normalizeRemoteMessages(payload), knowledgeVersion: KNOWLEDGE_VERSION };
+      const messages = normalizeRemoteMessages(payload);
+      const acknowledgment = messageAcknowledgment(clientMessageId, messages);
+      const acknowledgments = await recordMessageAcknowledgment(ref, principal, acknowledgment);
+      await ref.set({ route: context.route, pageCategory: context.pageCategory, updatedAt: now() }, { merge: true });
+      await completeMessageOperation(operation.ref, ref.id, acknowledgment);
+      return { sessionId: ref.id, messages, acknowledgment, acknowledgments, knowledgeVersion: KNOWLEDGE_VERSION };
+    } catch (error) {
+      await failMessageOperation(operation.ref, error);
+      if (error instanceof HttpsError) throw error;
+      return publicServiceError(error);
+    }
   }
 
   async function history(request, principal) {
@@ -301,7 +422,12 @@ function assistantHandlers(db, { remoteRequest = defaultRemoteRequest, now = () 
     let payload;
     try { payload = await remoteRequest(`/chat/public/session/${encodeURIComponent(session.remoteSessionId)}/messages`); }
     catch (error) { return publicServiceError(error); }
-    return { sessionId: ref.id, messages: normalizeRemoteMessages(payload), escalationState: session.escalationState || 'not_requested' };
+    return {
+      sessionId: ref.id,
+      messages: normalizeRemoteMessages(payload),
+      acknowledgments: session.messageAcknowledgments || [],
+      escalationState: session.escalationState || 'not_requested',
+    };
   }
 
   async function close(request, principal) {

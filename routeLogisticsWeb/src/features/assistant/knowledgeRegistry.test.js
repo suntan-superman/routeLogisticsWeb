@@ -28,7 +28,19 @@ test('estimate guidance covers visit, management review, approval and approved w
   capabilities.clear(); capabilities.add('estimates.manage'); capabilities.add('customers.read');
   const result = deterministicHelp('How does management review and approve an estimate before scheduling approved work?', context('manager'));
   assert.match(result.text, /exact version/i);
-  assert.match(result.text, /schedule the approved work/i);
+  assert.match(result.text, /estimate conversion workflow/i);
+});
+
+test('approved estimate scheduling uses conversion first and assigns a technician afterward', () => {
+  capabilities.clear(); capabilities.add('estimates.manage'); capabilities.add('customers.manage'); capabilities.add('jobs.schedule');
+  const result = deterministicHelp('How do I schedule work after a customer approves an estimate?', context('manager'));
+  assert.equal(result.knowledgeId, 'approved-estimate-scheduling');
+  assert.match(result.text, /Approved — scheduling needed/);
+  assert.match(result.text, /Convert approved estimate to job/);
+  assert.match(result.text, /unassigned job linked to the immutable approved estimate/);
+  assert.match(result.text, /Technician selection is not currently part of the conversion dialog/);
+  assert.doesNotMatch(result.text, /create or edit an appointment/i);
+  assert.deepEqual(result.actions.map(action => action.id), ['estimates']);
 });
 
 test('technician invoice question explains the restriction without an invoice action', () => {

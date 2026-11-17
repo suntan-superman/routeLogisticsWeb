@@ -104,6 +104,40 @@ test('message creation attributes Route Logistics and ignores forged role/compan
   assert.equal(calls[0].options.body.sourceApp, 'route_logistics_web');
 });
 
+test('message operation identity acknowledges stable upstream ids and replays without a second persistence request', async () => {
+  const { calls, handlers } = setup();
+  const payload = { action: 'message', message: 'How do I create an inquiry?', route: '/customers', clientMessageId: 'client-message-0001' };
+  const first = await handlers.handle(request(payload));
+  const replay = await handlers.handle(request(payload));
+  assert.deepEqual(first.acknowledgment, {
+    clientMessageId: 'client-message-0001',
+    visitorMessageId: 'visitor-1',
+    assistantMessageId: 'assistant-1',
+  });
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.sessionId, first.sessionId);
+  assert.equal(calls.filter(call => call.path === '/chat/public/session' && call.options.method === 'POST').length, 1);
+});
+
+test('message identity cannot be reused for different text and distinct identical questions remain distinct', async () => {
+  const { calls, handlers } = setup();
+  await handlers.handle(request({ action: 'message', message: 'Same question', clientMessageId: 'client-message-0001' }));
+  await assert.rejects(
+    handlers.handle(request({ action: 'message', message: 'Different question', clientMessageId: 'client-message-0001' })),
+    error => error.code === 'invalid-argument',
+  );
+  await handlers.handle(request({ action: 'message', message: 'Same question', clientMessageId: 'client-message-0002' }));
+  assert.equal(calls.filter(call => call.path === '/chat/public/session' && call.options.method === 'POST').length, 2);
+});
+
+test('history returns correlation acknowledgments for page refresh reconciliation', async () => {
+  const { handlers } = setup();
+  const created = await handlers.handle(request({ action: 'message', message: 'Refresh-safe question', clientMessageId: 'client-message-0001' }));
+  const history = await handlers.handle(request({ action: 'history', sessionId: created.sessionId }));
+  assert.equal(history.acknowledgments.length, 1);
+  assert.equal(history.acknowledgments[0].clientMessageId, 'client-message-0001');
+});
+
 test('a conversation cannot be read or written from another tenant', async () => {
   const { db, handlers } = setup();
   const created = await handlers.handle(request({ action: 'message', message: 'Help', route: '/' }));
@@ -188,7 +222,7 @@ test('the server kill switch disables provider messages while keeping determinis
   try {
     const { calls, handlers } = setup();
     const result = await handlers.handle(request({ action: 'message', message: 'Help with this page', route: '/customers' }));
-    assert.deepEqual(result, { disabled: true, fallback: true, knowledgeVersion: '2026-11-17.1' });
+    assert.deepEqual(result, { disabled: true, fallback: true, knowledgeVersion: '2026-11-17.2' });
     assert.equal(calls.length, 0);
   } finally {
     if (previous === undefined) delete process.env.RL_AI_ASSISTANT_ENABLED;

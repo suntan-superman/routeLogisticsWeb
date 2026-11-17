@@ -24,6 +24,14 @@ test('widget has responsive, keyboard, loading, error and retry behavior', () =>
   assert.match(widget, />Retry</);
 });
 
+test('widget uses correlation ids and a synchronous submission guard for optimistic reconciliation', () => {
+  assert.match(widget, /createClientMessageId\(\)/);
+  assert.match(widget, /submissionRef\.current/);
+  assert.match(widget, /reconcileAssistantMessages/);
+  assert.match(widget, /clientMessageId: attempt\.clientMessageId/);
+  assert.doesNotMatch(widget, /message\.role.*message\.text.*dedup|consecutive identical/i);
+});
+
 test('support form captures the required sanitized problem fields', () => {
   for (const field of ['taskAttempted', 'expectedResult', 'actualResult', 'errorMessage']) assert.match(widget, new RegExp(`name="${field}"`));
   assert.match(widget, /Do not include customer details, passwords, payment information, private notes, or photos/);

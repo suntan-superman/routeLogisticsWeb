@@ -17,8 +17,15 @@ import {
   loadAssistantHistory,
   sendAssistantMessage,
 } from '../../services/assistantApi';
+import {
+  MAX_ASSISTANT_MESSAGES,
+  createClientMessageId,
+  localAssistantMessage,
+  markAssistantAttempt,
+  optimisticVisitorMessage,
+  reconcileAssistantMessages,
+} from '../../services/assistantMessages';
 
-const MAX_LOCAL_MESSAGES = 40;
 const STORAGE_PREFIX = 'rl-assistant:';
 
 function storageKey(uid, workspaceReference) {
@@ -29,22 +36,12 @@ function readSavedConversation(key) {
     const parsed = JSON.parse(sessionStorage.getItem(key) || '{}');
     return {
       sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : '',
-      messages: Array.isArray(parsed.messages) ? parsed.messages.slice(-MAX_LOCAL_MESSAGES) : [],
+      messages: Array.isArray(parsed.messages) ? parsed.messages.slice(-MAX_ASSISTANT_MESSAGES) : [],
       escalated: parsed.escalated === true,
     };
   } catch {
     return { sessionId: '', messages: [], escalated: false };
   }
-}
-
-function mergeMessages(current, incoming) {
-  const byId = new Map();
-  [...current, ...(incoming || [])].forEach(message => {
-    if (!message?.text) return;
-    const id = message.id || `${message.role}:${message.createdAt || ''}:${message.text}`;
-    byId.set(id, { ...message, id });
-  });
-  return [...byId.values()].slice(-MAX_LOCAL_MESSAGES);
 }
 
 function localMessage(role, text, extra = {}) {
@@ -121,11 +118,14 @@ export default function RouteLogisticsAssistant() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [lastQuestion, setLastQuestion] = useState('');
+  const [lastAttempt, setLastAttempt] = useState(null);
   const [pendingActions, setPendingActions] = useState([]);
   const panelRef = useRef(null);
   const inputRef = useRef(null);
   const messageEndRef = useRef(null);
   const previousKeyRef = useRef(key);
+  const historyLoadedRef = useRef('');
+  const submissionRef = useRef('');
   const workspaceReady = ['company', 'solo'].includes(workspace?.status);
   const context = useMemo(() => ({ can, role, pathname: location.pathname, workspaceReady }), [can, role, location.pathname, workspaceReady]);
   const page = useMemo(() => pageKnowledge(location.pathname, context), [location.pathname, context]);
@@ -135,13 +135,14 @@ export default function RouteLogisticsAssistant() {
     if (previousKeyRef.current !== key) {
       const next = readSavedConversation(key);
       setSessionId(next.sessionId); setMessages(next.messages); setEscalated(next.escalated);
-      setError(''); setPendingActions([]); setMode('chat'); setOpen(false);
+      setError(''); setLastAttempt(null); setPendingActions([]); setMode('chat'); setOpen(false);
+      historyLoadedRef.current = ''; submissionRef.current = '';
       previousKeyRef.current = key;
     }
   }, [key]);
 
   useEffect(() => {
-    sessionStorage.setItem(key, JSON.stringify({ sessionId, messages: messages.slice(-MAX_LOCAL_MESSAGES), escalated }));
+    sessionStorage.setItem(key, JSON.stringify({ sessionId, messages: messages.slice(-MAX_ASSISTANT_MESSAGES), escalated }));
   }, [key, sessionId, messages, escalated]);
 
   useEffect(() => {
@@ -155,15 +156,18 @@ export default function RouteLogisticsAssistant() {
   useEffect(() => { if (open) messageEndRef.current?.scrollIntoView({ block: 'nearest' }); }, [messages, open, mode]);
 
   useEffect(() => {
-    if (!sessionId || messages.length || !workspaceReady) return;
+    if (!sessionId || !workspaceReady) return undefined;
+    const marker = `${key}:${sessionId}`;
+    if (historyLoadedRef.current === marker) return undefined;
+    historyLoadedRef.current = marker;
     let active = true;
     loadAssistantHistory(sessionId).then(result => {
       if (!active) return;
-      setMessages(result.messages || []);
+      setMessages(value => reconcileAssistantMessages(value, result.messages || [], { acknowledgments: result.acknowledgments || [] }));
       setEscalated(result.escalationState === 'requested');
-    }).catch(() => {});
+    }).catch(() => { if (active) historyLoadedRef.current = ''; });
     return () => { active = false; };
-  }, [sessionId, messages.length, workspaceReady]);
+  }, [key, sessionId, workspaceReady]);
 
   const navigateTo = action => {
     if (!authorizedActions([action.id], can, workspaceReady).length) {
@@ -174,39 +178,58 @@ export default function RouteLogisticsAssistant() {
     setOpen(false);
   };
 
-  const addDeterministicHelp = useCallback((question, prefix = '') => {
+  const addDeterministicHelp = useCallback((question, prefix = '', clientMessageId = '') => {
     const result = deterministicHelp(question, context);
-    setMessages(value => mergeMessages(value, [localMessage('assistant', `${prefix}${result.text}`, { fallback: true })]));
+    setMessages(value => reconcileAssistantMessages(value, [localAssistantMessage(`${prefix}${result.text}`, { clientMessageId, fallback: true })]));
     setPendingActions(result.actions);
     return result;
   }, [context]);
 
-  const ask = useCallback(async rawQuestion => {
+  const ask = useCallback(async (rawQuestion, retryAttempt = null) => {
     const question = String(rawQuestion || '').trim();
-    if (!question || busy) return;
+    if (!question || submissionRef.current) return;
     if (question.length > 1000) { setError('Questions are limited to 1,000 characters.'); return; }
     if (containsSensitiveQuestion(question)) { setError('Remove email addresses, phone numbers, passwords, credentials, payment details, or access tokens before sending.'); return; }
+    const attempt = retryAttempt?.clientMessageId
+      ? { clientMessageId: retryAttempt.clientMessageId, question }
+      : { clientMessageId: createClientMessageId(), question };
+    submissionRef.current = attempt.clientMessageId;
     setBusy(true); setError(''); setLastQuestion(question); setInput(''); setPendingActions([]);
-    setMessages(value => mergeMessages(value, [localMessage('visitor', question)]));
+    setMessages(value => retryAttempt
+      ? markAssistantAttempt(value, attempt.clientMessageId, 'sending')
+      : reconcileAssistantMessages(value, [optimisticVisitorMessage(attempt.clientMessageId, question)]));
     const local = deterministicHelp(question, context);
     try {
-      const result = await sendAssistantMessage({ sessionId, message: question, route: location.pathname });
+      const result = await sendAssistantMessage({ sessionId, message: question, route: location.pathname, clientMessageId: attempt.clientMessageId });
       if (result.disabled || result.fallback) {
-        addDeterministicHelp(question, 'AI guidance is currently disabled. ');
+        setMessages(value => markAssistantAttempt(value, attempt.clientMessageId, 'local'));
+        addDeterministicHelp(question, 'AI guidance is currently disabled. ', attempt.clientMessageId);
+        setLastAttempt(null);
       } else {
-        setSessionId(result.sessionId || sessionId);
-        setMessages(value => mergeMessages(value, result.messages || []));
+        const nextSessionId = result.sessionId || sessionId;
+        if (nextSessionId) historyLoadedRef.current = `${key}:${nextSessionId}`;
+        setSessionId(nextSessionId);
+        setMessages(value => reconcileAssistantMessages(value, result.messages || [], {
+          acknowledgments: result.acknowledgments || (result.acknowledgment ? [result.acknowledgment] : []),
+        }));
         setPendingActions(local.actions);
+        setLastAttempt(null);
       }
     } catch (requestError) {
       setError(assistantErrorMessage(requestError));
-      addDeterministicHelp(question, 'Using verified in-app help: ');
-    } finally { setBusy(false); }
-  }, [addDeterministicHelp, busy, context, location.pathname, sessionId]);
+      setLastAttempt(attempt);
+      setMessages(value => markAssistantAttempt(value, attempt.clientMessageId, 'retryable'));
+      addDeterministicHelp(question, 'Using verified in-app help: ', attempt.clientMessageId);
+    } finally {
+      if (submissionRef.current === attempt.clientMessageId) submissionRef.current = '';
+      setBusy(false);
+    }
+  }, [addDeterministicHelp, context, key, location.pathname, sessionId]);
 
   const newConversation = async () => {
     const old = sessionId;
     setSessionId(''); setMessages([]); setEscalated(false); setError(''); setPendingActions([]); setMode('chat');
+    setLastAttempt(null); historyLoadedRef.current = ''; submissionRef.current = '';
     sessionStorage.removeItem(key);
     if (old) closeAssistantSession(old).catch(() => {});
     window.setTimeout(() => inputRef.current?.focus(), 0);
@@ -217,7 +240,7 @@ export default function RouteLogisticsAssistant() {
     setBusy(true); setError('');
     try {
       const result = await loadAssistantHistory(sessionId);
-      setMessages(value => mergeMessages(value, result.messages));
+      setMessages(value => reconcileAssistantMessages(value, result.messages, { acknowledgments: result.acknowledgments || [] }));
     } catch (requestError) { setError(assistantErrorMessage(requestError)); }
     finally { setBusy(false); }
   };
@@ -230,7 +253,7 @@ export default function RouteLogisticsAssistant() {
         appVersion: import.meta.env.VITE_APP_VERSION || `web/${ROUTE_LOGISTICS_KNOWLEDGE_VERSION}`,
       });
       setSessionId(result.sessionId || sessionId); setEscalated(true); setMode('chat');
-      setMessages(value => mergeMessages(value, [
+      setMessages(value => reconcileAssistantMessages(value, [
         ...(result.messages || []),
         localMessage('system', result.acknowledgment || 'Your request was sent to Workside Support. This widget does not promise an immediate live response.'),
       ]));
@@ -241,7 +264,7 @@ export default function RouteLogisticsAssistant() {
   const helpWithPage = () => {
     setMode('chat');
     const question = `Help with this page: ${page?.displayName || location.pathname}`;
-    setMessages(value => mergeMessages(value, [localMessage('visitor', question)]));
+    setMessages(value => reconcileAssistantMessages(value, [localMessage('visitor', question)]));
     addDeterministicHelp(question);
   };
 
@@ -274,7 +297,7 @@ export default function RouteLogisticsAssistant() {
           </article>)}</div>
           {pendingActions.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{pendingActions.map(action => <button key={action.id} type="button" onClick={() => navigateTo(action)} className="rounded-md bg-primary-600 px-3 py-2 text-xs font-semibold text-white hover:bg-primary-700">{action.label}</button>)}</div>}
           {busy && <div className="mt-3 flex items-center gap-2 text-sm text-gray-500" role="status"><ArrowPathIcon className="h-4 w-4 animate-spin" />Checking verified guidance…</div>}
-          {error && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert"><div className="flex gap-2"><ExclamationTriangleIcon className="h-5 w-5 shrink-0" /><span>{error}</span></div>{lastQuestion && <button type="button" onClick={() => ask(lastQuestion)} disabled={busy} className="mt-2 font-semibold underline">Retry</button>}</div>}
+          {error && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert"><div className="flex gap-2"><ExclamationTriangleIcon className="h-5 w-5 shrink-0" /><span>{error}</span></div>{lastAttempt && <button type="button" onClick={() => ask(lastQuestion, lastAttempt)} disabled={busy} className="mt-2 font-semibold underline">Retry</button>}</div>}
           {escalated && <div className="mt-3 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-gray-800"><div className="flex items-start gap-2"><LifebuoyIcon className="h-5 w-5 shrink-0 text-primary-700" /><p>Workside Support handoff requested. Use Refresh to check for supported follow-up; an immediate live reply is not promised.</p></div><button type="button" onClick={refreshHistory} disabled={busy} className="mt-2 text-xs font-semibold text-primary-700 underline">Refresh conversation</button></div>}
           <div ref={messageEndRef} />
         </>}

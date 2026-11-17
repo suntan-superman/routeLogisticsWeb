@@ -112,6 +112,14 @@ The Route Logistics knowledge response is deliberately deterministic and product
 
 If the shared chat API, network, or response contract fails, the widget shows a retryable error and continues to offer deterministic knowledge topics and verified navigation. Core Route Logistics screens remain usable. A failed handoff retains its local conversation and may be retried. Invalid upstream responses never create an unbound local session. The kill switch can disable provider messages without a client rebuild.
 
+## Message identity and reconciliation correction
+
+The November 17 follow-up release corrected duplicate optimistic visitor messages. The browser now assigns a unique client message ID before rendering the optimistic question. `rlAssistant` records a server-only, tenant/user-scoped idempotency operation containing the question hash, local session reference, and the stable Merxus visitor/assistant message IDs; it does not duplicate message text. The response and history contracts return those acknowledgments so the browser replaces only the exact correlated optimistic visitor/fallback entries with server-authoritative messages. Repeated questions with different client IDs remain distinct.
+
+A synchronous submission guard blocks rapid Enter/click duplicates before React rerenders. A retry reuses the original client ID, allowing a completed callable operation to replay authoritative history without writing another Merxus message. Navigation, minimize/reopen, workspace-scoped session storage, page refresh, workspace switching, and logout preserve the same identity rules.
+
+Approved-estimate guidance was also aligned to the current release: authorized staff open the customer-approved estimate in Estimates, confirm `Approved — scheduling needed`, use `Convert approved estimate`, supply only required property/category or customer linkage, choose the service date and quarter-hour time, and explicitly confirm conversion. The idempotent conversion creates one unassigned job linked to the immutable approved estimate. Technician selection and conflict/alternative review currently occur afterward in Jobs or Dispatch, not inside the conversion dialog.
+
 ## Automated test evidence
 
 Validated on 2026-11-17:

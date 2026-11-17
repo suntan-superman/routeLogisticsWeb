@@ -4673,3 +4673,39 @@ All entries below matched ACTIVE deployed metadata on November 14, 4:31 PM Pacif
 | stamp_serviceLogs (onDocumentCreated) | Legacy tenancy stamping; serviceLogs/{id} | Server-only legacy owner attribution; only current authorized verified manager; never turns technician solo records into company records | No browser invocation; preserves existing tenanted records | functions/index.js; functions/index.js:296 | ACTIVE |
 
 The endpoint inventory, current metadata correlation and trigger details are retained locally in `.migration/acceptance-api-inventory.json`. The source of truth for current bindings remains `functions/index.js` and the named implementation modules. Private secrets are identified by names/configuration only; no payload appears in this plan.
+
+## AI assistant and Workside Support Console acceptance (2026-11-17)
+
+Detailed architecture and evidence: `docs/ROUTE_LOGISTICS_AI_ASSISTANT_SUPPORT_INTEGRATION.md`.
+
+### Automated browser verification
+
+- PASS — authenticated manager opens the assistant on Dispatch, requests page-aware help and uses the authorized Jobs action.
+- PASS — technician at mobile browser width opens and closes the assistant with Escape without losing the underlying page.
+- PASS — registry routes/actions resolve only to current application routes and capability-gated actions.
+
+### Automated Functions/emulator verification
+
+- PASS — live membership is resolved server-side and forged client role/company context is ignored.
+- PASS — cross-tenant conversation retrieval and revoked membership fail closed.
+- PASS — session/message limits, sensitive-content rejection, invalid upstream responses and the server kill switch fail safely.
+- PASS — Route Logistics support attribution, sanitized metadata, idempotent escalation and failed-handoff retry behavior.
+
+### Shared-service regression verification
+
+- PASS — Merxus Route Logistics product adapter and product separation tests.
+- PASS — existing Merxus public human-handoff idempotency regression.
+- PASS — Workside Support Console recognizes and labels `route-logistics` as Route Logistics.
+
+### Physical verification — not yet passed
+
+- PENDING — owner new-inquiry guidance/navigation.
+- PENDING — manager technician-estimate review/send guidance.
+- PENDING — technician invoice restriction.
+- PENDING — Dispatch Help with this page.
+- PENDING — one explicitly authorized synthetic handoff visible in the Support Console.
+- PENDING — existing Merxus production chat-to-console handoff.
+- PENDING — company switch isolation.
+- PENDING — production kill-switch/fallback exercise.
+
+Automated evidence must not be used to mark these physical checks complete.

@@ -7,6 +7,7 @@ import ThemeControl from './ThemeControl';
 import { disablePush } from '../services/push';
 import EmailVerificationBanner from './EmailVerificationBanner';
 import ConnectionStatus from './ConnectionStatus';
+import RouteLogisticsAssistant from '../features/assistant/RouteLogisticsAssistant';
 import { useConfirmUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { 
   HomeIcon, 
@@ -222,6 +223,7 @@ const Layout = ({ children }) => {
           </div>
         </main>
       </div>
+      <RouteLogisticsAssistant />
     </div>
   );
 };

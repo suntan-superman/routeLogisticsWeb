@@ -1,0 +1,197 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const {
+  PRODUCT,
+  assistantHandlers,
+  containsRestrictedContent,
+  normalizeRemoteMessages,
+  normalizeRoute,
+  routeAllowed,
+  sanitizeContext,
+} = require('./assistant');
+
+class FakeSnapshot {
+  constructor(data) { this._data = data; this.exists = data !== undefined; }
+  data() { return this._data; }
+  get(field) { return this._data?.[field]; }
+}
+
+class FakeRef {
+  constructor(db, path) { this.db = db; this.path = path; this.id = path.split('/').at(-1); }
+  async get() { return new FakeSnapshot(this.db.data.get(this.path)); }
+  async set(value, options = {}) {
+    const current = this.db.data.get(this.path) || {};
+    this.db.data.set(this.path, options.merge ? { ...current, ...value } : { ...value });
+  }
+  async update(value) {
+    const current = this.db.data.get(this.path);
+    if (!current) throw new Error('missing');
+    this.db.data.set(this.path, { ...current, ...value });
+  }
+}
+
+class FakeCollection {
+  constructor(db, name) { this.db = db; this.name = name; }
+  doc(id) { return new FakeRef(this.db, `${this.name}/${id || `auto_${++this.db.sequence}`}`); }
+}
+
+class FakeDb {
+  constructor() { this.data = new Map(); this.sequence = 0; }
+  collection(name) { return new FakeCollection(this, name); }
+  async runTransaction(run) {
+    const tx = {
+      get: ref => ref.get(),
+      set: (ref, value, options) => ref.set(value, options),
+      update: (ref, value) => ref.update(value),
+    };
+    return run(tx);
+  }
+}
+
+function request(data = {}, overrides = {}) {
+  return {
+    data,
+    auth: {
+      uid: overrides.uid || 'owner-a',
+      token: {
+        email: overrides.email || 'owner@example.com', email_verified: true,
+        companyId: overrides.companyId || 'company-a', role: overrides.role || 'owner', membershipId: overrides.membershipId || null,
+      },
+    },
+  };
+}
+
+function setup(overrides = {}) {
+  const db = new FakeDb();
+  db.data.set('companies/company-a', { ownerId: 'owner-a' });
+  db.data.set('companies/company-b', { ownerId: 'owner-b' });
+  const calls = [];
+  const defaultRemoteRequest = async (path, options = {}) => {
+    calls.push({ path, options });
+    if (path === '/chat/public/session') return { session: { id: `remote_${calls.length}` }, messages: [
+      { id: 'visitor-1', role: 'visitor', text: options.body.message, createdAt: '2026-11-17T00:00:00Z' },
+      { id: 'assistant-1', role: 'assistant', text: 'Verified Route Logistics guidance.', createdAt: '2026-11-17T00:00:01Z' },
+    ] };
+    if (path.endsWith('/request-human')) return { session: { status: 'escalated' }, messages: [] };
+    if (options.method === 'POST') return { messages: [{ id: `assistant-${calls.length}`, role: 'assistant', text: 'Follow-up.', createdAt: '2026-11-17T00:00:02Z' }] };
+    return { messages: [] };
+  };
+  const remoteRequest = overrides.remoteRequest || defaultRemoteRequest;
+  return { db, calls, defaultRemoteRequest, handlers: assistantHandlers(db, { remoteRequest, now: () => '2026-11-17T00:00:00.000Z' }) };
+}
+
+test('sanitization accepts only registered routes and server-derived capabilities', () => {
+  const principal = { role: 'technician', capabilities: ['jobs.read', 'jobs.work'] };
+  assert.equal(sanitizeContext({ route: 'https://evil.example', role: 'owner', capabilities: ['invoices.manage'] }, principal).route, '/');
+  assert.equal(normalizeRoute('/dispatch?company=other'), '/dispatch');
+  assert.equal(routeAllowed('/invoices', principal.capabilities), false);
+  assert.equal(containsRestrictedContent('token=abc'), true);
+});
+
+test('remote messages are bounded and reduced to safe text fields', () => {
+  const messages = normalizeRemoteMessages({ messages: Array.from({ length: 50 }, (_, index) => ({ id: `${index}`, role: 'assistant', text: `<b>${index}</b>`, secret: 'no' })) });
+  assert.equal(messages.length, 40);
+  assert.deepEqual(Object.keys(messages[0]).sort(), ['createdAt', 'id', 'role', 'text']);
+});
+
+test('message creation attributes Route Logistics and ignores forged role/company context', async () => {
+  const { calls, handlers } = setup();
+  const result = await handlers.handle(request({ action: 'message', message: 'How do I create an inquiry?', route: '/customers', role: 'technician', companyId: 'company-b' }));
+  assert.ok(result.sessionId);
+  assert.equal(calls[0].options.body.product, PRODUCT);
+  assert.equal(calls[0].options.body.tenantId, 'company-a');
+  assert.equal(calls[0].options.body.role, 'owner');
+  assert.equal(calls[0].options.body.sourceApp, 'route_logistics_web');
+});
+
+test('a conversation cannot be read or written from another tenant', async () => {
+  const { db, handlers } = setup();
+  const created = await handlers.handle(request({ action: 'message', message: 'Help', route: '/' }));
+  db.data.set('teamMembers/member-b', { uid: 'user-b', companyId: 'company-b', status: 'active', role: 'manager' });
+  await assert.rejects(
+    handlers.handle(request({ action: 'history', sessionId: created.sessionId }, { uid: 'user-b', email: 'b@example.com', companyId: 'company-b', role: 'manager', membershipId: 'member-b' })),
+    error => error.code === 'permission-denied',
+  );
+});
+
+test('revoked or missing membership is rejected even when the client forges claims', async () => {
+  const { handlers } = setup();
+  await assert.rejects(
+    handlers.handle(request({ action: 'status' }, { uid: 'former-user', email: 'former@example.com', companyId: 'company-a', role: 'manager', membershipId: 'missing' })),
+    error => error.code === 'permission-denied',
+  );
+});
+
+test('support escalation is idempotent and includes only explicit support metadata', async () => {
+  const { calls, handlers } = setup();
+  const created = await handlers.handle(request({ action: 'message', message: 'I need help', route: '/dispatch' }));
+  const payload = {
+    action: 'escalate', sessionId: created.sessionId, operationId: 'operation-1', contactName: 'Owner User',
+    contactEmail: 'owner@example.com', summary: 'Synthetic UI issue', details: 'The control did not respond.', route: '/dispatch',
+  };
+  const first = await handlers.handle(request(payload));
+  const second = await handlers.handle(request(payload));
+  assert.equal(first.escalated, true);
+  assert.equal(second.idempotent, true);
+  assert.equal(calls.filter(call => call.path.endsWith('/request-human')).length, 1);
+  const body = calls.find(call => call.path.endsWith('/request-human')).options.body;
+  assert.match(body.message, /Page: \/dispatch/);
+  assert.equal(body.product, PRODUCT);
+  assert.equal(body.tenantId, 'company-a');
+});
+
+test('invalid provider responses fail safely without persisting a local session', async () => {
+  const { db, handlers } = setup({ remoteRequest: async () => ({ session: {}, messages: [] }) });
+  await assert.rejects(
+    handlers.handle(request({ action: 'message', message: 'Help with scheduling', route: '/jobs' })),
+    error => error.code === 'unavailable',
+  );
+  assert.equal([...db.data.keys()].some(key => key.startsWith('rlAssistantSessions/')), false);
+});
+
+test('a failed support handoff remains retryable and does not duplicate a successful handoff', async () => {
+  let handoffAttempts = 0;
+  const calls = [];
+  const remoteRequest = async (path, options = {}) => {
+    calls.push({ path, options });
+    if (path === '/chat/public/session') {
+      return { session: { id: 'remote-retry' }, messages: [{ id: 'a', role: 'assistant', text: 'Ready.', createdAt: '2026-11-17T00:00:00Z' }] };
+    }
+    if (path.endsWith('/request-human')) {
+      handoffAttempts += 1;
+      if (handoffAttempts === 1) {
+        const error = new Error('temporary outage');
+        error.status = 503;
+        throw error;
+      }
+      return { session: { status: 'escalated' }, messages: [] };
+    }
+    return { messages: [] };
+  };
+  const { handlers } = setup({ remoteRequest });
+  const created = await handlers.handle(request({ action: 'message', message: 'I need help', route: '/dispatch' }));
+  const payload = {
+    action: 'escalate', sessionId: created.sessionId, operationId: 'operation-retry', contactName: 'Owner User',
+    contactEmail: 'owner@example.com', summary: 'Synthetic UI issue', details: 'The control did not respond.', route: '/dispatch',
+  };
+  await assert.rejects(handlers.handle(request(payload)), error => error.code === 'unavailable');
+  const retried = await handlers.handle(request(payload));
+  const repeated = await handlers.handle(request(payload));
+  assert.equal(retried.escalated, true);
+  assert.equal(repeated.idempotent, true);
+  assert.equal(handoffAttempts, 2);
+});
+
+test('the server kill switch disables provider messages while keeping deterministic fallback available', async () => {
+  const previous = process.env.RL_AI_ASSISTANT_ENABLED;
+  process.env.RL_AI_ASSISTANT_ENABLED = 'false';
+  try {
+    const { calls, handlers } = setup();
+    const result = await handlers.handle(request({ action: 'message', message: 'Help with this page', route: '/customers' }));
+    assert.deepEqual(result, { disabled: true, fallback: true, knowledgeVersion: '2026-11-17.1' });
+    assert.equal(calls.length, 0);
+  } finally {
+    if (previous === undefined) delete process.env.RL_AI_ASSISTANT_ENABLED;
+    else process.env.RL_AI_ASSISTANT_ENABLED = previous;
+  }
+});

@@ -45,6 +45,7 @@ const { paymentLifecycleHandlers } = require('./paymentLifecycle');
 const { estimateHandlers } = require('./estimates');
 const { reviewHandlers } = require('./reviews');
 const { reviewInvitationHandlers } = require('./reviewInvitations');
+const { assistantHandlers } = require('./assistant');
 
 initializeApp();
 const db = getFirestore();
@@ -59,6 +60,7 @@ const serviceAreas = serviceAreaHandlers(db, { geocode: createGoogleGeocoder({
 exports.rlServiceAreas = onCall({ timeoutSeconds: 60 }, serviceAreas.handle);
 exports.rlManageCustomer = onCall({ timeoutSeconds: 60 }, customerAddressHandlers(db, { serviceAreas }).handle);
 exports.rlManageInquiry = onCall({ timeoutSeconds: 60 }, customerIntakeHandlers(db, { serviceAreas }).handle);
+exports.rlAssistant = onCall({ timeoutSeconds: 30, maxInstances: 20 }, assistantHandlers(db).handle);
 
 const TENANT_COLLECTIONS = ['customers', 'jobs', 'appointments', 'photos', 'estimates', 'estimateTemplates', 'invoices', 'servicePlans', 'serviceLogs'];
 const appUrl = defineString('RL_APP_URL', { default: 'https://route-logistics.com' });

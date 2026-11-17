@@ -195,6 +195,7 @@ export const AuthProvider = ({ children }) => {
   // Sign out function
   const logout = async () => {
     try {
+      Object.keys(sessionStorage).filter(key => key.startsWith('rl-assistant:')).forEach(key => sessionStorage.removeItem(key));
       await signOut(auth);
       setUserProfile(null);
       toast.success('Signed out successfully');

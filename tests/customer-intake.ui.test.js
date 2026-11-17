@@ -82,8 +82,13 @@ test('a new prospective customer can be started without performing an existing-c
   await change('Prospect name', 'Direct prospect'); await change('Inquiry property address', property.address); await change('Inquiry service requested', 'New service request'); await submit(); const request = env.calls.find(row => row.action === 'create'); assert.equal(request.customer.name, 'Direct prospect'); assert.equal(request.property.address, property.address); assert.match(content(), /Inquiry saved/);
 });
 test('new prospect creation requires an explicit separate-contact decision when duplicate matches exist', async () => {
-  await newProspect(); assert.equal(button('Save inquiry').props.disabled, true); await change('Create separate prospect despite matches', true); await change('Separate customer reason', 'Separate renter at the same property'); assert.equal(button('Save inquiry').props.disabled, false); await submit();
+  await newProspect(); assert.equal(button('Save inquiry').props.disabled, false); await submit(); assert.equal(env.calls.filter(row => row.action === 'create').length, 0); assert.match(content(), /Possible matching customers were found/); await change('Create separate prospect despite matches', true); await change('Separate customer reason', 'Separate renter at the same property'); await submit();
   const request = env.calls.find(row => row.action === 'create'); assert.equal(request.duplicateDecision, 'separate'); assert.equal(request.duplicateReason, 'Separate renter at the same property'); assert.equal(request.customer.name, 'Synthetic prospect'); assert.equal(request.property.address, property.address); assert.match(content(), /Inquiry saved/);
+});
+test('new prospect save remains actionable and explains every missing required field', async () => {
+  env.matches = []; await mount(); await click('New Inquiry'); await click('Create inquiry for a new prospect'); await change('Prospect name', 'Homeowner prospect'); await change('Inquiry property address', property.address);
+  assert.equal(button('Save inquiry').props.disabled, false); assert.match(content(), /Before saving:.*Describe the service the homeowner is requesting/); await submit(); assert.equal(env.calls.filter(row => row.action === 'create').length, 0); assert.match(content(), /Describe the service the homeowner is requesting/);
+  await change('Inquiry service requested', 'Homeowner pest-control estimate'); await submit(); assert.equal(env.calls.filter(row => row.action === 'create').length, 1); assert.match(content(), /Inquiry saved/);
 });
 test('new inquiry draft is written synchronously and restores after closing and remounting', async () => {
   env.matches = []; await newProspect(); await change('Inquiry notes', 'Retain this unfinished phone inquiry'); const saved = load('services/inquiryService.js').readInquiryDraft('owner-company-one'); assert.equal(saved.notes, 'Retain this unfinished phone inquiry');

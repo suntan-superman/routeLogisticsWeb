@@ -62,7 +62,7 @@ function load(relative) {
 }
 async function mount(relative = 'components/InquiryWorkspace.jsx', props = { customers: [customer] }) { const Component = load(relative).default; await act(async () => { tree = create(React.createElement(Component, props)); }); }
 async function openExisting() { await mount(); await click('New Inquiry'); await change('Find existing customer', 'Existing'); await click('Find matching customers'); await click('Use this customer'); await change('Saved service property', property.id); await change('Inquiry service requested', 'Termite inspection'); }
-async function newProspect() { await mount(); await click('New Inquiry'); await change('Find existing customer', 'Synthetic prospect'); await click('Find matching customers'); await click('Create a new prospect instead'); await change('Inquiry property address', property.address); await change('Inquiry service requested', 'Initial inspection'); }
+async function newProspect() { await mount(); await click('New Inquiry'); await change('Find existing customer', 'Synthetic prospect'); await click('Find matching customers'); await click('None of these — create a new prospect'); await change('Inquiry property address', property.address); await change('Inquiry service requested', 'Initial inspection'); }
 beforeEach(() => {
   env = { calls: [], inquiries: [], matches: [{ customer, matchReasons: ['name'] }], toasts: [], navigation: [], lifecycle: 'active', manage: true, company: { id: 'company-one', serviceCategories: ['Pest Control'] }, discard: true };
   const memory = new Map(); global.localStorage = { getItem: key => memory.get(key) || null, setItem: (key, value) => memory.set(key, value), removeItem: key => memory.delete(key) };
@@ -71,11 +71,15 @@ beforeEach(() => {
 afterEach(async () => { if (tree) await act(async () => tree.unmount()); tree = null; delete global.window; delete global.document; delete global.localStorage; });
 
 test('existing identity and selected rental property survive inquiry save and estimate scheduling handoff', async () => {
-  await openExisting(); await change('Inquiry notes', 'Ask about treatment options'); await change('Inquiry follow-up staff', 'manager-one'); await submit();
+  await openExisting(); assert.equal(control('Find existing customer'), undefined); assert.match(content(), /Using existing customer:.*Existing customer/); assert.ok(button('Choose a different customer or prospect')); await change('Inquiry notes', 'Ask about treatment options'); await change('Inquiry follow-up staff', 'manager-one'); await submit();
   const created = env.calls.find(row => row.action === 'create'); assert.equal(created.customerId, customer.id); assert.equal(created.propertyId, property.id); assert.equal(Object.hasOwn(created, 'customer'), false); assert.equal(created.inquiry.followUpMemberId, 'manager-one');
   assert.match(content(), /Inquiry saved/); await click('Schedule Estimate');
   assert.equal(env.schedule.defaults.customerId, customer.id); assert.equal(env.schedule.defaults.servicePropertyId, property.id); assert.equal(env.schedule.defaults.address, property.address); assert.equal(env.schedule.defaults.appointmentKind, 'estimate_visit'); assert.equal(env.schedule.defaults.totalCost, '0'); assert.equal(env.schedule.defaults.notes, 'Ask about treatment options'); assert.doesNotMatch(env.schedule.defaults.notes, /side entrance/); assert.match(env.schedule.defaults.operationId, /^[a-f0-9-]{36}$/i);
   assert.equal(env.schedule.defaults.serviceAreaExceptionId, 'prior-owner-approval'); assert.equal(env.schedule.defaults.serviceCategory, 'Pest Control');
+});
+test('a new prospective customer can be started without performing an existing-customer search', async () => {
+  await mount(); await click('New Inquiry'); await click('Create inquiry for a new prospect'); assert.equal(control('Find existing customer'), undefined); assert.ok(control('Prospect name')); assert.ok(button('Choose a different customer or prospect'));
+  await change('Prospect name', 'Direct prospect'); await change('Inquiry property address', property.address); await change('Inquiry service requested', 'New service request'); await submit(); const request = env.calls.find(row => row.action === 'create'); assert.equal(request.customer.name, 'Direct prospect'); assert.equal(request.property.address, property.address); assert.match(content(), /Inquiry saved/);
 });
 test('new prospect creation requires an explicit separate-contact decision when duplicate matches exist', async () => {
   await newProspect(); assert.equal(button('Save inquiry').props.disabled, true); await change('Create separate prospect despite matches', true); await change('Separate customer reason', 'Separate renter at the same property'); assert.equal(button('Save inquiry').props.disabled, false); await submit();

@@ -12,7 +12,7 @@ test('PW-INTAKE-01 @smoke prospect inquiry schedules one nonbillable estimate wi
   await inquiry.getByLabel('Find existing customer', { exact: true }).fill(scenario.insideAddress);
   await inquiry.getByRole('button', { name: 'Find matching customers', exact: true }).click();
   await expect(inquiry.getByRole('button', { name: 'Use this customer', exact: true }).first()).toBeVisible();
-  await inquiry.getByRole('button', { name: 'Create a new prospect instead', exact: true }).click();
+  await inquiry.getByRole('button', { name: 'None of these — create a new prospect', exact: true }).click();
   await inquiry.getByLabel('Prospect name', { exact: true }).fill(name);
   await inquiry.getByLabel('Prospect email', { exact: true }).fill(`${scenario.prefix}-prospect@example.test`);
   await inquiry.getByLabel('Inquiry property address', { exact: true }).fill(scenario.insideAddress);

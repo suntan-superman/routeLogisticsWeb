@@ -127,7 +127,18 @@ Automated tests do not create a live support transfer.
 
 ## Deployment and verification
 
-Deployment order is Support Console compatibility, Merxus product support, Route Logistics Functions, then the Route Logistics web release. Record the deployed revision/commit identifiers in the release report. Production verification must remain read-only: load the site, confirm the launcher, request deterministic help, verify authorized navigation and inspect the client bundle for server credentials. A live transfer requires separate operator authorization.
+Deployment order was Support Console compatibility, Merxus product support, Route Logistics Functions, then the Route Logistics web release. The production release evidence is:
+
+| Component | Deployed artifact | Verification |
+| --- | --- | --- |
+| Workside Support Console | commit `c9ad552392abd445b4793a7a7f00818638d60d8e`; Netlify deploy `6afc90299e82f043e3ed96f4` | Ready and serving HTTP 200 at `https://support.worksidesoftware.com` |
+| Merxus shared backend | Cloud Run revision `merxus-ai-backend-00805-jjd`; image digest `sha256:0a5dac29185f8a7b56f80ad100ea5237e42fbc801fc08316d1c469379d866cdd` | Ready, 100% traffic, health endpoint HTTP 200 and Route Logistics CORS preflight accepted |
+| Route Logistics callable | `rlAssistant` revision `rlassistant-00001-saj` | ACTIVE; intended runtime flags confirmed; anonymous callable probe rejected with HTTP 401 `UNAUTHENTICATED` |
+| Route Logistics web | commit `6e6fdff1ec7610e19b66d460e06cd639c37325d3`; Netlify deploy `6afc914922c6eb92e7286a07` | Ready and serving HTTP 200 at `https://route-logistics.com` |
+
+The Merxus backend follows the operator's deployment-only policy: its Route Logistics adapter was deployed from a locally retained source backup and was not committed or pushed. Existing unrelated Merxus working changes remain intact. No live support transfer, customer mutation, provider message or financial operation was performed during production verification.
+
+Fresh final validation executed 28/28 root Functions guard tests and 194/195 Functions cases, with the single emulator-only case skipped by the unit command and already covered by the emulator/browser safety workflow. The full web suite passed 482/482 cases. The two focused Playwright assistant scenarios passed in Chromium with provider transports disabled.
 
 ## Rollback
 

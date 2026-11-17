@@ -4565,12 +4565,13 @@ Plan **10–13 hours hands-on** for the full operator matrix including setup and
 | Cleanup and legitimate-record baseline verification | Pending |
 | Final decision | Not signed off — physical/manual core acceptance remains |
 
-## Appendix 1. Complete Cloud Functions inventory — 100 source exports
+## Appendix 1. Complete Cloud Functions inventory — 101 source exports
 
 All entries below matched ACTIVE deployed metadata on November 14, 4:31 PM Pacific. API URL base for callable/HTTP entries: `https://us-central1-mi-factotum-field-service.cloudfunctions.net/`. Each source name is exact. Firestore/scheduler entries are triggers, not browser-invokable REST APIs. Do not invoke schedules or write trigger documents merely to complete this inventory.
 
 | Export / type | Module / trigger | Authorization / tenant scope | Required configuration / safety flags | Implementation / export source | Deployment |
 | --- | --- | --- | --- | --- | --- |
+| rlAssistant (onCall) | Authenticated product guidance and Workside Support handoff | Current Firebase account plus live company membership; server-derived role/capabilities; workspace-bound sessions; cross-tenant access denied | RL_AI_ASSISTANT_ENABLED; RL_SUPPORT_API_BASE_URL; no browser AI/support credential | functions/assistant.js; functions/index.js | ACTIVE — revision `rlassistant-00001-saj` |
 | rlServiceAreas (onCall) | Geographic coverage | Current tenant owner/manager settings; owner-only exceptions; admin operational checks; technician denied | RL_APP_URL; Google Address Validation ADC/API; coverage configured per tenant | functions/serviceAreas.js; functions/index.js:48 | ACTIVE |
 | syncClaims (onCall) | Staff authentication | Signed-in team user for claims; OTP request/verification public with rate limits and isolated eligible account checks | RL_EMAIL_ENABLED | functions/staffLogin.js; functions/claims.js; functions/workspace.js; functions/index.js:125 | ACTIVE |
 | rlReadWorkspace (onCall) | Workspace and jobs | Live workspace capability checks; technician assigned-job scope; company creation only eligible solo owner | RL_SERVICE_FORMS_ENABLED where form actions used | functions/workData.js; functions/jobPhotos.js; functions/index.js:134 | ACTIVE |

@@ -127,17 +127,30 @@ function operationDocumentId(principal, clientMessageId) {
     .digest('hex');
 }
 
-function persistedSupportReceipt(payload, tenantId) {
+function persistedSupportReceipt(payload, tenantId, messages = []) {
   const support = payload?.session || {};
   const supportSessionId = safeText(support.id || support.sessionId, 200);
   const transferState = safeText(support.transferState || support.handoff?.state, 80);
   const supportProduct = safeText(support.product, 100);
   const supportTenantId = safeText(support.tenantId, 200);
-  if (!supportSessionId || supportProduct !== PRODUCT || supportTenantId !== tenantId
-    || !['transfer_requested', 'human_takeover'].includes(transferState)) return null;
+  if (!supportSessionId || supportProduct !== PRODUCT || supportTenantId !== tenantId) return null;
+  const isClosed = transferState === 'closed' || safeText(support.status, 80) === 'closed';
+  if (isClosed) {
+    return {
+      supportSessionId,
+      supportProduct,
+      supportTenantId,
+      supportTransferState: 'closed',
+      supportStatus: 'closed',
+      supportRoutingStatus: safeText(support.routingStatus, 80) || 'closed',
+      supportAvailabilityOutcome: safeText(support.availabilityOutcome, 100) || null,
+      acknowledgment: null,
+    };
+  }
+  if (!['transfer_requested', 'human_takeover'].includes(transferState)) return null;
   const routingStatus = safeText(support.routingStatus, 80) || 'queued';
   const supportStatus = transferState === 'human_takeover'
-    ? 'human_takeover'
+    ? messages.some(message => message.role === 'agent') ? 'human_conversation_active' : 'assigned_to_support'
     : routingStatus === 'queued_no_agent_available' ? 'waiting_for_agent'
       : routingStatus === 'assigned' ? 'assigned_to_support' : 'received';
   const acknowledgment = supportStatus === 'waiting_for_agent'
@@ -452,11 +465,12 @@ function assistantHandlers(db, { remoteRequest = defaultRemoteRequest, now = () 
     let payload;
     try { payload = await remoteRequest(`/chat/public/session/${encodeURIComponent(session.remoteSessionId)}/messages`); }
     catch (error) { return publicServiceError(error); }
-    const receipt = persistedSupportReceipt(payload, principal.workspaceReference);
+    const messages = normalizeRemoteMessages(payload);
+    const receipt = persistedSupportReceipt(payload, principal.workspaceReference, messages);
     if (receipt) {
       await ref.set({
         ...receipt,
-        escalationState: 'requested',
+        escalationState: receipt.supportStatus === 'closed' ? 'closed' : 'requested',
         escalatedAt: session.escalatedAt || now(),
         updatedAt: now(),
       }, { merge: true });
@@ -465,9 +479,9 @@ function assistantHandlers(db, { remoteRequest = defaultRemoteRequest, now = () 
       sessionId: ref.id,
       supportSessionId: receipt?.supportSessionId || session.supportSessionId || null,
       supportStatus: receipt?.supportStatus || session.supportStatus || null,
-      messages: normalizeRemoteMessages(payload),
+      messages,
       acknowledgments: session.messageAcknowledgments || [],
-      escalationState: receipt || (session.escalationState === 'requested' && session.supportSessionId
+      escalationState: receipt?.supportStatus === 'closed' ? 'closed' : receipt || (session.escalationState === 'requested' && session.supportSessionId
         && session.supportProduct === PRODUCT && session.supportTenantId === principal.workspaceReference)
         ? 'requested'
         : session.escalationState === 'requesting' ? 'requesting' : 'not_requested',
@@ -518,18 +532,39 @@ function assistantHandlers(db, { remoteRequest = defaultRemoteRequest, now = () 
     } else {
       ref = collection.doc(documentId(sessionId, 'assistant session'));
       session = assertSessionOwner(await ref.get(), principal);
+      if (session.supportStatus === 'closed' || session.supportTransferState === 'closed') {
+        const created = await createRemoteSession(principal, context, `Support request: ${summary}`);
+        sessionId = created.sessionId;
+        ref = collection.doc(documentId(sessionId, 'assistant session'));
+        session = (await ref.get()).data();
+      }
     }
     if (session.escalationState === 'requested' && session.supportSessionId
       && session.supportProduct === PRODUCT && session.supportTenantId === principal.workspaceReference) {
-      return {
-        sessionId,
-        supportSessionId: session.supportSessionId,
-        escalated: true,
-        persisted: true,
-        idempotent: true,
-        supportStatus: session.supportStatus || 'received',
-        acknowledgment: session.acknowledgment,
-      };
+      let latestReceipt = null;
+      try {
+        const latest = await remoteRequest(`/chat/public/session/${encodeURIComponent(session.remoteSessionId)}/messages`);
+        latestReceipt = persistedSupportReceipt(latest, principal.workspaceReference, normalizeRemoteMessages(latest));
+      } catch (error) { return publicServiceError(error); }
+      if (latestReceipt?.supportStatus === 'closed') {
+        const created = await createRemoteSession(principal, context, `Support request: ${summary}`);
+        sessionId = created.sessionId;
+        ref = collection.doc(documentId(sessionId, 'assistant session'));
+        session = (await ref.get()).data();
+      } else {
+        if (latestReceipt) {
+          await ref.set({ ...latestReceipt, updatedAt: now() }, { merge: true });
+        }
+        return {
+          sessionId,
+          supportSessionId: latestReceipt?.supportSessionId || session.supportSessionId,
+          escalated: true,
+          persisted: true,
+          idempotent: true,
+          supportStatus: latestReceipt?.supportStatus || session.supportStatus || 'received',
+          acknowledgment: latestReceipt?.acknowledgment || session.acknowledgment,
+        };
+      }
     }
     if (session.escalationState === 'requesting' && session.lastEscalationOperationId === operationId) {
       return {

@@ -166,6 +166,75 @@ test('history repairs missing local handoff correlation from a persisted same-te
   assert.equal(db.data.get(key).supportSessionId, 'remote-history-repair');
 });
 
+test('history refresh follows authoritative support lifecycle and keeps closed transcript readable', async () => {
+  let remoteSessionCount = 0;
+  let remoteState = {
+    session: {
+      id: 'remote-lifecycle', product: PRODUCT, tenantId: 'company-a',
+      status: 'escalated', transferState: 'transfer_requested', routingStatus: 'queued_no_agent_available',
+    },
+    messages: [{ id: 'visitor-request', role: 'visitor', text: 'Please help', createdAt: '2026-11-17T00:00:01Z' }],
+  };
+  const remoteRequest = async (path) => {
+    if (path === '/chat/public/session') {
+      remoteSessionCount += 1;
+      return { session: { id: remoteSessionCount === 1 ? 'remote-lifecycle' : `remote-lifecycle-${remoteSessionCount}` }, messages: [] };
+    }
+    if (path.endsWith('/request-human')) {
+      const remoteId = path.match(/\/session\/([^/]+)\/request-human$/)?.[1];
+      if (remoteId !== 'remote-lifecycle') return { session: {
+        id: remoteId, product: PRODUCT, tenantId: 'company-a', status: 'escalated',
+        transferState: 'transfer_requested', routingStatus: 'queued_no_agent_available',
+      }, messages: [] };
+      return remoteState;
+    }
+    if (path.endsWith('/messages')) return remoteState;
+    return { messages: [] };
+  };
+  const { handlers } = setup({ remoteRequest });
+  const created = await handlers.handle(request({ action: 'message', message: 'Need a person' }));
+  await handlers.handle(request({
+    action: 'escalate', sessionId: created.sessionId, operationId: 'lifecycle-operation-1',
+    contactName: 'Owner User', contactEmail: 'owner@example.com', summary: 'Synthetic test', details: 'Lifecycle test.',
+  }));
+
+  let history = await handlers.handle(request({ action: 'history', sessionId: created.sessionId }));
+  assert.equal(history.supportStatus, 'waiting_for_agent');
+  assert.equal(history.escalationState, 'requested');
+
+  remoteState = {
+    session: { ...remoteState.session, status: 'active_human', transferState: 'human_takeover', routingStatus: 'assigned' },
+    messages: remoteState.messages,
+  };
+  history = await handlers.handle(request({ action: 'history', sessionId: created.sessionId }));
+  assert.equal(history.supportStatus, 'assigned_to_support');
+
+  remoteState = {
+    session: remoteState.session,
+    messages: [...remoteState.messages, { id: 'agent-reply', role: 'agent', text: 'I am here to help', createdAt: '2026-11-17T00:00:02Z' }],
+  };
+  history = await handlers.handle(request({ action: 'history', sessionId: created.sessionId }));
+  assert.equal(history.supportStatus, 'human_conversation_active');
+  assert.equal(history.messages.at(-1).text, 'I am here to help');
+
+  remoteState = {
+    session: { ...remoteState.session, status: 'closed', transferState: 'closed', routingStatus: 'closed' },
+    messages: [...remoteState.messages, { id: 'visitor-final', role: 'visitor', text: 'Thanks', createdAt: '2026-11-17T00:00:03Z' }],
+  };
+  history = await handlers.handle(request({ action: 'history', sessionId: created.sessionId }));
+  assert.equal(history.supportStatus, 'closed');
+  assert.equal(history.escalationState, 'closed');
+  assert.equal(history.supportSessionId, 'remote-lifecycle');
+  assert.deepEqual(history.messages.map(message => message.id), ['visitor-request', 'agent-reply', 'visitor-final']);
+  const nextRequest = await handlers.handle(request({
+    action: 'escalate', sessionId: created.sessionId, operationId: 'lifecycle-operation-2',
+    contactName: 'Owner User', contactEmail: 'owner@example.com', summary: 'New request', details: 'Follow-up.',
+  }));
+  assert.equal(nextRequest.persisted, true);
+  assert.notEqual(nextRequest.sessionId, created.sessionId);
+  assert.notEqual(nextRequest.supportSessionId, 'remote-lifecycle');
+});
+
 test('a conversation cannot be read or written from another tenant', async () => {
   const { db, handlers } = setup();
   const created = await handlers.handle(request({ action: 'message', message: 'Help', route: '/' }));

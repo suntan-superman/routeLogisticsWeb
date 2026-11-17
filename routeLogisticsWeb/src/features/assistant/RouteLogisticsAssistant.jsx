@@ -24,6 +24,7 @@ import {
   markAssistantAttempt,
   optimisticVisitorMessage,
   reconcileAssistantMessages,
+  supportLifecycleMessage,
 } from '../../services/assistantMessages';
 
 const STORAGE_PREFIX = 'rl-assistant:';
@@ -254,7 +255,7 @@ export default function RouteLogisticsAssistant() {
     setBusy(true); setError('');
     try {
       const result = await escalateAssistantSession({
-        ...form, sessionId: sessionId || null, operationId: crypto.randomUUID(),
+        ...form, sessionId: supportStatus === 'closed' ? null : sessionId || null, operationId: crypto.randomUUID(),
         appVersion: import.meta.env.VITE_APP_VERSION || `web/${ROUTE_LOGISTICS_KNOWLEDGE_VERSION}`,
       });
       setSessionId(result.sessionId || sessionId);
@@ -311,7 +312,7 @@ export default function RouteLogisticsAssistant() {
           {pendingActions.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{pendingActions.map(action => <button key={action.id} type="button" onClick={() => navigateTo(action)} className="rounded-md bg-primary-600 px-3 py-2 text-xs font-semibold text-white hover:bg-primary-700">{action.label}</button>)}</div>}
           {busy && <div className="mt-3 flex items-center gap-2 text-sm text-gray-500" role="status"><ArrowPathIcon className="h-4 w-4 animate-spin" />Checking verified guidance…</div>}
           {error && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert"><div className="flex gap-2"><ExclamationTriangleIcon className="h-5 w-5 shrink-0" /><span>{error}</span></div>{lastAttempt && <button type="button" onClick={() => ask(lastQuestion, lastAttempt)} disabled={busy} className="mt-2 font-semibold underline">Retry</button>}</div>}
-          {(escalated || supportStatus === 'requesting') && <div className="mt-3 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-gray-800"><div className="flex items-start gap-2"><LifebuoyIcon className="h-5 w-5 shrink-0 text-primary-700" /><p>{supportStatus === 'requesting' ? 'Connecting your request to Workside Support. Use Refresh to check again shortly.' : supportStatus === 'waiting_for_agent' ? 'Workside Support has received your request. It is waiting for a representative; an immediate live reply is not promised.' : supportStatus === 'assigned_to_support' ? 'Workside Support has received your request and assigned it to a representative. An immediate live reply is not promised.' : 'Workside Support has received your request. Use Refresh to check for supported follow-up; an immediate live reply is not promised.'}</p></div><button type="button" onClick={refreshHistory} disabled={busy} className="mt-2 text-xs font-semibold text-primary-700 underline">Refresh conversation</button></div>}
+          {(escalated || supportStatus === 'requesting' || supportStatus === 'closed') && <div className="mt-3 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-gray-800"><div className="flex items-start gap-2"><LifebuoyIcon className="h-5 w-5 shrink-0 text-primary-700" /><p>{supportLifecycleMessage(supportStatus)}</p></div>{supportStatus !== 'closed' && <button type="button" onClick={refreshHistory} disabled={busy} className="mt-2 text-xs font-semibold text-primary-700 underline">Refresh conversation</button>}</div>}
           <div ref={messageEndRef} />
         </>}
       </div>

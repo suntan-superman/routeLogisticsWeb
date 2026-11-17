@@ -61,4 +61,15 @@ export function markAssistantAttempt(messages = [], clientMessageId, deliverySta
     : message);
 }
 
+export function supportLifecycleMessage(status) {
+  switch (status) {
+    case 'requesting': return 'Connecting your request to Workside Support. Use Refresh to check again shortly.';
+    case 'waiting_for_agent': return 'Workside Support has received your request. It is waiting for a representative; an immediate live reply is not promised.';
+    case 'assigned_to_support': return 'A Workside Support representative has accepted your request and is assigned to the conversation.';
+    case 'human_conversation_active': return 'Your conversation with a Workside Support representative is active.';
+    case 'closed': return 'Your support conversation has ended. Start a new conversation to contact Workside Support again.';
+    default: return 'Workside Support has received your request. Use Refresh to check for supported follow-up; an immediate live reply is not promised.';
+  }
+}
+
 export { MAX_ASSISTANT_MESSAGES };

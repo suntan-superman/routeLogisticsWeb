@@ -5,6 +5,7 @@ import {
   markAssistantAttempt,
   optimisticVisitorMessage,
   reconcileAssistantMessages,
+  supportLifecycleMessage,
 } from './assistantMessages.js';
 
 const serverPair = (suffix, text = 'How do I create an invoice?') => [
@@ -47,4 +48,11 @@ test('an unacknowledged optimistic message survives unrelated history refreshes'
   const result = reconcileAssistantMessages([...serverPair('1'), pending], serverPair('1'));
   assert.equal(result.at(-1).id, pending.id);
   assert.equal(result.at(-1).deliveryState, 'sending');
+});
+
+test('support lifecycle copy distinguishes waiting, assigned, active, and closed refresh states', () => {
+  assert.match(supportLifecycleMessage('waiting_for_agent'), /waiting for a representative/);
+  assert.match(supportLifecycleMessage('assigned_to_support'), /accepted your request and is assigned/);
+  assert.match(supportLifecycleMessage('human_conversation_active'), /conversation .* is active/);
+  assert.match(supportLifecycleMessage('closed'), /conversation has ended/);
 });

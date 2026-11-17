@@ -216,6 +216,7 @@ const JobManagementPage = () => {
       const result = await JobManagementService.deleteJob(jobId, job.updatedAt);
       if (result.success) {
         setJobs(prev => prev.filter(job => job.id !== jobId));
+        if (selectedJob?.id === jobId) closeView();
         invalidate(['jobs','job','customer-stats']);
         toast.success('Job deleted successfully!');
       } else {
@@ -241,6 +242,7 @@ const JobManagementPage = () => {
       const result = await JobManagementService.cancelJob(job.id, '', job.updatedAt);
       if (!result.success) return toast.error(result.error || 'The appointment could not be cancelled.');
       setJobs(previous => previous.map(row => row.id === job.id ? result.job : row));
+      setSelectedJob(previous => previous?.id === job.id ? result.job : previous);
       invalidate(['jobs', 'job', 'customer-stats', 'route']);
       toast.success('Appointment cancelled');
     } catch (error) { toast.error(error.message || 'The appointment could not be cancelled.'); }
@@ -654,6 +656,7 @@ const JobManagementPage = () => {
                         {can('jobs.cancel') && ['scheduled', 'en-route'].includes(job.status) && (
                           <button
                             onClick={() => handleCancelJob(job)}
+                            aria-label={`Cancel ${job.serviceType || 'appointment'}`}
                             className="text-amber-700 hover:text-amber-900"
                             title="Cancel Appointment"
                           >
@@ -663,6 +666,7 @@ const JobManagementPage = () => {
                         {can('jobs.cancel') && job.status !== 'in-progress' && !isEstimateVisit(job) && (
                           <button
                             onClick={() => handleDeleteJob(job)}
+                            aria-label={`Permanently delete ${job.serviceType || 'job'}`}
                             className="text-red-600 hover:text-red-900"
                             title="Delete Job"
                           >
@@ -759,6 +763,8 @@ const JobManagementPage = () => {
               </div>
               
               <div className="flex justify-end space-x-3 mt-6">
+                {can('jobs.cancel') && ['scheduled', 'en-route'].includes(selectedJob.status) && <button onClick={() => handleCancelJob(selectedJob)} className="rounded-md border border-amber-600 px-4 py-2 text-amber-800 hover:bg-amber-50">Cancel appointment</button>}
+                {can('jobs.cancel') && selectedJob.status !== 'in-progress' && !isEstimateVisit(selectedJob) && <button onClick={() => handleDeleteJob(selectedJob)} className="rounded-md border border-red-600 px-4 py-2 text-red-700 hover:bg-red-50">Permanently delete</button>}
                 {can('invoices.manage') && selectedJob.status === 'completed' && !isEstimateVisit(selectedJob) && selectedJob.billable !== false && (
                   <button
                     onClick={() => handleCreateInvoice(selectedJob)}
@@ -773,12 +779,12 @@ const JobManagementPage = () => {
                 >
                   Close
                 </button>
-                <button
+                {selectedJob.status !== 'cancelled' && <button
                   onClick={() => openStatusModal(selectedJob)}
                   className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
                   Update Status
-                </button>
+                </button>}
               </div>
             </div>
           </div>

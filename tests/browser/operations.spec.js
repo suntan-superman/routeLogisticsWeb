@@ -47,6 +47,7 @@ test('PW-NOTES-01 technician note replay is idempotent and Jobs/Dispatch share w
   expect(visit.ok()).toBe(true); expect((await visit.json()).result.status).toBe('synced');
   saved = await scenario.read('jobs', scenario.ids.jobId);
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page).toHaveURL(/\/login(?:[?#]|$)/);
   await signIn(page, scenario.accounts.manager);
   await page.goto('/dispatch'); await page.getByLabel('Service date', { exact: true }).fill(scenario.jobDate);
   await page.getByRole('button', { name: `${scenario.customerName} · ${scenario.jobTitle}`, exact: true }).click();
@@ -97,6 +98,7 @@ test('PW-OPS-22 technician request reaches dispatch and manager resolution prese
   const afterRequest = await scenario.read('jobs', scenario.ids.jobId);
   for (const field of ['status', 'assignedTo', 'updatedAt', 'date', 'time']) expect(afterRequest[field]).toEqual(original[field]);
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page).toHaveURL(/\/login(?:[?#]|$)/);
   await signIn(page, scenario.accounts.manager);
   await page.goto('/dispatch'); await page.getByLabel('Service date', { exact: true }).fill(scenario.jobDate);
   await page.getByRole('button', { name: 'Reassignment requested (1)', exact: true }).click();
@@ -537,7 +539,7 @@ test('PW-OPS-12 owner can view invoice and payment history without changing invo
   await signIn(page, scenario.accounts.owner);
   await page.goto('/invoices');
   await expect(page.getByRole('heading', { name: 'Invoices', exact: true })).toBeVisible();
-  const row = page.getByRole('row').filter({ has: page.getByRole('cell', { name: scenario.invoiceNumber, exact: true }) });
+  const row = page.getByRole('row').filter({ hasText: scenario.invoiceNumber });
   await expect(row).toBeVisible();
   await expect(row.getByRole('cell', { name: scenario.customerName, exact: true })).toBeVisible();
   await expect(row.getByRole('cell', { name: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(before.total), exact: true })).toBeVisible();

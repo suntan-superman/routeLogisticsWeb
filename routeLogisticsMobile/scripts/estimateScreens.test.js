@@ -6,8 +6,8 @@ global.IS_REACT_ACT_ENVIRONMENT = true;
 const root = path.resolve(__dirname, '..'), web = path.resolve(root, '../routeLogisticsWeb'), token = 'a'.repeat(64);
 const policy = require('../../functions/shared/capabilities.json');
 function fixture(role = 'manager') {
-  const modules = new Map(), calls = [], operations = new Map(), listeners = new Set(); let sequence = 0;
-  const env = { calls, record: null, photos: [], delivery: null, cancelled: false, uploadFailure: false, ambiguousSave: false, compressionFailure: false, interactions: 0, converted: 0, approvalGets: [], approvals: 0, changes: [], urls: [], revoked: [], role, customers: [{ id: 'customer', name: 'Existing customer', email: 'prospect@example.com' }] };
+  const modules = new Map(), calls = [], operations = new Map(), listeners = new Set(), localDrafts = new Map(); let sequence = 0;
+  const env = { calls, record: null, photos: [], delivery: null, cancelled: false, uploadFailure: false, ambiguousSave: false, compressionFailure: false, interactions: 0, converted: 0, approvalGets: [], approvalDecisions: [], approvals: 0, changes: [], urls: [], revoked: [], role, customers: [{ id: 'customer', name: 'Existing customer', email: 'prospect@example.com' }] };
   const queryMock = require('../../tests/support/workspaceQueryMock.cjs').createWorkspaceQueryMock(React);
   env.user = { id: 'manager', companyId: 'acme', membershipId: 'member', role, companyName: 'Acme', services: ['Pest Control'] };
   const can = capability => policy.roles[env.role]?.includes(capability);
@@ -18,8 +18,8 @@ function fixture(role = 'manager') {
   const palette = { text: '#fff', secondary: '#bdd', danger: '#faa', border: '#375', accent: '#6eb' };
   async function callEstimate(action, fields = {}) {
     calls.push({ action, ...fields });
-    if (action === 'list') return { estimates: env.record ? [env.record] : [], enabled: true, emailEnabled: true };
-    if (action === 'get') return { estimate: env.record, versions: env.record ? [{ version: env.record.version, status: env.record.status, totalCents: env.record.totalCents }] : [], photos: env.photos, emailEnabled: true, delivery: env.delivery };
+    if (action === 'list') return { estimates: env.record ? [env.record] : [], templates: [], enabled: true, emailEnabled: true };
+    if (action === 'get') return { estimate: env.record, versions: env.record ? [{ version: env.record.version, status: env.record.status, totalCents: env.record.totalCents }] : [], photos: env.photos, emailEnabled: true, delivery: env.delivery, permissions: { canEdit: !['approved','converted','submitted-for-review'].includes(env.record?.status), canReview: ['draft','submitted-for-review'].includes(env.record?.status), canDeliver: env.record?.status === 'approved-for-delivery' } };
     if (action === 'save') {
       if (operations.has(fields.operationId)) return operations.get(fields.operationId);
       const result = { estimate: { ...fields.data, id: fields.estimateId || 'estimate', version: (env.record?.version || 0) + 1, status: 'draft', recipient: fields.data.prospect || { name: 'Existing customer', email: 'prospect@example.com' }, totalCents: 10023, subtotalCents: 9900, taxCents: 123, photoIds: fields.data.photoIds || [] } };
@@ -43,11 +43,14 @@ function fixture(role = 'manager') {
       if (name === 'react-hot-toast') return { success() {}, error() {} };
       if (name.endsWith('/hooks/useUnsavedChanges')) return { useUnsavedChanges: () => ({ confirmDiscard: async () => false }) };
       if (name.startsWith('@babel/runtime/')) return require(name);
-      if (name === 'react-native') return { View: 'View', Text: 'Text', Image: 'Image', ScrollView: 'ScrollView', Pressable: 'Pressable' };
+      if (name === 'react-native') return { View: 'View', Text: 'Text', Image: 'Image', ScrollView: 'ScrollView', Pressable: 'Pressable', AppState: { addEventListener: () => ({ remove() {} }) } };
+      if (name === '@react-native-community/netinfo') return { __esModule: true, default: { fetch: async () => ({ isConnected: true, isInternetReachable: true }), addEventListener: () => () => {} } };
       if (name === 'expo-crypto') return { randomUUID: () => `11111111-1111-4111-8111-${String(++sequence).padStart(12, '0')}` };
       if (name === 'expo-image-picker') return { UIImagePickerPresentationStyle: { FULL_SCREEN: 'full-screen' }, requestCameraPermissionsAsync: async () => ({ granted: true }), launchCameraAsync: async () => ({ canceled: env.cancelled, assets: [{ uri: 'file:///selected.jpg', width: 1600, height: 1200 }] }), launchImageLibraryAsync: async () => ({ canceled: env.cancelled, assets: [{ uri: 'file:///selected.jpg', width: 1600, height: 1200 }] }) };
       if (name.endsWith('/AuthContext')) return { useAuth: env.auth };
       if (name.endsWith('/ThemeProvider')) return { useTheme: () => ({ palette }) };
+      if (name.endsWith('/components/ThemeControl')) return () => React.createElement('span', null, 'Theme');
+      if (name === 'react-router-dom') return { useSearchParams: () => [new URLSearchParams(), () => {}] };
       if (name.endsWith('/components/MobileUI')) return { ScreenHeader: ({ title, onBack }) => React.createElement('View', null, React.createElement('Text', null, title), onBack && React.createElement('Pressable', { accessibilityLabel: 'Back', onPress: onBack })) };
       if (name === './Glass' || name.endsWith('/components/Glass')) return { GlassCard: ({ children }) => React.createElement('View', null, children), GlassButton: ({ title, accessibilityLabel, onPress, disabled, busy }) => React.createElement('Pressable', { accessibilityLabel: accessibilityLabel || title, disabled: disabled || busy, onPress }, React.createElement('Text', null, title)), GlassInput: ({ label, ...props }) => React.createElement('TextInput', { accessibilityLabel: label, ...props }) };
       if (name.endsWith('/nativeInteraction')) return { beginNativeInteraction: () => { env.interactions++; return () => env.interactions--; } };
@@ -56,7 +59,8 @@ function fixture(role = 'manager') {
       // This estimate/photo test does not exercise geographic policy. Keep its
       // newly composed child on the existing workspace API boundary.
       if (name.endsWith('/workspaceApi')) return { callWorkspace: async () => ({ settings: { configured: false }, availableCategories: [] }) };
-      if (name.endsWith('/estimateService')) return { callEstimate, prepareEstimatePhoto: async () => { if (env.compressionFailure) throw new Error('Photo preparation failed. Selection retained.'); return { base64: 'AAAA', uri: 'file:///compressed.jpg', dataUri: 'data:image/jpeg;base64,AAAA' }; }, shareEstimatePdf: async () => {}, downloadEstimatePdf: async () => {}, callEstimateApproval: async values => { if (values.action === 'get') { env.approvalGets.push(values); return { estimate: env.record || savedEstimate('sent'), photos: [], branding: { name: 'Acme' } }; } env.approvals++; return { approved: true }; } };
+      if (name.endsWith('/estimateService')) return { callEstimate, prepareEstimatePhoto: async () => { if (env.compressionFailure) throw new Error('Photo preparation failed. Selection retained.'); return { base64: 'AAAA', uri: 'file:///compressed.jpg', dataUri: 'data:image/jpeg;base64,AAAA' }; }, shareEstimatePdf: async () => {}, downloadEstimatePdf: async () => {}, callEstimateApproval: async values => { if (values.action === 'get') { env.approvalGets.push(values); return { estimate: env.record || savedEstimate('sent'), photos: [], branding: { name: 'Acme' } }; } env.approvals++; env.approvalDecisions.push(values); return { approved: values.action === 'approve', decision: values.action === 'request-revision' ? 'revision-requested' : values.action === 'decline' ? 'declined' : 'approved' }; } };
+      if (name.endsWith('/estimateDraftStore')) return { loadEstimateDraft: async identity => localDrafts.get(identity) || null, saveEstimateDraft: async (identity, payload) => { const value = { ...payload, identity, draftRevision: (localDrafts.get(identity)?.draftRevision || 0) + 1 }; localDrafts.set(identity, value); return value; }, retainEstimatePhoto: async (_identity, _id, asset) => asset, discardEstimateDraft: async identity => localDrafts.delete(identity), estimateDraftStateLabel: state => state };
       if (name.includes('functions/shared/estimateClient')) return helpers;
       if (name.startsWith('.')) { const next = path.resolve(path.dirname(filename), name); return load(path.extname(next) ? next : fs.existsSync(`${next}.jsx`) ? `${next}.jsx` : `${next}.js`); }
       throw new Error(`Unexpected dependency ${name}`);
@@ -80,8 +84,8 @@ test('draft helpers preserve canonical prospect recipients and never submit clie
   assert.throws(() => helpers.estimateInput({ ...draft, lineItems: [{ kind: 'labor', description: 'Work', quantity: '1', unitPrice: '1.999' }] })); assert.throws(() => helpers.conversionInput({ date: '2026-02-30', time: '09:00' }));
   assert.deepEqual(helpers.conversionInput({ date: '2026-11-20', time: '09:00' }, { createCustomer: true }), { schedule: { date: '2026-11-20', time: '09:00' }, createCustomer: true });
 });
-test('technicians see no estimate financial controls and make no estimate API calls', async () => {
-  const env = fixture('technician'), tree = await renderNative(env); assert.match(json(tree), /not available for your role/); assert.equal(env.calls.length, 0); assert.doesNotMatch(json(tree), /Unit price|Save estimate/); await act(async () => tree.unmount());
+test('technicians can reach only assigned estimate work and cannot start an unrelated freeform estimate', async () => {
+  const env = fixture('technician'), tree = await renderNative(env); assert.doesNotMatch(json(tree), /New photo estimate|Unit price|Save estimate/); assert.equal(env.calls.filter(call => call.action === 'list').length, 1); await act(async () => tree.unmount());
 });
 test('photo-first native draft uploads and attaches photos to a server-priced version without modal layering', async () => {
   const env = fixture(), tree = await renderNative(env); await press(tree, 'New photo estimate'); await press(tree, 'Choose estimate photo'); await fillDraft(tree); await press(tree, 'Save estimate version');
@@ -118,9 +122,9 @@ test('native estimate conversion offers quarter-hour choices instead of an arbit
   await press(tree, 'Convert approved estimate to job'); await press(tree, 'Confirm job conversion');
   assert.equal(env.calls.find(call => call.action === 'convert').schedule.time, '09:45'); await act(async () => tree.unmount());
 });
-test('actual email failure is visible separately from the sent estimate status and sending requires confirmation', async () => {
-  const env = fixture(); env.record = savedEstimate('sent'); env.delivery = { status: 'failed', attempts: 2, failureCode: 'SMTP_REJECTED', sentAt: null }; const tree = await renderNative(env); await press(tree, 'Open estimate'); assert.match(json(tree), /SMTP_REJECTED/); assert.match(json(tree), /2 attempts/); await press(tree, 'Email estimate for approval'); assert.equal(env.calls.filter(call => call.action === 'deliver').length, 0);
-  const confirm = nativeButton(tree, 'Confirm estimate email'); await act(async () => Promise.all([confirm.props.onPress(), confirm.props.onPress()])); await act(settle); assert.equal(env.calls.filter(call => call.action === 'deliver').length, 1); assert.match(json(tree), /Queued/); await act(async () => tree.unmount());
+test('actual email failure is visible separately from sent status and cannot duplicate a completed delivery operation', async () => {
+  const env = fixture(); env.record = savedEstimate('sent'); env.delivery = { status: 'failed', attempts: 2, failureCode: 'SMTP_REJECTED', sentAt: null }; const tree = await renderNative(env); await press(tree, 'Open estimate'); assert.match(json(tree), /SMTP_REJECTED/); assert.match(json(tree), /2 attempts/);
+  const send = nativeButton(tree, 'Email approved estimate'); assert.ok(send); assert.equal(send.props.disabled, true); assert.equal(env.calls.filter(call => call.action === 'deliver').length, 0); await act(async () => tree.unmount());
 });
 test('public approval survives StrictMode effect replay while stripping token fragments and records one explicit approval', async () => {
   const env = fixture(), Component = env.load(path.join(web, 'src/pages/EstimateApprovalPage.jsx')).default; let tree;
@@ -130,6 +134,15 @@ test('public approval survives StrictMode effect replay while stripping token fr
 });
 test('a converted public estimate shows recorded approval instead of asking the customer to approve again', async () => {
   const env = fixture(); env.record = { ...savedEstimate('converted'), convertedJobId: 'job' }; let tree; await act(async () => { tree = create(React.createElement(env.load(path.join(web, 'src/pages/EstimateApprovalPage.jsx')).default)); }); await act(settle); assert.equal(tree.root.findAllByType('form').length, 0); assert.match(json(tree), /approval is recorded/); await act(async () => tree.unmount());
+});
+test('public customer decline and revision requests record one explicit decision without exposing another form', async () => {
+  for (const action of ['decline', 'request-revision']) {
+    const env = fixture(), Component = env.load(path.join(web, 'src/pages/EstimateApprovalPage.jsx')).default; let tree;
+    await act(async () => { tree = create(React.createElement(Component)); }); await act(settle);
+    if (action === 'request-revision') { const reason = tree.root.findAllByType('textarea')[0]; await act(async () => reason.props.onChange({ target: { value: 'Please include the detached garage.' } })); }
+    const label = action === 'decline' ? 'Decline estimate' : 'Request revisions', control = tree.root.findAllByType('button').find(node => node.children.join('') === label); assert.ok(control); await act(async () => control.props.onClick()); await act(settle);
+    assert.equal(env.approvalDecisions.length, 1); assert.equal(env.approvalDecisions[0].action, action); assert.equal(tree.root.findAllByType('form').length, 0); assert.match(json(tree), action === 'decline' ? /No job or invoice was created/ : /revision request is recorded/); await act(async () => tree.unmount());
+  }
 });
 test('web management retains a selected photo through preparation failure and retries without sending an email', async () => {
   const env = fixture(), Component = env.load(path.join(web, 'src/pages/EstimatesPage.jsx')).default; let tree;

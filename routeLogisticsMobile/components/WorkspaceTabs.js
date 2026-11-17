@@ -13,6 +13,7 @@ export const MANAGEMENT_TABS = [
   { id: 'team', label: 'Team', icon: 'people-outline' },
   { id: 'map', label: 'Map', icon: 'map-outline' },
   { id: 'schedule', label: 'Schedule', icon: 'calendar-outline' },
+  { id: 'estimates', label: 'Quotes', icon: 'document-text-outline' },
 ];
 export default function WorkspaceTabs({ active, onSelect, busy = false, mode = 'field' }) {
   const { palette } = useTheme();

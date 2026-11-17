@@ -1,6 +1,6 @@
 // Client draft validation only. The backend owns all prices, totals and versions.
 const blankLine = kind => ({ kind, description: '', quantity: '1', unitPrice: '', unit: kind === 'labor' ? 'hour' : 'item' });
-const blankEstimate = () => ({ customerId: '', prospect: { name: '', email: '', phone: '', address: '' }, title: '', serviceType: '', scopeOfWork: '', notes: '', validDays: '30', taxRate: '0', lineItems: [blankLine('labor'), blankLine('material')], photoIds: [] });
+const blankEstimate = () => ({ customerId: '', prospect: { name: '', email: '', phone: '', address: '' }, title: '', serviceType: '', scopeOfWork: '', notes: '', technicianNotes: '', internalReviewNotes: '', validDays: '30', taxRate: '0', lineItems: [blankLine('labor'), blankLine('material')], photoIds: [] });
 function propertyInput(value = {}) {
   const address = String(value.serviceProperty?.address || '').trim(), serviceCategory = String(value.serviceCategory || '').trim();
   if (address.length > 278) throw new Error('Use a service property address of up to 278 characters.');
@@ -21,7 +21,7 @@ function estimateInput(draft) {
   });
   const taxRate = Number(draft.taxRate || 0), validDays = Number(draft.validDays || 30);
   if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100 || !/^\d+(\.\d{1,2})?$/.test(String(draft.taxRate || 0)) || !Number.isInteger(validDays) || validDays < 1 || validDays > 90) throw new Error('Tax must be 0–100% (up to two decimals); validity must be 1–90 days.');
-  return { customerId: draft.customerId || null, prospect: draft.customerId ? null : Object.fromEntries(['name', 'email', 'phone', 'address'].map(key => [key, String(draft.prospect?.[key] || '').trim()])), title: draft.title.trim(), serviceType: draft.serviceType.trim(), scopeOfWork: draft.scopeOfWork.trim(), notes: draft.notes?.trim() || '', validDays, taxRate, lineItems: cleaned, photoIds: draft.photoIds || [], ...propertyInput(draft) };
+  return { customerId: draft.customerId || null, prospect: draft.customerId ? null : Object.fromEntries(['name', 'email', 'phone', 'address'].map(key => [key, String(draft.prospect?.[key] || '').trim()])), title: draft.title.trim(), serviceType: draft.serviceType.trim(), scopeOfWork: draft.scopeOfWork.trim(), notes: draft.notes?.trim() || '', technicianNotes: draft.technicianNotes?.trim() || '', internalReviewNotes: draft.internalReviewNotes?.trim() || '', validDays, taxRate, lineItems: cleaned, photoIds: draft.photoIds || [], ...['sourceVisitId','inquiryId','servicePropertyId'].reduce((result, key) => Object.hasOwn(draft, key) ? { ...result, [key]: draft[key] } : result, {}), ...propertyInput(draft) };
 }
 const money = cents => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(cents || 0) / 100);
 function conversionInput(schedule, { customerId, createCustomer = false } = {}) {

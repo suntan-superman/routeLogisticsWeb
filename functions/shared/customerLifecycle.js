@@ -1,5 +1,5 @@
 const LIFECYCLES = ['prospect', 'active', 'inactive'];
-const INQUIRY_STATUSES = ['new', 'contacted', 'estimate_scheduled', 'estimate_completed', 'converted', 'closed'];
+const INQUIRY_STATUSES = ['new', 'contacted', 'estimate_scheduled', 'estimate_completed', 'estimate_drafted', 'estimate_approved_scheduling_needed', 'estimate_declined', 'estimate_revision_requested', 'converted', 'closed'];
 const INQUIRY_SOURCES = ['phone', 'website', 'referral', 'existing_customer', 'walk_in', 'other'];
 const lifecycleFor = customer => LIFECYCLES.includes(customer?.lifecycle) ? customer.lifecycle : 'active';
 const customerArchived = customer => customer?.isActive === false || !!customer?.deletedAt || ['inactive', 'archived', 'deleted'].includes(customer?.status);

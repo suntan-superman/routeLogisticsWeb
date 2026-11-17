@@ -25,7 +25,7 @@ function workAccessReason(job, user, permissions) {
 
 // One mounted workspace, with exclusive inline pages. No native Modal presents
 // another Modal or the camera, and the photo owner survives child-page changes.
-export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowUp, onInteractionChange }) {
+export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowUp, onPrepareEstimate, onInteractionChange }) {
   const { user, permissions } = useAuth(), { palette } = useTheme();
   const [mode, setMode] = useState('details'), [draft, setDraft] = useState(emptyDraft);
   const [error, setError] = useState(''), [notice, setNotice] = useState('');
@@ -292,6 +292,7 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
         {!!displayJob.completionNotes && <Text style={{ color: palette.secondary, fontSize: 15, lineHeight: 23 }}>Completion notes: {displayJob.completionNotes}</Text>}
       </Card>}
       {mode === 'details' && <View style={{ gap: 10 }}>
+        {estimateVisit && onPrepareEstimate && (permissions.can?.('estimates.manage') || permissions.can?.('estimates.prepareAssigned')) && !['cancelled', 'canceled'].includes(displayJob.status) && <GlassButton title={displayJob.estimateId ? 'View Estimate' : 'Prepare Estimate'} disabled={busy || hasDraft} onPress={() => onPrepareEstimate(displayJob)} />}
         {canComplete && <GlassButton title={hasCompletionDraft ? 'Resume completion' : 'Complete'} secondary={displayJob.status !== 'in-progress'} disabled={busy} onPress={openCompletion} />}
         {permissions.canManage && onEdit && !submitted && <GlassButton secondary title="Edit job" disabled={busy} onPress={edit} />}
         {permissions.canManage && onFollowUp && displayJob.status === 'completed' && <GlassButton secondary title="Schedule follow-up" disabled={busy} onPress={() => { if (!explainBlockedPhoto() && !workDraftRef.current && !serviceDraftRef.current && !hasCompletionDraft) onFollowUp(displayJob); }} />}

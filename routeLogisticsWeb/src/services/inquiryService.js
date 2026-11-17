@@ -1,7 +1,7 @@
 import { callWorkspace } from './workspaceApi';
 
 export const inquirySources = [{ value: 'phone', label: 'Phone' }, { value: 'website', label: 'Website' }, { value: 'referral', label: 'Referral' }, { value: 'existing_customer', label: 'Existing customer' }, { value: 'walk_in', label: 'Walk-in' }, { value: 'other', label: 'Other' }];
-export const inquiryStatuses = [{ value: 'new', label: 'New' }, { value: 'contacted', label: 'Contacted' }, { value: 'estimate_scheduled', label: 'Estimate scheduled' }, { value: 'estimate_completed', label: 'Estimate completed' }, { value: 'converted', label: 'Converted' }, { value: 'closed', label: 'Closed' }];
+export const inquiryStatuses = [{ value: 'new', label: 'New' }, { value: 'contacted', label: 'Contacted' }, { value: 'estimate_scheduled', label: 'Estimate scheduled' }, { value: 'estimate_completed', label: 'Visit completed — quote needed' }, { value: 'estimate_drafted', label: 'Estimate drafted' }, { value: 'estimate_approved_scheduling_needed', label: 'Approved — scheduling needed' }, { value: 'estimate_declined', label: 'Estimate declined' }, { value: 'estimate_revision_requested', label: 'Estimate revision requested' }, { value: 'converted', label: 'Converted' }, { value: 'closed', label: 'Closed' }];
 export const manageInquiry = (action, data = {}) => callWorkspace('rlManageInquiry', { action, ...data });
 export const customerLifecycle = customer => ['prospect', 'active', 'inactive'].includes(customer?.lifecycle) ? customer.lifecycle : 'active';
 export const lifecycleLabel = customer => ({ prospect: 'Prospect', active: 'Active customer', inactive: 'Inactive customer' })[customerLifecycle(customer)];

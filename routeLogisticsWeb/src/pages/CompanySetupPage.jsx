@@ -23,7 +23,7 @@ import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 
 const companyForm = (company = {}) => ({
   name: company.name || '', description: company.description || '', address: company.address || '', city: company.city || '', state: company.state || '', zipCode: company.zipCode || '',
-  phone: company.phone || '', email: company.email || '', website: company.website || '', logo: company.logo || '', primaryColor: company.primaryColor || '#10b981', secondaryColor: company.secondaryColor || '#6b7280', invoiceRemindersEnabled: company.invoiceRemindersEnabled === true
+  phone: company.phone || '', email: company.email || '', website: company.website || '', logo: company.logo || '', primaryColor: company.primaryColor || '#10b981', secondaryColor: company.secondaryColor || '#6b7280', invoiceRemindersEnabled: company.invoiceRemindersEnabled === true, allowTechnicianEstimateSend: company.allowTechnicianEstimateSend === true
 });
 const companySnapshot = (data, categories) => JSON.stringify({ ...data, serviceCategories: categories });
 
@@ -605,7 +605,7 @@ const CompanySetupForm = () => {
       transition={{ duration: 0.5 }}
       className="space-y-6"
     >
-      {company && isOwner && <label className="flex gap-3 rounded-lg border bg-white p-4"><input type="checkbox" checked={companyData.invoiceRemindersEnabled} onChange={(e) => handleInputChange('invoiceRemindersEnabled', e.target.checked)} />Send weekly overdue reminders to customers who have consented to invoice emails. Save company settings to apply.</label>}
+      {company && isOwner && <div className="space-y-3"><label className="flex gap-3 rounded-lg border bg-white p-4"><input type="checkbox" checked={companyData.invoiceRemindersEnabled} onChange={(e) => handleInputChange('invoiceRemindersEnabled', e.target.checked)} />Send weekly overdue reminders to customers who have consented to invoice emails. Save company settings to apply.</label><label className="flex gap-3 rounded-lg border bg-white p-4"><input type="checkbox" checked={companyData.allowTechnicianEstimateSend} onChange={(e) => handleInputChange('allowTechnicianEstimateSend', e.target.checked)} /><span><strong>Allow technicians to send estimates directly</strong><span className="mt-1 block text-sm text-gray-600">Off by default. When off, assigned technicians can prepare and submit estimates, but management must approve the exact version before delivery.</span></span></label></div>}
       {/* Header */}
       {inviteLink && <div className="rounded-lg border border-green-200 bg-green-50 p-4"><p className="mb-2">{inviteDelivery === 'queued' ? 'Invitation email queued. You can also share this link directly:' : 'Email delivery is disabled. Copy this invitation link to share it directly:'}</p><input aria-label="Invitation link" readOnly value={inviteLink} onFocus={(e) => e.target.select()} className="w-full rounded border-gray-300" /><button type="button" className="mt-2 underline" onClick={async () => { try { await navigator.clipboard.writeText(inviteLink); toast.success('Link copied'); } catch { toast.error('Select and copy the link above.'); } }}>Copy invitation link</button></div>}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">

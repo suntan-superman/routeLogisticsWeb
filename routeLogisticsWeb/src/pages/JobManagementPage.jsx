@@ -718,10 +718,10 @@ const JobManagementPage = () => {
                   </div>
                 </div>
                 
-                <div className="bg-gray-50 p-4 rounded-md">
+                {!isEstimateVisit(selectedJob) && <div className="bg-gray-50 p-4 rounded-md">
                   <h5 className="text-sm font-medium text-gray-700 mb-2">Total Cost</h5>
                   <p className="text-lg font-semibold text-gray-900">{formatCurrency(selectedJob.totalCost)}</p>
-                </div>
+                </div>}
                 
                 <JobWorkDetails key={selectedJob.id} job={selectedJob} allowInquiryLink={can('customers.manage')} />
 

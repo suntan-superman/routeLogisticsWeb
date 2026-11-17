@@ -198,6 +198,7 @@ test('approved estimate conversion activates the same existing prospect without 
   const f = await fixture(); await db.doc(`customers/${f.customerId}`).update({ lifecycle: 'prospect' });
   const estimate = estimateHandlers(db, { ...f.config, enabled: () => true, emailEnabled: () => true, appUrl: () => 'https://example.invalid', bucketProvider: () => ({ file: () => ({ save: async () => {} }) }) });
   const saved = await estimate.handle(f.request({ action: 'save', operationId: f.op('quote'), data: { customerId: f.customerId, title: 'Synthetic accepted quote', serviceType: 'Inspection', scopeOfWork: 'Approved synthetic work', lineItems: [{ kind: 'labor', description: 'Inspection', quantity: 1, unitPrice: 100 }], taxRate: 0, validDays: 30, photoIds: [] } }));
+  await estimate.handle(f.request({ action: 'review', estimateId: saved.estimate.id, expectedVersion: 1, decision: 'approve', comments: 'Synthetic management approval for the exact version.' }));
   const delivery = await estimate.handle(f.request({ action: 'deliver', estimateId: saved.estimate.id, expectedVersion: 1 })), mail = await db.doc(`rlMail/${delivery.mailId}`).get(), token = mail.get('text').match(/token=([a-f0-9]{64})/)[1];
   await estimate.approval({ data: { action: 'approve', estimateId: saved.estimate.id, token, signerName: 'Synthetic signer', acceptedTerms: true }, rawRequest: { ip: f.id } });
   const result = await estimate.handle(f.request({ action: 'convert', estimateId: saved.estimate.id, expectedVersion: 1, schedule: { date: '2026-12-01', time: '10:00' } }));

@@ -42,6 +42,7 @@ async function approvedConvertedJob(f) {
   const serviceAreas = serviceAreaHandlers(db, { now, geocode: async address => ({ formattedAddress: address, latitude: 35, longitude: -119, postalCode: '93312', countryCode: 'US', locationType: 'PREMISE', streetAddressVerified: true }) });
   const handler = estimateHandlers(db, { enabled: () => true, emailEnabled: () => true, appUrl: () => 'https://example.invalid', bucketProvider: () => bucket, now, serviceAreas });
   const { estimate } = await handler.handle(f.request({ action: 'save', operationId: `${f.id}-estimate-save`, data: { customerId: f.customerId, title: 'Synthetic approved scope', serviceType: 'Synthetic quote service', scopeOfWork: 'Approved scope', lineItems: [{ kind: 'labor', description: 'Approved labor', quantity: 2, unitPrice: 40 }, { kind: 'material', description: 'Approved material', quantity: 1, unitPrice: 20 }], taxRate: 8.25, validDays: 30, photoIds: [] } }));
+  await handler.handle(f.request({ action: 'review', estimateId: estimate.id, expectedVersion: estimate.version, decision: 'approve', comments: 'Synthetic management approval for the exact version.' }));
   const delivery = await handler.handle(f.request({ action: 'deliver', estimateId: estimate.id, expectedVersion: estimate.version }));
   const token = (await db.doc(`rlMail/${delivery.mailId}`).get()).get('text').match(/token=([a-f0-9]{64})/)[1];
   await handler.approval({ data: { action: 'approve', estimateId: estimate.id, token, signerName: 'Synthetic signer', acceptedTerms: true }, rawRequest: { ip: f.id } });

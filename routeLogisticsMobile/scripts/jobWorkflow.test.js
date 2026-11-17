@@ -80,8 +80,9 @@ beforeEach(() => {
 afterEach(async () => { if (tree) await act(async () => tree.unmount()); });
 
 test('estimate details retain property access and dispatcher notes and completion offers quote-needed outcome',async()=>{
- await render(job({appointmentKind:'estimate_visit',billable:false,estimateOutcome:'estimate_pending',inquiryId:'inquiry-one',serviceProperty:{address:'22 Rental Road',label:'Rental',unit:'B'},address:'Old billing street',propertyAccessInstructions:'Gate 2468',dispatchNotes:'Inspect exterior only'}));
+ let prepared=null;await render(job({appointmentKind:'estimate_visit',billable:false,estimateOutcome:'estimate_pending',inquiryId:'inquiry-one',serviceProperty:{address:'22 Rental Road',label:'Rental',unit:'B'},address:'Old billing street',propertyAccessInstructions:'Gate 2468',dispatchNotes:'Inspect exterior only'}),{onPrepareEstimate:selected=>{prepared=selected;}});
  assert.match(text(),/Estimate Visit/);assert.match(text(),/22 Rental Road/);assert.match(text(),/Gate 2468/);assert.match(text(),/Inspect exterior only/);assert.doesNotMatch(text(),/Old billing street/);assert.equal(outcomeProps.job.inquiryId,'inquiry-one');assert.equal(outcomeProps.readOnly,false);
+ await press('Prepare Estimate');assert.equal(prepared.id,'assigned');
  await press('Complete');assert.match(text(),/Document estimate visit/);assert.ok(control('Completion outcome: Visit completed — quote needed'));await input('Work completed','Inspected for a quote');await press('Completion outcome: Customer declined');await press('Review completion');assert.match(text(),/Customer declined/);await press('Confirm completion');assert.equal(calls[0].draft.estimateOutcome,'customer_declined');assert.equal(calls[0].job.billable,false);assert.equal(photoMounts,1);
 });
 

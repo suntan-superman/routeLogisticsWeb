@@ -14,7 +14,9 @@ const {
   rgb
 } = require('pdf-lib');
 const {
-  requireCapability
+  accessScope,
+  requireCapability,
+  hasCapability
 } = require('./access');
 const {
   hash,
@@ -96,10 +98,21 @@ function cleanDraft(data) {
     serviceType: text('serviceType', 200, true),
     scopeOfWork: text('scopeOfWork', 5000),
     notes: text('notes', 3000),
+    technicianNotes: text('technicianNotes', 3000),
+    internalReviewNotes: text('internalReviewNotes', 3000),
     validDays,
     photoIds,
     ...estimateTotals(data.lineItems, data.taxRate ?? 0)
   };
+}
+function estimateTemplateView(row) {
+  const value = row.data(), money = input => Number.isFinite(Number(input)) && Number(input) >= 0 ? Number(Number(input).toFixed(2)) : 0,
+    hours = Number.isFinite(Number(value.laborHours)) && Number(value.laborHours) > 0 ? Number(Number(value.laborHours).toFixed(3)) : 0,
+    laborRate = money(value.laborRate), materialCost = money(value.materialCost), totalCost = money(value.totalCost), lineItems = [];
+  if (hours && laborRate) lineItems.push({ kind: 'labor', description: String(value.serviceType || value.name || 'Labor').slice(0, 300), quantity: hours, unitPrice: laborRate });
+  if (materialCost) lineItems.push({ kind: 'material', description: String(value.materials || `${value.name || 'Service'} materials`).slice(0, 300), quantity: 1, unitPrice: materialCost });
+  if (!lineItems.length && totalCost) lineItems.push({ kind: 'service', description: String(value.name || value.serviceType || 'Service').slice(0, 300), quantity: 1, unitPrice: totalCost });
+  return { id: row.id, name: String(value.name || 'Estimate template').slice(0, 200), serviceType: String(value.serviceType || '').slice(0, 200), scopeOfWork: String(value.scopeOfWork || value.description || '').slice(0, 5000), notes: String(value.notes || value.terms || '').slice(0, 3000), validDays: Number.isInteger(value.validityDays) && value.validityDays >= 1 && value.validityDays <= 90 ? value.validityDays : 30, lineItems };
 }
 const scoped = (scope, data) => !!data && (scope.companyId ? data.companyId === scope.companyId : !data.companyId && data.userId === scope.uid);
 const managed = (scope, row) => {
@@ -225,6 +238,25 @@ function estimateHandlers(db, config = {}) {
   const ref = (name, id) => db.doc(`${name}/${id}`),
     versionRef = (id, version) => ref('rlEstimateVersions', hash(`${id}:${version}`)),
     secretRef = id => ref('rlEstimateApprovalSecrets', id);
+  const manages = scope => hasCapability(scope.role, 'estimates.manage');
+  const preparesAssigned = scope => hasCapability(scope.role, 'estimates.prepareAssigned');
+  const assignedVisit = (scope, job) => !!job && job.companyId === scope.companyId && job.appointmentKind === 'estimate_visit'
+    && job.assignedTo === scope.memberId && (!job.assignedToUid || job.assignedToUid === scope.uid)
+    && !['cancelled', 'canceled'].includes(job.status);
+  async function visitFor(scope, id, tx) {
+    const row = tx ? await tx.get(ref('jobs', documentId(id, 'estimate visit'))) : await ref('jobs', documentId(id, 'estimate visit')).get();
+    if (!row.exists || (manages(scope) ? row.get('companyId') !== scope.companyId : !assignedVisit(scope, row.data()))) fail('permission-denied', 'This estimate visit is not assigned to your current workspace.');
+    if (row.get('appointmentKind') !== 'estimate_visit' || row.get('billable') !== false) fail('failed-precondition', 'Prepare an estimate from a nonbillable estimate visit.');
+    return row;
+  }
+  async function assertEstimateAccess(scope, row, tx) {
+    managed(scope, row);
+    if (manages(scope)) return;
+    if (!preparesAssigned(scope) || row.get('preparedByUid') !== scope.uid || !row.get('sourceVisitId')) fail('permission-denied', 'This estimate is not assigned to you.');
+    const visit = await visitFor(scope, row.get('sourceVisitId'), tx);
+    if (visit.get('customerId') !== row.get('customerId')) fail('failed-precondition', 'The estimate visit customer changed. Ask management to review the estimate.');
+  }
+  const taskRef = (id, version, kind = 'review') => ref('rlEstimateTasks', hash(`${id}:${version}:${kind}`));
   const enabledCheck = () => {
     if (!enabled()) fail('failed-precondition', 'Photo estimates are awaiting production configuration.');
   };
@@ -235,6 +267,11 @@ function estimateHandlers(db, config = {}) {
     createdAt: dateString(data.createdAt) || data.createdAt,
     updatedAt: dateString(data.updatedAt) || data.updatedAt
   });
+  const staffView = (scope, id, data) => {
+    const result = view(id, data);
+    if (!manages(scope)) delete result.internalReviewNotes;
+    return result;
+  };
   async function photosFor(scope, id, photoIds, tx) {
     const rows = await Promise.all(photoIds.map(photoId => tx ? tx.get(ref('rlEstimatePhotos', photoId)) : ref('rlEstimatePhotos', photoId).get()));
     for (const row of rows) if (!row.exists || row.get('estimateId') !== id || !scoped(scope, row.data())) fail('permission-denied', 'A selected photo does not belong to this estimate.');
@@ -292,9 +329,10 @@ function estimateHandlers(db, config = {}) {
   }
   return {
     handle: async request => {
-      const scope = await requireCapability(db, request, 'estimates.manage'),
+      const scope = await accessScope(db, request),
         data = request.data || {},
         action = data.action;
+      if (!manages(scope) && !preparesAssigned(scope)) fail('permission-denied', 'Your role does not allow estimate work.');
       await rateLimit(db, 'estimate-manage', scope.uid, 40);
       if (action === 'list') {
         if (!enabled()) return {
@@ -303,21 +341,51 @@ function estimateHandlers(db, config = {}) {
           estimates: [],
           hasMore: false
         };
-        const rows = await db.collection('estimates').where(scope.companyId ? 'companyId' : 'userId', '==', scope.companyId || scope.uid).orderBy('createdAt', 'desc').limit(101).get();
+        const rows = manages(scope)
+          ? await db.collection('estimates').where(scope.companyId ? 'companyId' : 'userId', '==', scope.companyId || scope.uid).orderBy('createdAt', 'desc').limit(101).get()
+          : await db.collection('estimates').where('preparedByUid', '==', scope.uid).limit(101).get();
+        const [company, templateRows] = await Promise.all([scope.companyId ? ref('companies', scope.companyId).get() : Promise.resolve(null), db.collection('estimateTemplates').where(scope.companyId ? 'companyId' : 'userId', '==', scope.companyId || scope.uid).limit(101).get()]);
+        const visibleRows = manages(scope) ? rows.docs : (await Promise.all(rows.docs.map(async row => {
+          if (!scoped(scope, row.data()) || !row.get('sourceVisitId')) return null;
+          const visit = await ref('jobs', row.get('sourceVisitId')).get();
+          return visit.exists && assignedVisit(scope, visit.data()) ? row : null;
+        }))).filter(Boolean);
         return {
           enabled: true,
           emailEnabled: emailEnabled(),
-          estimates: rows.docs.slice(0, 100).filter(row => scoped(scope, row.data())).map(row => view(row.id, row.data())),
+          allowTechnicianEstimateSend: company?.get('allowTechnicianEstimateSend') === true,
+          templates: templateRows.docs.filter(row => row.get('isActive') !== false).slice(0, 100).map(estimateTemplateView),
+          estimates: visibleRows.slice(0, 100).filter(row => scoped(scope, row.data())).map(row => staffView(scope, row.id, row.data())).sort((a, b) => timestamp(b.createdAt) - timestamp(a.createdAt)),
           hasMore: rows.size > 100
         };
       }
       enabledCheck();
+      if (action === 'visit-context') {
+        const visit = await visitFor(scope, data.visitId), existingId = visit.get('estimateId');
+        if (existingId) {
+          const existing = await ref('estimates', documentId(existingId, 'estimate')).get();
+          if (existing.exists) { await assertEstimateAccess(scope, existing); return { estimate: staffView(scope, existing.id, existing.data()), existing: true }; }
+        }
+        const customer = await ref('customers', documentId(visit.get('customerId'), 'customer')).get();
+        if (!customer.exists || !scoped(scope, customer.data())) fail('failed-precondition', 'The estimate visit customer is unavailable.');
+        const property = visit.get('serviceProperty') || {};
+        return { existing: false, context: {
+          sourceVisitId: visit.id, inquiryId: visit.get('inquiryId') || null, customerId: customer.id,
+          servicePropertyId: visit.get('servicePropertyId') || null,
+          serviceProperty: { address: property.address || visit.get('address') || '' },
+          serviceCategory: visit.get('serviceCategory') || '', serviceType: visit.get('serviceType') || '',
+          title: `${visit.get('serviceType') || 'Service'} estimate`, customerName: customer.get('name') || visit.get('customerName') || 'Customer'
+        } };
+      }
       if (action === 'save') {
         const draft = cleanDraft(data.data),
           isNew = !data.estimateId,
           operation = documentId(data.operationId, 'operation');
         if (!/^[A-Za-z0-9_-]{16,80}$/.test(operation)) fail('invalid-argument', 'Use a stable estimate operation ID.');
-        const id = isNew ? hash(`${scope.companyId || scope.uid}:${scope.uid}:${operation}`) : documentId(data.estimateId, 'estimate'),
+        const sourceVisitId = data.data.sourceVisitId ? documentId(data.data.sourceVisitId, 'estimate visit') : null;
+        if (!manages(scope) && !sourceVisitId) fail('failed-precondition', 'Technician estimates must start from an assigned estimate visit.');
+        const visit = sourceVisitId ? await visitFor(scope, sourceVisitId) : null;
+        const id = isNew ? sourceVisitId ? hash(`${scope.companyId || scope.uid}:estimate-visit:${sourceVisitId}`) : hash(`${scope.companyId || scope.uid}:${scope.uid}:${operation}`) : documentId(data.estimateId, 'estimate'),
           target = ref('estimates', id),
           operationRef = ref('rlEstimateOperations', hash(`${scope.companyId || scope.uid}:${scope.uid}:${operation}`));
         const fingerprint = hash(JSON.stringify({
@@ -328,36 +396,53 @@ function estimateHandlers(db, config = {}) {
           prospect: data.data.prospect || null,
           serviceProperty: data.data.serviceProperty || null,
           serviceCategory: data.data.serviceCategory || null,
-          serviceAreaExceptionId: data.data.serviceAreaExceptionId || null
+          serviceAreaExceptionId: data.data.serviceAreaExceptionId || null,
+          sourceVisitId,
+          inquiryId: data.data.inquiryId || null,
+          servicePropertyId: data.data.servicePropertyId || null
         }));
         const [initial, initialOperation] = await Promise.all([target.get(), operationRef.get()]);
-        if (initial.exists) managed(scope, initial);
+        if (initial.exists) await assertEstimateAccess(scope, initial);
         if (initial.exists && !initialOperation.exists) {
           if (initial.get('rlManaged') !== true) fail('failed-precondition', 'Legacy estimates are preserved. Copy their content into a new photo estimate.');
-          if (['approved', 'converted'].includes(initial.get('status'))) fail('failed-precondition', 'An approved estimate is immutable. Create a new draft for a revised quote.');
+          const locked = manages(scope) ? ['approved', 'converted', 'submitted-for-review'] : ['approved', 'converted', 'sent', 'submitted-for-review', 'approved-for-delivery'];
+          if (locked.includes(initial.get('status'))) fail('failed-precondition', 'This estimate version is locked. Request changes or create an authorized revision first.');
           if (data.expectedVersion !== initial.get('version')) fail('aborted', 'This estimate changed. Reload before saving your draft.');
         }
         if (!initialOperation.exists && data.data.customerId) {
           const customer = await ref('customers', documentId(data.data.customerId, 'customer')).get();
           if (!customer.exists || !scoped(scope, customer.data()) || customer.get('isActive') === false) fail('permission-denied', 'Choose an active customer from your company.');
         }
-        const area = initialOperation.exists ? null : await serviceAreas.prepare(scope, data.data, initial.data() || {}, 'estimate', !initial.exists);
+        // An assigned estimate visit already carries the company-approved service
+        // property. Technicians may quote that visit, but they may not replace or
+        // revalidate its property geometry. New standalone estimates still pass
+        // through the normal owner/manager service-area workflow.
+        const area = initialOperation.exists || sourceVisitId ? null : await serviceAreas.prepare(scope, data.data, initial.data() || {}, 'estimate', !initial.exists);
         return db.runTransaction(async tx => {
-          const [old, previousOperation, secret] = await Promise.all([tx.get(target), tx.get(operationRef), tx.get(secretRef(id))]);
+          const inquiryId = data.data.inquiryId || initial.get('inquiryId') || visit?.get('inquiryId') || null;
+          const [old, previousOperation, secret, currentVisit, currentInquiry] = await Promise.all([tx.get(target), tx.get(operationRef), tx.get(secretRef(id)), sourceVisitId ? tx.get(ref('jobs', sourceVisitId)) : Promise.resolve(null), inquiryId ? tx.get(ref('rlInquiries', inquiryId)) : Promise.resolve(null)]);
           if (previousOperation.exists) {
             if (previousOperation.get('fingerprint') !== fingerprint) fail('already-exists', 'This operation was already used for a different estimate change.');
-            managed(scope, old);
+            await assertEstimateAccess(scope, old, tx);
             return {
-              estimate: view(id, old.data()),
+              estimate: staffView(scope, id, old.data()),
               existing: true
             };
           }
           if (old.exists) {
-            managed(scope, old);
+            await assertEstimateAccess(scope, old, tx);
             if (old.get('rlManaged') !== true) fail('failed-precondition', 'Legacy estimates are preserved. Copy their content into a new photo estimate.');
-            if (['approved', 'converted'].includes(old.get('status'))) fail('failed-precondition', 'An approved estimate is immutable. Create a new draft for a revised quote.');
+            const locked = manages(scope) ? ['approved', 'converted', 'submitted-for-review'] : ['approved', 'converted', 'sent', 'submitted-for-review', 'approved-for-delivery'];
+            if (locked.includes(old.get('status'))) fail('failed-precondition', 'This estimate version is locked. Request changes or create an authorized revision first.');
             if (data.expectedVersion !== old.get('version')) fail('aborted', 'This estimate changed. Reload before saving your draft.');
           } else if (!isNew) fail('not-found', 'Estimate not found.');
+          if (sourceVisitId && (!currentVisit?.exists || (manages(scope) ? currentVisit.get('companyId') !== scope.companyId : !assignedVisit(scope, currentVisit.data())))) fail('permission-denied', 'The estimate visit assignment changed. Reopen it before saving.');
+          if (currentVisit?.exists && currentVisit.get('customerId') !== data.data.customerId) fail('failed-precondition', 'Use the customer linked to this estimate visit. Ask management to correct the visit before preparing its estimate.');
+          if (old.exists && old.get('sourceVisitId') && sourceVisitId !== old.get('sourceVisitId')) fail('failed-precondition', 'An estimate cannot be moved to a different visit. Open the correct visit instead.');
+          if (currentVisit?.exists && (currentVisit.get('inquiryId') || null) !== (inquiryId || null)) fail('failed-precondition', 'The estimate must remain linked to its visit inquiry. Reopen the estimate visit.');
+          if (currentVisit?.exists && (currentVisit.get('servicePropertyId') || null) !== (data.data.servicePropertyId || old.get('servicePropertyId') || null)) fail('failed-precondition', 'The estimate must use the service property linked to its visit.');
+          if (inquiryId && (!currentInquiry?.exists || !scoped(scope, currentInquiry.data()) || currentInquiry.get('customerId') !== data.data.customerId
+            || (currentInquiry.get('servicePropertyId') || null) !== (data.data.servicePropertyId || old.get('servicePropertyId') || null))) fail('failed-precondition', 'The linked inquiry, customer and service property must remain together.');
           if (area && initial.exists && !old.updateTime.isEqual(initial.updateTime)) fail('aborted', 'This estimate changed while its service property was checked. Reload before saving.');
           const contact = await recipient(scope, data.data, tx);
           await photosFor(scope, id, draft.photoIds, tx);
@@ -366,14 +451,22 @@ function estimateHandlers(db, config = {}) {
             created = old.get('createdAt') || new Date(now()).toISOString();
           const current = {
             ...draft,
+            ...(manages(scope) ? {} : { internalReviewNotes: old.get('internalReviewNotes') || '' }),
             ...contact,
             ...storedGeometry(old.data()),
+            ...storedGeometry(currentVisit?.data() || {}),
             ...storedGeometry(area?.patch),
             userId: old.get('userId') || scope.uid,
             ...(scope.companyId ? {
               companyId: scope.companyId
             } : {}),
             rlManaged: true,
+            sourceVisitId: sourceVisitId || old.get('sourceVisitId') || null,
+            inquiryId: inquiryId || old.get('inquiryId') || null,
+            servicePropertyId: data.data.servicePropertyId || old.get('servicePropertyId') || visit?.get('servicePropertyId') || null,
+            preparedByUid: old.get('preparedByUid') || scope.uid,
+            preparedByMemberId: old.get('preparedByMemberId') || scope.memberId || null,
+            preparedByName: old.get('preparedByName') || scope.name || scope.email || '',
             version,
             status: 'draft',
             estimateNumber: old.get('estimateNumber') || `RL-${id.slice(0, 8).toUpperCase()}`,
@@ -400,6 +493,8 @@ function estimateHandlers(db, config = {}) {
           if (secret.exists) tx.update(secretRef(id), {
             status: 'superseded'
           });
+          if (current.sourceVisitId) tx.update(ref('jobs', current.sourceVisitId), { estimateId: id, estimateVersion: version, estimateOutcome: 'quote_prepared', updatedAt: new Date(now()).toISOString() });
+          if (currentInquiry?.exists && scoped(scope, currentInquiry.data()) && !['closed', 'converted'].includes(currentInquiry.get('status'))) tx.update(currentInquiry.ref, { estimateId: id, estimateVersion: version, status: 'estimate_drafted', revision: (currentInquiry.get('revision') || 0) + 1, updatedAt: new Date(now()) });
           tx.create(ref('rlAudit', `estimate_${id}_v${version}`), {
             action: 'estimate.save',
             companyId: scope.companyId || null,
@@ -410,22 +505,31 @@ function estimateHandlers(db, config = {}) {
             createdAt: new Date(now())
           });
           return {
-            estimate: view(id, current)
+            estimate: staffView(scope, id, current)
           };
         });
       }
       const id = documentId(data.estimateId, 'estimate'),
         target = ref('estimates', id),
         row = await target.get();
-      managed(scope, row);
+      await assertEstimateAccess(scope, row);
       const estimate = row.data();
       if (action === 'get') {
         const versions = await db.collection('rlEstimateVersions').where('estimateId', '==', id).limit(100).get(),
           photos = estimate.rlManaged ? await photosFor(scope, id, estimate.photoIds || []) : [],
-          mail = estimate.rlManaged ? await ref('rlMail', `estimate_${id}_v${estimate.version}`).get() : null;
+          mail = estimate.rlManaged ? await ref('rlMail', `estimate_${id}_v${estimate.version}`).get() : null,
+          company = scope.companyId ? await ref('companies', scope.companyId).get() : null,
+          directTechnicianSend = !manages(scope) && company?.get('allowTechnicianEstimateSend') === true;
         return {
-          estimate: view(id, estimate),
+          estimate: staffView(scope, id, estimate),
           emailEnabled: emailEnabled(),
+          permissions: {
+            canEdit: manages(scope) ? !['approved', 'converted', 'submitted-for-review'].includes(estimate.status) : ['draft', 'changes-requested'].includes(estimate.status),
+            canSubmit: !manages(scope) && ['draft', 'changes-requested'].includes(estimate.status),
+            canReview: manages(scope) && ['draft', 'submitted-for-review'].includes(estimate.status),
+            canDeliver: manages(scope) ? estimate.status === 'approved-for-delivery' && estimate.approvedForDeliveryVersion === estimate.version : directTechnicianSend && estimate.status === 'draft',
+            directTechnicianSend
+          },
           delivery: mail?.exists ? {status:mail.get('status'),attempts:mail.get('attempts') || 0,failureCode:mail.get('failureCode') || null,sentAt:dateString(mail.get('sentAt'))} : null,
           versions: versions.docs.map(v => ({
             version: v.get('version'),
@@ -440,6 +544,34 @@ function estimateHandlers(db, config = {}) {
         };
       }
       if (estimate.rlManaged !== true) fail('failed-precondition', 'This legacy estimate is read-only in the photo workflow.');
+      if (action === 'submit-review') {
+        if (manages(scope) || !['draft', 'changes-requested'].includes(estimate.status)) fail('failed-precondition', 'Only an assigned technician draft can be submitted for review.');
+        if (data.expectedVersion !== estimate.version) fail('aborted', 'This estimate changed. Reload before submitting it.');
+        return db.runTransaction(async tx => {
+          const current = await tx.get(target); await assertEstimateAccess(scope, current, tx);
+          if (current.get('version') !== data.expectedVersion || !['draft', 'changes-requested'].includes(current.get('status'))) fail('aborted', 'This estimate changed. Reload before submitting it.');
+          const at = new Date(now());
+          tx.update(target, { status: 'submitted-for-review', submittedVersion: current.get('version'), submittedAt: at.toISOString(), updatedAt: at.toISOString() });
+          tx.set(taskRef(id, current.get('version')), { companyId: scope.companyId, estimateId: id, version: current.get('version'), type: 'estimate-review', status: 'open', preparedByUid: scope.uid, createdAt: at, updatedAt: at });
+          tx.create(ref('rlAudit', `estimate_${id}_v${current.get('version')}_submitted`), { action: 'estimate.review-submitted', companyId: scope.companyId, actorId: scope.uid, estimateId: id, version: current.get('version'), createdAt: at });
+          return { submitted: true, version: current.get('version') };
+        });
+      }
+      if (action === 'review') {
+        if (!manages(scope)) fail('permission-denied', 'Management review permission is required.');
+        if (!['approve', 'request-changes'].includes(data.decision) || typeof data.comments !== 'string' || data.comments.length > 3000) fail('invalid-argument', 'Choose approve or request changes and enter valid review comments.');
+        if (data.decision === 'request-changes' && !data.comments.trim()) fail('invalid-argument', 'Explain the requested changes.');
+        if (data.expectedVersion !== estimate.version) fail('aborted', 'This estimate changed. Reload before reviewing it.');
+        return db.runTransaction(async tx => {
+          const [current, task] = await Promise.all([tx.get(target), tx.get(taskRef(id, data.expectedVersion))]); managed(scope, current);
+          if (current.get('version') !== data.expectedVersion || !['draft', 'submitted-for-review'].includes(current.get('status')) || current.get('status') === 'submitted-for-review' && current.get('submittedVersion') !== current.get('version') || data.decision === 'request-changes' && current.get('status') !== 'submitted-for-review') fail('failed-precondition', 'Review the current immutable version. Changes can be requested only from a technician submission.');
+          const at = new Date(now()), approved = data.decision === 'approve';
+          tx.update(target, { status: approved ? 'approved-for-delivery' : 'changes-requested', reviewVersion: current.get('version'), approvedForDeliveryVersion: approved ? current.get('version') : null, reviewComments: data.comments.trim(), reviewedByUid: scope.uid, reviewedAt: at.toISOString(), updatedAt: at.toISOString() });
+          tx.set(taskRef(id, current.get('version')), { ...(task.exists ? task.data() : {}), companyId: scope.companyId, estimateId: id, version: current.get('version'), type: 'estimate-review', status: approved ? 'approved' : 'changes-requested', comments: data.comments.trim(), reviewedByUid: scope.uid, updatedAt: at }, { merge: true });
+          tx.create(ref('rlAudit', `estimate_${id}_v${current.get('version')}_${approved ? 'delivery-approved' : 'changes-requested'}`), { action: approved ? 'estimate.delivery-approved' : 'estimate.changes-requested', companyId: scope.companyId, actorId: scope.uid, estimateId: id, version: current.get('version'), comments: data.comments.trim(), createdAt: at });
+          return { status: approved ? 'approved-for-delivery' : 'changes-requested', version: current.get('version') };
+        });
+      }
       if (action === 'photo-upload') {
         if (estimate.status !== 'draft') fail('failed-precondition', 'Save a new draft before attaching photos.');
         const operation = documentId(data.operationId, 'operation');
@@ -502,7 +634,10 @@ function estimateHandlers(db, config = {}) {
       };
       if (action === 'deliver') {
         if (!emailEnabled()) fail('failed-precondition', 'Estimate email delivery is disabled. You can download the PDF for review.');
-        if (!['draft', 'sent'].includes(estimate.status)) fail('failed-precondition', 'Only an open estimate version can be sent.');
+        const company = scope.companyId ? await ref('companies', scope.companyId).get() : null,
+          directTechnicianSend = !manages(scope) && company?.get('allowTechnicianEstimateSend') === true;
+        if (manages(scope) ? !['approved-for-delivery', 'sent'].includes(estimate.status) || estimate.status !== 'sent' && estimate.approvedForDeliveryVersion !== estimate.version
+          : !directTechnicianSend || !['draft', 'sent'].includes(estimate.status)) fail('failed-precondition', manages(scope) ? 'Approve this exact estimate version for delivery before sending it.' : 'Management review is required before this estimate can be sent.');
         if (!validEmail(estimate.recipient.email)) fail('failed-precondition', 'Add a valid customer or prospect email before sending.');
         const mailId = `estimate_${id}_v${estimate.version}`,
           mailRef = ref('rlMail', mailId),
@@ -526,9 +661,10 @@ function estimateHandlers(db, config = {}) {
           base = String(appUrl()).replace(/\/$/, ''),
           link = `${base}/estimate-approval#id=${id}&token=${token}`;
         return db.runTransaction(async tx => {
-          const [current, old, customer] = await Promise.all([tx.get(target), tx.get(mailRef), estimate.customerId ? tx.get(ref('customers', estimate.customerId)) : Promise.resolve(null)]);
-          managed(scope, current);
-          if (current.get('version') !== estimate.version || !['draft', 'sent'].includes(current.get('status'))) fail('aborted', 'The quote changed before email was queued.');
+          const [current, old, customer, currentCompany] = await Promise.all([tx.get(target), tx.get(mailRef), estimate.customerId ? tx.get(ref('customers', estimate.customerId)) : Promise.resolve(null), scope.companyId ? tx.get(ref('companies', scope.companyId)) : Promise.resolve(null)]);
+          await assertEstimateAccess(scope, current, tx);
+          const technicianAllowed = !manages(scope) && currentCompany?.get('allowTechnicianEstimateSend') === true;
+          if (current.get('version') !== estimate.version || (manages(scope) ? !['approved-for-delivery', 'sent'].includes(current.get('status')) || current.get('status') !== 'sent' && current.get('approvedForDeliveryVersion') !== current.get('version') : !technicianAllowed || !['draft', 'sent'].includes(current.get('status')))) fail('aborted', 'The quote or its delivery authorization changed before email was queued.');
           if (customer && (!scoped(scope, customer.data()) || normalizeEmail(customer.get('email')) !== estimate.recipient.email)) fail('failed-precondition', 'Customer contact changed. Save a new estimate version before sending.');
           if (old.exists) return {
             queued: true,
@@ -574,6 +710,7 @@ function estimateHandlers(db, config = {}) {
             actorId: scope.uid,
             estimateId: id,
             version: estimate.version,
+            directTechnicianSend,
             createdAt: new Date(now())
           });
           return {
@@ -609,7 +746,8 @@ function estimateHandlers(db, config = {}) {
           if (!approvedSource.customerId && !data.customerId && data.createCustomer === true && destinationAddress) newCustomerAddress = validatedCustomerAddress(await addressValidator.validateAddress(scope, destinationAddress));
         }
         return db.runTransaction(async tx => {
-          const [current, approval, snapshot, existing] = await Promise.all([tx.get(target), tx.get(secretRef(id)), tx.get(versionRef(id, estimate.version)), tx.get(jobRef)]);
+          const inquiryId = estimate.inquiryId || null;
+          const [current, approval, snapshot, existing, inquiry, followUpTask] = await Promise.all([tx.get(target), tx.get(secretRef(id)), tx.get(versionRef(id, estimate.version)), tx.get(jobRef), inquiryId ? tx.get(ref('rlInquiries', inquiryId)) : Promise.resolve(null), tx.get(taskRef(id, estimate.version, 'customer-decision'))]);
           managed(scope, current);
           if (current.get('version') !== data.expectedVersion) fail('aborted', 'Estimate version changed.');
           if (existing.exists) {
@@ -662,6 +800,7 @@ function estimateHandlers(db, config = {}) {
             billingSnapshot,
             estimateId: id,
             estimateVersion: source.version,
+            inquiryId: source.inquiryId || null,
             createdAt: new Date(now()).toISOString(),
             updatedAt: new Date(now()).toISOString()
           };
@@ -680,6 +819,8 @@ function estimateHandlers(db, config = {}) {
             convertedCustomerId: customer.id,
             convertedAt: new Date(now()).toISOString()
           });
+          if (inquiry?.exists && scoped(scope, inquiry.data()) && !['closed', 'converted'].includes(inquiry.get('status'))) tx.update(inquiry.ref, { status: 'converted', convertedJobId: jobId, estimateId: id, estimateVersion: source.version, revision: (inquiry.get('revision') || 0) + 1, updatedAt: new Date(now()) });
+          if (followUpTask.exists && scoped(scope, followUpTask.data())) tx.update(followUpTask.ref, { status: 'completed', convertedJobId: jobId, updatedAt: new Date(now()) });
           tx.create(ref('rlEstimateConversions', id), {
             companyId: scope.companyId || null,
             estimateId: id,
@@ -715,7 +856,7 @@ function estimateHandlers(db, config = {}) {
       const target = ref('estimates', id),
         tokenHash = hash(token);
       const validate = (row, secret) => {
-        if (!row.exists || row.get('rlManaged') !== true || !secret.exists || !['open', 'approved'].includes(secret.get('status')) || secret.get('version') !== row.get('version') || (secret.get('companyId') || null) !== (row.get('companyId') || null) || secret.get('userId') !== row.get('userId') || !Number.isFinite(timestamp(secret.get('expiresAt'))) || timestamp(secret.get('expiresAt')) <= now() || typeof secret.get('tokenHash') !== 'string' || secret.get('tokenHash').length !== tokenHash.length || !timingSafeEqual(Buffer.from(secret.get('tokenHash')), Buffer.from(tokenHash))) fail('permission-denied', 'This estimate link is invalid, expired or superseded.');
+        if (!row.exists || row.get('rlManaged') !== true || !secret.exists || !['open', 'approved', 'declined', 'revision-requested'].includes(secret.get('status')) || secret.get('version') !== row.get('version') || (secret.get('companyId') || null) !== (row.get('companyId') || null) || secret.get('userId') !== row.get('userId') || !Number.isFinite(timestamp(secret.get('expiresAt'))) || timestamp(secret.get('expiresAt')) <= now() || typeof secret.get('tokenHash') !== 'string' || secret.get('tokenHash').length !== tokenHash.length || !timingSafeEqual(Buffer.from(secret.get('tokenHash')), Buffer.from(tokenHash))) fail('permission-denied', 'This estimate link is invalid, expired or superseded.');
       };
       const validateRecipient = async (row, tx) => {
         if (!row.get('customerId')) return;
@@ -723,7 +864,7 @@ function estimateHandlers(db, config = {}) {
         const customer = tx ? await tx.get(target) : await target.get();
         if (!customer.exists || !scoped({companyId:row.get('companyId') || null,uid:row.get('userId')},customer.data()) || customer.get('isActive') === false || normalizeEmail(customer.get('email')) !== row.get('recipient')?.email) fail('permission-denied','This estimate recipient changed. Ask the service provider for a new review link.');
       };
-      if (data.action === 'get') {
+      if (['get', 'pdf'].includes(data.action)) {
         const [row, secret] = await Promise.all([target.get(), secretRef(id).get()]);
         validate(row, secret);
         await validateRecipient(row);
@@ -733,7 +874,9 @@ function estimateHandlers(db, config = {}) {
           scope = {
             companyId: value.companyId || null,
             uid: value.userId
-          },
+          };
+        if (data.action === 'pdf') return { dataUri: `data:application/pdf;base64,${(await buildPdf(scope, id, value)).toString('base64')}`, filename: `${value.estimateNumber}-v${value.version}.pdf` };
+        const
           company = scope.companyId ? await ref('companies', scope.companyId).get() : await ref('users', scope.uid).get(),
           photos = await photosFor(scope, id, value.photoIds || []);
         return {
@@ -770,40 +913,54 @@ function estimateHandlers(db, config = {}) {
           }))
         };
       }
-      if (data.action !== 'approve' || data.acceptedTerms !== true || typeof data.signerName !== 'string' || data.signerName.trim().length < 2 || data.signerName.length > 100) fail('invalid-argument', 'Enter your name and confirm approval of this estimate version.');
+      if (!['approve', 'decline', 'request-revision'].includes(data.action)) fail('invalid-argument', 'Choose approve, decline or request revision.');
+      const approving = data.action === 'approve', decisionStatus = approving ? 'approved' : data.action === 'decline' ? 'declined' : 'revision-requested',
+        reason = typeof data.reason === 'string' ? data.reason.trim() : '';
+      if (approving && (data.acceptedTerms !== true || typeof data.signerName !== 'string' || data.signerName.trim().length < 2 || data.signerName.length > 100)) fail('invalid-argument', 'Enter your name and confirm approval of this estimate version.');
+      if (!approving && (reason.length > 2000 || data.action === 'request-revision' && !reason)) fail('invalid-argument', data.action === 'request-revision' ? 'Explain the requested revision.' : 'Enter a valid optional decline reason.');
       return db.runTransaction(async tx => {
-        const [row, secret] = await Promise.all([tx.get(target), tx.get(secretRef(id))]);
+        const initial = await tx.get(target), inquiryId = initial.get('inquiryId') || null;
+        const [row, secret, inquiry, task] = await Promise.all([Promise.resolve(initial), tx.get(secretRef(id)), inquiryId ? tx.get(ref('rlInquiries', inquiryId)) : Promise.resolve(null), tx.get(taskRef(id, initial.get('version'), 'customer-decision'))]);
         validate(row, secret);
         await validateRecipient(row,tx);
         const version = await tx.get(versionRef(id,row.get('version')));
         if (!version.exists || !scoped({companyId:row.get('companyId') || null,uid:row.get('userId')},version.data()) || version.get('totalCents') !== row.get('totalCents')) fail('failed-precondition','This quote version changed. Ask the provider for a new link.');
-        if (secret.get('status') === 'approved') return {
-          approved: true,
+        if (secret.get('status') === decisionStatus) return {
+          approved: approving,
+          decision: decisionStatus,
           existing: true,
           version: row.get('version')
         };
+        if (secret.get('status') !== 'open') fail('failed-precondition', 'A decision was already recorded for this estimate version. Contact the provider to request another link.');
         if (row.get('status') !== 'sent') fail('failed-precondition', 'This estimate is not currently open for approval.');
+        const at = new Date(now());
         tx.update(secretRef(id), {
-          status: 'approved',
-          approvedAt: new Date(now()),
-          signerName: data.signerName.trim()
+          status: decisionStatus,
+          decidedAt: at,
+          ...(approving ? { approvedAt: at, signerName: data.signerName.trim() } : { reason })
         });
         tx.update(target, {
-          status: 'approved',
-          approvedAt: new Date(now()).toISOString(),
-          approvalName: data.signerName.trim()
+          status: decisionStatus,
+          customerDecision: decisionStatus,
+          customerDecisionVersion: row.get('version'),
+          customerDecisionAt: at.toISOString(),
+          schedulingNeeded: approving,
+          ...(approving ? { approvedAt: at.toISOString(), approvalName: data.signerName.trim() } : { customerDecisionReason: reason })
         });
-        tx.create(ref('rlAudit', `estimate_${id}_v${row.get('version')}_approved`), {
-          action: 'estimate.customer-approval',
+        if (inquiry?.exists && (inquiry.get('companyId') || null) === (row.get('companyId') || null) && !['closed', 'converted'].includes(inquiry.get('status'))) tx.update(inquiry.ref, { status: approving ? 'estimate_approved_scheduling_needed' : data.action === 'decline' ? 'estimate_declined' : 'estimate_revision_requested', estimateId: id, estimateVersion: row.get('version'), revision: (inquiry.get('revision') || 0) + 1, updatedAt: at });
+        tx.set(taskRef(id, row.get('version'), 'customer-decision'), { ...(task.exists ? task.data() : {}), companyId: row.get('companyId') || null, estimateId: id, version: row.get('version'), type: approving ? 'estimate-scheduling-needed' : 'estimate-customer-attention', status: 'open', decision: decisionStatus, reason, createdAt: task.exists && task.get('createdAt') || at, updatedAt: at }, { merge: true });
+        tx.create(ref('rlAudit', `estimate_${id}_v${row.get('version')}_${decisionStatus}`), {
+          action: approving ? 'estimate.customer-approval' : data.action === 'decline' ? 'estimate.customer-decline' : 'estimate.customer-revision-request',
           companyId: row.get('companyId') || null,
           estimateId: id,
           version: row.get('version'),
-          signerName: data.signerName.trim(),
+          ...(approving ? { signerName: data.signerName.trim() } : { reason }),
           totalCents: row.get('totalCents'),
-          createdAt: new Date(now())
+          createdAt: at
         });
         return {
-          approved: true,
+          approved: approving,
+          decision: decisionStatus,
           existing: false,
           version: row.get('version')
         };

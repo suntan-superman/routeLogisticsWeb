@@ -34,6 +34,7 @@ export default function WorkspaceScreen() {
   const mode = modePreference.identity === identity ? permittedMode(modePreference.mode, user, permissions) : 'field';
   const companyField = !!user.companyId, fieldVisible = mode === 'field';
   const [tab, setTab] = useState('home'), [period, setPeriod] = useState('day'), [selection, setSelection] = useState(null);
+  const [estimateVisit, setEstimateVisit] = useState(null);
   const [notice, setNotice] = useState(''), [confirmLeave, setConfirmLeave] = useState(false), [interaction, setInteraction] = useState({ busy: false, hasDraft: false });
   const [shiftBusy, setShiftBusy] = useState(false), shiftInteractionRef = useRef(false);
   const [managementAction, setManagementAction] = useState(null), managementSequence = useRef(0);
@@ -74,7 +75,7 @@ export default function WorkspaceScreen() {
     }
   }, []);
   const requestTab = useCallback(next => {
-    if (next === 'estimates' && !permissions.can('estimates.manage')) return;
+    if (next === 'estimates' && !permissions.can('estimates.manage') && !permissions.can('estimates.prepareAssigned')) return;
     if ((interactionRef.current.busy || shiftInteractionRef.current)) { setNotice('Finish or cancel the current photo or save operation before changing screens.'); return; }
     if (interactionRef.current.hasDraft) { destination.current = selection ? next : null; setNotice('Your draft is still here. Save it, or use Close to review discarding it before changing screens.'); return; }
     setSelection(null); setNotice(''); destination.current = null; setTab(next);
@@ -91,7 +92,7 @@ export default function WorkspaceScreen() {
     });
   }, [eligible, modePreference.ready, modePreference.identity, identity, mode, user, permissions]);
   const requestManagementTab = useCallback(next => {
-    if (!eligible || !['overview', 'team', 'map', 'schedule'].includes(next)) return;
+    if (!eligible || !['overview', 'team', 'map', 'schedule', 'estimates'].includes(next)) return;
     if ((interactionRef.current.busy || shiftInteractionRef.current)) { setNotice('Finish or cancel the current save operation before changing screens.'); return; }
     if (interactionRef.current.hasDraft) { setNotice('Your draft is still here. Save or cancel it before changing management screens.'); return; }
     setSelection(null); setNotice(''); setManagementTab(next);
@@ -114,6 +115,13 @@ export default function WorkspaceScreen() {
     setManagementAction({ id: ++managementSequence.current, kind, job: selected });
     closeSelection(); setTab('home');
   }, [permissions.canManage, blocked, canRead, user.companyId, user.id, closeSelection]);
+  const prepareEstimate = useCallback(selected => {
+    if (!selected?.id || !permissions.can('estimates.manage') && !permissions.can('estimates.prepareAssigned')) return;
+    if (selected.companyId !== user.companyId || selected.appointmentKind !== 'estimate_visit') return;
+    setEstimateVisit({ id: selected.id });
+    destination.current = 'estimates';
+    closeSelection();
+  }, [permissions, user.companyId, closeSelection]);
   const consumeManagementAction = useCallback(id => setManagementAction(current => current?.id === id ? null : current), []);
   const refreshWork = useCallback(async () => {
     // Mutation/sync refresh is explicit and updates retained lists as well as the
@@ -160,11 +168,13 @@ export default function WorkspaceScreen() {
       <RetainedPage visible={fieldVisible && tab === 'schedule'}><ScheduleScreen user={user} query={schedule} period={period} onPeriodChange={setPeriod} onOpenJob={openJob} /></RetainedPage>
       <RetainedPage visible={fieldVisible && tab === 'route'}><RouteScreen user={user} active={fieldVisible && tab === 'route' && !currentSelection} onOpenJob={openJob} /></RetainedPage>
       <RetainedPage visible={fieldVisible && tab === 'settings'}><SettingsScreen navigation={navigation} embedded active={fieldVisible && tab === 'settings' && !currentSelection} /></RetainedPage>
-      {!companyField && permissions.can('estimates.manage') && <RetainedPage visible={fieldVisible && tab === 'estimates'}><EstimatesScreen active={fieldVisible && tab === 'estimates' && !currentSelection} onInteractionChange={onInteractionChange} /></RetainedPage>}
-      {eligible && <RetainedPage visible={!fieldVisible}><ManagementScreen user={user} permissions={permissions} active={!fieldVisible && !currentSelection} view={managementTab} onViewChange={requestManagementTab} onOpenJob={openJob} onChanged={refreshWork} onInteractionChange={onInteractionChange} /></RetainedPage>}
+      {(permissions.can('estimates.manage') || permissions.can('estimates.prepareAssigned')) && <RetainedPage visible={fieldVisible && tab === 'estimates'}><EstimatesScreen active={fieldVisible && tab === 'estimates' && !currentSelection} initialVisit={estimateVisit} onVisitConsumed={() => setEstimateVisit(null)} onInteractionChange={onInteractionChange} /></RetainedPage>}
+      {eligible && <RetainedPage visible={!fieldVisible && managementTab !== 'estimates'}><ManagementScreen user={user} permissions={permissions} active={!fieldVisible && managementTab !== 'estimates' && !currentSelection} view={managementTab} onViewChange={requestManagementTab} onOpenJob={openJob} onChanged={refreshWork} onInteractionChange={onInteractionChange} /></RetainedPage>}
+      {eligible && permissions.can('estimates.manage') && <RetainedPage visible={!fieldVisible && managementTab === 'estimates'}><EstimatesScreen active={!fieldVisible && managementTab === 'estimates' && !currentSelection} onInteractionChange={onInteractionChange} /></RetainedPage>}
     </View>
     {!!currentSelection && <View accessibilityViewIsModal testID="selected-work-order" style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: palette.background }}>
       {!!job && <RetainedPage visible={!blocked}><JobWorkflow key={currentSelection.id} job={job} onClose={closeSelection} onChanged={refreshWork} onInteractionChange={onInteractionChange}
+        onPrepareEstimate={prepareEstimate}
         onEdit={permissions.canManage ? selected => openManagement('edit', selected) : undefined}
         onFollowUp={permissions.canManage ? selected => openManagement('follow-up', selected) : undefined} /></RetainedPage>}
       {(!job || blocked) && <View style={{ flex: 1, paddingBottom: 20 }}><ScreenHeader title="Work order" subtitle={user.companyName} />

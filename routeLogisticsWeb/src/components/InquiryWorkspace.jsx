@@ -54,7 +54,17 @@ function InquiryDialog({ scopeId, inquiry, company, onClose, onSaved, onSchedule
     const keydown = event => { if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); void closeAction.current(); } };
     window.addEventListener('keydown', keydown); return () => { document.body.style.overflow = previous; window.removeEventListener('keydown', keydown); };
   }, []);
-  const change = (key, value) => { if (lock.current || saved) return; setForm(previous => { const changedProperty = key === 'property' && value.address !== previous.property.address || key === 'serviceCategory' && value !== previous.serviceCategory; const next = { ...previous, [key]: value, ...(changedProperty ? { serviceAreaExceptionId: null } : {}) }; if (!inquiry) setLocalSave(writeInquiryDraft(scopeId, next)); return next; }); setError(''); setValidation(null); };
+  const change = (key, value) => {
+    if (lock.current || saved) return;
+    const changedIdentity = form.mode === 'new' && (['name', 'email', 'phone'].includes(key) && value !== form[key] || key === 'property' && value.address !== form.property.address);
+    if (changedIdentity) { setMatches([]); setSearched(false); }
+    setForm(previous => {
+      const changedProperty = key === 'property' && value.address !== previous.property.address || key === 'serviceCategory' && value !== previous.serviceCategory;
+      const next = { ...previous, [key]: value, ...(changedProperty ? { serviceAreaExceptionId: null } : {}), ...(changedIdentity ? { duplicateDecision: false, duplicateReason: '' } : {}) };
+      if (!inquiry) setLocalSave(writeInquiryDraft(scopeId, next)); return next;
+    });
+    setError(''); setValidation(null);
+  };
   const find = async () => {
     if (lock.current || !form.search.trim()) return; const ticket = generation.current; lock.current = true; setBusy('search'); setError('');
     try { const result = await manageInquiry('matches', { query: form.search.trim() }); if (!live.current || ticket !== generation.current) return; setMatches(result.matches || []); setSearched(true); if (result.hasMore) setError('More possible matches exist. Refine the search before creating another customer.'); }

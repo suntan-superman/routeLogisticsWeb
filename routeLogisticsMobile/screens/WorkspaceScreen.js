@@ -20,6 +20,7 @@ import HomeScreen from './HomeScreen';
 import EstimatesScreen from './EstimatesScreen';
 import ManagementScreen from './ManagementScreen';
 import { canUseManagementMode, loadWorkspaceMode, saveWorkspaceMode, permittedMode } from '../services/mobileMode';
+import { estimateVisitSnapshot } from '../services/estimateVisitPolicy';
 
 function RetainedPage({ visible, children }) {
   return <View style={{ flex: 1, display: visible ? 'flex' : 'none' }} pointerEvents={visible ? 'auto' : 'none'}
@@ -118,10 +119,17 @@ export default function WorkspaceScreen() {
   const prepareEstimate = useCallback(selected => {
     if (!selected?.id || !permissions.can('estimates.manage') && !permissions.can('estimates.prepareAssigned')) return;
     if (selected.companyId !== user.companyId || selected.appointmentKind !== 'estimate_visit') return;
-    setEstimateVisit({ id: selected.id });
+    const visit = estimateVisitSnapshot(selected);
+    if (!visit) { setNotice('This estimate visit is missing the cached customer or property context needed to prepare an estimate. Reopen it online and try again.'); return; }
+    setEstimateVisit(visit);
     destination.current = 'estimates';
     closeSelection();
   }, [permissions, user.companyId, closeSelection]);
+  const returnToEstimateVisit = useCallback(visit => {
+    const selected = visit?.snapshot;
+    if (!selected?.id || selected.companyId !== user.companyId) { setNotice('The originating work order is no longer available in this workspace. Return to your schedule and reopen it.'); return; }
+    setEstimateVisit(null); openJob(selected);
+  }, [openJob, user.companyId]);
   const consumeManagementAction = useCallback(id => setManagementAction(current => current?.id === id ? null : current), []);
   const refreshWork = useCallback(async () => {
     // Mutation/sync refresh is explicit and updates retained lists as well as the
@@ -168,7 +176,7 @@ export default function WorkspaceScreen() {
       <RetainedPage visible={fieldVisible && tab === 'schedule'}><ScheduleScreen user={user} query={schedule} period={period} onPeriodChange={setPeriod} onOpenJob={openJob} /></RetainedPage>
       <RetainedPage visible={fieldVisible && tab === 'route'}><RouteScreen user={user} active={fieldVisible && tab === 'route' && !currentSelection} onOpenJob={openJob} /></RetainedPage>
       <RetainedPage visible={fieldVisible && tab === 'settings'}><SettingsScreen navigation={navigation} embedded active={fieldVisible && tab === 'settings' && !currentSelection} /></RetainedPage>
-      {(permissions.can('estimates.manage') || permissions.can('estimates.prepareAssigned')) && <RetainedPage visible={fieldVisible && tab === 'estimates'}><EstimatesScreen active={fieldVisible && tab === 'estimates' && !currentSelection} initialVisit={estimateVisit} onVisitConsumed={() => setEstimateVisit(null)} onInteractionChange={onInteractionChange} /></RetainedPage>}
+      {(permissions.can('estimates.manage') || permissions.can('estimates.prepareAssigned')) && <RetainedPage visible={fieldVisible && tab === 'estimates'}><EstimatesScreen active={fieldVisible && tab === 'estimates' && !currentSelection} initialVisit={estimateVisit} onVisitConsumed={() => setEstimateVisit(null)} onReturnToVisit={returnToEstimateVisit} onInteractionChange={onInteractionChange} /></RetainedPage>}
       {eligible && <RetainedPage visible={!fieldVisible && managementTab !== 'estimates'}><ManagementScreen user={user} permissions={permissions} active={!fieldVisible && managementTab !== 'estimates' && !currentSelection} view={managementTab} onViewChange={requestManagementTab} onOpenJob={openJob} onChanged={refreshWork} onInteractionChange={onInteractionChange} /></RetainedPage>}
       {eligible && permissions.can('estimates.manage') && <RetainedPage visible={!fieldVisible && managementTab === 'estimates'}><EstimatesScreen active={!fieldVisible && managementTab === 'estimates' && !currentSelection} onInteractionChange={onInteractionChange} /></RetainedPage>}
     </View>

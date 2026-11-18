@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AppState, Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { AppState, Image, Pressable, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Crypto from 'expo-crypto';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../theme/ThemeProvider';
 import { GlassButton, GlassCard, GlassInput } from '../components/Glass';
 import QuarterHourTimeField from '../components/QuarterHourTimePicker';
-import { ScreenHeader } from '../components/MobileUI';
+import { KeyboardAwareScrollView, ScreenHeader } from '../components/MobileUI';
 import { CustomerService } from '../services/firebase';
 import { beginNativeInteraction } from '../services/nativeInteraction';
 import { callEstimate, prepareEstimatePhoto, shareEstimatePdf } from '../services/estimateService';
@@ -14,17 +14,19 @@ import { blankEstimate, blankLine, draftFromEstimate, estimateInput, money, conv
 import { useJobResourceRefresh } from '../services/useJobResources';
 import NetInfo from '@react-native-community/netinfo';
 import { loadEstimateDraft, saveEstimateDraft, retainEstimatePhoto, discardEstimateDraft, estimateDraftStateLabel } from '../services/estimateDraftStore';
+import { estimateContextFromVisit } from '../services/estimateVisitPolicy';
 
-export default function EstimatesScreen({ onInteractionChange, active = true, initialVisit = null, onVisitConsumed }) {
+export default function EstimatesScreen({ onInteractionChange, active = true, initialVisit = null, onVisitConsumed, onReturnToVisit }) {
   const { user, permissions, accessStatus = 'ready' } = useAuth(), { palette } = useTheme();
   const allowed = permissions.can('estimates.manage') || permissions.can('estimates.prepareAssigned'), scope = [user.id, user.companyId, user.role, user.membershipId].join(':');
-  const [rows, setRows] = useState([]), [customers, setCustomers] = useState([]), [templates, setTemplates] = useState([]), [enabled, setEnabled] = useState(false), [emailEnabled, setEmailEnabled] = useState(false);
+  const [rows, setRows] = useState([]), [customers, setCustomers] = useState([]), [templates, setTemplates] = useState([]), [enabled, setEnabled] = useState(false), [availability, setAvailability] = useState('checking'), [emailEnabled, setEmailEnabled] = useState(false);
   const [editing, setEditing] = useState(false), [record, setRecord] = useState(null), [draft, setDraft] = useState(blankEstimate), [photos, setPhotos] = useState([]), [versions, setVersions] = useState([]);
   const [search, setSearch] = useState(''), [busy, setBusy] = useState(false), [dirty, setDirty] = useState(false), [uncertain, setUncertain] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState(''), [confirm, setConfirm] = useState(null);
   const [schedule, setSchedule] = useState({ date: '', time: '09:00' });
   const [createCustomer, setCreateCustomer] = useState(false), [conversionCustomerId, setConversionCustomerId] = useState('');
   const [delivery, setDelivery] = useState(null);
   const [draftIdentity, setDraftIdentity] = useState(''), [draftState, setDraftState] = useState('server'), [estimatePermissions, setEstimatePermissions] = useState({}), [reviewComments, setReviewComments] = useState('');
+  const [originVisit, setOriginVisit] = useState(null);
   const live = useRef(false), generation = useRef(0), locked = useRef(false), callbacks = useRef(onInteractionChange), pendingSave = useRef(null), target = useRef(record), photoRef = useRef(photos), persistSequence = useRef(0), persistQueue = useRef(Promise.resolve()), visitHandled = useRef(''), saveRef = useRef(null);
   callbacks.current = onInteractionChange; target.current = record; photoRef.current = photos;
   useEffect(() => { callbacks.current?.({ busy, hasDraft: dirty || uncertain || ['device','waiting','syncing','conflict','failed'].includes(draftState) }); }, [busy, dirty, uncertain, draftState]);
@@ -32,13 +34,17 @@ export default function EstimatesScreen({ onInteractionChange, active = true, in
   const load = async () => {
     const ticket = generation.current; if (!allowed || accessStatus !== 'ready') return;
     let result;
-    try { result = await callEstimate('list'); } catch (failure) { if (current(ticket)) setError(failure.message || 'Could not refresh estimates.'); throw failure; }
+    try { result = await callEstimate('list'); } catch (failure) {
+      const network = await NetInfo.fetch().catch(() => null), offline = network?.isConnected === false || network?.isInternetReachable === false;
+      if (current(ticket)) { setAvailability(offline ? 'offline' : 'unavailable'); if (!offline) setError(failure.message || 'Could not refresh estimates.'); }
+      throw failure;
+    }
     if (!current(ticket)) return;
-    setRows(result.estimates || []); setTemplates(result.templates || []); setEnabled(result.enabled === true); setEmailEnabled(result.emailEnabled === true);
+    setRows(result.estimates || []); setTemplates(result.templates || []); setEnabled(result.enabled === true); setAvailability(result.enabled === true ? 'enabled' : 'disabled'); setEmailEnabled(result.emailEnabled === true);
     const customerResult = await CustomerService.getCustomers(); if (current(ticket) && customerResult.success) setCustomers(customerResult.customers || []);
     return result;
   };
-  useEffect(() => { live.current = true; generation.current++; setRows([]); setEditing(false); setPhotos([]); setRecord(null); setDirty(false); setUncertain(false); setDraftIdentity(''); setDraftState('server'); pendingSave.current = null;
+  useEffect(() => { live.current = true; generation.current++; setRows([]); setEditing(false); setPhotos([]); setRecord(null); setDirty(false); setUncertain(false); setDraftIdentity(''); setDraftState('server'); setAvailability('checking'); setOriginVisit(null); pendingSave.current = null;
     return () => { live.current = false; generation.current++; callbacks.current?.({ busy: false, hasDraft: false }); };
   }, [scope, allowed]);
   const queueLocalDraft = (nextDraft, nextPhotos = photoRef.current) => {
@@ -129,26 +135,48 @@ export default function EstimatesScreen({ onInteractionChange, active = true, in
   useEffect(() => {
     if (!active || !initialVisit?.id || visitHandled.current === initialVisit.id || !allowed || accessStatus !== 'ready') return;
     visitHandled.current = initialVisit.id; const identity = `visit:${initialVisit.id}`;
+    setOriginVisit(initialVisit);
     run(async ticket => {
-      const [context, local] = await Promise.all([callEstimate('visit-context', { visitId: initialVisit.id }), loadEstimateDraft(identity)]); if (!current(ticket)) return;
+      const local = await loadEstimateDraft(identity); if (!current(ticket)) return;
+      let context, restoredOffline = false;
+      try {
+        context = await callEstimate('visit-context', { visitId: initialVisit.id });
+        if (current(ticket)) { setEnabled(true); setAvailability('enabled'); }
+      } catch (failure) {
+        const network = await NetInfo.fetch().catch(() => null), offline = network?.isConnected === false || network?.isInternetReachable === false;
+        const fallback = local?.draft || estimateContextFromVisit(initialVisit);
+        if (!offline || !fallback) throw failure;
+        context = { existing: false, context: fallback };
+        restoredOffline = true;
+        setAvailability('offline');
+      }
+      if (!current(ticket)) return;
       if (context.estimate) {
         const result = await callEstimate('get', { estimateId: context.estimate.id }); if (!current(ticket)) return;
         const restored = local?.draft && local.syncState !== 'server';
         setRecord(result.estimate); setDraft(restored ? local.draft : draftFromEstimate(result.estimate)); setPhotos(restored ? (local.photos || []).map(photo => ({ ...photo, asset: photo.uri ? { uri: photo.uri } : undefined })) : (result.photos || []).map(photo => ({ ...photo, remoteId: photo.id, attached: true }))); setVersions(result.versions || []); setEstimatePermissions(result.permissions || {}); setEmailEnabled(result.emailEnabled === true); setDelivery(result.delivery || null); setEditing(true); setDirty(!!restored); setDraftIdentity(identity); setDraftState(restored && local.baseVersion !== result.estimate.version ? 'conflict' : restored ? 'device' : 'server'); pendingSave.current = local?.operationId ? { operationId: local.operationId, estimateId: result.estimate.id, expectedVersion: local.baseVersion, data: null } : null; setMessage(restored ? 'Saved estimate draft restored from this device.' : 'Linked estimate opened.'); onVisitConsumed?.(); return;
       }
       const next = local?.draft || { ...blankEstimate(), ...context.context, scopeOfWork: '', lineItems: [blankLine('labor'), blankLine('material')] };
-      setRecord(null); setDraft(next); setPhotos((local?.photos || []).map(photo => ({ ...photo, asset: photo.uri ? { uri: photo.uri } : undefined }))); setVersions([]); setEditing(true); setDirty(true); setDraftIdentity(identity); setDraftState(local ? local.syncState || 'device' : 'device'); pendingSave.current = local?.operationId ? { operationId: local.operationId, data: null } : { operationId: Crypto.randomUUID(), data: null }; setMessage(local ? 'Saved estimate draft restored from this device.' : 'Estimate visit loaded. Add scope and pricing, then save or submit for review.'); onVisitConsumed?.();
+      setRecord(null); setDraft(next); setPhotos((local?.photos || []).map(photo => ({ ...photo, asset: photo.uri ? { uri: photo.uri } : undefined }))); setVersions([]); setEditing(true); setDirty(true); setDraftIdentity(identity); setDraftState(local ? local.syncState || 'device' : 'device'); pendingSave.current = local?.operationId ? { operationId: local.operationId, data: null } : { operationId: Crypto.randomUUID(), data: null }; setMessage(local ? 'Saved estimate draft restored from this device.' : restoredOffline ? 'Estimate visit restored from the assigned work order. This draft is saved on this device and will be revalidated when it synchronizes.' : 'Estimate visit loaded. Add scope and pricing, then save or submit for review.'); onVisitConsumed?.();
     });
   }, [active, initialVisit?.id, allowed, accessStatus]);
   if (!allowed) return <View><Text accessibilityRole="alert" style={{ color: palette.danger }}>Estimate preparation is not available for your role.</Text></View>;
-  const editable = enabled && !record?.legacy && !record?.convertedJobId && !record?.jobId && (!record || estimatePermissions.canEdit !== false && !['approved', 'converted', 'submitted-for-review'].includes(record.status)), fieldsDisabled = busy || uncertain || !editable, visitBound = !!draft.sourceVisitId;
+  const visitBound = !!draft.sourceVisitId, workflowAvailable = enabled || visitBound && availability !== 'disabled';
+  const editable = workflowAvailable && !record?.legacy && !record?.convertedJobId && !record?.jobId && (!record || estimatePermissions.canEdit !== false && !['approved', 'converted', 'submitted-for-review'].includes(record.status)), fieldsDisabled = busy || uncertain || !editable;
   const canConvert = permissions.can('customers.manage') && permissions.can('jobs.schedule');
   const input = (label, name, options = {}) => <GlassInput label={label} value={String(draft[name] || '')} editable={!fieldsDisabled} onChangeText={value => change(name, value)} {...options} />;
   const close = () => { if (dirty || uncertain) setConfirm('leave'); else setEditing(false); };
+  const returnToVisit = async () => {
+    if (!originVisit || busy) return;
+    try { await persistQueue.current; } catch { setError('This estimate draft could not be confirmed on this device. Keep it open and retry before returning to the work order.'); return; }
+    onReturnToVisit?.(originVisit);
+  };
   return <View style={{ flex: 1 }}><ScreenHeader title="Estimates" subtitle="Photos, scope and a priced proposal" onBack={editing ? close : undefined} />
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20, gap: 16 }}>
+    <KeyboardAwareScrollView contentContainerStyle={{ padding: 20, paddingBottom: 36, gap: 16 }}>
       {!!error && <Text accessibilityRole="alert" style={{ color: palette.danger, lineHeight: 22 }}>{error}</Text>}{!!message && <Text accessibilityLiveRegion="polite" style={{ color: palette.accent, lineHeight: 22 }}>{message}</Text>}{editing && <Text accessibilityLiveRegion="polite" style={{ color: draftState === 'failed' || draftState === 'conflict' ? palette.danger : palette.secondary, fontWeight: '600' }}>{estimateDraftStateLabel(draftState)}</Text>}
-      {!enabled && <Text style={{ color: palette.secondary }}>New estimate workflows await production activation. Existing estimates remain available to review.</Text>}
+      {availability === 'disabled' && <Text style={{ color: palette.secondary }}>New estimate workflows are disabled by the current production configuration. Existing estimates remain available to review.</Text>}
+      {availability === 'offline' && !visitBound && <Text style={{ color: palette.secondary }}>Reconnect to verify estimate availability. Assigned estimate-visit drafts that were opened or cached remain available offline.</Text>}
+      {!!originVisit && <GlassButton secondary title="Return to originating work order" disabled={busy} onPress={returnToVisit} />}
       {!editing ? <>{permissions.can('estimates.manage') && <GlassButton title="New photo estimate" disabled={busy || !enabled || accessStatus !== 'ready'} onPress={startNew} />}<GlassButton secondary title="Refresh estimates" disabled={busy} onPress={() => run(load)} />
         {rows.map(estimate => <GlassCard key={estimate.id}><Text style={{ color: palette.text, fontSize: 17, fontWeight: '700' }}>{estimate.title || estimate.serviceType || 'Legacy estimate'}</Text><Text style={{ color: palette.secondary }}>{estimate.customerName || estimate.recipient?.name || estimate.prospect?.name || 'Customer'} · {estimate.status || 'Legacy'} · {estimate.legacy ? 'Read-only legacy' : `v${estimate.version}`}</Text>{Number.isFinite(estimate.totalCents) && <Text style={{ color: palette.text }}>{money(estimate.totalCents)}</Text>}<GlassButton secondary title="Open estimate" onPress={() => open(estimate)} disabled={busy} /></GlassCard>)}
         {!rows.length && <Text style={{ color: palette.secondary }}>No estimates yet. Start with photos of the requested work.</Text>}</> : <>
@@ -192,6 +220,6 @@ export default function EstimatesScreen({ onInteractionChange, active = true, in
         {!!versions.length && <GlassCard><Text style={{ color: palette.text, fontWeight: '700' }}>Version history</Text>{versions.map(version => <Text key={version.version} style={{ color: palette.secondary }}>v{version.version} · {version.status} · {money(version.totalCents)}</Text>)}</GlassCard>}
         {confirm && <GlassCard><Text style={{ color: palette.text, lineHeight: 22 }}>{confirm === 'leave' ? 'Discard this device draft and its unsynchronized photos? Saved server versions remain.' : confirm === 'deliver' ? `Email saved version ${record.version} to its customer/prospect for approval?` : createCustomer ? 'Create a customer from the approved prospect and an unassigned scheduled job?' : 'Create an unassigned scheduled job from this approved estimate?'}</Text><GlassButton title={confirm === 'leave' ? 'Discard device draft and close' : confirm === 'deliver' ? 'Confirm estimate email' : 'Confirm job conversion'} disabled={busy} onPress={() => confirm === 'leave' ? run(async () => { await discardEstimateDraft(draftIdentity, photos); setEditing(false); setDirty(false); setDraftState('server'); setUncertain(false); pendingSave.current = null; setConfirm(null); }) : run(async ticket => { const result = await callEstimate(confirm === 'deliver' ? 'deliver' : 'convert', { estimateId: record.id, expectedVersion: record.version, ...(confirm === 'convert' ? conversionInput(schedule, { customerId: conversionCustomerId, createCustomer }) : {}) }); if (!current(ticket)) return; setConfirm(null); setMessage(confirm === 'deliver' ? 'Estimate email queued. Delivery status is recorded by the email worker.' : `Approved estimate converted to job ${result.jobId}.`); const latest = await callEstimate('get', { estimateId: record.id }); if (current(ticket)) { setRecord(latest.estimate); setDraft(draftFromEstimate(latest.estimate)); setVersions(latest.versions || []); setDelivery(latest.delivery || null); setEstimatePermissions(latest.permissions || {}); } })} /><GlassButton secondary title="Keep estimate open" disabled={busy} onPress={() => setConfirm(null)} /></GlassCard>}
       </>}
-    </ScrollView>
+    </KeyboardAwareScrollView>
   </View>;
 }

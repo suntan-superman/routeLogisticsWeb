@@ -62,6 +62,7 @@ export async function overlayJobs(jobs) {
     }
     return rows.filter((row) => row.kind === 'job' && row.jobId === job.id && !['discarded', 'synced'].includes(row.state)).reduce((current, row) => ({
     ...current, ...(['pending', 'syncing'].includes(row.state) ? row.patch : {}),
+    ...(row.patch?.status === 'completed' ? { status: saved.status, serverStatus: saved.status, localCompletionPending: true } : {}),
     syncState: row.state, syncOperationId: row.id, syncError: row.error || '', syncErrorCode: row.errorCode || null, syncPatch: row.patch,
   }), job); });
 }

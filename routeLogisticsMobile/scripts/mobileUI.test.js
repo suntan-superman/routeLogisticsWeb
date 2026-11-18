@@ -2,8 +2,9 @@ const { test, afterEach } = require('node:test');
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path'), React = require('react');
 const { create, act } = require('react-test-renderer'), babel = require('@babel/core');
 global.IS_REACT_ACT_ENVIRONMENT = true;
-const cache = new Map(), native = Object.fromEntries(['View', 'Text', 'Pressable', 'ActivityIndicator', 'TextInput', 'ScrollView'].map(name => [name, name]));
+const cache = new Map(), native = Object.fromEntries(['View', 'Text', 'Pressable', 'ActivityIndicator', 'TextInput', 'ScrollView', 'KeyboardAvoidingView'].map(name => [name, name]));
 native.StyleSheet = { create: value => value };
+native.Platform = { OS: 'android' };
 const backHandlers = new Set(), announcements = [], focusTargets = [];
 let keyboardDismissals = 0;
 native.BackHandler = { addEventListener: (_event, handler) => { backHandlers.add(handler); return { remove: () => backHandlers.delete(handler) }; } };
@@ -55,6 +56,17 @@ test('buttons and fields provide accessible targets and solid readable surfaces 
  }
  await render(Glass.GlassInput,{label:'Work notes',multiline:true,value:'Saved',onChangeText(){}});
  const field=tree.root.findByType('TextInput');assert.equal(field.props.accessibilityLabel,'Work notes');assert.ok(field.props.style[0].minHeight>=100);assert.equal(field.props.maxFontSizeMultiplier,undefined);
+});
+
+test('keyboard-aware scrolling keeps multiline Android editors reachable above the keyboard',async()=>{
+ const scrollRef=React.createRef(),scrollTo=()=>{};
+ await render(UI.KeyboardAwareScrollView,{scrollRef,testID:'keyboard-form',children:React.createElement('TextInput',{multiline:true})},{createNodeMock:element=>element.type==='ScrollView'?{scrollTo}:null});
+ const avoider=tree.root.findByType('KeyboardAvoidingView'),scroll=tree.root.findByType('ScrollView');
+ assert.equal(avoider.props.behavior,'height');
+ assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');
+ assert.equal(scroll.props.keyboardDismissMode,'on-drag');
+ assert.equal(scroll.props.automaticallyAdjustKeyboardInsets,true);
+ assert.equal(scrollRef.current.scrollTo,scrollTo);
 });
 
 test('screen headers and status labels remain explicit and safe-area edges are configurable',async()=>{

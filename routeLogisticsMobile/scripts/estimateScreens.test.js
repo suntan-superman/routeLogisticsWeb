@@ -7,7 +7,7 @@ const root = path.resolve(__dirname, '..'), web = path.resolve(root, '../routeLo
 const policy = require('../../functions/shared/capabilities.json');
 function fixture(role = 'manager') {
   const modules = new Map(), calls = [], operations = new Map(), listeners = new Set(), localDrafts = new Map(); let sequence = 0;
-  const env = { calls, record: null, photos: [], delivery: null, cancelled: false, uploadFailure: false, ambiguousSave: false, compressionFailure: false, interactions: 0, converted: 0, approvalGets: [], approvalDecisions: [], approvals: 0, changes: [], urls: [], revoked: [], role, customers: [{ id: 'customer', name: 'Existing customer', email: 'prospect@example.com' }] };
+  const env = { calls, record: null, photos: [], delivery: null, cancelled: false, uploadFailure: false, ambiguousSave: false, compressionFailure: false, offline: false, interactions: 0, converted: 0, approvalGets: [], approvalDecisions: [], approvals: 0, changes: [], urls: [], revoked: [], role, customers: [{ id: 'customer', name: 'Existing customer', email: 'prospect@example.com' }] };
   const queryMock = require('../../tests/support/workspaceQueryMock.cjs').createWorkspaceQueryMock(React);
   env.user = { id: 'manager', companyId: 'acme', membershipId: 'member', role, companyName: 'Acme', services: ['Pest Control'] };
   const can = capability => policy.roles[env.role]?.includes(capability);
@@ -18,7 +18,9 @@ function fixture(role = 'manager') {
   const palette = { text: '#fff', secondary: '#bdd', danger: '#faa', border: '#375', accent: '#6eb' };
   async function callEstimate(action, fields = {}) {
     calls.push({ action, ...fields });
+    if (env.offline) throw Object.assign(new Error('Network unavailable'), { code: 'functions/unavailable' });
     if (action === 'list') return { estimates: env.record ? [env.record] : [], templates: [], enabled: true, emailEnabled: true };
+    if (action === 'visit-context') return { existing: false, context: { sourceVisitId: fields.visitId, inquiryId: 'inquiry', customerId: 'customer', customerName: 'Existing customer', servicePropertyId: 'property', serviceProperty: { address: '1 Work Street' }, serviceCategory: 'Pest Control', serviceType: 'Termite Inspection', title: 'Termite Inspection estimate' } };
     if (action === 'get') return { estimate: env.record, versions: env.record ? [{ version: env.record.version, status: env.record.status, totalCents: env.record.totalCents }] : [], photos: env.photos, emailEnabled: true, delivery: env.delivery, permissions: { canEdit: !['approved','converted','submitted-for-review'].includes(env.record?.status), canReview: ['draft','submitted-for-review'].includes(env.record?.status), canDeliver: env.record?.status === 'approved-for-delivery' } };
     if (action === 'save') {
       if (operations.has(fields.operationId)) return operations.get(fields.operationId);
@@ -44,14 +46,14 @@ function fixture(role = 'manager') {
       if (name.endsWith('/hooks/useUnsavedChanges')) return { useUnsavedChanges: () => ({ confirmDiscard: async () => false }) };
       if (name.startsWith('@babel/runtime/')) return require(name);
       if (name === 'react-native') return { View: 'View', Text: 'Text', Image: 'Image', ScrollView: 'ScrollView', Pressable: 'Pressable', AppState: { addEventListener: () => ({ remove() {} }) } };
-      if (name === '@react-native-community/netinfo') return { __esModule: true, default: { fetch: async () => ({ isConnected: true, isInternetReachable: true }), addEventListener: () => () => {} } };
+      if (name === '@react-native-community/netinfo') return { __esModule: true, default: { fetch: async () => ({ isConnected: !env.offline, isInternetReachable: !env.offline }), addEventListener: () => () => {} } };
       if (name === 'expo-crypto') return { randomUUID: () => `11111111-1111-4111-8111-${String(++sequence).padStart(12, '0')}` };
       if (name === 'expo-image-picker') return { UIImagePickerPresentationStyle: { FULL_SCREEN: 'full-screen' }, requestCameraPermissionsAsync: async () => ({ granted: true }), launchCameraAsync: async () => ({ canceled: env.cancelled, assets: [{ uri: 'file:///selected.jpg', width: 1600, height: 1200 }] }), launchImageLibraryAsync: async () => ({ canceled: env.cancelled, assets: [{ uri: 'file:///selected.jpg', width: 1600, height: 1200 }] }) };
       if (name.endsWith('/AuthContext')) return { useAuth: env.auth };
       if (name.endsWith('/ThemeProvider')) return { useTheme: () => ({ palette }) };
       if (name.endsWith('/components/ThemeControl')) return () => React.createElement('span', null, 'Theme');
       if (name === 'react-router-dom') return { useSearchParams: () => [new URLSearchParams(), () => {}] };
-      if (name.endsWith('/components/MobileUI')) return { ScreenHeader: ({ title, onBack }) => React.createElement('View', null, React.createElement('Text', null, title), onBack && React.createElement('Pressable', { accessibilityLabel: 'Back', onPress: onBack })) };
+      if (name.endsWith('/components/MobileUI')) return { ScreenHeader: ({ title, onBack }) => React.createElement('View', null, React.createElement('Text', null, title), onBack && React.createElement('Pressable', { accessibilityLabel: 'Back', onPress: onBack })), KeyboardAwareScrollView: ({ children, ...props }) => React.createElement('ScrollView', props, children) };
       if (name === './Glass' || name.endsWith('/components/Glass')) return { GlassCard: ({ children }) => React.createElement('View', null, children), GlassButton: ({ title, accessibilityLabel, onPress, disabled, busy }) => React.createElement('Pressable', { accessibilityLabel: accessibilityLabel || title, disabled: disabled || busy, onPress }, React.createElement('Text', null, title)), GlassInput: ({ label, ...props }) => React.createElement('TextInput', { accessibilityLabel: label, ...props }) };
       if (name.endsWith('/nativeInteraction')) return { beginNativeInteraction: () => { env.interactions++; return () => env.interactions--; } };
       if (name.endsWith('/services/firebase')) return { CustomerService: { getCustomers: async () => ({ success: true, customers: env.customers }) } };
@@ -75,7 +77,7 @@ const savedEstimate = status => ({ id: 'estimate', version: 2, status, title: 'P
 const json = tree => JSON.stringify(tree.toJSON());
 const nativeButton = (tree, label) => tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === label)[0];
 async function press(tree, label) { const value = nativeButton(tree, label); assert.ok(value, label); assert.notEqual(value.props.disabled, true); await act(async () => value.props.onPress()); await act(settle); }
-async function renderNative(env) { let tree; await act(async () => { tree = create(React.createElement(env.load('screens/EstimatesScreen.js').default, { onInteractionChange: value => env.changes.push(value) })); }); await act(settle); return tree; }
+async function renderNative(env, props = {}) { let tree; await act(async () => { tree = create(React.createElement(env.load('screens/EstimatesScreen.js').default, { onInteractionChange: value => env.changes.push(value), ...props })); }); await act(settle); return tree; }
 async function fill(tree, label, value) { const field = tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === label)[0]; assert.ok(field, label); await act(async () => field.props.onChangeText(value)); }
 async function fillDraft(tree) { for (const [label, value] of [['Prospect name', 'Prospect'], ['Prospect email', 'prospect@example.com'], ['Estimate title', 'Pest work'], ['Service type', 'Pest Control'], ['Scope of work', 'Treat the property'], ['Description 1', 'Labor'], ['Quantity 1', '2'], ['Unit price ($) 1', '50']]) await fill(tree, label, value); }
 
@@ -86,6 +88,19 @@ test('draft helpers preserve canonical prospect recipients and never submit clie
 });
 test('technicians can reach only assigned estimate work and cannot start an unrelated freeform estimate', async () => {
   const env = fixture('technician'), tree = await renderNative(env); assert.doesNotMatch(json(tree), /New photo estimate|Unit price|Save estimate/); assert.equal(env.calls.filter(call => call.action === 'list').length, 1); await act(async () => tree.unmount());
+});
+test('an assigned estimate visit opens and persists a device draft offline without reporting the feature disabled', async () => {
+  const env = fixture('technician'); env.offline = true; let returned = null, consumed = 0;
+  const initialVisit = { id: 'visit-one', snapshot: { id: 'visit-one', companyId: 'acme', customerId: 'customer', customerName: 'Jeremy Richards', serviceType: 'Termite Inspection', serviceCategory: 'Pest Control', servicePropertyId: 'property', serviceProperty: { address: '11503 Wrangler Drive' }, inquiryId: 'inquiry', appointmentKind: 'estimate_visit', billable: false, assignedTo: 'member', assignedToUid: 'manager', status: 'in-progress' } };
+  const tree = await renderNative(env, { active: true, initialVisit, onVisitConsumed: () => consumed++, onReturnToVisit: visit => { returned = visit; } });
+  assert.match(json(tree), /Estimate visit restored from the assigned work order/); assert.match(json(tree), /saved on this device/i); assert.doesNotMatch(json(tree), /await production activation|disabled by the current production configuration/);
+  assert.ok(tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Scope of work')[0]);
+  await fill(tree, 'Scope of work', 'Inspect termite activity and prepare treatment options.'); await act(settle);
+  await press(tree, 'Return to originating work order'); assert.equal(returned.id, 'visit-one'); assert.equal(consumed, 1);
+  await act(async () => tree.unmount());
+  const restored = await renderNative(env, { active: true, initialVisit });
+  assert.equal(restored.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Scope of work')[0].props.value, 'Inspect termite activity and prepare treatment options.');
+  assert.match(json(restored), /Saved estimate draft restored from this device/); await act(async () => restored.unmount());
 });
 test('photo-first native draft uploads and attaches photos to a server-priced version without modal layering', async () => {
   const env = fixture(), tree = await renderNative(env); await press(tree, 'New photo estimate'); await press(tree, 'Choose estimate photo'); await fillDraft(tree); await press(tree, 'Save estimate version');

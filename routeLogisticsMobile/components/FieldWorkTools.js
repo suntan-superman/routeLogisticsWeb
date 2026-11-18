@@ -41,7 +41,7 @@ const noteDraftForJob = (draft, job) => {
   return Number.isFinite(server) && Number.isFinite(saved) && server > saved ? null : draft;
 };
 
-export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyChange, draftActionsRef, showNavigation = true, readOnly = false, active = true }) {
+export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyChange, draftActionsRef, showNavigation = true, readOnly = false, active = true, onVisitSectionLayout, onVisitEditorOpened }) {
   const { palette } = useTheme();
   const [notes, setNotes] = useState(() => workNotes(job)), [dirty, setDirty] = useState(false), [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
@@ -55,10 +55,11 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
   const mounted = useRef(false), generation = useRef(0), lock = useRef(false), sequence = useRef(0), dirtyRef = useRef(false);
   const visitSequence = useRef(0), visitAttempt = useRef(null), lastVisitJob = useRef(job);
   const visitReceipts=useRef(new Map()),draftState=useRef({notes,form,visitDraft}),lastError=useRef(''),draftAPI=useRef(null);
+  const visitStatus=useRef({arrival:null,departure:null});
   const noteEdit=useRef(0),noteSnapshot=useRef(null),noteWrite=useRef(null),noteRetry=useRef(null);
   draftState.current={notes,form,visitDraft};
-  const callbacks = useRef({ onChanged, onDraftChange, onBusyChange }), target = useRef(job);
-  callbacks.current = { onChanged, onDraftChange, onBusyChange }; target.current = job;
+  const callbacks = useRef({ onChanged, onDraftChange, onBusyChange, onVisitEditorOpened }), target = useRef(job);
+  callbacks.current = { onChanged, onDraftChange, onBusyChange, onVisitEditorOpened }; target.current = job;
   const current = (ticket, id) => mounted.current && generation.current === ticket && target.current?.id === id;
   const allowWork = !readOnly && !['completed', 'cancelled', 'canceled'].includes(job?.status);
   const reportError=(message,visit=false)=>{lastError.current=message;setError(message);if(visit)setVisitSaveError(message);};
@@ -297,12 +298,15 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
     const valid=()=>{if(!mounted.current||target.current?.id!==selected)return false;if(ticket===null)ticket=generation.current;return ticket===generation.current;};
     const unavailable=()=>({success:false,message:'The work order changed. Reopen it before continuing.'});
     const handle={getDrafts:()=>valid()?draftAPI.current.getDrafts():{notes:false,application:false,visit:false,visitAttempted:false,hasDraft:false,changed:true},
+      getVisitStatus:()=>valid()?visitStatus.current:{arrival:null,departure:null,changed:true},
+      beginDeparture:()=>{if(!valid()||!allowWork)return false;openVisit('departed');callbacks.current.onVisitEditorOpened?.();return true;},
       saveDrafts:()=>valid()?draftAPI.current.saveDrafts():Promise.resolve(unavailable()),discardDrafts:()=>valid()?draftAPI.current.discardDrafts():unavailable()};
     return handle;
-  },[draftActionsRef,job?.id]);
+  },[draftActionsRef,job?.id,allowWork]);
   if (!job?.id) return null;
   const arrivalRecord=latestManual(visits,'arrived',job.id),lastDeparture=latestManual(visits,'departed',job.id);
   const departureRecord=lastDeparture&&(!arrivalRecord||Date.parse(visitInstant(lastDeparture))>=Date.parse(visitInstant(arrivalRecord)))?lastDeparture:null;
+  visitStatus.current={arrival:arrivalRecord,departure:departureRecord};
   const address = [job.address, job.city, job.state, job.zipCode].filter(value => typeof value === 'string').join(', ');
   const destination = typeof job.latitude === 'number' && typeof job.longitude === 'number' ? `${job.latitude},${job.longitude}` : address;
   return <View style={{ gap: 20 }}>
@@ -313,7 +317,7 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
       {job.status === 'scheduled' && <PrimaryButton title="Mark en route" busy={busy} onPress={() => save({ status: 'en-route' })} />}
       <SecondaryButton title="Start work" busy={busy} onPress={() => save({ status: 'in-progress' })} />
     </Card>}
-    <Card><SectionHeader title="Visit record" subtitle="Arrival and departure reports are separate from job status. GPS evidence does not verify property access." />
+    <View onLayout={onVisitSectionLayout}><Card><SectionHeader title="Visit record" subtitle="Arrival and departure reports are separate from job status. GPS evidence does not verify property access." />
       {visitsLoading && <Text accessibilityLiveRegion="polite" style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Refreshing visit record…</Text>}
       {!!visitsError && <InlineNotice tone="error" message={visitsError} />}
       {!visits.length && !visitsLoading && !visitsError && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>No visit events recorded.</Text>}
@@ -347,7 +351,7 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
         <PrimaryButton title={visitAttempted ? 'Retry visit record' : 'Save visit record'} busy={busy} onPress={()=>saveVisit()} />
         <SecondaryButton title="Cancel visit record" disabled={busy||visitAttempted} onPress={() => {draftState.current.visitDraft=null;setVisitDraft(null); setVisitAttempted(false); visitAttempt.current = null; setError('');setVisitSaveError('');}} />
       </View>)}
-    </Card>
+    </Card></View>
     <Card><SectionHeader title="Work notes" subtitle="Document observations and work instructions for this visit." />
       {!!noteStorageError&&<InlineNotice tone="error" message={noteStorageError}/>}
       <Text accessibilityLiveRegion="polite" style={{color:['failed','conflict','storage-failed'].includes(noteState?.state)?palette.danger:palette.secondary,fontSize:13,lineHeight:21}}>{notesLoading?'Restoring saved work notes…':({saving:'Saving on device…',draft:'Saved on device — draft retained. Select Save work notes to queue synchronization.',pending:'Saved on device — waiting to sync',syncing:'Synchronizing work notes',synced:'Saved to server',failed:'Synchronization failed — retry required',conflict:'Conflict — management attention required. Your work notes are retained.','storage-failed':'Work notes are not saved on device. Retry before leaving.'}[noteState?.state]||'Work notes are separate from dispatcher job instructions.')}</Text>

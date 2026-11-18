@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, ScrollView, ActivityIndicator, Linking } from 'react-native';
+import { View, Text, ActivityIndicator, Linking } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../theme/ThemeProvider';
 import { GlassButton, GlassInput } from './Glass';
-import { Card, ScreenHeader, SectionHeader, StatusBadge, InlineNotice, ConfirmationPanel, ActionDialog } from './MobileUI';
+import { Card, ScreenHeader, SectionHeader, StatusBadge, InlineNotice, ConfirmationPanel, ActionDialog, KeyboardAwareScrollView } from './MobileUI';
 import JobPhotos from './JobPhotos';
 import FieldWorkTools from './FieldWorkTools';
 import ServiceChecklist from './ServiceChecklist';
@@ -14,7 +14,7 @@ import { jobDestination } from '../services/workPresentation';
 import { completeJob } from '../services/jobCompletion';
 import { getQueuedOperation, resolveOffline } from '../services/offline';
 
-const emptyDraft = () => ({ actualWorkDone: '', actualHours: '', completionNotes: '' });
+const emptyDraft = () => ({ actualWorkDone: '', actualHours: '', completionNotes: '', departureExceptionReason: '' });
 function workAccessReason(job, user, permissions) {
   if (!user?.emailVerified || !permissions?.canAccess || !permissions.can?.('jobs.work')) return 'Verify your email and refresh your workspace before changing this job.';
   if (!job?.id) return 'Reopen the job from your job list.';
@@ -43,6 +43,7 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
   const requestBusyRef=useRef(false),requestDraftRef=useRef(false);
   const outcomeBusyRef=useRef(false),outcomeDraftRef=useRef(false);
   const workActionsRef = useRef(null), checklistActionsRef = useRef(null), draftAction = useRef(null);
+  const scrollRef = useRef(null), fieldWorkY = useRef(0), visitSectionY = useRef(0);
   const notify = useRef(onInteractionChange); notify.current = onInteractionChange;
   const hasCompletionDraft = Object.values(draft).some(value => String(value).trim());
   const hasDraft = photoDraft || workDraft || serviceDraft || requestDraft || outcomeDraft || hasCompletionDraft || !!completionDialog, busy = saving || reviewing || photoBusy || workBusy || serviceBusy || requestBusy || outcomeBusy || resolvingDrafts;
@@ -87,7 +88,7 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
   const updateOutcomeBusy=useCallback(value=>{outcomeBusyRef.current=value;if(mounted.current)setOutcomeBusy(value);},[]);
   const updateOutcomeDraft=useCallback(value=>{outcomeDraftRef.current=value;if(mounted.current)setOutcomeDraft(value);},[]);
   const accessReason = workAccessReason(job, user, permissions);
-  const displayJob = submitted?.jobId === job?.id ? { ...job, ...submitted.draft, status: 'completed', ...(isEstimateVisit(job) ? { estimateOutcome: completionEstimateOutcome(job, submitted.draft.estimateOutcome) } : {}) } : job;
+  const displayJob = submitted?.jobId === job?.id ? { ...job, ...submitted.draft, status: submitted.status === 'synced' ? 'completed' : job.status, ...(submitted.status === 'queued' ? { syncState: 'pending', localCompletionPending: true } : {}), ...(isEstimateVisit(job) ? { estimateOutcome: completionEstimateOutcome(job, submitted.draft.estimateOutcome) } : {}) } : job;
   const estimateVisit = isEstimateVisit(displayJob);
   const canComplete = !accessReason && ['scheduled', 'en-route', 'in-progress'].includes(displayJob?.status);
   const explainBlockedPhoto = () => {
@@ -167,6 +168,22 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
       if (mounted.current && generation.current === ticket) setResolvingDrafts(false);
     }
   };
+  const prepareReview = async nextDraft => {
+    if (reviewPending.current !== null || submitting.current !== null) return;
+    setError('');
+    const ticket = generation.current;
+    reviewPending.current = ticket; setReviewing(true);
+    try {
+      const saved = retryOperationId ? await getQueuedOperation(retryOperationId) : null;
+      if (!mounted.current || generation.current !== ticket) return;
+      setDraft(nextDraft); setSavedChange(saved); setMode('confirm');
+    } catch (failure) {
+      if (mounted.current && generation.current === ticket) showCompletionProblem(failure.message || 'Could not read the saved completion. Reopen the job and check saved work.');
+    } finally {
+      if (reviewPending.current === ticket) reviewPending.current = null;
+      if (mounted.current && generation.current === ticket) setReviewing(false);
+    }
+  };
   const review = async () => {
     if (reviewPending.current !== null || submitting.current !== null) return;
     if (inspectDrafts().hasDraft) { showDrafts(); return; }
@@ -174,19 +191,23 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
     if (!draft.actualWorkDone.trim()) { showCompletionProblem('Describe the work completed before submitting.'); return; }
     if (draft.actualWorkDone.trim().length > 10000 || draft.completionNotes.trim().length > 10000) { showCompletionProblem('Work details and completion notes must each be at most 10,000 characters.'); return; }
     if (draft.actualHours.trim() && (!Number.isFinite(Number(draft.actualHours)) || Number(draft.actualHours) < 0 || Number(draft.actualHours) > 744)) { showCompletionProblem('Enter actual work hours between 0 and 744, or leave the optional field empty.'); return; }
-    setError('');
-    const ticket = generation.current;
-    reviewPending.current = ticket; setReviewing(true);
-    try {
-      const saved = retryOperationId ? await getQueuedOperation(retryOperationId) : null;
-      if (!mounted.current || generation.current !== ticket) return;
-      setSavedChange(saved); setMode('confirm');
-    } catch (failure) {
-      if (mounted.current && generation.current === ticket) showCompletionProblem(failure.message || 'Could not read the saved completion. Reopen the job and check saved work.');
-    } finally {
-      if (reviewPending.current === ticket) reviewPending.current = null;
-      if (mounted.current && generation.current === ticket) setReviewing(false);
+    const visit = workActionsRef.current?.getVisitStatus?.();
+    if (visit?.arrival && !visit?.departure && !draft.departureExceptionReason.trim()) {
+      setCompletionDialog({ kind: 'departure', title: 'Departure has not been recorded', tone: 'error', message: 'An arrival is saved for this visit, but no later departure is saved. Record departure now, or enter an explicit exception reason before continuing. No timestamp or GPS evidence will be created automatically.' });
+      return;
     }
+    await prepareReview(draft);
+  };
+  const recordDeparture = () => {
+    if (busy) return;
+    setCompletionDialog(null); setMode('details'); setError(''); setNotice('Departure entry is open in the Visit record. Save it before completing the work order.');
+    workActionsRef.current?.beginDeparture?.();
+    scrollRef.current?.scrollTo?.({ y: Math.max(0, fieldWorkY.current + visitSectionY.current - 12), animated: true });
+  };
+  const continueWithoutDeparture = async () => {
+    const reason = draft.departureExceptionReason.trim();
+    if (reason.length < 5 || reason.length > 1000) { setCompletionDialog(current => ({ ...current, tone: 'error', message: 'Enter a specific departure exception reason between 5 and 1,000 characters, or record departure.' })); return; }
+    setCompletionDialog(null); await prepareReview({ ...draft, departureExceptionReason: reason });
   };
   const submit = async () => {
     if (submitting.current !== null || explainBlockedPhoto()) return;
@@ -241,13 +262,13 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
     <ScreenHeader title={mode === 'details' ? 'Job Details' : mode === 'completion' ? 'Complete job' : 'Review completion'} subtitle={mode === 'details' ? 'Your assigned work order' : displayJob.customerName || 'Assigned visit'}>
       <GlassButton secondary title="Close" accessibilityLabel="Close job details" disabled={busy} onPress={close} />
     </ScreenHeader>
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 28, gap: 20 }}>
+    <KeyboardAwareScrollView scrollRef={scrollRef} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 36, gap: 20 }}>
       {!!error && <InlineNotice tone="error" message={error} />}
       {!!notice && <InlineNotice tone="success" message={notice} />}
       {busy && <View accessibilityLiveRegion="polite" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><ActivityIndicator color={palette.accent} /><Text style={{ flex: 1, color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{saving ? 'Saving completion…' : reviewing ? 'Loading saved work…' : outcomeBusy ? 'Saving estimate outcome…' : workBusy ? 'Saving your work…' : 'Finish or cancel the photo picker to continue.'}</Text></View>}
       <Card>
         {estimateVisit && <Text accessibilityRole="text" style={{ color: palette.accent, fontSize: 14, fontWeight: '700' }}>Estimate Visit</Text>}
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><StatusBadge status={displayJob.status} />{!!job.syncState && <StatusBadge syncState={job.syncState} />}</View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><StatusBadge status={displayJob.status} />{!!displayJob.syncState && <StatusBadge syncState={displayJob.syncState} />}</View>
         <Text style={{ color: palette.text, fontSize: 25, lineHeight: 32, fontWeight: '700', letterSpacing: -0.5 }}>{displayJob.customerName || 'Assigned customer'}</Text>
         <Text style={{ color: palette.secondary, fontSize: 16, lineHeight: 24 }}>{displayJob.serviceType || 'Service visit'}</Text>
         <Text style={{ color: palette.text, fontSize: 15, lineHeight: 23, fontWeight: '600' }}>{[displayJob.date, displayJob.time || 'Time not set'].filter(Boolean).join(' · ')}</Text>
@@ -271,8 +292,8 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
       {estimateVisit && <View style={{ display: mode === 'details' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details'} pointerEvents={mode === 'details' ? 'auto' : 'none'}>
         <EstimateVisitOutcome key={job.id} job={displayJob} active={mode === 'details' && !completionDialog} readOnly={!!accessReason || ['cancelled','canceled'].includes(displayJob.status)} onChanged={onChanged} onBusyChange={updateOutcomeBusy} onDraftChange={updateOutcomeDraft} />
       </View>}
-      <View style={{ display: mode === 'details' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details'} importantForAccessibility={mode === 'details' ? 'auto' : 'no-hide-descendants'} pointerEvents={mode === 'details' ? 'auto' : 'none'}>
-        <FieldWorkTools key={job.id} job={job} active={mode === 'details' && !completionDialog} draftActionsRef={workActionsRef} readOnly={!!accessReason || ['completed', 'cancelled', 'canceled'].includes(displayJob.status)} showNavigation={false} onChanged={onChanged} onBusyChange={updateWorkBusy} onDraftChange={updateWorkDraft} />
+      <View onLayout={event => { fieldWorkY.current = event.nativeEvent.layout.y; }} style={{ display: mode === 'details' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details'} importantForAccessibility={mode === 'details' ? 'auto' : 'no-hide-descendants'} pointerEvents={mode === 'details' ? 'auto' : 'none'}>
+        <FieldWorkTools key={job.id} job={job} active={mode === 'details' && !completionDialog} draftActionsRef={workActionsRef} readOnly={!!accessReason || ['completed', 'cancelled', 'canceled'].includes(displayJob.status)} showNavigation={false} onChanged={onChanged} onBusyChange={updateWorkBusy} onDraftChange={updateWorkDraft} onVisitSectionLayout={event => { visitSectionY.current = event.nativeEvent.layout.y; }} />
       </View>
       <View style={{ display: mode === 'details' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details'} importantForAccessibility={mode === 'details' ? 'auto' : 'no-hide-descendants'} pointerEvents={mode === 'details' ? 'auto' : 'none'}>
         <Card><SectionHeader title="Visit photos" subtitle="Document the site and completed work. Saved photos show their upload status." />
@@ -309,10 +330,11 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
         <Text style={{ color: palette.text, fontSize: 16, lineHeight: 24 }}>{draft.actualWorkDone}</Text>
         {!!draft.actualHours.trim() && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Actual hours: {draft.actualHours}</Text>}
         {!!draft.completionNotes.trim() && <Text style={{ color: palette.secondary, fontSize: 15, lineHeight: 23 }}>{draft.completionNotes}</Text>}
+        {!!draft.departureExceptionReason.trim() && <InlineNotice tone="error" message={`Departure exception: ${draft.departureExceptionReason.trim()}`} />}
         {!!savedChange?.server && <View style={{ gap: 7 }}><SectionHeader title="Review the latest online work" /><Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Status: {savedChange.server.status || 'Not supplied'}</Text><Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Work completed: {savedChange.server.actualWorkDone || 'Not recorded'}</Text><Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Notes: {savedChange.server.notes || savedChange.server.completionNotes || 'Not recorded'}</Text><Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Confirm only after reviewing these changes. Your saved completion will be checked against the latest job again.</Text></View>}
         <GlassButton title="Confirm completion" busy={saving} disabled={busy} onPress={submit} /><GlassButton secondary title="Back to completion" disabled={busy} onPress={() => setMode('completion')} />
       </ConfirmationPanel>}
-    </ScrollView>
+    </KeyboardAwareScrollView>
     </View>
     {closeRequested&&!completionDialog&&<ActionDialog testID="close-work-drafts-dialog" title="Keep your work?" message="Save supported work drafts before closing. A failed save keeps the work order open and retains your text." busy={busy} onClose={()=>{if(!busy)setCloseRequested(false);}}>
       {(hasCompletionDraft||retryOperationId)&&<InlineNotice message="Resume or cancel the completion draft before saving and closing. Previously queued work remains on the device."/>}
@@ -325,7 +347,12 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
         <GlassButton title="Save drafts and continue" busy={resolvingDrafts} disabled={busy || !inspectDrafts().canSave} onPress={() => resolveDrafts(false)} />
         <GlassButton secondary title="Discard unsaved drafts and continue" disabled={busy || !inspectDrafts().canDiscard} onPress={() => resolveDrafts(true)} />
       </>}
-      <GlassButton secondary title={completionDialog.kind === 'success' || completionDialog.kind === 'saved' ? 'Return to work order' : 'Keep editing'} disabled={busy} onPress={() => { if (!busy) setCompletionDialog(null); }} />
+      {completionDialog.kind === 'departure' && <>
+        <GlassInput label="Reason for completing without departure" value={draft.departureExceptionReason} maxLength={1000} multiline editable={!busy} onChangeText={value => setDraft(current => ({ ...current, departureExceptionReason: value }))} />
+        <GlassButton title="Record departure" disabled={busy} onPress={recordDeparture} />
+        <GlassButton secondary title="Continue with documented exception" disabled={busy || draft.departureExceptionReason.trim().length < 5} onPress={continueWithoutDeparture} />
+      </>}
+      {completionDialog.kind !== 'departure' && <GlassButton secondary title={completionDialog.kind === 'success' || completionDialog.kind === 'saved' ? 'Return to work order' : 'Keep editing'} disabled={busy} onPress={() => { if (!busy) setCompletionDialog(null); }} />}
     </ActionDialog>}
   </View>;
 }

@@ -59,6 +59,18 @@ test('acknowledged visit revisions chain to work notes, departure and authorized
  const completed=await apply(f.request({jobId:f.jobId,operationId:`${f.companyId}-complete-operation`,expectedVersion:departure.version,patch:{status:'completed',actualWorkDone:'Test inspection completed'}}));assert.equal(completed.status,'synced');
  const job=await f.job.get();assert.equal(job.get('status'),'completed');assert.equal(job.get('workNotes'),'Offline work notes retained');assert.equal(job.get('visitEvidence.arrivedAt'),f.payload().occurredAt);
 });
+test('completion after arrival requires a real departure or an explicit audited exception',async()=>{
+ const f=await fixture(),arrival=await f.handlers.visit(f.request(f.payload())),apply=offlineHandler(db);
+ const base={jobId:f.jobId,expectedVersion:arrival.version,patch:{status:'completed',actualWorkDone:'Inspection completed'}};
+ await assert.rejects(apply(f.request({...base,operationId:`${f.companyId}-missing-departure`})),error=>error.code==='failed-precondition'&&/Record departure/.test(error.message));
+ assert.equal((await f.job.get()).get('status'),'in-progress');
+ const reason='Customer asked the technician to leave immediately after the inspection.';
+ const completed=await apply(f.request({...base,operationId:`${f.companyId}-departure-exception`,patch:{...base.patch,departureExceptionReason:reason}}));
+ assert.equal(completed.status,'synced');
+ const job=await f.job.get();assert.equal(job.get('status'),'completed');assert.equal(job.get('departureExceptionReason'),reason);
+ const audits=await db.collection('rlAudit').where('companyId','==',f.companyId).where('action','==','job.departureException').get();
+ assert.equal(audits.size,1);assert.equal(audits.docs[0].get('reason'),reason);assert.equal(audits.docs[0].get('jobId'),f.jobId);
+});
 test('invalid times, missing access reasons and malformed GPS fail without losing or inventing service evidence',async()=>{
  const f=await fixture();
  for(const patch of [{occurredAt:'invalid'},{occurredAt:new Date(f.clock+180000).toISOString()},{occurredAt:new Date(f.clock-31*86400000).toISOString()},{latitude:35,longitude:-119,accuracy:null,capturedAt:f.payload().occurredAt},{latitude:35,longitude:-119,accuracy:15,capturedAt:new Date(f.clock).toISOString()}])await assert.rejects(f.handlers.visit(f.request(f.payload('arrived',patch))),{code:'invalid-argument'});

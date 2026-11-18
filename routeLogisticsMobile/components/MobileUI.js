@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, Pressable, ActivityIndicator, ScrollView, BackHandler, Keyboard, AccessibilityInfo, findNodeHandle } from 'react-native';
+import { View, Text, Pressable, ActivityIndicator, ScrollView, BackHandler, Keyboard, KeyboardAvoidingView, Platform, AccessibilityInfo, findNodeHandle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeProvider';
 import { GlassCard, GlassButton, GlassInput, IconButton } from './Glass';
@@ -10,6 +10,14 @@ export const PrimaryButton = props => <GlassButton {...props} />;
 export const SecondaryButton = props => <GlassButton secondary {...props} />;
 export const FormField = props => <GlassInput {...props} />;
 export const Card = props => <GlassCard {...props} />;
+const KeyboardContainer = KeyboardAvoidingView || View;
+
+export function KeyboardAwareScrollView({ children, contentContainerStyle, style, scrollRef, ...props }) {
+  return <KeyboardContainer style={{ flex: 1 }} behavior={Platform?.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={0}>
+    <ScrollView ref={scrollRef} style={[{ flex: 1 }, style]} contentContainerStyle={contentContainerStyle} keyboardShouldPersistTaps="handled"
+      keyboardDismissMode={Platform?.OS === 'ios' ? 'interactive' : 'on-drag'} automaticallyAdjustKeyboardInsets {...props}>{children}</ScrollView>
+  </KeyboardContainer>;
+}
 
 export function ScreenHeader({ title, subtitle, onBack, children }) {
   const { palette } = useTheme();
@@ -67,7 +75,8 @@ export function JobCard({ job, onPress, featured = false, compact = false }) {
     </View>
     <Text style={{ color: palette.text, fontSize: 14, lineHeight: 21, fontWeight: '600' }}>{appointment}</Text>
     {!compact && !!address && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{address}</Text>}
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><AppointmentBadge job={job} /><StatusBadge status={job.status} />{!!job.syncState && <StatusBadge syncState={job.syncState} />}</View>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><AppointmentBadge job={job} /><StatusBadge status={job.localCompletionPending ? job.serverStatus || job.status : job.status} />{!!job.syncState && <StatusBadge syncState={job.syncState} />}</View>
+    {job.localCompletionPending && <Text accessibilityLiveRegion="polite" style={{ color: palette.secondary, fontSize: 13, lineHeight: 20 }}>Completion saved on this device — the server has not confirmed the completed status yet.</Text>}
     {isEstimateVisit(job) && <Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 20 }}>{estimateOutcomeLabel(job)}</Text>}
     {!!job.syncError && <Text accessibilityRole="alert" style={{ color: palette.danger, fontSize: 13, lineHeight: 20 }}>{job.syncError}</Text>}
   </Pressable>;
@@ -113,7 +122,8 @@ export function ActionDialog({ title, message, tone = 'info', busy = false, onCl
   return <View testID={testID} accessibilityViewIsModal importantForAccessibility="yes" onAccessibilityEscape={close}
     style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 100, elevation: 30, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
     <Pressable testID={`${testID}-backdrop`} accessible={false} disabled={busy} onPress={close} style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(0,0,0,0.6)' }} />
-    <View style={{ width: '100%', maxWidth: 520, maxHeight: '90%', borderRadius: 20, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, overflow: 'hidden' }}>
+    <KeyboardContainer behavior={Platform?.OS === 'ios' ? 'padding' : 'height'} style={{ width: '100%', maxWidth: 520, maxHeight: '90%' }}>
+    <View style={{ width: '100%', maxHeight: '100%', borderRadius: 20, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, overflow: 'hidden' }}>
       <View style={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
         <Text ref={heading} accessibilityRole="header" style={{ flex: 1, color: palette.text, fontSize: 20, fontWeight: '700', lineHeight: 27 }}>{title}</Text>
         {!!onClose && <GlassButton secondary title="Close" accessibilityLabel="Close dialog" disabled={busy} onPress={close} />}
@@ -123,6 +133,6 @@ export function ActionDialog({ title, message, tone = 'info', busy = false, onCl
         {busy && <ActivityIndicator accessibilityLabel="Saving changes" color={palette.accent} />}
         {children}
       </ScrollView>
-    </View>
+    </View></KeyboardContainer>
   </View>;
 }

@@ -321,7 +321,9 @@ test('offline completion is durably queued with a stable job ID and visible pend
   assert.equal(f.job.status, 'in-progress'); assert.equal(f.calls.length, 0);
   const rows = await f.queuedWork(); assert.equal(rows.length, 1); assert.equal(rows[0].id, result.operationId);
   const [overlaid] = await f.overlayJobs([{ ...f.job }]);
-  assert.equal(overlaid.status, 'completed'); assert.equal(overlaid.syncState, 'pending');
+  assert.equal(overlaid.status, 'in-progress'); assert.equal(overlaid.serverStatus, 'in-progress');
+  assert.equal(overlaid.localCompletionPending, true); assert.equal(overlaid.syncPatch.status, 'completed');
+  assert.equal(overlaid.syncState, 'pending');
   const repeat = await f.completeJob({ ...f.job }, draft);
   assert.equal(repeat.operationId, result.operationId); assert.equal((await f.queuedWork()).length, 1);
 });

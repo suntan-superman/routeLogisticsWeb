@@ -39,11 +39,11 @@ async function fixture(role) {
   const auth = { uid, token: { companyId, role, ...(memberId ? { membershipId: memberId } : {}), email_verified: true, email: `${role}@example.test` } };
   const f = { prefix, companyId, ownerId, uid, memberId, jobId, role, request: data => ({ auth, data }), uploaded: [] };
   fixtures.push(f);
-  await set(`companies/${companyId}`, { ownerId, name: 'Synthetic working-supervisor company', timeZone: 'America/Los_Angeles' });
+  await set(`companies/${companyId}`, { ownerId, name: 'Synthetic working-supervisor pest-control company', industry: 'Pest Control', timeZone: 'America/Los_Angeles' });
   await set(`users/${uid}`, { rlCompanyId: companyId, name: `Synthetic working ${role}` });
   if (memberId) await set(`teamMembers/${memberId}`, { companyId, uid, role, status: 'active', name: 'Synthetic working manager' });
   await set(`customers/${prefix}-customer`, { companyId, name: 'Synthetic field customer', phone: '5550100000', address: 'Synthetic service property' });
-  await set(`jobs/${jobId}`, { companyId, userId: ownerId, assignedTo: memberId || uid, assignedToUid: uid, customerId: `${prefix}-customer`, date: '2030-01-03', time: '10:00', estimatedDuration: 1, status: 'in-progress', updatedAt: '2030-01-03T17:00:00.000Z', latitude: 35, longitude: -119 });
+  await set(`jobs/${jobId}`, { companyId, userId: ownerId, assignedTo: memberId || uid, assignedToUid: uid, customerId: `${prefix}-customer`, serviceType: 'Pest Control', serviceCategory: 'Pest Control', date: '2030-01-03', time: '10:00', estimatedDuration: 1, status: 'in-progress', updatedAt: '2030-01-03T17:00:00.000Z', latitude: 35, longitude: -119 });
   f.work = workDataHandlers(db); f.apply = offlineHandler(db); f.forms = serviceFormsHandler(db, { enabled: () => true }); f.locations = locationHandlers(db, { now: () => Date.parse('2030-01-03T18:00:00.000Z') });
   f.photo = jobPhotoHandler(db, () => ({ file: path => ({ save: async (bytes, options) => f.uploaded.push({ path, bytes, options }), getMetadata: async () => [{ size: jpeg.length, contentType: 'image/jpeg' }], download: async () => [jpeg] }) }));
   return f;

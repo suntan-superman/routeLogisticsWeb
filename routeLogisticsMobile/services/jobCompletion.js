@@ -17,13 +17,15 @@ function validateJob(job, retry = false) {
   if (!['scheduled', 'en-route', 'in-progress'].includes(job.status) && !(retry && job.status === 'completed')) throw fail(job.status === 'cancelled' ? 'This job was cancelled. A manager must reopen it before you can complete it.' : job.status === 'completed' ? 'This job is already completed. Refresh the job list.' : `This job cannot be completed from its current status (${job.status || 'unknown'}).`);
 }
 function completionFields(draft, job) {
-  const actualWorkDone = String(draft?.actualWorkDone || '').trim(), completionNotes = String(draft?.completionNotes || '').trim();
+  const actualWorkDone = String(draft?.actualWorkDone || '').trim(), completionNotes = String(draft?.completionNotes || '').trim(), departureExceptionReason = String(draft?.departureExceptionReason || '').trim();
   if (!actualWorkDone) throw fail('Describe the work completed before submitting.', 'invalid-argument');
   if (actualWorkDone.length > 10000 || completionNotes.length > 10000) throw fail('Work details and notes must each be at most 10,000 characters.', 'invalid-argument');
   const hours = String(draft?.actualHours ?? '').trim();
   if (hours && (!Number.isFinite(Number(hours)) || Number(hours) < 0 || Number(hours) > 744)) throw fail('Enter actual work hours between 0 and 744, or leave the optional field empty.', 'invalid-argument');
   if (draft?.estimateOutcome && (!isEstimateVisit(job) || !Object.hasOwn(ESTIMATE_OUTCOMES, draft.estimateOutcome))) throw fail('Choose a valid outcome for the estimate visit.', 'invalid-argument');
+  if (departureExceptionReason && (departureExceptionReason.length < 5 || departureExceptionReason.length > 1000)) throw fail('Enter a specific departure exception reason between 5 and 1,000 characters.', 'invalid-argument');
   return { status: 'completed', actualWorkDone, ...(hours ? { actualHours: Number(hours) } : {}), completionNotes,
+    ...(departureExceptionReason ? { departureExceptionReason } : {}),
     ...(isEstimateVisit(job) ? { estimateOutcome: completionEstimateOutcome(job, draft?.estimateOutcome) } : {}) };
 }
 async function outcome(operationId, jobId) {

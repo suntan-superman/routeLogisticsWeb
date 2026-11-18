@@ -8,7 +8,7 @@ const babel = require('@babel/core');
 const { workspacePermissions } = require('../services/workspacePolicy');
 global.IS_REACT_ACT_ENVIRONMENT = true;
 let account, tree, photoProps, workProps, checklistProps, requestProps, outcomeProps, photoMounts, photoUnmounts, calls, loader, savedRead, reads, changes, closes, interactions, discarded, navigationCalls;
-let workDrafts, checklistDrafts, savedDraftCalls, discardedDraftCalls, saveWorkDrafts, saveChecklistDrafts, discardWorkDrafts;
+let workDrafts, checklistDrafts, savedDraftCalls, discardedDraftCalls, saveWorkDrafts, saveChecklistDrafts, discardWorkDrafts, visitStatus, departureOpened;
 const saved = new Map();
 const native = Object.fromEntries(['View', 'Text', 'ScrollView', 'ActivityIndicator'].map(name => [name, name]));
 native.Linking = { openURL: async url => navigationCalls.push(url) };
@@ -32,7 +32,7 @@ function load() {
     if (specifier === './Glass') return { GlassButton: button, GlassInput: ({ label, ...props }) => React.createElement('TextInput', { accessibilityLabel: label, ...props }) };
     if (specifier === './MobileUI') {
       const panel = ({ title, message, children, ...props }) => React.createElement('View', props, title && React.createElement('Text', null, title), message && React.createElement('Text', null, message), children);
-      return { Card: panel, ScreenHeader: panel, SectionHeader: panel, InlineNotice: panel, ConfirmationPanel: panel, ActionDialog: panel, StatusBadge: ({ status, syncState }) => React.createElement('Text', null, status || syncState) };
+      return { Card: panel, ScreenHeader: panel, SectionHeader: panel, InlineNotice: panel, ConfirmationPanel: panel, ActionDialog: panel, KeyboardAwareScrollView: ({ children, ...props }) => React.createElement('ScrollView', props, children), StatusBadge: ({ status, syncState }) => React.createElement('Text', null, status || syncState) };
     }
     if (specifier === './JobPhotos') return Photos;
     if (specifier === './JobReassignmentRequest') return props => {requestProps=props;return null;};
@@ -41,7 +41,7 @@ function load() {
     if (specifier.endsWith('/services/workPresentation')) return require('../services/workPresentation');
     if (specifier === './FieldWorkTools') return props => {
       workProps = props;
-      if (props.draftActionsRef) props.draftActionsRef.current = { getDrafts: () => workDrafts, saveDrafts: () => saveWorkDrafts(), discardDrafts: () => discardWorkDrafts() };
+      if (props.draftActionsRef) props.draftActionsRef.current = { getDrafts: () => workDrafts, getVisitStatus: () => visitStatus, beginDeparture: () => { departureOpened++; return true; }, saveDrafts: () => saveWorkDrafts(), discardDrafts: () => discardWorkDrafts() };
       return React.createElement('WorkTools');
     };
     if (specifier === './ServiceChecklist') return props => {
@@ -76,6 +76,7 @@ beforeEach(() => {
   saveWorkDrafts = async () => { savedDraftCalls.push('work'); workDrafts = { notes: false, application: false, visit: false, hasDraft: false }; workProps.onDraftChange(false); return { success: true }; };
   saveChecklistDrafts = async () => { savedDraftCalls.push('checklist'); checklistDrafts = { checklist: false, hasDraft: false }; checklistProps.onDraftChange(false); return { success: true }; };
   discardWorkDrafts = () => { discardedDraftCalls.push('work'); workDrafts = { notes: false, application: false, visit: false, hasDraft: false }; workProps.onDraftChange(false); return { success: true }; };
+  visitStatus = { arrival: null, departure: null }; departureOpened = 0;
 });
 afterEach(async () => { if (tree) await act(async () => tree.unmount()); });
 
@@ -144,6 +145,16 @@ test('completion validates fields, shows saving, suppresses duplicate taps and r
   assert.equal(changes, 1); assert.match(text(), /Job Details/); assert.match(text(), /Status:.*completed/); assert.match(text(), /Job completed and synchronized/);
   assert.equal(control('Complete'), undefined); assert.ok(control('Return to work order'));
   await press('Return to work order'); assert.equal(interactions.at(-1).hasDraft, false);
+});
+
+test('an arrival without departure offers direct departure recording or a documented exception', async () => {
+  visitStatus = { arrival: { id: 'arrival', type: 'arrived', recordedAt: '2026-11-18T17:00:00.000Z' }, departure: null };
+  await render(); await draft(); await press('Review completion');
+  assert.match(text(), /Departure has not been recorded/); assert.ok(control('Record departure')); assert.ok(control('Continue with documented exception'));
+  await press('Record departure'); assert.equal(departureOpened, 1); assert.match(text(), /Departure entry is open/);
+  await press('Resume completion'); await press('Review completion'); await input('Reason for completing without departure', 'Customer asked the technician to leave immediately.');
+  await press('Continue with documented exception'); assert.match(text(), /Departure exception: Customer asked/);
+  await press('Confirm completion'); assert.equal(calls[0].draft.departureExceptionReason, 'Customer asked the technician to leave immediately.');
 });
 
 test('completion failure keeps context and draft and retries the same durable operation after review', async () => {

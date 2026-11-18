@@ -6,8 +6,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { GlassCard, GlassButton } from './Glass';
 import { queuedWork, subscribeOffline, flushOffline, resolveOffline } from '../services/offline';
 
-const workName = row => row.kind === 'visit' ? `${({arrived:'Arrival',departed:'Departure','access-blocked':'Access-blocked'})[row.record?.type]||'Visit'} evidence` : row.kind === 'photo' ? 'Photo' : row.kind === 'application' ? 'Application record' : row.kind === 'service-form' ? 'Service report' : 'Job update';
-const reviewLabels = { status: 'Status', actualWorkDone: 'Work completed', actualHours: 'Actual hours', completionNotes: 'Completion notes', notes: 'Work notes', completedAt: 'Completed at' };
+const workName = row => row.kind === 'visit' ? `${({arrived:'Arrival',departed:'Departure','access-blocked':'Access-blocked'})[row.record?.type]||'Visit'} evidence` : row.kind === 'photo' ? 'Photo' : row.kind === 'application' ? 'Application record' : row.kind === 'service-form' ? 'Service report' : row.patch?.status === 'completed' ? 'Job completion' : row.patch?.notes !== undefined ? 'Work notes' : 'Job update';
+const reviewLabels = { status: 'Status', actualWorkDone: 'Work completed', actualHours: 'Actual hours', completionNotes: 'Completion notes', departureExceptionReason: 'Departure exception', notes: 'Work notes', completedAt: 'Completed at' };
 function ReviewValues({ title, values, palette }) {
   return <View style={{ gap: 4 }}><Text style={{ color: palette.text, fontWeight: '600' }}>{title}</Text>{Object.entries(reviewLabels).filter(([key]) => values?.[key] != null).map(([key, label]) => <Text key={key} style={{ color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{label}: {String(values[key])}</Text>)}</View>;
 }

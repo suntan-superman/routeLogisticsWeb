@@ -85,6 +85,10 @@ test('new prospect creation requires an explicit separate-contact decision when 
   await newProspect(); assert.equal(button('Save inquiry').props.disabled, false); await submit(); assert.equal(env.calls.filter(row => row.action === 'create').length, 0); assert.match(content(), /Possible matching customers were found/); await change('Create separate prospect despite matches', true); await change('Separate customer reason', 'Separate renter at the same property'); await submit();
   const request = env.calls.find(row => row.action === 'create'); assert.equal(request.duplicateDecision, 'separate'); assert.equal(request.duplicateReason, 'Separate renter at the same property'); assert.equal(request.customer.name, 'Synthetic prospect'); assert.equal(request.property.address, property.address); assert.match(content(), /Inquiry saved/);
 });
+test('new prospect duplicate warning identifies the matching customer field', async () => {
+  env.matches = [{ customer: { ...customer, phone: '(661) 602-5407' }, matchReasons: ['phone'] }]; await newProspect();
+  assert.match(content(), /Existing customer/); assert.match(content(), /\(661\) 602-5407/); assert.match(content(), /Matched on: Same phone number/);
+});
 test('new prospect save remains actionable and explains every missing required field', async () => {
   env.matches = []; await mount(); await click('New Inquiry'); await click('Create inquiry for a new prospect'); await change('Prospect name', 'Homeowner prospect'); await change('Inquiry property address', property.address);
   assert.equal(button('Save inquiry').props.disabled, false); assert.match(content(), /Before saving:.*Describe the service the homeowner is requesting/); await submit(); assert.equal(env.calls.filter(row => row.action === 'create').length, 0); assert.match(content(), /Describe the service the homeowner is requesting/);

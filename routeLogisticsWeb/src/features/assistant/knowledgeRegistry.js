@@ -1,6 +1,7 @@
 import { routeCapabilities } from '../../utils/routeAccess.js';
+import verifiedProcedures from './verifiedProcedures.generated.js';
 
-export const ROUTE_LOGISTICS_KNOWLEDGE_VERSION = '2026-11-18.1';
+export const ROUTE_LOGISTICS_KNOWLEDGE_VERSION = '2026-11-18.2';
 
 export const assistantActions = Object.freeze({
   dashboard: { id: 'dashboard', label: 'Go to Dashboard', route: '/', capability: 'jobs.read' },
@@ -140,7 +141,65 @@ export function resolveKnowledge(question, context) {
   return ranked[0]?.score > 0 ? ranked[0].entry : pageKnowledge(context.pathname || '/', context);
 }
 
+const verifiedActionIds = Object.freeze({
+  'CPE-01': ['customers'], 'CPE-02': ['customers'], 'CPE-03': ['customers'], 'CPE-04': ['customers'],
+  'CPE-05': ['customers'], 'CPE-06': ['jobs'], 'CPE-07': ['customers'], 'CPE-08': ['customers'],
+  'CPE-09': ['estimates'], 'CPE-10': ['estimates'], 'CPE-11': ['estimates'], 'CPE-12': ['estimates'],
+  'CPE-13': ['estimates'], 'CPE-14': ['estimates'], 'CPE-15': ['estimates'], 'CPE-16': ['estimates'],
+  'CPE-17': ['estimates'], 'CPE-19': ['estimates'], 'CPE-20': ['estimates'],
+  'JSD-01': ['jobs'], 'JSD-02': ['jobs'], 'JSD-03': ['jobs'], 'JSD-04': ['jobs'], 'JSD-05': ['company'],
+  'JSD-06': ['jobs'], 'JSD-07': ['jobs'], 'JSD-08': ['servicePlans'], 'JSD-09': ['dispatch'],
+  'JSD-10': ['dispatch'], 'JSD-11': ['routes'], 'JSD-12': ['dispatch'], 'JSD-13': ['dispatch'],
+  'JSD-14': ['myWork'], 'JSD-15': ['myWork'],
+  'MOB-01': [], 'MOB-02': [], 'MOB-03': ['myWork'], 'MOB-04': ['myWork'], 'MOB-05': ['myWork'],
+  'MOB-06': ['myWork'], 'MOB-07': ['myWork'], 'MOB-08': ['myWork'], 'MOB-09': ['myWork'],
+  'MOB-10': ['myWork'], 'MOB-11': ['myWork'], 'MOB-12': ['myWork'], 'MOB-13': ['myWork'],
+  'MOB-14': ['myWork'], 'MOB-15': [],
+  'BIL-01': ['jobs'], 'BIL-02': [], 'BIL-03': ['invoices'], 'BIL-04': ['invoices'],
+  'BIL-05': ['invoices'], 'BIL-06': [], 'BIL-07': [], 'BIL-08': ['invoices'],
+  'BIL-09': ['integrations'], 'BIL-10': ['integrations'],
+  'APT-01': ['company'], 'APT-02': [], 'APT-03': ['myWork'], 'APT-04': ['company'],
+  'APT-05': [], 'APT-06': [], 'APT-07': [], 'APT-08': [], 'APT-09': [], 'APT-10': [],
+  'APT-11': [], 'APT-12': [], 'APT-13': [], 'APT-14': [], 'APT-15': [],
+});
+
+const fallbackStopWords = new Set(['a','an','and','are','can','do','does','for','from','how','i','in','is','it','me','my','of','on','or','the','this','to','what','when','where','which','why','will','with','you']);
+const normalizeVerifiedQuestion = value => String(value || '').toLowerCase().replace(/[’']/g, '').replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+const verifiedTerms = value => normalizeVerifiedQuestion(value).split(' ').filter(token => token.length > 1 && !fallbackStopWords.has(token));
+const verifiedDice = (first, second) => {
+  const left = new Set(first), right = new Set(second);
+  if (!left.size || !right.size) return 0;
+  let overlap = 0;
+  for (const token of left) if (right.has(token)) overlap += 1;
+  return 2 * overlap / (left.size + right.size);
+};
+
+function resolveVerifiedProcedure(question, context) {
+  const normalized = normalizeVerifiedQuestion(question);
+  const exact = verifiedProcedures.find(procedure => normalizeVerifiedQuestion(procedure.question) === normalized);
+  if (exact) return exact;
+  const incoming = verifiedTerms(normalized);
+  const ranked = verifiedProcedures.map(procedure => ({
+    procedure,
+    score: verifiedDice(incoming, verifiedTerms(procedure.question)) + (procedure.routes.includes(context.pathname) ? 0.05 : 0),
+  })).sort((a, b) => b.score - a.score);
+  if (!ranked[0] || ranked[0].score < 0.82 || ranked[1] && ranked[0].score - ranked[1].score < 0.08) return null;
+  return ranked[0].procedure;
+}
+
 export function deterministicHelp(question, context) {
+  const verified = resolveVerifiedProcedure(question, context);
+  if (verified && !['CPE-01', 'CPE-20'].includes(verified.id)) {
+    const role = context.role === 'technician-assigned' ? 'technician' : context.role;
+    const denied = verified.deniedRoles.includes(role);
+    const text = denied ? verified.denialReply || 'Your current role cannot perform this action. Ask an authorized owner or administrator.' : verified.reply;
+    return {
+      text,
+      actions: denied ? [] : authorizedActions(verifiedActionIds[verified.id] || [], context.can, context.workspaceReady),
+      knowledgeId: verified.intent,
+      verifiedProcedureId: verified.id,
+    };
+  }
   const entry = resolveKnowledge(question, context);
   if (!entry) return { text: 'Choose a help topic or contact Workside Support.', actions: [] };
   if (entry.status === 'planned') return { text: `${entry.displayName} is planned, not currently implemented. I will not direct you to a screen that does not exist.`, actions: [] };

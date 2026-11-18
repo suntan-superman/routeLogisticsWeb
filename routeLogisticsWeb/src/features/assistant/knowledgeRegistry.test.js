@@ -81,3 +81,33 @@ test('sensitive user questions are rejected before transport', () => {
   assert.equal(containsSensitiveQuestion('Email customer@example.com about this'), true);
   assert.equal(containsSensitiveQuestion('How do I schedule an estimate?'), false);
 });
+
+test('verified fallback explains cancellation and permanent deletion without inventing actions', () => {
+  capabilities.clear(); capabilities.add('jobs.schedule'); capabilities.add('jobs.cancel');
+  const cancellation = deterministicHelp('How do I cancel an appointment?', context('manager'));
+  assert.equal(cancellation.verifiedProcedureId, 'JSD-06');
+  assert.match(cancellation.text, /retained in history/i);
+  assert.match(cancellation.text, /in-progress or completed work cannot be cancelled/i);
+  const deletion = deterministicHelp('How do I permanently delete a test job?', context('manager'));
+  assert.equal(deletion.verifiedProcedureId, 'JSD-07');
+  assert.match(deletion.text, /Permanently delete/);
+});
+
+test('verified fallback states that live card payments are disabled', () => {
+  capabilities.clear(); capabilities.add('invoices.read'); capabilities.add('invoices.manage');
+  const result = deterministicHelp('Can Route Logistics collect live card payments now?', context('owner'));
+  assert.equal(result.verifiedProcedureId, 'BIL-06');
+  assert.match(result.text, /Live payments remain disabled/);
+  assert.match(result.text, /cannot enable payments/);
+  assert.equal(result.actions.length, 0);
+});
+
+test('verified fallback enforces manager invoice and invitation restrictions', () => {
+  capabilities.clear(); capabilities.add('jobs.schedule'); capabilities.add('company.read');
+  const invoice = deterministicHelp('How do I create an invoice from a completed job?', context('manager'));
+  assert.match(invoice.text, /does not have invoice access/i);
+  assert.equal(invoice.actions.length, 0);
+  const invitation = deterministicHelp('How does the owner invite a technician or manager?', context('manager'));
+  assert.match(invitation.text, /Only the company owner/);
+  assert.equal(invitation.actions.length, 0);
+});

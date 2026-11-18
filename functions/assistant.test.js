@@ -365,7 +365,7 @@ test('the server kill switch disables provider messages while keeping determinis
   try {
     const { calls, handlers } = setup();
     const result = await handlers.handle(request({ action: 'message', message: 'Help with this page', route: '/customers' }));
-    assert.deepEqual(result, { disabled: true, fallback: true, knowledgeVersion: '2026-11-18.1' });
+    assert.deepEqual(result, { disabled: true, fallback: true, knowledgeVersion: '2026-11-18.2' });
     assert.equal(calls.length, 0);
   } finally {
     if (previous === undefined) delete process.env.RL_AI_ASSISTANT_ENABLED;

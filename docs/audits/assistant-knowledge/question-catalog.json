@@ -1,0 +1,3507 @@
+[
+  {
+    "id": "CPE-01",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I create a request for an estimate for a new or prospective customer?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Customers > New Inquiry > Create inquiry for a new prospect",
+    "verifiedAnswer": "Open Customers and choose New Inquiry. Choose Create inquiry for a new prospect, enter contact, service property, Service requested, category and follow-up details, then Save inquiry. From the saved inquiry choose Schedule Estimate. Do not start with Schedule New Job.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/components/InquiryWorkspace.jsx",
+      "functions/customerIntake.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/customers",
+        "expectation": "procedure",
+        "required": [
+          [
+            "customers"
+          ],
+          [
+            "new inquiry"
+          ],
+          [
+            "new prospect"
+          ],
+          [
+            "service property"
+          ],
+          [
+            "schedule estimate"
+          ],
+          [
+            "do not",
+            "schedule new job"
+          ]
+        ]
+      },
+      {
+        "role": "owner",
+        "route": "/customers",
+        "expectation": "procedure",
+        "required": [
+          [
+            "new inquiry"
+          ],
+          [
+            "prospect"
+          ],
+          [
+            "schedule estimate"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-02",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I schedule an estimate visit for an existing customer?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Customers > New Inquiry > Find existing customer > Use this customer > Save inquiry > Schedule Estimate",
+    "verifiedAnswer": "Create an inquiry, search for and select the existing customer and property, describe the requested service, save, then choose Schedule Estimate and review date, quarter-hour time, property and eligible field worker.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/components/InquiryWorkspace.jsx",
+      "functions/customerIntake.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/customers",
+        "expectation": "procedure",
+        "required": [
+          [
+            "new inquiry"
+          ],
+          [
+            "existing customer",
+            "search"
+          ],
+          [
+            "schedule estimate"
+          ],
+          [
+            "quarter-hour",
+            "time"
+          ],
+          [
+            "eligible",
+            "field worker",
+            "technician"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-03",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I add a customer without first creating an inquiry?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Customers > Add Customer",
+    "verifiedAnswer": "On Customers choose Add Customer, enter identity/contact and address fields, then save. Use New Inquiry instead when the contact is still a prospect requesting an estimate.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/CustomerManagementPage.jsx",
+      "routeLogisticsWeb/src/components/ServicePropertyDirectory.jsx",
+      "functions/index.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/customers",
+        "expectation": "procedure",
+        "required": [
+          [
+            "customers"
+          ],
+          [
+            "add customer"
+          ],
+          [
+            "new inquiry",
+            "prospect"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-04",
+    "category": "Customers, prospects and estimates",
+    "question": "How does Route Logistics prevent a duplicate prospect or customer?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Customers > New Inquiry > Find matching customers",
+    "verifiedAnswer": "Search existing customers by name, email, phone or service address. If possible matches appear, reuse the correct record; creating a separate prospect requires explicit confirmation and a reason.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/components/InquiryWorkspace.jsx",
+      "functions/customerIntake.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/customers",
+        "expectation": "procedure",
+        "required": [
+          [
+            "search"
+          ],
+          [
+            "existing customer"
+          ],
+          [
+            "separate prospect",
+            "duplicate"
+          ],
+          [
+            "reason"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-05",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I manage more than one service property for a customer?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Customers > View customer > Service properties",
+    "verifiedAnswer": "Open the customer, use the Service properties section to add or edit labeled properties, validate the service address and save. Scheduling must select the property where service occurs, not the billing address.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/CustomerManagementPage.jsx",
+      "routeLogisticsWeb/src/components/ServicePropertyDirectory.jsx",
+      "functions/index.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/customers",
+        "expectation": "procedure",
+        "required": [
+          [
+            "customer"
+          ],
+          [
+            "service propert"
+          ],
+          [
+            "add",
+            "edit"
+          ],
+          [
+            "service address",
+            "billing"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-06",
+    "category": "Customers, prospects and estimates",
+    "question": "Can I change the service property while creating an appointment and save it permanently?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Jobs > New Job > Service property > Enable Editing",
+    "verifiedAnswer": "Choose Enable Editing before changing the populated address. Google validation is advisory for internal scheduling. Select the option to save the address to the customer when the change should be permanent; otherwise it applies only to the job.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/components/JobFormModal.jsx",
+      "routeLogisticsWeb/src/pages/JobManagementPage.jsx",
+      "functions/index.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/jobs",
+        "expectation": "procedure",
+        "required": [
+          [
+            "enable editing"
+          ],
+          [
+            "google",
+            "address"
+          ],
+          [
+            "permanent",
+            "customer"
+          ],
+          [
+            "job"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-07",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I check whether a prospect property is inside our service area?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Customers > New Inquiry > Check coverage / owner exception",
+    "verifiedAnswer": "Enter the service property and category, expand Check coverage / owner exception, and run the eligibility check. An authorized owner can approve an explicit out-of-area exception; the server rechecks eligibility.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/components/InquiryWorkspace.jsx",
+      "functions/customerIntake.js",
+      "routeLogisticsWeb/src/components/ServicePropertyEligibility.jsx",
+      "functions/serviceAreas.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/customers",
+        "expectation": "procedure",
+        "required": [
+          [
+            "check coverage"
+          ],
+          [
+            "service property"
+          ],
+          [
+            "category"
+          ],
+          [
+            "owner",
+            "exception"
+          ],
+          [
+            "server"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-08",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I assign an estimate visit to a field worker?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Customers > inquiry > Schedule Estimate > Assigned technician",
+    "verifiedAnswer": "From the saved inquiry choose Schedule Estimate. In the scheduling dialog confirm the Estimate visit kind, select an eligible field worker under Assigned technician, review conflicts and alternatives, then save.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/components/InquiryWorkspace.jsx",
+      "functions/customerIntake.js",
+      "routeLogisticsWeb/src/components/JobFormModal.jsx",
+      "routeLogisticsWeb/src/pages/JobManagementPage.jsx",
+      "functions/index.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/customers",
+        "expectation": "procedure",
+        "required": [
+          [
+            "schedule estimate"
+          ],
+          [
+            "assigned technician",
+            "field worker"
+          ],
+          [
+            "eligible"
+          ],
+          [
+            "conflict",
+            "alternative"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-09",
+    "category": "Customers, prospects and estimates",
+    "question": "How does a technician open an assigned estimate visit?",
+    "supportedRoles": [
+      "technician",
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Mobile > Field > assigned work order > Prepare Estimate",
+    "verifiedAnswer": "In Field mode open the assigned estimate visit, complete the visit workflow, then choose Prepare Estimate. Technicians can prepare only an assigned estimate and cannot approve it as management.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/EstimatesPage.jsx",
+      "routeLogisticsMobile/screens/EstimatesScreen.js",
+      "functions/estimates.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "my work",
+            "assigned"
+          ],
+          [
+            "prepare estimate"
+          ],
+          [
+            "cannot",
+            "management",
+            "approve"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-10",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I add labor to an estimate?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician-assigned"
+    ],
+    "navigation": "Estimates > open draft > Add labor line",
+    "verifiedAnswer": "Open the draft, choose Add labor line, enter description, quantity and unit price, then save the versioned draft. Server calculation determines totals.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/EstimatesPage.jsx",
+      "routeLogisticsMobile/screens/EstimatesScreen.js",
+      "functions/estimates.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/estimates",
+        "expectation": "procedure",
+        "required": [
+          [
+            "estimates"
+          ],
+          [
+            "labor"
+          ],
+          [
+            "description"
+          ],
+          [
+            "quantity"
+          ],
+          [
+            "unit price"
+          ],
+          [
+            "save",
+            "version"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-11",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I add materials to an estimate?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician-assigned"
+    ],
+    "navigation": "Estimates > open draft > Add material line",
+    "verifiedAnswer": "Open the draft, choose Add material line, enter description, quantity and unit price, then save the versioned draft.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/EstimatesPage.jsx",
+      "routeLogisticsMobile/screens/EstimatesScreen.js",
+      "functions/estimates.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/estimates",
+        "expectation": "procedure",
+        "required": [
+          [
+            "estimate"
+          ],
+          [
+            "material"
+          ],
+          [
+            "description"
+          ],
+          [
+            "quantity"
+          ],
+          [
+            "unit price"
+          ],
+          [
+            "save"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-12",
+    "category": "Customers, prospects and estimates",
+    "question": "Can I add notes and photos to an estimate?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician-assigned"
+    ],
+    "navigation": "Estimates > open draft > Notes / Camera / Gallery",
+    "verifiedAnswer": "Yes. Add scope/notes and capture or select photos in the estimate draft. Photos are retained locally until uploaded and attached to a saved version; keep the draft until synchronization is confirmed.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/EstimatesPage.jsx",
+      "routeLogisticsMobile/screens/EstimatesScreen.js",
+      "functions/estimates.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/estimates",
+        "expectation": "procedure",
+        "required": [
+          [
+            "notes"
+          ],
+          [
+            "photo"
+          ],
+          [
+            "draft"
+          ],
+          [
+            "save",
+            "upload"
+          ],
+          [
+            "sync"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-13",
+    "category": "Customers, prospects and estimates",
+    "question": "Can I prepare and save an estimate while the mobile app is offline?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician-assigned"
+    ],
+    "navigation": "Mobile > Estimates > edit assigned estimate",
+    "verifiedAnswer": "A previously loaded assigned estimate can be edited offline. The app shows saved-on-device or waiting-to-sync state and retries after reconnection. It must not be treated as server-saved until synchronization succeeds.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/EstimatesPage.jsx",
+      "routeLogisticsMobile/screens/EstimatesScreen.js",
+      "functions/estimates.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/estimates",
+        "expectation": "procedure",
+        "required": [
+          [
+            "offline"
+          ],
+          [
+            "saved",
+            "device"
+          ],
+          [
+            "waiting",
+            "sync"
+          ],
+          [
+            "reconnect"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-14",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I create or share an estimate PDF?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician-assigned"
+    ],
+    "navigation": "Estimates > open saved version > Share estimate PDF",
+    "verifiedAnswer": "Open the saved estimate version and choose Share estimate PDF. Customer email delivery is a separate action and may require management approval and enabled email.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/EstimatesPage.jsx",
+      "routeLogisticsMobile/screens/EstimatesScreen.js",
+      "functions/estimates.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/estimates",
+        "expectation": "procedure",
+        "required": [
+          [
+            "estimate"
+          ],
+          [
+            "pdf"
+          ],
+          [
+            "share"
+          ],
+          [
+            "email",
+            "separate"
+          ],
+          [
+            "approval"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-15",
+    "category": "Customers, prospects and estimates",
+    "question": "How does a technician submit an estimate for management review?",
+    "supportedRoles": [
+      "technician-assigned"
+    ],
+    "navigation": "Mobile > Estimates > saved server version > Submit for Review",
+    "verifiedAnswer": "Save and synchronize the exact draft version first, then choose Submit for Review. The version becomes read-only for the technician while management reviews it.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/EstimatesPage.jsx",
+      "routeLogisticsMobile/screens/EstimatesScreen.js",
+      "functions/estimates.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/estimates",
+        "expectation": "procedure",
+        "required": [
+          [
+            "save",
+            "synchronize"
+          ],
+          [
+            "submit for review"
+          ],
+          [
+            "version"
+          ],
+          [
+            "management"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-16",
+    "category": "Customers, prospects and estimates",
+    "question": "How does a manager approve an estimate or request changes?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Estimates > open submitted version > Approve for delivery / Request changes",
+    "verifiedAnswer": "Open the submitted version. Enter review comments as needed, then choose Approve for delivery or Request changes. Approval applies only to that exact version.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/EstimatesPage.jsx",
+      "routeLogisticsMobile/screens/EstimatesScreen.js",
+      "functions/estimates.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/estimates",
+        "expectation": "procedure",
+        "required": [
+          [
+            "submitted",
+            "version"
+          ],
+          [
+            "approve for delivery"
+          ],
+          [
+            "request changes"
+          ],
+          [
+            "exact",
+            "version"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-17",
+    "category": "Customers, prospects and estimates",
+    "question": "How is an approved estimate sent to the customer?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Estimates > approved version > Email approved estimate",
+    "verifiedAnswer": "After management approves the exact version, choose Email approved estimate and monitor delivery status. A technician can send directly only if the company owner enabled that policy.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/EstimatesPage.jsx",
+      "routeLogisticsMobile/screens/EstimatesScreen.js",
+      "functions/estimates.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/estimates",
+        "expectation": "procedure",
+        "required": [
+          [
+            "approve"
+          ],
+          [
+            "email approved estimate"
+          ],
+          [
+            "delivery status"
+          ],
+          [
+            "technician",
+            "owner",
+            "policy"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-18",
+    "category": "Customers, prospects and estimates",
+    "question": "How can a customer approve, decline, or request a revision to an estimate?",
+    "supportedRoles": [
+      "customer"
+    ],
+    "navigation": "Secure estimate email link > approval page",
+    "verifiedAnswer": "The customer opens the secure estimate link and acts on the exact version: approve, decline, or request a revision. A later edit creates a new version and does not rewrite the earlier decision.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/EstimateApprovalPage.jsx",
+      "functions/estimates.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/estimates",
+        "expectation": "procedure",
+        "required": [
+          [
+            "customer"
+          ],
+          [
+            "approve"
+          ],
+          [
+            "decline"
+          ],
+          [
+            "revision"
+          ],
+          [
+            "version"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-19",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I revise an estimate after changes are requested?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician-assigned"
+    ],
+    "navigation": "Estimates > revision-requested estimate > edit and save new version",
+    "verifiedAnswer": "Open the revision-requested estimate, review management/customer comments, edit the draft, save a new immutable version, and submit or approve that version through the normal workflow.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/EstimatesPage.jsx",
+      "routeLogisticsMobile/screens/EstimatesScreen.js",
+      "functions/estimates.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/estimates",
+        "expectation": "procedure",
+        "required": [
+          [
+            "revision"
+          ],
+          [
+            "comments"
+          ],
+          [
+            "new",
+            "version"
+          ],
+          [
+            "submit"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "CPE-20",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I schedule work after a customer approves an estimate?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Estimates > Approved — scheduling needed > Convert approved estimate",
+    "verifiedAnswer": "Open Estimates and locate the estimate marked Approved — scheduling needed. Choose Convert approved estimate to job, confirm required property/category or prospect conversion details, choose date and quarter-hour time, then explicitly convert. This creates one unassigned job linked to the immutable approved estimate and pricing. Technician selection is not currently inside the conversion dialog; assign the technician later in Jobs or Dispatch.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/EstimatesPage.jsx",
+      "routeLogisticsMobile/screens/EstimatesScreen.js",
+      "functions/estimates.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/estimates",
+        "expectation": "procedure",
+        "required": [
+          [
+            "approved"
+          ],
+          [
+            "convert approved estimate"
+          ],
+          [
+            "property",
+            "category"
+          ],
+          [
+            "quarter-hour",
+            "time"
+          ],
+          [
+            "unassigned"
+          ],
+          [
+            "jobs",
+            "dispatch"
+          ],
+          [
+            "immutable",
+            "pricing"
+          ]
+        ]
+      },
+      {
+        "role": "technician",
+        "route": "/estimates",
+        "expectation": "permission-denied",
+        "required": [
+          [
+            "role",
+            "cannot",
+            "ask"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "JSD-01",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I create a one-time job for an existing customer?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Jobs > New Job > One-time appointment",
+    "verifiedAnswer": "Open Jobs, choose New Job, select an existing customer and service property, keep One-time appointment, enter service, date, quarter-hour time and duration, optionally assign an eligible field worker, then Schedule Job.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/components/JobFormModal.jsx",
+      "routeLogisticsWeb/src/pages/JobManagementPage.jsx",
+      "functions/index.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/jobs",
+        "expectation": "procedure",
+        "required": [
+          [
+            "jobs"
+          ],
+          [
+            "new job"
+          ],
+          [
+            "existing customer"
+          ],
+          [
+            "service property"
+          ],
+          [
+            "one-time"
+          ],
+          [
+            "quarter-hour"
+          ],
+          [
+            "schedule job"
+          ]
+        ]
+      },
+      {
+        "role": "technician",
+        "route": "/jobs",
+        "expectation": "permission-denied",
+        "required": [
+          [
+            "role",
+            "cannot",
+            "ask"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "JSD-02",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I create a recurring weekly, monthly, or quarterly appointment?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Jobs > New Job > Recurring appointment",
+    "verifiedAnswer": "Choose Recurring appointment, select the frequency/pattern and first service date, configure preferred technician and fallback behavior, review availability, then save. The recurring Service Plan creates future jobs.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/components/JobFormModal.jsx",
+      "routeLogisticsWeb/src/pages/JobManagementPage.jsx",
+      "functions/index.js",
+      "routeLogisticsWeb/src/pages/ServicePlansPage.jsx",
+      "functions/recurring.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/jobs",
+        "expectation": "procedure",
+        "required": [
+          [
+            "recurring"
+          ],
+          [
+            "frequency",
+            "weekly",
+            "monthly",
+            "quarterly"
+          ],
+          [
+            "first",
+            "date"
+          ],
+          [
+            "preferred technician"
+          ],
+          [
+            "service plan"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "JSD-03",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "Can I assign a technician before saving a new job?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Jobs > New Job > Assigned technician",
+    "verifiedAnswer": "Yes. Select Assigned technician before saving. Only field-eligible staff appear; review schedule conflicts and alternatives before Schedule Job.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/components/JobFormModal.jsx",
+      "routeLogisticsWeb/src/pages/JobManagementPage.jsx",
+      "functions/index.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/jobs",
+        "expectation": "procedure",
+        "required": [
+          [
+            "assigned technician"
+          ],
+          [
+            "before",
+            "saving"
+          ],
+          [
+            "field",
+            "eligible"
+          ],
+          [
+            "conflict",
+            "alternative"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "JSD-04",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "What happens if the selected technician has a schedule conflict?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Jobs > New/Edit Job > Technician and schedule",
+    "verifiedAnswer": "The availability check shows overlapping work and alternate times/dates. Choose a conflict-free alternative or deliberately leave unassigned/review the warning; travel time is not included in the conflict check.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/components/JobFormModal.jsx",
+      "routeLogisticsWeb/src/pages/JobManagementPage.jsx",
+      "functions/index.js",
+      "routeLogisticsWeb/src/components/TechnicianAvailability.jsx"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/jobs",
+        "expectation": "procedure",
+        "required": [
+          [
+            "conflict"
+          ],
+          [
+            "alternate",
+            "alternative"
+          ],
+          [
+            "time",
+            "date"
+          ],
+          [
+            "travel",
+            "not included"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "JSD-05",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "Why is a manager or owner missing from the assignment list?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Company > Team > Field work settings",
+    "verifiedAnswer": "Role and field-work eligibility are separate. Open Company and enable field assignment for that staff member. Office-only managers retain management access but do not appear for new field assignments.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/CompanySetupPage.jsx",
+      "routeLogisticsMobile/components/StaffAvailabilityEditor.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/company-setup",
+        "expectation": "procedure",
+        "required": [
+          [
+            "role"
+          ],
+          [
+            "field work",
+            "field assignment"
+          ],
+          [
+            "office-only"
+          ],
+          [
+            "management access"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "JSD-06",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I cancel an appointment?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Jobs > View/Edit job > Cancel appointment",
+    "verifiedAnswer": "Open the job and choose Cancel appointment, then confirm. Scheduled work can be cancelled and retained in history; in-progress or completed work cannot be cancelled through this action.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/components/JobFormModal.jsx",
+      "routeLogisticsWeb/src/pages/JobManagementPage.jsx",
+      "functions/index.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/jobs",
+        "expectation": "procedure",
+        "required": [
+          [
+            "cancel"
+          ],
+          [
+            "confirm"
+          ],
+          [
+            "retained",
+            "history"
+          ],
+          [
+            "in-progress"
+          ],
+          [
+            "completed"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "JSD-07",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I permanently delete a test job?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Jobs > job actions/details > Permanently delete",
+    "verifiedAnswer": "Choose Permanently delete and confirm. It is limited to authorized management, is unavailable for in-progress work and estimate visits, and is intended for records that may safely be removed.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/components/JobFormModal.jsx",
+      "routeLogisticsWeb/src/pages/JobManagementPage.jsx",
+      "functions/index.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/jobs",
+        "expectation": "procedure",
+        "required": [
+          [
+            "permanently delete"
+          ],
+          [
+            "confirm"
+          ],
+          [
+            "in-progress"
+          ],
+          [
+            "estimate visit"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "JSD-08",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I skip one recurring visit or pause recurring service for a period?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Service Plans > plan > Pause",
+    "verifiedAnswer": "Open Service Plans, choose Pause, then select Skip the next occurrence only, Pause through a date, or Pause indefinitely. Already-created Jobs remain individually manageable. Use Resume to reactivate an indefinite pause.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/ServicePlansPage.jsx",
+      "functions/recurring.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/service-plans",
+        "expectation": "procedure",
+        "required": [
+          [
+            "service plans"
+          ],
+          [
+            "pause"
+          ],
+          [
+            "skip",
+            "next occurrence"
+          ],
+          [
+            "through",
+            "date"
+          ],
+          [
+            "indefinite"
+          ],
+          [
+            "already",
+            "jobs"
+          ],
+          [
+            "resume"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "JSD-09",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I reassign a job from the web app?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Dispatch or Jobs > Assigned to",
+    "verifiedAnswer": "Open Dispatch or the job in Jobs, select a different eligible field worker in Assigned to, review conflicts/availability, and save. A technician cannot self-reassign without management.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/components/JobFormModal.jsx",
+      "routeLogisticsWeb/src/pages/JobManagementPage.jsx",
+      "functions/index.js",
+      "routeLogisticsWeb/src/pages/DispatchPage.jsx",
+      "routeLogisticsWeb/src/pages/RoutesPage.jsx",
+      "functions/routes.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/dispatch",
+        "expectation": "procedure",
+        "required": [
+          [
+            "dispatch",
+            "jobs"
+          ],
+          [
+            "assigned to",
+            "reassign"
+          ],
+          [
+            "eligible"
+          ],
+          [
+            "conflict",
+            "availability"
+          ]
+        ]
+      },
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "permission-denied",
+        "required": [
+          [
+            "role",
+            "cannot",
+            "ask"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "JSD-10",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How does a manager reassign scheduled work in the mobile app?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Mobile > Management > Scheduled jobs > job > reassignment controls",
+    "verifiedAnswer": "Switch to Management mode, open Scheduled jobs, select the job and choose an eligible staff member. Review conflicts before confirming. Technicians instead submit a reassignment request.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/screens/ManagementScreen.js",
+      "routeLogisticsMobile/services/managementPolicy.js",
+      "routeLogisticsMobile/components/JobReassignmentRequest.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/dispatch",
+        "expectation": "procedure",
+        "required": [
+          [
+            "management"
+          ],
+          [
+            "scheduled jobs"
+          ],
+          [
+            "eligible"
+          ],
+          [
+            "conflict"
+          ],
+          [
+            "technician",
+            "request"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "JSD-11",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I calculate and save a technician’s daily route?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Daily Routes > technician/date > Load jobs > Calculate route > Save stop order",
+    "verifiedAnswer": "Open Daily Routes, select the technician and service date, choose Load jobs, set the start/departure options, choose Calculate route, review warnings, and then choose Save stop order. Route optimization requires valid service locations.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/DispatchPage.jsx",
+      "routeLogisticsWeb/src/pages/RoutesPage.jsx",
+      "functions/routes.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/routes",
+        "expectation": "procedure",
+        "required": [
+          [
+            "daily routes"
+          ],
+          [
+            "technician"
+          ],
+          [
+            "service date"
+          ],
+          [
+            "calculate route"
+          ],
+          [
+            "save stop order"
+          ],
+          [
+            "valid",
+            "location"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "JSD-12",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I show jobs and technician locations on the dispatch map?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Dispatch > Show dispatch map > Locate service addresses",
+    "verifiedAnswer": "Open Dispatch, choose the service date and filters, show the map, and locate unmapped service addresses in controlled batches. Job markers and on-duty team positions are distinct; GPS freshness does not prove availability.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/DispatchPage.jsx",
+      "routeLogisticsWeb/src/pages/RoutesPage.jsx",
+      "functions/routes.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/dispatch",
+        "expectation": "procedure",
+        "required": [
+          [
+            "dispatch"
+          ],
+          [
+            "map"
+          ],
+          [
+            "service address"
+          ],
+          [
+            "job",
+            "marker"
+          ],
+          [
+            "on-duty",
+            "team"
+          ],
+          [
+            "gps",
+            "availability"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "JSD-13",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "Where do I review potentially late, overdue, or reassignment-requested jobs?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Dispatch > attention filters",
+    "verifiedAnswer": "Use Dispatch and select Potentially late, Overdue, or Reassignment requested. These indicators do not automatically change assignments or prove technician absence.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/DispatchPage.jsx",
+      "routeLogisticsWeb/src/pages/RoutesPage.jsx",
+      "functions/routes.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/dispatch",
+        "expectation": "procedure",
+        "required": [
+          [
+            "dispatch"
+          ],
+          [
+            "potentially late"
+          ],
+          [
+            "overdue"
+          ],
+          [
+            "reassignment requested"
+          ],
+          [
+            "do not",
+            "assignment",
+            "absence"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "JSD-14",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do job statuses change from scheduled to completed?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician-assigned"
+    ],
+    "navigation": "Mobile > assigned job > field workflow",
+    "verifiedAnswer": "Assigned field staff progress authorized work through en-route/in-progress and completion using the job workflow. Completion requires work completed text and preserves visit/checklist/photo drafts. Managers can review status but must not bypass assignment controls.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/components/JobWorkflow.js",
+      "routeLogisticsMobile/components/FieldWorkTools.js",
+      "routeLogisticsMobile/services/offline.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "assigned"
+          ],
+          [
+            "en-route",
+            "in-progress"
+          ],
+          [
+            "complete"
+          ],
+          [
+            "work completed"
+          ],
+          [
+            "draft"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "JSD-15",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "Why can’t I see or open a job that should be assigned to me?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician"
+    ],
+    "navigation": "Mobile > Field/Schedule or Web > Jobs/Dispatch",
+    "verifiedAnswer": "Confirm the signed-in workspace, active membership, current assignment and non-cancelled status. Refresh assigned work after reconnecting. Technicians see only authorized assigned jobs; ask management to correct assignment rather than weakening access.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/components/JobWorkflow.js",
+      "routeLogisticsMobile/components/FieldWorkTools.js",
+      "routeLogisticsMobile/services/offline.js",
+      "routeLogisticsMobile/services/useJobResources.js",
+      "functions/security.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "workspace",
+            "membership"
+          ],
+          [
+            "assignment"
+          ],
+          [
+            "refresh",
+            "reconnect"
+          ],
+          [
+            "assigned jobs"
+          ],
+          [
+            "management"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "MOB-01",
+    "category": "Technician mobile workflows",
+    "question": "How does a technician sign in on mobile with a password or email code?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician"
+    ],
+    "navigation": "Mobile Login > Password or Email code",
+    "verifiedAnswer": "Choose Password or Email code. For Email code request the newest six-digit code and enter it within ten minutes. An invitation must still be accepted separately before company access exists.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/LoginPage.jsx",
+      "routeLogisticsMobile/screens/LoginScreen.js",
+      "functions/staffLogin.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "password"
+          ],
+          [
+            "email code"
+          ],
+          [
+            "six-digit"
+          ],
+          [
+            "ten minutes",
+            "expires"
+          ],
+          [
+            "invitation",
+            "separate"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "MOB-02",
+    "category": "Technician mobile workflows",
+    "question": "What is the difference between Field and Management mode?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager"
+    ],
+    "navigation": "Mobile mode toggle",
+    "verifiedAnswer": "Field mode shows the signed-in person’s assigned work. Management mode exposes authorized operational summaries and management actions. A technician has Field access only; switching mode does not change role or permissions.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/screens/HomeScreen.js",
+      "routeLogisticsMobile/screens/SettingsScreen.js",
+      "routeLogisticsMobile/services/mobileMode.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/",
+        "expectation": "procedure",
+        "required": [
+          [
+            "field"
+          ],
+          [
+            "management"
+          ],
+          [
+            "assigned work"
+          ],
+          [
+            "does not",
+            "role",
+            "permission"
+          ]
+        ]
+      },
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "field"
+          ],
+          [
+            "technician"
+          ],
+          [
+            "permission"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "MOB-03",
+    "category": "Technician mobile workflows",
+    "question": "How do I go On Duty or Off Duty?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician"
+    ],
+    "navigation": "Mobile Home header > On Duty/Off Duty > Work shift",
+    "verifiedAnswer": "Tap the status button in the Home header, then Start shift or End shift. On Duty is a server shift state; Off Duty stops work-location sharing on the device after the end is confirmed.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/components/WorkLocation.js",
+      "functions/locations.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "on duty",
+            "off duty"
+          ],
+          [
+            "home",
+            "header"
+          ],
+          [
+            "start shift",
+            "end shift"
+          ],
+          [
+            "location",
+            "sharing"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "MOB-04",
+    "category": "Technician mobile workflows",
+    "question": "When is my location shared with the manager or owner?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician"
+    ],
+    "navigation": "Mobile Home > On Duty > Work shift",
+    "verifiedAnswer": "Location is shared only during an active On Duty shift after device permission/consent. Background sharing depends on the selected option and OS permission. End shift to stop; recording a visit does not start continuous sharing.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/components/WorkLocation.js",
+      "routeLogisticsMobile/services/workTracking.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "on duty",
+            "shift"
+          ],
+          [
+            "permission",
+            "consent"
+          ],
+          [
+            "background"
+          ],
+          [
+            "end shift"
+          ],
+          [
+            "visit",
+            "does not"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "MOB-05",
+    "category": "Technician mobile workflows",
+    "question": "Can I open and work on a job while offline?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician-assigned"
+    ],
+    "navigation": "Mobile > previously loaded assigned job",
+    "verifiedAnswer": "Yes, only if the authorized job was opened/cached online first. Offline work is saved in the company/user/role/membership scope and must synchronize after reconnection; access is revalidated before server changes.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/components/JobWorkflow.js",
+      "routeLogisticsMobile/components/FieldWorkTools.js",
+      "routeLogisticsMobile/services/offline.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "opened",
+            "online",
+            "cached"
+          ],
+          [
+            "offline"
+          ],
+          [
+            "company",
+            "user",
+            "scope"
+          ],
+          [
+            "reconnect",
+            "sync"
+          ],
+          [
+            "access",
+            "revalidated"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "MOB-06",
+    "category": "Technician mobile workflows",
+    "question": "Will work-note drafts survive closing or restarting the mobile app?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician-assigned"
+    ],
+    "navigation": "Job Details > Work notes > Save work notes",
+    "verifiedAnswer": "Typed work notes are persisted per company/user/job and restored after restart. Use Save work notes to queue synchronization. Do not discard the draft until Saved to server is shown.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/components/JobWorkflow.js",
+      "routeLogisticsMobile/components/FieldWorkTools.js",
+      "routeLogisticsMobile/services/offline.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "work notes"
+          ],
+          [
+            "company",
+            "user",
+            "job"
+          ],
+          [
+            "restart",
+            "restore"
+          ],
+          [
+            "save work notes"
+          ],
+          [
+            "saved to server"
+          ],
+          [
+            "do not",
+            "discard"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "MOB-07",
+    "category": "Technician mobile workflows",
+    "question": "How do I take or choose a job photo and what happens offline?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician-assigned"
+    ],
+    "navigation": "Job Details > Photos > Camera or Gallery",
+    "verifiedAnswer": "Open Photos and choose Camera or Gallery, grant permission when requested, select/capture the image and save/queue it. The retained file and operation survive offline restart and show waiting/sync/error state with retry.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/components/JobPhotos.js",
+      "routeLogisticsMobile/services/offline.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "photo"
+          ],
+          [
+            "camera",
+            "gallery"
+          ],
+          [
+            "permission"
+          ],
+          [
+            "offline",
+            "restart"
+          ],
+          [
+            "waiting",
+            "sync",
+            "retry"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "MOB-08",
+    "category": "Technician mobile workflows",
+    "question": "How do I record arrival at a job?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician-assigned"
+    ],
+    "navigation": "Job Details > Visit record > Record arrival",
+    "verifiedAnswer": "Choose Record arrival, optionally attach a current GPS sample, then save the visit event. The original event time and operation ID are retained offline. Arrival evidence does not independently prove access.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/components/JobWorkflow.js",
+      "routeLogisticsMobile/components/FieldWorkTools.js",
+      "routeLogisticsMobile/services/offline.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "record arrival"
+          ],
+          [
+            "gps",
+            "optional"
+          ],
+          [
+            "visit event"
+          ],
+          [
+            "offline"
+          ],
+          [
+            "does not",
+            "prove",
+            "access"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "MOB-09",
+    "category": "Technician mobile workflows",
+    "question": "How do I record departure from a job?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician-assigned"
+    ],
+    "navigation": "Job Details > Visit record > Record departure",
+    "verifiedAnswer": "Choose Record departure, optionally include a current GPS sample, then save. Confirm the green/completed state or synchronization label before leaving the workflow.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/components/JobWorkflow.js",
+      "routeLogisticsMobile/components/FieldWorkTools.js",
+      "routeLogisticsMobile/services/offline.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "record departure"
+          ],
+          [
+            "gps",
+            "optional"
+          ],
+          [
+            "save"
+          ],
+          [
+            "sync",
+            "saved"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "MOB-10",
+    "category": "Technician mobile workflows",
+    "question": "What should I record if I cannot access the property?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician-assigned"
+    ],
+    "navigation": "Job Details > Visit record > Couldn't access property",
+    "verifiedAnswer": "Choose Couldn’t access property, enter the required explanation, optionally include GPS evidence, and save the access-blocked visit event. This records evidence; it does not automatically complete or cancel the job.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/components/JobWorkflow.js",
+      "routeLogisticsMobile/components/FieldWorkTools.js",
+      "routeLogisticsMobile/services/offline.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "access",
+            "property"
+          ],
+          [
+            "explanation",
+            "note"
+          ],
+          [
+            "gps",
+            "optional"
+          ],
+          [
+            "does not",
+            "complete",
+            "cancel"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "MOB-11",
+    "category": "Technician mobile workflows",
+    "question": "Why do I see a service checklist and which template should I use?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician-assigned"
+    ],
+    "navigation": "Job Details > Service checklist",
+    "verifiedAnswer": "A manager attaches the company/service-appropriate template. Technicians complete the pinned template but cannot choose or replace it. The management catalog is filtered for the company/job and the server rejects an unrelated built-in template. Saved report versions remain tied to the job assignment.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/components/ServiceChecklist.js",
+      "routeLogisticsWeb/src/components/ServiceChecklist.jsx",
+      "functions/serviceForms.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "manager"
+          ],
+          [
+            "template"
+          ],
+          [
+            "technician",
+            "cannot",
+            "pinned"
+          ],
+          [
+            "company",
+            "job",
+            "service"
+          ],
+          [
+            "reject",
+            "unrelated"
+          ],
+          [
+            "version",
+            "assignment"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "MOB-12",
+    "category": "Technician mobile workflows",
+    "question": "What must I do before completing a job?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician-assigned"
+    ],
+    "navigation": "Job Details > Complete > Review completion",
+    "verifiedAnswer": "Save or explicitly discard open notes/photo/checklist/visit drafts, enter Work completed, optional hours/notes and estimate-visit outcome when applicable, review the confirmation, then submit. Product application is optional unless company policy says otherwise.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/components/JobWorkflow.js",
+      "routeLogisticsMobile/components/FieldWorkTools.js",
+      "routeLogisticsMobile/services/offline.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "save",
+            "discard"
+          ],
+          [
+            "draft"
+          ],
+          [
+            "work completed"
+          ],
+          [
+            "review completion"
+          ],
+          [
+            "product application",
+            "optional"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "MOB-13",
+    "category": "Technician mobile workflows",
+    "question": "What do I do when mobile synchronization fails?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician-assigned"
+    ],
+    "navigation": "Job Details > synchronization state > Retry",
+    "verifiedAnswer": "Keep the local draft, reconnect, use the specific retry control and wait for Saved to server. Do not recreate the work or discard the stable operation; conflicts require management review.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/components/JobWorkflow.js",
+      "routeLogisticsMobile/components/FieldWorkTools.js",
+      "routeLogisticsMobile/services/offline.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "keep",
+            "draft"
+          ],
+          [
+            "reconnect"
+          ],
+          [
+            "retry"
+          ],
+          [
+            "saved to server"
+          ],
+          [
+            "do not",
+            "discard"
+          ],
+          [
+            "conflict",
+            "management"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "MOB-14",
+    "category": "Technician mobile workflows",
+    "question": "How does a technician request that a job be reassigned?",
+    "supportedRoles": [
+      "technician-assigned"
+    ],
+    "navigation": "Job Details > Request reassignment",
+    "verifiedAnswer": "Open the assigned nonterminal job, choose Request reassignment, select a supported reason and add appropriate notes. Management receives the request and must resolve it; the technician does not change the assignment directly.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/components/JobReassignmentRequest.js",
+      "functions/jobExceptions.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "request reassignment"
+          ],
+          [
+            "reason"
+          ],
+          [
+            "management"
+          ],
+          [
+            "does not",
+            "assignment",
+            "directly"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "MOB-15",
+    "category": "Technician mobile workflows",
+    "question": "Where can I change mobile appearance and find the app version?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician"
+    ],
+    "navigation": "Mobile > Settings > Appearance / About",
+    "verifiedAnswer": "Open Settings. Appearance offers System, Light and Dark and stores the choice on the device. Open About for the app version/build used by support.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/screens/HomeScreen.js",
+      "routeLogisticsMobile/screens/SettingsScreen.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "settings"
+          ],
+          [
+            "appearance"
+          ],
+          [
+            "system"
+          ],
+          [
+            "light"
+          ],
+          [
+            "dark"
+          ],
+          [
+            "device"
+          ],
+          [
+            "about"
+          ],
+          [
+            "version"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "BIL-01",
+    "category": "Billing, payments and approvals",
+    "question": "How do I create an invoice from a completed job?",
+    "supportedRoles": [
+      "owner",
+      "admin"
+    ],
+    "navigation": "Jobs > View completed billable job > Create Invoice",
+    "verifiedAnswer": "Open the completed billable job in Jobs, choose Create Invoice, review the preview/source details and explicitly generate the draft. Estimate visits are nonbillable and cannot use this path.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/InvoicesPage.jsx",
+      "routeLogisticsWeb/src/components/InvoiceCreationDialog.jsx",
+      "functions/invoices.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "owner",
+        "route": "/invoices",
+        "expectation": "procedure",
+        "required": [
+          [
+            "jobs"
+          ],
+          [
+            "completed",
+            "billable"
+          ],
+          [
+            "create invoice"
+          ],
+          [
+            "preview"
+          ],
+          [
+            "estimate visit",
+            "nonbillable"
+          ]
+        ]
+      },
+      {
+        "role": "manager",
+        "route": "/jobs",
+        "expectation": "permission-denied",
+        "required": [
+          [
+            "role",
+            "cannot",
+            "ask"
+          ]
+        ]
+      },
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "permission-denied",
+        "required": [
+          [
+            "role",
+            "cannot",
+            "ask"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "BIL-02",
+    "category": "Billing, payments and approvals",
+    "question": "Can a manager or technician create or view invoices?",
+    "supportedRoles": [
+      "owner",
+      "admin"
+    ],
+    "navigation": "Invoices (owner/admin only)",
+    "verifiedAnswer": "No. The current capability policy gives invoice read/manage access to owners and administrators only. Managers and technicians must ask an authorized owner or administrator.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/InvoicesPage.jsx",
+      "routeLogisticsWeb/src/components/InvoiceCreationDialog.jsx",
+      "functions/invoices.js",
+      "functions/shared/capabilities.json",
+      "routeLogisticsWeb/src/utils/routeAccess.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/invoices",
+        "expectation": "permission-denied",
+        "required": [
+          [
+            "role",
+            "cannot",
+            "ask"
+          ]
+        ]
+      },
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "permission-denied",
+        "required": [
+          [
+            "role",
+            "cannot",
+            "ask"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "BIL-03",
+    "category": "Billing, payments and approvals",
+    "question": "How do I review an invoice before generating it?",
+    "supportedRoles": [
+      "owner",
+      "admin"
+    ],
+    "navigation": "Jobs > completed job > Create Invoice > preview dialog",
+    "verifiedAnswer": "Open Create Invoice from eligible completed work, review customer/source, immutable completed work, line items, totals and warnings, then explicitly create. Do not rely on the assistant to perform the financial action.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/InvoicesPage.jsx",
+      "routeLogisticsWeb/src/components/InvoiceCreationDialog.jsx",
+      "functions/invoices.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "owner",
+        "route": "/invoices",
+        "expectation": "procedure",
+        "required": [
+          [
+            "preview"
+          ],
+          [
+            "customer",
+            "source"
+          ],
+          [
+            "line item",
+            "total"
+          ],
+          [
+            "explicit"
+          ],
+          [
+            "assistant",
+            "does not"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "BIL-04",
+    "category": "Billing, payments and approvals",
+    "question": "How do I correct an invoice after it has been issued?",
+    "supportedRoles": [
+      "owner",
+      "admin"
+    ],
+    "navigation": "Invoices > invoice actions > Void / Review replacement",
+    "verifiedAnswer": "Do not silently rewrite issued history. Void the eligible invoice with confirmation, then use Review replacement for its job. Payment locks must be resolved first and audit history is retained.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/InvoicesPage.jsx",
+      "routeLogisticsWeb/src/components/InvoiceCreationDialog.jsx",
+      "functions/invoices.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "owner",
+        "route": "/invoices",
+        "expectation": "procedure",
+        "required": [
+          [
+            "void"
+          ],
+          [
+            "review replacement"
+          ],
+          [
+            "payment lock"
+          ],
+          [
+            "audit",
+            "history"
+          ],
+          [
+            "do not",
+            "rewrite"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "BIL-05",
+    "category": "Billing, payments and approvals",
+    "question": "What does a Stripe test payment change on an invoice?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "authorized customer"
+    ],
+    "navigation": "Invoices > sent invoice > Test card payment",
+    "verifiedAnswer": "In test mode the Payment Element creates a test PaymentIntent. Signed webhook reconciliation updates testPaymentStatus and payment audit state, but does not mark the real invoice paid.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/components/InvoicePayment.jsx",
+      "functions/payments.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "owner",
+        "route": "/invoices",
+        "expectation": "procedure",
+        "required": [
+          [
+            "test"
+          ],
+          [
+            "payment"
+          ],
+          [
+            "webhook"
+          ],
+          [
+            "testpaymentstatus",
+            "test payment status"
+          ],
+          [
+            "does not",
+            "invoice",
+            "paid"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "BIL-06",
+    "category": "Billing, payments and approvals",
+    "question": "Can Route Logistics collect live card payments now?",
+    "supportedRoles": [],
+    "navigation": "No enabled production workflow",
+    "verifiedAnswer": "No. Live payments remain disabled unless live mode is configured and explicitly approved. Use only the controlled test flow; the assistant cannot enable payments.",
+    "implementationStatus": "disabled",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/components/InvoicePayment.jsx",
+      "functions/payments.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "owner",
+        "route": "/invoices",
+        "expectation": "unsupported",
+        "required": [
+          [
+            "live"
+          ],
+          [
+            "disabled"
+          ],
+          [
+            "test"
+          ],
+          [
+            "cannot",
+            "enable"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "BIL-07",
+    "category": "Billing, payments and approvals",
+    "question": "What invoices and payments can a customer see in the portal?",
+    "supportedRoles": [
+      "authorized customer"
+    ],
+    "navigation": "Customer Portal > provider > invoices/payment history",
+    "verifiedAnswer": "After email-code verification, the customer sees only invoices and payment history linked to their authorized provider association and matching portal identity. Provider switching remains tenant-scoped.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/CustomerPortalPage.jsx",
+      "functions/portal.js",
+      "functions/payments.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "owner",
+        "route": "/invoices",
+        "expectation": "procedure",
+        "required": [
+          [
+            "customer portal"
+          ],
+          [
+            "email",
+            "code"
+          ],
+          [
+            "authorized",
+            "provider"
+          ],
+          [
+            "tenant",
+            "scoped"
+          ],
+          [
+            "invoice",
+            "payment history"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "BIL-08",
+    "category": "Billing, payments and approvals",
+    "question": "How do I email an invoice and verify delivery?",
+    "supportedRoles": [
+      "owner",
+      "admin"
+    ],
+    "navigation": "Invoices > Email invoice",
+    "verifiedAnswer": "For a draft/sent eligible invoice choose Email invoice. The app queues delivery and records status; sent status is not the same as inbox delivery, so review delivery/audit status when needed.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/InvoicesPage.jsx",
+      "functions/invoiceEmail.js",
+      "functions/mail.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "owner",
+        "route": "/invoices",
+        "expectation": "procedure",
+        "required": [
+          [
+            "email invoice"
+          ],
+          [
+            "queue"
+          ],
+          [
+            "delivery",
+            "status"
+          ],
+          [
+            "not",
+            "inbox"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "BIL-09",
+    "category": "Billing, payments and approvals",
+    "question": "Is QuickBooks synchronization available and can it export accounting data?",
+    "supportedRoles": [
+      "owner",
+      "admin-read"
+    ],
+    "navigation": "Integrations > QuickBooks Online",
+    "verifiedAnswer": "The owner can connect the company sandbox and review status/options/mappings. Accounting exports are currently disabled; production synchronization is not approved. Do not use Export reviewed record until writes are deliberately enabled for a controlled environment.",
+    "implementationStatus": "limited",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/IntegrationsPage.jsx",
+      "functions/quickBooks.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "owner",
+        "route": "/integrations",
+        "expectation": "procedure",
+        "required": [
+          [
+            "quickbooks"
+          ],
+          [
+            "owner"
+          ],
+          [
+            "sandbox"
+          ],
+          [
+            "exports",
+            "disabled"
+          ],
+          [
+            "production",
+            "not",
+            "approved"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "BIL-10",
+    "category": "Billing, payments and approvals",
+    "question": "How do I choose the default QuickBooks income account and service item?",
+    "supportedRoles": [
+      "owner"
+    ],
+    "navigation": "Integrations > Accounting defaults",
+    "verifiedAnswer": "Connect QuickBooks, refresh available options, search the active income accounts and service items, choose both defaults and Save defaults. Empty lists must be populated in QuickBooks first. Saving preferences does not create or modify QuickBooks records.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/IntegrationsPage.jsx",
+      "functions/quickBooks.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "owner",
+        "route": "/integrations",
+        "expectation": "procedure",
+        "required": [
+          [
+            "accounting defaults"
+          ],
+          [
+            "refresh"
+          ],
+          [
+            "income account"
+          ],
+          [
+            "service item"
+          ],
+          [
+            "save defaults"
+          ],
+          [
+            "does not",
+            "create",
+            "modify"
+          ]
+        ]
+      },
+      {
+        "role": "manager",
+        "route": "/integrations",
+        "expectation": "permission-denied",
+        "required": [
+          [
+            "role",
+            "cannot",
+            "ask"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "APT-01",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "What can a company owner do that other roles cannot?",
+    "supportedRoles": [
+      "owner"
+    ],
+    "navigation": "Company and all authorized operational pages",
+    "verifiedAnswer": "The owner has company edit, team management, ownership transfer, finance and integration management in addition to operations. Owner-reserved actions include invitations/role changes, ownership transfer and QuickBooks connection/defaults.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "functions/shared/capabilities.json",
+      "routeLogisticsWeb/src/utils/routeAccess.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "owner",
+        "route": "/company-setup",
+        "expectation": "procedure",
+        "required": [
+          [
+            "owner"
+          ],
+          [
+            "team"
+          ],
+          [
+            "ownership"
+          ],
+          [
+            "invoice",
+            "finance"
+          ],
+          [
+            "integration",
+            "quickbooks"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "APT-02",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "What can a manager do and what is restricted?",
+    "supportedRoles": [
+      "manager"
+    ],
+    "navigation": "Operational pages allowed by capability policy",
+    "verifiedAnswer": "Managers can manage customers, jobs, assignments, estimates, plans, routes, dispatch, locations, operational reports and reviews. They cannot manage invoices/financial reports, company ownership, team invitations/roles or owner-only integrations.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "functions/shared/capabilities.json",
+      "routeLogisticsWeb/src/utils/routeAccess.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/",
+        "expectation": "procedure",
+        "required": [
+          [
+            "customers"
+          ],
+          [
+            "jobs",
+            "dispatch"
+          ],
+          [
+            "estimate"
+          ],
+          [
+            "cannot",
+            "invoice",
+            "financial"
+          ],
+          [
+            "cannot",
+            "owner",
+            "team",
+            "integration"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "APT-03",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "What can a technician access?",
+    "supportedRoles": [
+      "technician"
+    ],
+    "navigation": "Dashboard/My Work, assigned Estimates, Routes, read-only customer/company context",
+    "verifiedAnswer": "Technicians can read authorized company/customer/job context, work assigned jobs, prepare assigned estimates, read routes and share their own location. They cannot schedule/assign company work, manage customers, invoices, team or integrations.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "functions/shared/capabilities.json",
+      "routeLogisticsWeb/src/utils/routeAccess.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "assigned",
+            "jobs"
+          ],
+          [
+            "assigned",
+            "estimate"
+          ],
+          [
+            "route"
+          ],
+          [
+            "own",
+            "location"
+          ],
+          [
+            "cannot",
+            "schedule",
+            "invoice",
+            "team"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "APT-04",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "How does the owner invite a technician or manager?",
+    "supportedRoles": [
+      "owner"
+    ],
+    "navigation": "Company > Team > invitation email/role > Send invite",
+    "verifiedAnswer": "Open Company, enter the email, select Technician or Manager and send the invitation. The role is owner-selected. If email is disabled or delayed, copy the generated invitation link securely.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/CompanySetupPage.jsx",
+      "functions/invitations.js",
+      "functions/mail.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "owner",
+        "route": "/company-setup",
+        "expectation": "procedure",
+        "required": [
+          [
+            "company"
+          ],
+          [
+            "email"
+          ],
+          [
+            "technician",
+            "manager"
+          ],
+          [
+            "invitation"
+          ],
+          [
+            "role"
+          ],
+          [
+            "link"
+          ]
+        ]
+      },
+      {
+        "role": "manager",
+        "route": "/company-setup",
+        "expectation": "permission-denied",
+        "required": [
+          [
+            "role",
+            "cannot",
+            "ask"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "APT-05",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "Where does an invited new user set a password?",
+    "supportedRoles": [
+      "invited user"
+    ],
+    "navigation": "Invitation link > Create account > verify email > return to invitation > Accept invitation",
+    "verifiedAnswer": "A new user creates a personal Route Logistics login from the invitation flow, sets the password during account creation, verifies email, then returns to Accept invitation. Acceptance joins the existing company and does not create a team.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/AcceptInvitePage.jsx",
+      "routeLogisticsWeb/src/pages/SignUpPage.jsx"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/",
+        "expectation": "procedure",
+        "required": [
+          [
+            "invitation"
+          ],
+          [
+            "create",
+            "login",
+            "account"
+          ],
+          [
+            "password"
+          ],
+          [
+            "verify",
+            "email"
+          ],
+          [
+            "accept invitation"
+          ],
+          [
+            "does not",
+            "create",
+            "team"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "APT-06",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "What should an invited user do if they already have a Route Logistics account?",
+    "supportedRoles": [
+      "invited user"
+    ],
+    "navigation": "Invitation link > Sign in > return > Accept invitation",
+    "verifiedAnswer": "Sign in with the existing password or use Forgot password, then reopen the same invitation and choose Accept invitation while signed in with the invited email.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/AcceptInvitePage.jsx"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/",
+        "expectation": "procedure",
+        "required": [
+          [
+            "existing",
+            "account"
+          ],
+          [
+            "sign in"
+          ],
+          [
+            "forgot password"
+          ],
+          [
+            "invitation"
+          ],
+          [
+            "accept invitation"
+          ],
+          [
+            "invited email"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "APT-07",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "How do I reset a forgotten password?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician"
+    ],
+    "navigation": "Login > Forgot password? > Send password reset link",
+    "verifiedAnswer": "On Login choose Forgot password?, enter the email and send the reset link. After changing the password, sign in again; reopen a pending invitation if one still needs acceptance.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/LoginPage.jsx",
+      "routeLogisticsMobile/screens/LoginScreen.js",
+      "functions/staffLogin.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/",
+        "expectation": "procedure",
+        "required": [
+          [
+            "forgot password"
+          ],
+          [
+            "reset",
+            "link"
+          ],
+          [
+            "sign in"
+          ],
+          [
+            "invitation"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "APT-08",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "How does email-code login work for staff?",
+    "supportedRoles": [
+      "verified owner",
+      "verified admin",
+      "verified manager",
+      "verified technician"
+    ],
+    "navigation": "Login > Email code > Email a sign-in code",
+    "verifiedAnswer": "Choose Email code, request a code for a verified staff account, enter the newest six-digit code within ten minutes and sign in. Codes are single-use/rate-limited; customer portal codes belong on the portal.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/LoginPage.jsx",
+      "routeLogisticsMobile/screens/LoginScreen.js",
+      "functions/staffLogin.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/",
+        "expectation": "procedure",
+        "required": [
+          [
+            "email code"
+          ],
+          [
+            "verified"
+          ],
+          [
+            "six-digit"
+          ],
+          [
+            "ten minutes",
+            "expires"
+          ],
+          [
+            "single-use",
+            "rate"
+          ],
+          [
+            "customer portal"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "APT-09",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "What does Remember me store?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician"
+    ],
+    "navigation": "Login > Remember me",
+    "verifiedAnswer": "It stores only the email address on that device for convenience. It does not store the password or bypass authentication.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/pages/LoginPage.jsx",
+      "routeLogisticsMobile/screens/LoginScreen.js",
+      "functions/staffLogin.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/",
+        "expectation": "procedure",
+        "required": [
+          [
+            "remember"
+          ],
+          [
+            "email"
+          ],
+          [
+            "device"
+          ],
+          [
+            "does not",
+            "password",
+            "bypass"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "APT-10",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "How do I permanently delete my mobile account?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician"
+    ],
+    "navigation": "Mobile > Settings > Account and legal > Delete account",
+    "verifiedAnswer": "Open Settings and Delete account, review pending offline work, sign in recently if required, type the full current email exactly and complete the destructive confirmation. Personal sign-in is deleted while required business/audit records are retained.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsMobile/components/DeleteAccountSettings.js",
+      "functions/accountDeletion.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "technician",
+        "route": "/my-work",
+        "expectation": "procedure",
+        "required": [
+          [
+            "settings"
+          ],
+          [
+            "delete account"
+          ],
+          [
+            "offline",
+            "pending"
+          ],
+          [
+            "sign in"
+          ],
+          [
+            "email"
+          ],
+          [
+            "confirmation"
+          ],
+          [
+            "business",
+            "audit",
+            "retained"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "APT-11",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "Why do I get a missing or insufficient permissions error after my role changes?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician"
+    ],
+    "navigation": "Refresh access / sign out and sign in",
+    "verifiedAnswer": "The active membership, token role and membership ID must match. Use Refresh access or sign out/in to obtain current claims. If the membership is inactive or wrong, the owner must correct it; retrying must not bypass tenant checks.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "functions/security.js",
+      "functions/claims.js",
+      "routeLogisticsWeb/src/contexts/AuthContext.jsx"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/",
+        "expectation": "procedure",
+        "required": [
+          [
+            "membership"
+          ],
+          [
+            "role"
+          ],
+          [
+            "refresh access",
+            "sign out"
+          ],
+          [
+            "claims"
+          ],
+          [
+            "owner"
+          ],
+          [
+            "tenant"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "APT-12",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "Can I switch to another company workspace with the same account?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician"
+    ],
+    "navigation": "Workspace access selection when multiple memberships are available",
+    "verifiedAnswer": "Only active authorized memberships can be selected. Switching refreshes claims and data scope; unsaved/offline work remains scoped to the original company and must not be mixed across workspaces.",
+    "implementationStatus": "limited",
+    "sourceReferences": [
+      "routeLogisticsMobile/screens/WorkspaceScreen.js",
+      "routeLogisticsMobile/screens/WorkspaceAccessScreen.js",
+      "functions/workspace.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/",
+        "expectation": "procedure",
+        "required": [
+          [
+            "active",
+            "membership"
+          ],
+          [
+            "switch",
+            "workspace"
+          ],
+          [
+            "claims",
+            "scope"
+          ],
+          [
+            "offline",
+            "original company"
+          ],
+          [
+            "not",
+            "mixed"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "APT-13",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "Can the AI Assistant change jobs, customers, invoices, or permissions for me?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician"
+    ],
+    "navigation": "Assistant chat",
+    "verifiedAnswer": "No. The assistant is guidance-only and offers authorized navigation. It does not execute customer, job, financial, credential or permission changes.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/features/assistant/RouteLogisticsAssistant.jsx",
+      "functions/assistant.js",
+      "C:/Users/sjroy/Source/Merxus/merxus-ai-backend/src/modules/chat/services/routeLogisticsKnowledgeBase.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "owner",
+        "route": "/",
+        "expectation": "procedure",
+        "required": [
+          [
+            "guidance"
+          ],
+          [
+            "does not",
+            "cannot"
+          ],
+          [
+            "job",
+            "customer"
+          ],
+          [
+            "invoice",
+            "financial"
+          ],
+          [
+            "permission"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "APT-14",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "How do I contact a human or report a problem from the assistant?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician"
+    ],
+    "navigation": "Assistant > Support or Report a Problem",
+    "verifiedAnswer": "Use the existing support workflow: open Support or Report a Problem, review the disclosure, enter only necessary non-customer/non-financial details and submit to Workside Support. A handoff is not automatic from an ordinary question.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/features/assistant/RouteLogisticsAssistant.jsx",
+      "functions/assistant.js",
+      "C:/Users/sjroy/Source/Merxus/merxus-ai-backend/src/modules/chat/services/routeLogisticsKnowledgeBase.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/",
+        "expectation": "procedure",
+        "required": [
+          [
+            "support",
+            "report a problem"
+          ],
+          [
+            "disclosure"
+          ],
+          [
+            "without",
+            "customer",
+            "financial"
+          ],
+          [
+            "workside"
+          ],
+          [
+            "not",
+            "automatic"
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "APT-15",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "How do I close or reset an assistant conversation, and what should I do if it is unavailable?",
+    "supportedRoles": [
+      "owner",
+      "admin",
+      "manager",
+      "technician"
+    ],
+    "navigation": "Assistant > New conversation / minimize; retry on provider error",
+    "verifiedAnswer": "Use the assistant’s new/reset conversation control to close the existing session and start clean; minimizing preserves it in session storage. If the provider is unavailable, retry later and use verified help topics. Closing a conversation does not change application data.",
+    "implementationStatus": "implemented",
+    "sourceReferences": [
+      "routeLogisticsWeb/src/features/assistant/RouteLogisticsAssistant.jsx",
+      "functions/assistant.js",
+      "C:/Users/sjroy/Source/Merxus/merxus-ai-backend/src/modules/chat/services/routeLogisticsKnowledgeBase.js"
+    ],
+    "verificationStatus": "SOURCE_VERIFIED",
+    "assistantTests": [
+      {
+        "role": "manager",
+        "route": "/",
+        "expectation": "procedure",
+        "required": [
+          [
+            "conversation",
+            "session"
+          ],
+          [
+            "close",
+            "new",
+            "reset"
+          ],
+          [
+            "minimize",
+            "preserve"
+          ],
+          [
+            "unavailable",
+            "retry"
+          ],
+          [
+            "does not",
+            "data"
+          ]
+        ]
+      }
+    ]
+  }
+]

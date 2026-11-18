@@ -1,0 +1,21 @@
+{
+  "generatedAt": "2026-11-18T17:03:09.866Z",
+  "auditMode": "local-full-path-no-network",
+  "catalogQuestions": 75,
+  "assistantCases": 85,
+  "knowledgeVersion": "2026-11-18.2",
+  "capabilityPolicyVersion": 3,
+  "merxusResolverPath": "C:\\Users\\sjroy\\Source\\Merxus\\merxus-ai-backend\\src\\modules\\chat\\services\\routeLogisticsKnowledgeBase.js",
+  "missingSourceReferences": [],
+  "questionClassifications": {
+    "PASS": 74,
+    "UNSUPPORTED": 1
+  },
+  "caseClassifications": {
+    "PASS": 84,
+    "UNSUPPORTED": 1
+  },
+  "strictAccuracyPercent": 100,
+  "substantialAccuracyPercent": 100,
+  "criticalFailureCases": 0
+}

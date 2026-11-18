@@ -1,0 +1,2537 @@
+[
+  {
+    "questionId": "CPE-01",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I create a request for an estimate for a new or prospective customer?",
+    "role": "manager",
+    "requestedRoute": "/customers",
+    "callableRoute": "/customers",
+    "pageCategory": "customers",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Customers and choose New Inquiry. Search for an existing customer first; if this is a new contact, choose Create inquiry for a new prospect. Enter the prospect contact information, service property, requested service, and follow-up details, then save the inquiry. From the saved inquiry, choose Schedule Estimate and select the date, quarter-hour time, and eligible field worker. The contact remains a prospect until conversion is appropriate. Do not use Schedule New Job for someone who does not yet have an established customer record.",
+    "error": null,
+    "classification": "PASS",
+    "coverageRatio": 1,
+    "missingConceptGroups": [],
+    "rationale": "The response includes the required navigation, procedure, and limitation concepts.",
+    "severity": "none"
+  },
+  {
+    "questionId": "CPE-01",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I create a request for an estimate for a new or prospective customer?",
+    "role": "owner",
+    "requestedRoute": "/customers",
+    "callableRoute": "/customers",
+    "pageCategory": "customers",
+    "callableRole": "owner",
+    "capabilityCount": 28,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Customers and choose New Inquiry. Search for an existing customer first; if this is a new contact, choose Create inquiry for a new prospect. Enter the prospect contact information, service property, requested service, and follow-up details, then save the inquiry. From the saved inquiry, choose Schedule Estimate and select the date, quarter-hour time, and eligible field worker. The contact remains a prospect until conversion is appropriate. Do not use Schedule New Job for someone who does not yet have an established customer record.",
+    "error": null,
+    "classification": "PASS",
+    "coverageRatio": 1,
+    "missingConceptGroups": [],
+    "rationale": "The response includes the required navigation, procedure, and limitation concepts.",
+    "severity": "none"
+  },
+  {
+    "questionId": "CPE-02",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I schedule an estimate visit for an existing customer?",
+    "role": "manager",
+    "requestedRoute": "/customers",
+    "callableRoute": "/customers",
+    "pageCategory": "customers",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Use Jobs to create or edit the appointment, select its service property and quarter-hour start time, then choose an eligible field worker and review conflicts. Use Dispatch to review potentially late, overdue, or reassignment-requested work and to reassign when authorized.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.4,
+    "missingConceptGroups": [
+      [
+        "new inquiry"
+      ],
+      [
+        "existing customer",
+        "search"
+      ],
+      [
+        "schedule estimate"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "CPE-03",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I add a customer without first creating an inquiry?",
+    "role": "manager",
+    "requestedRoute": "/customers",
+    "callableRoute": "/customers",
+    "pageCategory": "customers",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Customers and choose New Inquiry. Search for an existing customer first; if this is a new contact, choose Create inquiry for a new prospect. Enter the prospect contact information, service property, requested service, and follow-up details, then save the inquiry. From the saved inquiry, choose Schedule Estimate and select the date, quarter-hour time, and eligible field worker. The contact remains a prospect until conversion is appropriate. Do not use Schedule New Job for someone who does not yet have an established customer record.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.667,
+    "missingConceptGroups": [
+      [
+        "add customer"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "CPE-04",
+    "category": "Customers, prospects and estimates",
+    "question": "How does Route Logistics prevent a duplicate prospect or customer?",
+    "role": "manager",
+    "requestedRoute": "/customers",
+    "callableRoute": "/customers",
+    "pageCategory": "customers",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Customers and choose New Inquiry. Search for an existing customer first; if this is a new contact, choose Create inquiry for a new prospect. Enter the prospect contact information, service property, requested service, and follow-up details, then save the inquiry. From the saved inquiry, choose Schedule Estimate and select the date, quarter-hour time, and eligible field worker. The contact remains a prospect until conversion is appropriate. Do not use Schedule New Job for someone who does not yet have an established customer record.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.5,
+    "missingConceptGroups": [
+      [
+        "separate prospect",
+        "duplicate"
+      ],
+      [
+        "reason"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "CPE-05",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I manage more than one service property for a customer?",
+    "role": "manager",
+    "requestedRoute": "/customers",
+    "callableRoute": "/customers",
+    "pageCategory": "customers",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Customers and choose New Inquiry. Search for an existing customer first; if this is a new contact, choose Create inquiry for a new prospect. Enter the prospect contact information, service property, requested service, and follow-up details, then save the inquiry. From the saved inquiry, choose Schedule Estimate and select the date, quarter-hour time, and eligible field worker. The contact remains a prospect until conversion is appropriate. Do not use Schedule New Job for someone who does not yet have an established customer record.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.5,
+    "missingConceptGroups": [
+      [
+        "add",
+        "edit"
+      ],
+      [
+        "service address",
+        "billing"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "CPE-06",
+    "category": "Customers, prospects and estimates",
+    "question": "Can I change the service property while creating an appointment and save it permanently?",
+    "role": "manager",
+    "requestedRoute": "/jobs",
+    "callableRoute": "/jobs",
+    "pageCategory": "scheduling",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Customers and choose New Inquiry. Search for an existing customer first; if this is a new contact, choose Create inquiry for a new prospect. Enter the prospect contact information, service property, requested service, and follow-up details, then save the inquiry. From the saved inquiry, choose Schedule Estimate and select the date, quarter-hour time, and eligible field worker. The contact remains a prospect until conversion is appropriate. Do not use Schedule New Job for someone who does not yet have an established customer record.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.5,
+    "missingConceptGroups": [
+      [
+        "enable editing"
+      ],
+      [
+        "google",
+        "address"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "CPE-07",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I check whether a prospect property is inside our service area?",
+    "role": "manager",
+    "requestedRoute": "/customers",
+    "callableRoute": "/customers",
+    "pageCategory": "customers",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Customers and choose New Inquiry. Search for an existing customer first; if this is a new contact, choose Create inquiry for a new prospect. Enter the prospect contact information, service property, requested service, and follow-up details, then save the inquiry. From the saved inquiry, choose Schedule Estimate and select the date, quarter-hour time, and eligible field worker. The contact remains a prospect until conversion is appropriate. Do not use Schedule New Job for someone who does not yet have an established customer record.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0.2,
+    "missingConceptGroups": [
+      [
+        "check coverage"
+      ],
+      [
+        "category"
+      ],
+      [
+        "owner",
+        "exception"
+      ],
+      [
+        "server"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "CPE-08",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I assign an estimate visit to a field worker?",
+    "role": "manager",
+    "requestedRoute": "/customers",
+    "callableRoute": "/customers",
+    "pageCategory": "customers",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Use Jobs to create or edit the appointment, select its service property and quarter-hour start time, then choose an eligible field worker and review conflicts. Use Dispatch to review potentially late, overdue, or reassignment-requested work and to reassign when authorized.",
+    "error": null,
+    "classification": "PASS",
+    "coverageRatio": 0.75,
+    "missingConceptGroups": [
+      [
+        "schedule estimate"
+      ]
+    ],
+    "rationale": "The response includes the required navigation, procedure, and limitation concepts.",
+    "severity": "none"
+  },
+  {
+    "questionId": "CPE-09",
+    "category": "Customers, prospects and estimates",
+    "question": "How does a technician open an assigned estimate visit?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Estimates or the assigned estimate visit. Add labor, materials, notes, and photos, then save the versioned draft. You can prepare an assigned estimate and submit the exact version for management review, but you cannot approve or send it as management.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.667,
+    "missingConceptGroups": [
+      [
+        "prepare estimate"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "CPE-10",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I add labor to an estimate?",
+    "role": "manager",
+    "requestedRoute": "/estimates",
+    "callableRoute": "/estimates",
+    "pageCategory": "estimates",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Estimates or the assigned estimate visit. Add labor, materials, notes, and photos, then save the versioned draft. Review the exact submitted version, request changes or approve it, send it to the customer, and schedule work only after customer approval.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.5,
+    "missingConceptGroups": [
+      [
+        "description"
+      ],
+      [
+        "quantity"
+      ],
+      [
+        "unit price"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "CPE-11",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I add materials to an estimate?",
+    "role": "technician",
+    "requestedRoute": "/estimates",
+    "callableRoute": "/estimates",
+    "pageCategory": "estimates",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Estimates or the assigned estimate visit. Add labor, materials, notes, and photos, then save the versioned draft. You can prepare an assigned estimate and submit the exact version for management review, but you cannot approve or send it as management.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.5,
+    "missingConceptGroups": [
+      [
+        "description"
+      ],
+      [
+        "quantity"
+      ],
+      [
+        "unit price"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "CPE-12",
+    "category": "Customers, prospects and estimates",
+    "question": "Can I add notes and photos to an estimate?",
+    "role": "technician",
+    "requestedRoute": "/estimates",
+    "callableRoute": "/estimates",
+    "pageCategory": "estimates",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Estimates or the assigned estimate visit. Add labor, materials, notes, and photos, then save the versioned draft. You can prepare an assigned estimate and submit the exact version for management review, but you cannot approve or send it as management.",
+    "error": null,
+    "classification": "PASS",
+    "coverageRatio": 0.8,
+    "missingConceptGroups": [
+      [
+        "sync"
+      ]
+    ],
+    "rationale": "The response includes the required navigation, procedure, and limitation concepts.",
+    "severity": "none"
+  },
+  {
+    "questionId": "CPE-13",
+    "category": "Customers, prospects and estimates",
+    "question": "Can I prepare and save an estimate while the mobile app is offline?",
+    "role": "technician",
+    "requestedRoute": "/estimates",
+    "callableRoute": "/estimates",
+    "pageCategory": "estimates",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open My Work and select the assigned visit. Record arrival/departure, photos, notes, checklist entries, and completion details. Offline drafts stay on the device until server synchronization is confirmed; do not discard a draft that is still waiting to sync.",
+    "error": null,
+    "classification": "PASS",
+    "coverageRatio": 0.75,
+    "missingConceptGroups": [
+      [
+        "reconnect"
+      ]
+    ],
+    "rationale": "The response includes the required navigation, procedure, and limitation concepts.",
+    "severity": "none"
+  },
+  {
+    "questionId": "CPE-14",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I create or share an estimate PDF?",
+    "role": "manager",
+    "requestedRoute": "/estimates",
+    "callableRoute": "/estimates",
+    "pageCategory": "estimates",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Estimates or the assigned estimate visit. Add labor, materials, notes, and photos, then save the versioned draft. Review the exact submitted version, request changes or approve it, send it to the customer, and schedule work only after customer approval.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.4,
+    "missingConceptGroups": [
+      [
+        "pdf"
+      ],
+      [
+        "share"
+      ],
+      [
+        "email",
+        "separate"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "CPE-15",
+    "category": "Customers, prospects and estimates",
+    "question": "How does a technician submit an estimate for management review?",
+    "role": "technician",
+    "requestedRoute": "/estimates",
+    "callableRoute": "/estimates",
+    "pageCategory": "estimates",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Estimates or the assigned estimate visit. Add labor, materials, notes, and photos, then save the versioned draft. You can prepare an assigned estimate and submit the exact version for management review, but you cannot approve or send it as management.",
+    "error": null,
+    "classification": "PASS",
+    "coverageRatio": 0.75,
+    "missingConceptGroups": [
+      [
+        "submit for review"
+      ]
+    ],
+    "rationale": "The response includes the required navigation, procedure, and limitation concepts.",
+    "severity": "none"
+  },
+  {
+    "questionId": "CPE-16",
+    "category": "Customers, prospects and estimates",
+    "question": "How does a manager approve an estimate or request changes?",
+    "role": "manager",
+    "requestedRoute": "/estimates",
+    "callableRoute": "/estimates",
+    "pageCategory": "estimates",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Estimates or the assigned estimate visit. Add labor, materials, notes, and photos, then save the versioned draft. Review the exact submitted version, request changes or approve it, send it to the customer, and schedule work only after customer approval.",
+    "error": null,
+    "classification": "PASS",
+    "coverageRatio": 0.75,
+    "missingConceptGroups": [
+      [
+        "approve for delivery"
+      ]
+    ],
+    "rationale": "The response includes the required navigation, procedure, and limitation concepts.",
+    "severity": "none"
+  },
+  {
+    "questionId": "CPE-17",
+    "category": "Customers, prospects and estimates",
+    "question": "How is an approved estimate sent to the customer?",
+    "role": "manager",
+    "requestedRoute": "/estimates",
+    "callableRoute": "/estimates",
+    "pageCategory": "estimates",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Estimates or the assigned estimate visit. Add labor, materials, notes, and photos, then save the versioned draft. Review the exact submitted version, request changes or approve it, send it to the customer, and schedule work only after customer approval.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0.25,
+    "missingConceptGroups": [
+      [
+        "email approved estimate"
+      ],
+      [
+        "delivery status"
+      ],
+      [
+        "technician",
+        "owner",
+        "policy"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "CPE-18",
+    "category": "Customers, prospects and estimates",
+    "question": "How can a customer approve, decline, or request a revision to an estimate?",
+    "role": "manager",
+    "requestedRoute": "/estimates",
+    "callableRoute": "/estimates",
+    "pageCategory": "estimates",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Estimates or the assigned estimate visit. Add labor, materials, notes, and photos, then save the versioned draft. Review the exact submitted version, request changes or approve it, send it to the customer, and schedule work only after customer approval.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.6,
+    "missingConceptGroups": [
+      [
+        "decline"
+      ],
+      [
+        "revision"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "CPE-19",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I revise an estimate after changes are requested?",
+    "role": "technician",
+    "requestedRoute": "/estimates",
+    "callableRoute": "/estimates",
+    "pageCategory": "estimates",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Estimates or the assigned estimate visit. Add labor, materials, notes, and photos, then save the versioned draft. You can prepare an assigned estimate and submit the exact version for management review, but you cannot approve or send it as management.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.5,
+    "missingConceptGroups": [
+      [
+        "revision"
+      ],
+      [
+        "comments"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "CPE-20",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I schedule work after a customer approves an estimate?",
+    "role": "manager",
+    "requestedRoute": "/estimates",
+    "callableRoute": "/estimates",
+    "pageCategory": "estimates",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Estimates and locate the customer-approved estimate with Approved — scheduling needed status. Open it and use Convert approved estimate. Confirm its approved property and service category, supplying only required missing property/category or prospect-to-customer information. Choose the service date and quarter-hour time, select Convert approved estimate to job, then explicitly confirm job conversion. This creates one unassigned job linked to the immutable approved estimate. Verify the Converted job reference, then open Jobs or Dispatch to choose an eligible technician and review conflicts or alternatives. Technician selection is not currently inside the conversion dialog. Geographic checks and idempotent conversion remain enforced.",
+    "error": null,
+    "classification": "PASS",
+    "coverageRatio": 1,
+    "missingConceptGroups": [],
+    "rationale": "The response includes the required navigation, procedure, and limitation concepts.",
+    "severity": "none"
+  },
+  {
+    "questionId": "CPE-20",
+    "category": "Customers, prospects and estimates",
+    "question": "How do I schedule work after a customer approves an estimate?",
+    "role": "technician",
+    "requestedRoute": "/estimates",
+    "callableRoute": "/estimates",
+    "pageCategory": "estimates",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Your role cannot convert a customer-approved estimate into scheduled work. Ask an authorized manager, administrator, or owner. Do not create an unrelated new job.",
+    "error": null,
+    "classification": "PASS",
+    "coverageRatio": 1,
+    "missingConceptGroups": [],
+    "rationale": "The response enforced the verified role boundary.",
+    "severity": "none"
+  },
+  {
+    "questionId": "JSD-01",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I create a one-time job for an existing customer?",
+    "role": "manager",
+    "requestedRoute": "/jobs",
+    "callableRoute": "/jobs",
+    "pageCategory": "scheduling",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On Jobs, choose the customer and service property, schedule on a quarter hour, check field-staff availability, and assign the appointment before saving. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0.286,
+    "missingConceptGroups": [
+      [
+        "new job"
+      ],
+      [
+        "existing customer"
+      ],
+      [
+        "one-time"
+      ],
+      [
+        "quarter-hour"
+      ],
+      [
+        "schedule job"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "JSD-01",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I create a one-time job for an existing customer?",
+    "role": "technician",
+    "requestedRoute": "/jobs",
+    "callableRoute": "/",
+    "pageCategory": "dashboard",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "I can help you find the correct Route Logistics page or explain a supported workflow. Ask what you want to do. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [],
+    "rationale": "The response did not enforce the verified role boundary.",
+    "severity": "critical"
+  },
+  {
+    "questionId": "JSD-02",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I create a recurring weekly, monthly, or quarterly appointment?",
+    "role": "manager",
+    "requestedRoute": "/jobs",
+    "callableRoute": "/jobs",
+    "pageCategory": "scheduling",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Use Jobs to create or edit the appointment, select its service property and quarter-hour start time, then choose an eligible field worker and review conflicts. Use Dispatch to review potentially late, overdue, or reassignment-requested work and to reassign when authorized.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "recurring"
+      ],
+      [
+        "frequency",
+        "weekly",
+        "monthly",
+        "quarterly"
+      ],
+      [
+        "first",
+        "date"
+      ],
+      [
+        "preferred technician"
+      ],
+      [
+        "service plan"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "JSD-03",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "Can I assign a technician before saving a new job?",
+    "role": "manager",
+    "requestedRoute": "/jobs",
+    "callableRoute": "/jobs",
+    "pageCategory": "scheduling",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Use Jobs to create or edit the appointment, select its service property and quarter-hour start time, then choose an eligible field worker and review conflicts. Use Dispatch to review potentially late, overdue, or reassignment-requested work and to reassign when authorized.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.5,
+    "missingConceptGroups": [
+      [
+        "assigned technician"
+      ],
+      [
+        "before",
+        "saving"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "JSD-04",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "What happens if the selected technician has a schedule conflict?",
+    "role": "manager",
+    "requestedRoute": "/jobs",
+    "callableRoute": "/jobs",
+    "pageCategory": "scheduling",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Use Jobs to create or edit the appointment, select its service property and quarter-hour start time, then choose an eligible field worker and review conflicts. Use Dispatch to review potentially late, overdue, or reassignment-requested work and to reassign when authorized.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.5,
+    "missingConceptGroups": [
+      [
+        "alternate",
+        "alternative"
+      ],
+      [
+        "travel",
+        "not included"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "JSD-05",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "Why is a manager or owner missing from the assignment list?",
+    "role": "manager",
+    "requestedRoute": "/company-setup",
+    "callableRoute": "/company-setup",
+    "pageCategory": "company",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On Company, authorized users can review team roles, field-work eligibility, services, service areas, availability, and company settings. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.5,
+    "missingConceptGroups": [
+      [
+        "office-only"
+      ],
+      [
+        "management access"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "JSD-06",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I cancel an appointment?",
+    "role": "manager",
+    "requestedRoute": "/jobs",
+    "callableRoute": "/jobs",
+    "pageCategory": "scheduling",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Use Jobs to create or edit the appointment, select its service property and quarter-hour start time, then choose an eligible field worker and review conflicts. Use Dispatch to review potentially late, overdue, or reassignment-requested work and to reassign when authorized.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "cancel"
+      ],
+      [
+        "confirm"
+      ],
+      [
+        "retained",
+        "history"
+      ],
+      [
+        "in-progress"
+      ],
+      [
+        "completed"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "critical"
+  },
+  {
+    "questionId": "JSD-07",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I permanently delete a test job?",
+    "role": "manager",
+    "requestedRoute": "/jobs",
+    "callableRoute": "/jobs",
+    "pageCategory": "scheduling",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On Jobs, choose the customer and service property, schedule on a quarter hour, check field-staff availability, and assign the appointment before saving. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "permanently delete"
+      ],
+      [
+        "confirm"
+      ],
+      [
+        "in-progress"
+      ],
+      [
+        "estimate visit"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "critical"
+  },
+  {
+    "questionId": "JSD-08",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I skip one recurring visit or pause recurring service for a period?",
+    "role": "manager",
+    "requestedRoute": "/service-plans",
+    "callableRoute": "/service-plans",
+    "pageCategory": "service-plans",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "I can help you find the correct Route Logistics page or explain a supported workflow. Ask what you want to do. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "service plans"
+      ],
+      [
+        "pause"
+      ],
+      [
+        "skip",
+        "next occurrence"
+      ],
+      [
+        "through",
+        "date"
+      ],
+      [
+        "indefinite"
+      ],
+      [
+        "already",
+        "jobs"
+      ],
+      [
+        "resume"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "JSD-09",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I reassign a job from the web app?",
+    "role": "manager",
+    "requestedRoute": "/dispatch",
+    "callableRoute": "/dispatch",
+    "pageCategory": "dispatch",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Use Jobs to create or edit the appointment, select its service property and quarter-hour start time, then choose an eligible field worker and review conflicts. Use Dispatch to review potentially late, overdue, or reassignment-requested work and to reassign when authorized.",
+    "error": null,
+    "classification": "PASS",
+    "coverageRatio": 1,
+    "missingConceptGroups": [],
+    "rationale": "The response includes the required navigation, procedure, and limitation concepts.",
+    "severity": "none"
+  },
+  {
+    "questionId": "JSD-09",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I reassign a job from the web app?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Your role can review assigned work but cannot schedule or reassign company appointments. Ask an authorized manager, administrator, or owner. Use My Work for your assigned visits.",
+    "error": null,
+    "classification": "PASS",
+    "coverageRatio": 1,
+    "missingConceptGroups": [],
+    "rationale": "The response enforced the verified role boundary.",
+    "severity": "none"
+  },
+  {
+    "questionId": "JSD-10",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How does a manager reassign scheduled work in the mobile app?",
+    "role": "manager",
+    "requestedRoute": "/dispatch",
+    "callableRoute": "/dispatch",
+    "pageCategory": "dispatch",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Use Jobs to create or edit the appointment, select its service property and quarter-hour start time, then choose an eligible field worker and review conflicts. Use Dispatch to review potentially late, overdue, or reassignment-requested work and to reassign when authorized.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.6,
+    "missingConceptGroups": [
+      [
+        "management"
+      ],
+      [
+        "scheduled jobs"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "JSD-11",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I calculate and save a technician’s daily route?",
+    "role": "manager",
+    "requestedRoute": "/routes",
+    "callableRoute": "/routes",
+    "pageCategory": "routes",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "I can help you find the correct Route Logistics page or explain a supported workflow. Ask what you want to do. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "daily routes"
+      ],
+      [
+        "technician"
+      ],
+      [
+        "service date"
+      ],
+      [
+        "calculate route"
+      ],
+      [
+        "save stop order"
+      ],
+      [
+        "valid",
+        "location"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "JSD-12",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do I show jobs and technician locations on the dispatch map?",
+    "role": "manager",
+    "requestedRoute": "/dispatch",
+    "callableRoute": "/dispatch",
+    "pageCategory": "dispatch",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Use Jobs to create or edit the appointment, select its service property and quarter-hour start time, then choose an eligible field worker and review conflicts. Use Dispatch to review potentially late, overdue, or reassignment-requested work and to reassign when authorized.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0.333,
+    "missingConceptGroups": [
+      [
+        "map"
+      ],
+      [
+        "service address"
+      ],
+      [
+        "on-duty",
+        "team"
+      ],
+      [
+        "gps",
+        "availability"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "JSD-13",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "Where do I review potentially late, overdue, or reassignment-requested jobs?",
+    "role": "manager",
+    "requestedRoute": "/dispatch",
+    "callableRoute": "/dispatch",
+    "pageCategory": "dispatch",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Use Jobs to create or edit the appointment, select its service property and quarter-hour start time, then choose an eligible field worker and review conflicts. Use Dispatch to review potentially late, overdue, or reassignment-requested work and to reassign when authorized.",
+    "error": null,
+    "classification": "PASS",
+    "coverageRatio": 0.8,
+    "missingConceptGroups": [
+      [
+        "reassignment requested"
+      ]
+    ],
+    "rationale": "The response includes the required navigation, procedure, and limitation concepts.",
+    "severity": "none"
+  },
+  {
+    "questionId": "JSD-14",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "How do job statuses change from scheduled to completed?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On My Work, open an assigned visit, record arrival and departure, save notes and photos, complete checklists, and synchronize offline drafts before completion. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.6,
+    "missingConceptGroups": [
+      [
+        "en-route",
+        "in-progress"
+      ],
+      [
+        "work completed"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "JSD-15",
+    "category": "Jobs, scheduling and dispatch",
+    "question": "Why can’t I see or open a job that should be assigned to me?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On My Work, open an assigned visit, record arrival and departure, save notes and photos, complete checklists, and synchronize offline drafts before completion. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "workspace",
+        "membership"
+      ],
+      [
+        "assignment"
+      ],
+      [
+        "refresh",
+        "reconnect"
+      ],
+      [
+        "assigned jobs"
+      ],
+      [
+        "management"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "MOB-01",
+    "category": "Technician mobile workflows",
+    "question": "How does a technician sign in on mobile with a password or email code?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On My Work, open an assigned visit, record arrival and departure, save notes and photos, complete checklists, and synchronize offline drafts before completion. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "password"
+      ],
+      [
+        "email code"
+      ],
+      [
+        "six-digit"
+      ],
+      [
+        "ten minutes",
+        "expires"
+      ],
+      [
+        "invitation",
+        "separate"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "MOB-02",
+    "category": "Technician mobile workflows",
+    "question": "What is the difference between Field and Management mode?",
+    "role": "manager",
+    "requestedRoute": "/",
+    "callableRoute": "/",
+    "pageCategory": "dashboard",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "I can help you find the correct Route Logistics page or explain a supported workflow. Ask what you want to do. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0.25,
+    "missingConceptGroups": [
+      [
+        "management"
+      ],
+      [
+        "assigned work"
+      ],
+      [
+        "does not",
+        "role",
+        "permission"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "MOB-02",
+    "category": "Technician mobile workflows",
+    "question": "What is the difference between Field and Management mode?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On My Work, open an assigned visit, record arrival and departure, save notes and photos, complete checklists, and synchronize offline drafts before completion. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0.333,
+    "missingConceptGroups": [
+      [
+        "technician"
+      ],
+      [
+        "permission"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "MOB-03",
+    "category": "Technician mobile workflows",
+    "question": "How do I go On Duty or Off Duty?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On My Work, open an assigned visit, record arrival and departure, save notes and photos, complete checklists, and synchronize offline drafts before completion. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "on duty",
+        "off duty"
+      ],
+      [
+        "home",
+        "header"
+      ],
+      [
+        "start shift",
+        "end shift"
+      ],
+      [
+        "location",
+        "sharing"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "MOB-04",
+    "category": "Technician mobile workflows",
+    "question": "When is my location shared with the manager or owner?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On My Work, open an assigned visit, record arrival and departure, save notes and photos, complete checklists, and synchronize offline drafts before completion. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0.2,
+    "missingConceptGroups": [
+      [
+        "on duty",
+        "shift"
+      ],
+      [
+        "permission",
+        "consent"
+      ],
+      [
+        "background"
+      ],
+      [
+        "end shift"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "MOB-05",
+    "category": "Technician mobile workflows",
+    "question": "Can I open and work on a job while offline?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open My Work and select the assigned visit. Record arrival/departure, photos, notes, checklist entries, and completion details. Offline drafts stay on the device until server synchronization is confirmed; do not discard a draft that is still waiting to sync.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.4,
+    "missingConceptGroups": [
+      [
+        "opened",
+        "online",
+        "cached"
+      ],
+      [
+        "company",
+        "user",
+        "scope"
+      ],
+      [
+        "access",
+        "revalidated"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "MOB-06",
+    "category": "Technician mobile workflows",
+    "question": "Will work-note drafts survive closing or restarting the mobile app?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On My Work, open an assigned visit, record arrival and departure, save notes and photos, complete checklists, and synchronize offline drafts before completion. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0.167,
+    "missingConceptGroups": [
+      [
+        "work notes"
+      ],
+      [
+        "restart",
+        "restore"
+      ],
+      [
+        "save work notes"
+      ],
+      [
+        "saved to server"
+      ],
+      [
+        "do not",
+        "discard"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "MOB-07",
+    "category": "Technician mobile workflows",
+    "question": "How do I take or choose a job photo and what happens offline?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open My Work and select the assigned visit. Record arrival/departure, photos, notes, checklist entries, and completion details. Offline drafts stay on the device until server synchronization is confirmed; do not discard a draft that is still waiting to sync.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.6,
+    "missingConceptGroups": [
+      [
+        "camera",
+        "gallery"
+      ],
+      [
+        "permission"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "MOB-08",
+    "category": "Technician mobile workflows",
+    "question": "How do I record arrival at a job?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open My Work and select the assigned visit. Record arrival/departure, photos, notes, checklist entries, and completion details. Offline drafts stay on the device until server synchronization is confirmed; do not discard a draft that is still waiting to sync.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.4,
+    "missingConceptGroups": [
+      [
+        "gps",
+        "optional"
+      ],
+      [
+        "visit event"
+      ],
+      [
+        "does not",
+        "prove",
+        "access"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "MOB-09",
+    "category": "Technician mobile workflows",
+    "question": "How do I record departure from a job?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open My Work and select the assigned visit. Record arrival/departure, photos, notes, checklist entries, and completion details. Offline drafts stay on the device until server synchronization is confirmed; do not discard a draft that is still waiting to sync.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0.25,
+    "missingConceptGroups": [
+      [
+        "record departure"
+      ],
+      [
+        "gps",
+        "optional"
+      ],
+      [
+        "save"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "MOB-10",
+    "category": "Technician mobile workflows",
+    "question": "What should I record if I cannot access the property?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On My Work, open an assigned visit, record arrival and departure, save notes and photos, complete checklists, and synchronize offline drafts before completion. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.5,
+    "missingConceptGroups": [
+      [
+        "access",
+        "property"
+      ],
+      [
+        "gps",
+        "optional"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "MOB-11",
+    "category": "Technician mobile workflows",
+    "question": "Why do I see a service checklist and which template should I use?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On My Work, open an assigned visit, record arrival and departure, save notes and photos, complete checklists, and synchronize offline drafts before completion. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0.167,
+    "missingConceptGroups": [
+      [
+        "manager"
+      ],
+      [
+        "template"
+      ],
+      [
+        "technician",
+        "cannot",
+        "pinned"
+      ],
+      [
+        "reject",
+        "unrelated"
+      ],
+      [
+        "version",
+        "assignment"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "MOB-12",
+    "category": "Technician mobile workflows",
+    "question": "What must I do before completing a job?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On My Work, open an assigned visit, record arrival and departure, save notes and photos, complete checklists, and synchronize offline drafts before completion. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.4,
+    "missingConceptGroups": [
+      [
+        "work completed"
+      ],
+      [
+        "review completion"
+      ],
+      [
+        "product application",
+        "optional"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "MOB-13",
+    "category": "Technician mobile workflows",
+    "question": "What do I do when mobile synchronization fails?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On My Work, open an assigned visit, record arrival and departure, save notes and photos, complete checklists, and synchronize offline drafts before completion. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0.167,
+    "missingConceptGroups": [
+      [
+        "reconnect"
+      ],
+      [
+        "retry"
+      ],
+      [
+        "saved to server"
+      ],
+      [
+        "do not",
+        "discard"
+      ],
+      [
+        "conflict",
+        "management"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "MOB-14",
+    "category": "Technician mobile workflows",
+    "question": "How does a technician request that a job be reassigned?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On My Work, open an assigned visit, record arrival and departure, save notes and photos, complete checklists, and synchronize offline drafts before completion. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "request reassignment"
+      ],
+      [
+        "reason"
+      ],
+      [
+        "management"
+      ],
+      [
+        "does not",
+        "assignment",
+        "directly"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "MOB-15",
+    "category": "Technician mobile workflows",
+    "question": "Where can I change mobile appearance and find the app version?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On My Work, open an assigned visit, record arrival and departure, save notes and photos, complete checklists, and synchronize offline drafts before completion. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "settings"
+      ],
+      [
+        "appearance"
+      ],
+      [
+        "system"
+      ],
+      [
+        "light"
+      ],
+      [
+        "dark"
+      ],
+      [
+        "device"
+      ],
+      [
+        "about"
+      ],
+      [
+        "version"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "BIL-01",
+    "category": "Billing, payments and approvals",
+    "question": "How do I create an invoice from a completed job?",
+    "role": "owner",
+    "requestedRoute": "/invoices",
+    "callableRoute": "/invoices",
+    "pageCategory": "invoices",
+    "callableRole": "owner",
+    "capabilityCount": 28,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open My Work and select the assigned visit. Record arrival/departure, photos, notes, checklist entries, and completion details. Offline drafts stay on the device until server synchronization is confirmed; do not discard a draft that is still waiting to sync.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "jobs"
+      ],
+      [
+        "completed",
+        "billable"
+      ],
+      [
+        "create invoice"
+      ],
+      [
+        "preview"
+      ],
+      [
+        "estimate visit",
+        "nonbillable"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "critical"
+  },
+  {
+    "questionId": "BIL-01",
+    "category": "Billing, payments and approvals",
+    "question": "How do I create an invoice from a completed job?",
+    "role": "manager",
+    "requestedRoute": "/jobs",
+    "callableRoute": "/jobs",
+    "pageCategory": "scheduling",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open My Work and select the assigned visit. Record arrival/departure, photos, notes, checklist entries, and completion details. Offline drafts stay on the device until server synchronization is confirmed; do not discard a draft that is still waiting to sync.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "role",
+        "cannot",
+        "ask"
+      ]
+    ],
+    "rationale": "The response did not enforce the verified role boundary.",
+    "severity": "critical"
+  },
+  {
+    "questionId": "BIL-01",
+    "category": "Billing, payments and approvals",
+    "question": "How do I create an invoice from a completed job?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open My Work and select the assigned visit. Record arrival/departure, photos, notes, checklist entries, and completion details. Offline drafts stay on the device until server synchronization is confirmed; do not discard a draft that is still waiting to sync.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "role",
+        "cannot",
+        "ask"
+      ]
+    ],
+    "rationale": "The response did not enforce the verified role boundary.",
+    "severity": "critical"
+  },
+  {
+    "questionId": "BIL-02",
+    "category": "Billing, payments and approvals",
+    "question": "Can a manager or technician create or view invoices?",
+    "role": "manager",
+    "requestedRoute": "/invoices",
+    "callableRoute": "/",
+    "pageCategory": "dashboard",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "I can help you find the correct Route Logistics page or explain a supported workflow. Ask what you want to do. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [],
+    "rationale": "The response did not enforce the verified role boundary.",
+    "severity": "critical"
+  },
+  {
+    "questionId": "BIL-02",
+    "category": "Billing, payments and approvals",
+    "question": "Can a manager or technician create or view invoices?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On My Work, open an assigned visit, record arrival and departure, save notes and photos, complete checklists, and synchronize offline drafts before completion. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [],
+    "rationale": "The response did not enforce the verified role boundary.",
+    "severity": "critical"
+  },
+  {
+    "questionId": "BIL-03",
+    "category": "Billing, payments and approvals",
+    "question": "How do I review an invoice before generating it?",
+    "role": "owner",
+    "requestedRoute": "/invoices",
+    "callableRoute": "/invoices",
+    "pageCategory": "invoices",
+    "callableRole": "owner",
+    "capabilityCount": 28,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Invoices to review billable work and preview the invoice. Explicitly authorize generation only after the preview is correct. Use audited correction/revision controls for changes and the authorized customer or invoice view for payment history. The assistant does not perform financial actions.",
+    "error": null,
+    "classification": "PASS",
+    "coverageRatio": 0.8,
+    "missingConceptGroups": [
+      [
+        "line item",
+        "total"
+      ]
+    ],
+    "rationale": "The response includes the required navigation, procedure, and limitation concepts.",
+    "severity": "none"
+  },
+  {
+    "questionId": "BIL-04",
+    "category": "Billing, payments and approvals",
+    "question": "How do I correct an invoice after it has been issued?",
+    "role": "owner",
+    "requestedRoute": "/invoices",
+    "callableRoute": "/invoices",
+    "pageCategory": "invoices",
+    "callableRole": "owner",
+    "capabilityCount": 28,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Invoices to review billable work and preview the invoice. Explicitly authorize generation only after the preview is correct. Use audited correction/revision controls for changes and the authorized customer or invoice view for payment history. The assistant does not perform financial actions.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0.2,
+    "missingConceptGroups": [
+      [
+        "void"
+      ],
+      [
+        "review replacement"
+      ],
+      [
+        "payment lock"
+      ],
+      [
+        "do not",
+        "rewrite"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "BIL-05",
+    "category": "Billing, payments and approvals",
+    "question": "What does a Stripe test payment change on an invoice?",
+    "role": "owner",
+    "requestedRoute": "/invoices",
+    "callableRoute": "/invoices",
+    "pageCategory": "invoices",
+    "callableRole": "owner",
+    "capabilityCount": 28,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Invoices to review billable work and preview the invoice. Explicitly authorize generation only after the preview is correct. Use audited correction/revision controls for changes and the authorized customer or invoice view for payment history. The assistant does not perform financial actions.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.4,
+    "missingConceptGroups": [
+      [
+        "test"
+      ],
+      [
+        "webhook"
+      ],
+      [
+        "testpaymentstatus",
+        "test payment status"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "BIL-06",
+    "category": "Billing, payments and approvals",
+    "question": "Can Route Logistics collect live card payments now?",
+    "role": "owner",
+    "requestedRoute": "/invoices",
+    "callableRoute": "/invoices",
+    "pageCategory": "invoices",
+    "callableRole": "owner",
+    "capabilityCount": 28,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On Invoices, authorized owners or administrators can preview billable work, explicitly generate an invoice, review status, make audited corrections, and inspect payment history. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "UNSUPPORTED",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "live"
+      ],
+      [
+        "disabled"
+      ],
+      [
+        "test"
+      ],
+      [
+        "cannot",
+        "enable"
+      ]
+    ],
+    "rationale": "The verified workflow is disabled, but the response did not clearly state the limitation.",
+    "severity": "critical"
+  },
+  {
+    "questionId": "BIL-07",
+    "category": "Billing, payments and approvals",
+    "question": "What invoices and payments can a customer see in the portal?",
+    "role": "owner",
+    "requestedRoute": "/invoices",
+    "callableRoute": "/invoices",
+    "pageCategory": "invoices",
+    "callableRole": "owner",
+    "capabilityCount": 28,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On Invoices, authorized owners or administrators can preview billable work, explicitly generate an invoice, review status, make audited corrections, and inspect payment history. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.4,
+    "missingConceptGroups": [
+      [
+        "customer portal"
+      ],
+      [
+        "email",
+        "code"
+      ],
+      [
+        "tenant",
+        "scoped"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "BIL-08",
+    "category": "Billing, payments and approvals",
+    "question": "How do I email an invoice and verify delivery?",
+    "role": "owner",
+    "requestedRoute": "/invoices",
+    "callableRoute": "/invoices",
+    "pageCategory": "invoices",
+    "callableRole": "owner",
+    "capabilityCount": 28,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Invoices to review billable work and preview the invoice. Explicitly authorize generation only after the preview is correct. Use audited correction/revision controls for changes and the authorized customer or invoice view for payment history. The assistant does not perform financial actions.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0.25,
+    "missingConceptGroups": [
+      [
+        "email invoice"
+      ],
+      [
+        "queue"
+      ],
+      [
+        "delivery",
+        "status"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "BIL-09",
+    "category": "Billing, payments and approvals",
+    "question": "Is QuickBooks synchronization available and can it export accounting data?",
+    "role": "owner",
+    "requestedRoute": "/integrations",
+    "callableRoute": "/integrations",
+    "pageCategory": "integrations",
+    "callableRole": "owner",
+    "capabilityCount": 28,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "I can help you find the correct Route Logistics page or explain a supported workflow. Ask what you want to do. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0.2,
+    "missingConceptGroups": [
+      [
+        "quickbooks"
+      ],
+      [
+        "owner"
+      ],
+      [
+        "sandbox"
+      ],
+      [
+        "exports",
+        "disabled"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "BIL-10",
+    "category": "Billing, payments and approvals",
+    "question": "How do I choose the default QuickBooks income account and service item?",
+    "role": "owner",
+    "requestedRoute": "/integrations",
+    "callableRoute": "/integrations",
+    "pageCategory": "integrations",
+    "callableRole": "owner",
+    "capabilityCount": 28,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "I can help you find the correct Route Logistics page or explain a supported workflow. Ask what you want to do. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "accounting defaults"
+      ],
+      [
+        "refresh"
+      ],
+      [
+        "income account"
+      ],
+      [
+        "service item"
+      ],
+      [
+        "save defaults"
+      ],
+      [
+        "does not",
+        "create",
+        "modify"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "BIL-10",
+    "category": "Billing, payments and approvals",
+    "question": "How do I choose the default QuickBooks income account and service item?",
+    "role": "manager",
+    "requestedRoute": "/integrations",
+    "callableRoute": "/",
+    "pageCategory": "dashboard",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "I can help you find the correct Route Logistics page or explain a supported workflow. Ask what you want to do. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [],
+    "rationale": "The response did not enforce the verified role boundary.",
+    "severity": "critical"
+  },
+  {
+    "questionId": "APT-01",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "What can a company owner do that other roles cannot?",
+    "role": "owner",
+    "requestedRoute": "/company-setup",
+    "callableRoute": "/company-setup",
+    "pageCategory": "company",
+    "callableRole": "owner",
+    "capabilityCount": 28,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Company for team roles, field-work eligibility, services, service areas, availability, and company settings. Integrations and Notifications have dedicated pages. Owner-reserved changes remain limited to the company owner.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.6,
+    "missingConceptGroups": [
+      [
+        "ownership"
+      ],
+      [
+        "invoice",
+        "finance"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "APT-02",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "What can a manager do and what is restricted?",
+    "role": "manager",
+    "requestedRoute": "/",
+    "callableRoute": "/",
+    "pageCategory": "dashboard",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "I can help you find the correct Route Logistics page or explain a supported workflow. Ask what you want to do. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.4,
+    "missingConceptGroups": [
+      [
+        "customers"
+      ],
+      [
+        "jobs",
+        "dispatch"
+      ],
+      [
+        "cannot",
+        "owner",
+        "team",
+        "integration"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "APT-03",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "What can a technician access?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On My Work, open an assigned visit, record arrival and departure, save notes and photos, complete checklists, and synchronize offline drafts before completion. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.6,
+    "missingConceptGroups": [
+      [
+        "route"
+      ],
+      [
+        "own",
+        "location"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "APT-04",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "How does the owner invite a technician or manager?",
+    "role": "owner",
+    "requestedRoute": "/company-setup",
+    "callableRoute": "/company-setup",
+    "pageCategory": "company",
+    "callableRole": "owner",
+    "capabilityCount": 28,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On Company, authorized users can review team roles, field-work eligibility, services, service areas, availability, and company settings. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0.333,
+    "missingConceptGroups": [
+      [
+        "email"
+      ],
+      [
+        "technician",
+        "manager"
+      ],
+      [
+        "invitation"
+      ],
+      [
+        "link"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "APT-04",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "How does the owner invite a technician or manager?",
+    "role": "manager",
+    "requestedRoute": "/company-setup",
+    "callableRoute": "/company-setup",
+    "pageCategory": "company",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On Company, authorized users can review team roles, field-work eligibility, services, service areas, availability, and company settings. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [],
+    "rationale": "The response did not enforce the verified role boundary.",
+    "severity": "critical"
+  },
+  {
+    "questionId": "APT-05",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "Where does an invited new user set a password?",
+    "role": "technician",
+    "requestedRoute": "/",
+    "callableRoute": "/",
+    "pageCategory": "dashboard",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "I can help you find the correct Route Logistics page or explain a supported workflow. Ask what you want to do. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "invitation"
+      ],
+      [
+        "create",
+        "login",
+        "account"
+      ],
+      [
+        "password"
+      ],
+      [
+        "verify",
+        "email"
+      ],
+      [
+        "accept invitation"
+      ],
+      [
+        "does not",
+        "create",
+        "team"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "APT-06",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "What should an invited user do if they already have a Route Logistics account?",
+    "role": "technician",
+    "requestedRoute": "/",
+    "callableRoute": "/",
+    "pageCategory": "dashboard",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "I can help you find the correct Route Logistics page or explain a supported workflow. Ask what you want to do. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "existing",
+        "account"
+      ],
+      [
+        "sign in"
+      ],
+      [
+        "forgot password"
+      ],
+      [
+        "invitation"
+      ],
+      [
+        "accept invitation"
+      ],
+      [
+        "invited email"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "APT-07",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "How do I reset a forgotten password?",
+    "role": "manager",
+    "requestedRoute": "/",
+    "callableRoute": "/",
+    "pageCategory": "dashboard",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "I can help you find the correct Route Logistics page or explain a supported workflow. Ask what you want to do. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "forgot password"
+      ],
+      [
+        "reset",
+        "link"
+      ],
+      [
+        "sign in"
+      ],
+      [
+        "invitation"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "APT-08",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "How does email-code login work for staff?",
+    "role": "manager",
+    "requestedRoute": "/",
+    "callableRoute": "/",
+    "pageCategory": "dashboard",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "I can help you find the correct Route Logistics page or explain a supported workflow. Ask what you want to do. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "email code"
+      ],
+      [
+        "verified"
+      ],
+      [
+        "six-digit"
+      ],
+      [
+        "ten minutes",
+        "expires"
+      ],
+      [
+        "single-use",
+        "rate"
+      ],
+      [
+        "customer portal"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "APT-09",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "What does Remember me store?",
+    "role": "technician",
+    "requestedRoute": "/",
+    "callableRoute": "/",
+    "pageCategory": "dashboard",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "I can help you find the correct Route Logistics page or explain a supported workflow. Ask what you want to do. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "remember"
+      ],
+      [
+        "email"
+      ],
+      [
+        "device"
+      ],
+      [
+        "does not",
+        "password",
+        "bypass"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "APT-10",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "How do I permanently delete my mobile account?",
+    "role": "technician",
+    "requestedRoute": "/my-work",
+    "callableRoute": "/my-work",
+    "pageCategory": "technician-work",
+    "callableRole": "technician",
+    "capabilityCount": 7,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "On My Work, open an assigned visit, record arrival and departure, save notes and photos, complete checklists, and synchronize offline drafts before completion. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0.143,
+    "missingConceptGroups": [
+      [
+        "settings"
+      ],
+      [
+        "delete account"
+      ],
+      [
+        "sign in"
+      ],
+      [
+        "email"
+      ],
+      [
+        "confirmation"
+      ],
+      [
+        "business",
+        "audit",
+        "retained"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "APT-11",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "Why do I get a missing or insufficient permissions error after my role changes?",
+    "role": "manager",
+    "requestedRoute": "/",
+    "callableRoute": "/",
+    "pageCategory": "dashboard",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "I can help you find the correct Route Logistics page or explain a supported workflow. Ask what you want to do. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "membership"
+      ],
+      [
+        "role"
+      ],
+      [
+        "refresh access",
+        "sign out"
+      ],
+      [
+        "claims"
+      ],
+      [
+        "owner"
+      ],
+      [
+        "tenant"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "APT-12",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "Can I switch to another company workspace with the same account?",
+    "role": "manager",
+    "requestedRoute": "/",
+    "callableRoute": "/",
+    "pageCategory": "dashboard",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Open Company for team roles, field-work eligibility, services, service areas, availability, and company settings. Integrations and Notifications have dedicated pages. Owner-reserved changes remain limited to the company owner.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0.2,
+    "missingConceptGroups": [
+      [
+        "active",
+        "membership"
+      ],
+      [
+        "switch",
+        "workspace"
+      ],
+      [
+        "claims",
+        "scope"
+      ],
+      [
+        "offline",
+        "original company"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  },
+  {
+    "questionId": "APT-13",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "Can the AI Assistant change jobs, customers, invoices, or permissions for me?",
+    "role": "owner",
+    "requestedRoute": "/",
+    "callableRoute": "/",
+    "pageCategory": "dashboard",
+    "callableRole": "owner",
+    "capabilityCount": 28,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "I can help you find the correct Route Logistics page or explain a supported workflow. Ask what you want to do. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "PARTIAL",
+    "coverageRatio": 0.4,
+    "missingConceptGroups": [
+      [
+        "guidance"
+      ],
+      [
+        "does not",
+        "cannot"
+      ],
+      [
+        "permission"
+      ]
+    ],
+    "rationale": "The response is directionally correct but omits material verified steps or limitations.",
+    "severity": "moderate"
+  },
+  {
+    "questionId": "APT-14",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "How do I contact a human or report a problem from the assistant?",
+    "role": "manager",
+    "requestedRoute": "/",
+    "callableRoute": "/",
+    "pageCategory": "dashboard",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "Choose Contact Workside Support or Report a Problem in the assistant. Review the disclosure, describe the issue without customer or financial data, and submit it to the existing support workflow.",
+    "error": null,
+    "classification": "PASS",
+    "coverageRatio": 0.8,
+    "missingConceptGroups": [
+      [
+        "not",
+        "automatic"
+      ]
+    ],
+    "rationale": "The response includes the required navigation, procedure, and limitation concepts.",
+    "severity": "none"
+  },
+  {
+    "questionId": "APT-15",
+    "category": "Accounts, permissions and troubleshooting",
+    "question": "How do I close or reset an assistant conversation, and what should I do if it is unavailable?",
+    "role": "manager",
+    "requestedRoute": "/",
+    "callableRoute": "/",
+    "pageCategory": "dashboard",
+    "callableRole": "manager",
+    "capabilityCount": 18,
+    "knowledgeVersion": "2026-11-18.1",
+    "actualResponse": "I can help you find the correct Route Logistics page or explain a supported workflow. Ask what you want to do. I am not certain which workflow you mean; name the task, such as creating an inquiry, scheduling a job, completing field work, preparing an estimate, or reviewing an invoice.",
+    "error": null,
+    "classification": "FAIL",
+    "coverageRatio": 0,
+    "missingConceptGroups": [
+      [
+        "conversation",
+        "session"
+      ],
+      [
+        "close",
+        "new",
+        "reset"
+      ],
+      [
+        "minimize",
+        "preserve"
+      ],
+      [
+        "unavailable",
+        "retry"
+      ],
+      [
+        "does not",
+        "data"
+      ]
+    ],
+    "rationale": "The response is incorrect, misleading, or too generic to complete the verified workflow.",
+    "severity": "major"
+  }
+]

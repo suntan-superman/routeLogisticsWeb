@@ -34,7 +34,7 @@ function compile(relative) {
     if (name.endsWith('/contexts/AuthContext')) return { useAuth: () => ({ currentUser: { uid: 'owner' }, company: env.company ? { id: 'company', serviceCategories: ['Pest Control'] } : null, role: 'owner', can: () => true }) };
     if (name.endsWith('/hooks/useUnsavedChanges')) return { useUnsavedChanges: value => { env.dirty = value; } };
     if (name.endsWith('/services/customerService')) return { __esModule: true, default: { getCustomers: async () => ({ success: true, customers: [{ id: 'customer-1', name: 'Synthetic customer' }], hasMore: false }) } };
-    if (name.endsWith('/services/estimateService')) return { callEstimate: estimateCall, prepareEstimatePhoto: () => { throw Error('No native photo work in this suite.'); }, downloadEstimatePdf: async () => {} };
+    if (name.endsWith('/services/estimateService')) return { callEstimate: estimateCall, prepareEstimatePhoto: () => { throw Error('No native photo work in this suite.'); }, previewEstimatePdf: async () => {}, downloadEstimatePdf: async () => {} };
     if (name.endsWith('/utils/estimateDraft')) return compile('utils/estimateDraft.js');
     if (name.endsWith('/components/TimeSelect')) return { __esModule: true, default: props => React.createElement('input', { 'aria-label': props.label, value: props.value, onChange: event => props.onChange(event.target.value) }) };
     if (name.endsWith('/components/AddressValidationNotice')) return { __esModule: true, default: Notice };

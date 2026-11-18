@@ -45,8 +45,8 @@ function decimal(value, places, label) {
   if (scaled > 100000000000n) fail('invalid-argument', `${label} is too large.`);
   return scaled;
 }
-function estimateTotals(items, taxRate = 0) {
-  if (!Array.isArray(items) || !items.length || items.length > 50) fail('invalid-argument', 'Include between 1 and 50 labor, material or service lines.');
+function estimateTotals(items, taxRate = 0, { allowEmpty = false } = {}) {
+  if (!Array.isArray(items) || items.length > 50 || !allowEmpty && !items.length) fail('invalid-argument', 'Include between 1 and 50 labor, material or service lines.');
   let subtotal = 0n;
   const lineItems = items.map(item => {
     const description = typeof item.description === 'string' ? item.description.trim() : '';
@@ -81,7 +81,7 @@ function estimateTotals(items, taxRate = 0) {
     total: Number(total) / 100
   };
 }
-function cleanDraft(data) {
+function cleanDraft(data, { allowUnpriced = false } = {}) {
   if (!data || typeof data !== 'object') fail('invalid-argument', 'Estimate details are required.');
   const text = (key, max, required = false) => {
     const value = typeof data[key] === 'string' ? data[key].trim() : '';
@@ -102,8 +102,12 @@ function cleanDraft(data) {
     internalReviewNotes: text('internalReviewNotes', 3000),
     validDays,
     photoIds,
-    ...estimateTotals(data.lineItems, data.taxRate ?? 0)
+    ...estimateTotals(data.lineItems, data.taxRate ?? 0, { allowEmpty: allowUnpriced })
   };
+}
+function assertDeliveryReady(estimate) {
+  if (!Array.isArray(estimate.lineItems) || !estimate.lineItems.length) fail('failed-precondition', 'Add and save at least one priced labor, material or service line before approving customer delivery.');
+  if (!validEmail(estimate.recipient?.email)) fail('failed-precondition', 'Add and save a valid customer email before approving customer delivery.');
 }
 function estimateTemplateView(row) {
   const value = row.data(), money = input => Number.isFinite(Number(input)) && Number(input) >= 0 ? Number(Number(input).toFixed(2)) : 0,
@@ -344,7 +348,7 @@ function estimateHandlers(db, config = {}) {
         const rows = manages(scope)
           ? await db.collection('estimates').where(scope.companyId ? 'companyId' : 'userId', '==', scope.companyId || scope.uid).orderBy('createdAt', 'desc').limit(101).get()
           : await db.collection('estimates').where('preparedByUid', '==', scope.uid).limit(101).get();
-        const [company, templateRows] = await Promise.all([scope.companyId ? ref('companies', scope.companyId).get() : Promise.resolve(null), db.collection('estimateTemplates').where(scope.companyId ? 'companyId' : 'userId', '==', scope.companyId || scope.uid).limit(101).get()]);
+        const templateRows = await db.collection('estimateTemplates').where(scope.companyId ? 'companyId' : 'userId', '==', scope.companyId || scope.uid).limit(101).get();
         const visibleRows = manages(scope) ? rows.docs : (await Promise.all(rows.docs.map(async row => {
           if (!scoped(scope, row.data()) || !row.get('sourceVisitId')) return null;
           const visit = await ref('jobs', row.get('sourceVisitId')).get();
@@ -352,8 +356,7 @@ function estimateHandlers(db, config = {}) {
         }))).filter(Boolean);
         return {
           enabled: true,
-          emailEnabled: emailEnabled(),
-          allowTechnicianEstimateSend: company?.get('allowTechnicianEstimateSend') === true,
+          emailEnabled: manages(scope) && emailEnabled(),
           templates: templateRows.docs.filter(row => row.get('isActive') !== false).slice(0, 100).map(estimateTemplateView),
           estimates: visibleRows.slice(0, 100).filter(row => scoped(scope, row.data())).map(row => staffView(scope, row.id, row.data())).sort((a, b) => timestamp(b.createdAt) - timestamp(a.createdAt)),
           hasMore: rows.size > 100
@@ -378,7 +381,7 @@ function estimateHandlers(db, config = {}) {
         } };
       }
       if (action === 'save') {
-        const draft = cleanDraft(data.data),
+        const draft = cleanDraft(data.data, { allowUnpriced: !manages(scope) }),
           isNew = !data.estimateId,
           operation = documentId(data.operationId, 'operation');
         if (!/^[A-Za-z0-9_-]{16,80}$/.test(operation)) fail('invalid-argument', 'Use a stable estimate operation ID.');
@@ -405,7 +408,7 @@ function estimateHandlers(db, config = {}) {
         if (initial.exists) await assertEstimateAccess(scope, initial);
         if (initial.exists && !initialOperation.exists) {
           if (initial.get('rlManaged') !== true) fail('failed-precondition', 'Legacy estimates are preserved. Copy their content into a new photo estimate.');
-          const locked = manages(scope) ? ['approved', 'converted', 'submitted-for-review'] : ['approved', 'converted', 'sent', 'submitted-for-review', 'approved-for-delivery'];
+          const locked = manages(scope) ? ['approved', 'converted'] : ['approved', 'converted', 'sent', 'submitted-for-review', 'approved-for-delivery'];
           if (locked.includes(initial.get('status'))) fail('failed-precondition', 'This estimate version is locked. Request changes or create an authorized revision first.');
           if (data.expectedVersion !== initial.get('version')) fail('aborted', 'This estimate changed. Reload before saving your draft.');
         }
@@ -432,7 +435,7 @@ function estimateHandlers(db, config = {}) {
           if (old.exists) {
             await assertEstimateAccess(scope, old, tx);
             if (old.get('rlManaged') !== true) fail('failed-precondition', 'Legacy estimates are preserved. Copy their content into a new photo estimate.');
-            const locked = manages(scope) ? ['approved', 'converted', 'submitted-for-review'] : ['approved', 'converted', 'sent', 'submitted-for-review', 'approved-for-delivery'];
+            const locked = manages(scope) ? ['approved', 'converted'] : ['approved', 'converted', 'sent', 'submitted-for-review', 'approved-for-delivery'];
             if (locked.includes(old.get('status'))) fail('failed-precondition', 'This estimate version is locked. Request changes or create an authorized revision first.');
             if (data.expectedVersion !== old.get('version')) fail('aborted', 'This estimate changed. Reload before saving your draft.');
           } else if (!isNew) fail('not-found', 'Estimate not found.');
@@ -482,6 +485,12 @@ function estimateHandlers(db, config = {}) {
             estimateId: id,
             createdAt: new Date(now()).toISOString()
           });
+          if (old.exists && old.get('status') === 'submitted-for-review') tx.set(taskRef(id, old.get('version')), {
+            status: 'superseded',
+            supersededByVersion: version,
+            supersededByUid: scope.uid,
+            updatedAt: new Date(now())
+          }, { merge: true });
           tx.create(operationRef, {
             companyId: scope.companyId || null,
             userId: scope.uid,
@@ -518,17 +527,15 @@ function estimateHandlers(db, config = {}) {
         const versions = await db.collection('rlEstimateVersions').where('estimateId', '==', id).limit(100).get(),
           photos = estimate.rlManaged ? await photosFor(scope, id, estimate.photoIds || []) : [],
           mail = estimate.rlManaged ? await ref('rlMail', `estimate_${id}_v${estimate.version}`).get() : null,
-          company = scope.companyId ? await ref('companies', scope.companyId).get() : null,
-          directTechnicianSend = !manages(scope) && company?.get('allowTechnicianEstimateSend') === true;
+          canManage = manages(scope);
         return {
           estimate: staffView(scope, id, estimate),
-          emailEnabled: emailEnabled(),
+          emailEnabled: canManage && emailEnabled(),
           permissions: {
-            canEdit: manages(scope) ? !['approved', 'converted', 'submitted-for-review'].includes(estimate.status) : ['draft', 'changes-requested'].includes(estimate.status),
+            canEdit: canManage ? !['approved', 'converted'].includes(estimate.status) : ['draft', 'changes-requested'].includes(estimate.status),
             canSubmit: !manages(scope) && ['draft', 'changes-requested'].includes(estimate.status),
-            canReview: manages(scope) && ['draft', 'submitted-for-review'].includes(estimate.status),
-            canDeliver: manages(scope) ? estimate.status === 'approved-for-delivery' && estimate.approvedForDeliveryVersion === estimate.version : directTechnicianSend && estimate.status === 'draft',
-            directTechnicianSend
+            canReview: canManage && ['draft', 'submitted-for-review'].includes(estimate.status),
+            canDeliver: canManage && estimate.status === 'approved-for-delivery' && estimate.approvedForDeliveryVersion === estimate.version
           },
           delivery: mail?.exists ? {status:mail.get('status'),attempts:mail.get('attempts') || 0,failureCode:mail.get('failureCode') || null,sentAt:dateString(mail.get('sentAt')),recipient:normalizeEmail(mail.get('to'))} : null,
           versions: versions.docs.map(v => ({
@@ -566,6 +573,7 @@ function estimateHandlers(db, config = {}) {
           const [current, task] = await Promise.all([tx.get(target), tx.get(taskRef(id, data.expectedVersion))]); managed(scope, current);
           if (current.get('version') !== data.expectedVersion || !['draft', 'submitted-for-review'].includes(current.get('status')) || current.get('status') === 'submitted-for-review' && current.get('submittedVersion') !== current.get('version') || data.decision === 'request-changes' && current.get('status') !== 'submitted-for-review') fail('failed-precondition', 'Review the current immutable version. Changes can be requested only from a technician submission.');
           const at = new Date(now()), approved = data.decision === 'approve';
+          if (approved) assertDeliveryReady(current.data());
           tx.update(target, { status: approved ? 'approved-for-delivery' : 'changes-requested', reviewVersion: current.get('version'), approvedForDeliveryVersion: approved ? current.get('version') : null, reviewComments: data.comments.trim(), reviewedByUid: scope.uid, reviewedAt: at.toISOString(), updatedAt: at.toISOString() });
           tx.set(taskRef(id, current.get('version')), { ...(task.exists ? task.data() : {}), companyId: scope.companyId, estimateId: id, version: current.get('version'), type: 'estimate-review', status: approved ? 'approved' : 'changes-requested', comments: data.comments.trim(), reviewedByUid: scope.uid, updatedAt: at }, { merge: true });
           tx.create(ref('rlAudit', `estimate_${id}_v${current.get('version')}_${approved ? 'delivery-approved' : 'changes-requested'}`), { action: approved ? 'estimate.delivery-approved' : 'estimate.changes-requested', companyId: scope.companyId, actorId: scope.uid, estimateId: id, version: current.get('version'), comments: data.comments.trim(), createdAt: at });
@@ -628,16 +636,17 @@ function estimateHandlers(db, config = {}) {
         };
       }
       if (data.expectedVersion !== estimate.version) fail('aborted', 'This estimate changed. Reload before continuing.');
-      if (action === 'pdf') return {
-        dataUri: `data:application/pdf;base64,${(await buildPdf(scope, id, estimate)).toString('base64')}`,
-        filename: `${estimate.estimateNumber}-v${estimate.version}.pdf`
-      };
+      if (action === 'pdf') {
+        if (!manages(scope)) fail('permission-denied', 'Management permission is required to generate the formal customer estimate PDF.');
+        return {
+          dataUri: `data:application/pdf;base64,${(await buildPdf(scope, id, estimate)).toString('base64')}`,
+          filename: `${estimate.estimateNumber}-v${estimate.version}.pdf`
+        };
+      }
       if (action === 'deliver') {
+        if (!manages(scope)) fail('permission-denied', 'Management approval is required before customer delivery.');
         if (!emailEnabled()) fail('failed-precondition', 'Estimate email delivery is disabled. You can download the PDF for review.');
-        const company = scope.companyId ? await ref('companies', scope.companyId).get() : null,
-          directTechnicianSend = !manages(scope) && company?.get('allowTechnicianEstimateSend') === true;
-        if (manages(scope) ? !['approved-for-delivery', 'sent'].includes(estimate.status) || estimate.status !== 'sent' && estimate.approvedForDeliveryVersion !== estimate.version
-          : !directTechnicianSend || !['draft', 'sent'].includes(estimate.status)) fail('failed-precondition', manages(scope) ? 'Approve this exact estimate version for delivery before sending it.' : 'Management review is required before this estimate can be sent.');
+        if (!['approved-for-delivery', 'sent'].includes(estimate.status) || estimate.status !== 'sent' && estimate.approvedForDeliveryVersion !== estimate.version) fail('failed-precondition', 'Approve this exact estimate version for delivery before sending it.');
         const recipientEmail = normalizeEmail(data.recipientEmail || estimate.recipient.email);
         if (!validEmail(recipientEmail)) fail('invalid-argument', 'Enter a valid estimate recipient email before sending.');
         const mailId = `estimate_${id}_v${estimate.version}`,
@@ -661,10 +670,9 @@ function estimateHandlers(db, config = {}) {
           base = String(appUrl()).replace(/\/$/, ''),
           link = `${base}/estimate-approval#id=${id}&token=${token}`;
         return db.runTransaction(async tx => {
-          const [current, old, customer, currentCompany] = await Promise.all([tx.get(target), tx.get(mailRef), estimate.customerId ? tx.get(ref('customers', estimate.customerId)) : Promise.resolve(null), scope.companyId ? tx.get(ref('companies', scope.companyId)) : Promise.resolve(null)]);
+          const [current, old, customer] = await Promise.all([tx.get(target), tx.get(mailRef), estimate.customerId ? tx.get(ref('customers', estimate.customerId)) : Promise.resolve(null)]);
           await assertEstimateAccess(scope, current, tx);
-          const technicianAllowed = !manages(scope) && currentCompany?.get('allowTechnicianEstimateSend') === true;
-          if (current.get('version') !== estimate.version || (manages(scope) ? !['approved-for-delivery', 'sent'].includes(current.get('status')) || current.get('status') !== 'sent' && current.get('approvedForDeliveryVersion') !== current.get('version') : !technicianAllowed || !['draft', 'sent'].includes(current.get('status')))) fail('aborted', 'The quote or its delivery authorization changed before email was queued.');
+          if (current.get('version') !== estimate.version || !['approved-for-delivery', 'sent'].includes(current.get('status')) || current.get('status') !== 'sent' && current.get('approvedForDeliveryVersion') !== current.get('version')) fail('aborted', 'The quote or its delivery authorization changed before email was queued.');
           if (customer && (!scoped(scope, customer.data()) || customer.get('isActive') === false || customer.get('deletedAt'))) fail('failed-precondition', 'The linked customer is no longer available for estimate delivery.');
           if (old.exists) {
             if (normalizeEmail(old.get('to')) !== recipientEmail) fail('failed-precondition', 'This estimate version was already queued for a different recipient. Save a new version before sending it elsewhere.');
@@ -709,7 +717,7 @@ function estimateHandlers(db, config = {}) {
             actorId: scope.uid,
             estimateId: id,
             version: estimate.version,
-            directTechnicianSend,
+            authorizedRole: scope.role,
             createdAt: new Date(now())
           });
           return {

@@ -7,11 +7,11 @@ const root = path.resolve(__dirname, '..'), web = path.resolve(root, '../routeLo
 const policy = require('../../functions/shared/capabilities.json');
 function fixture(role = 'manager') {
   const modules = new Map(), calls = [], operations = new Map(), listeners = new Set(), localDrafts = new Map(); let sequence = 0;
-  const env = { calls, record: null, photos: [], delivery: null, cancelled: false, uploadFailure: false, ambiguousSave: false, compressionFailure: false, offline: false, interactions: 0, converted: 0, approvalGets: [], approvalDecisions: [], approvals: 0, changes: [], urls: [], revoked: [], role, customers: [{ id: 'customer', name: 'Existing customer', email: 'prospect@example.com' }] };
+  const env = { calls, record: null, photos: [], delivery: null, cancelled: false, uploadFailure: false, ambiguousSave: false, compressionFailure: false, offline: false, interactions: 0, converted: 0, previewed: false, approvalGets: [], approvalDecisions: [], approvals: 0, changes: [], urls: [], revoked: [], role, customers: [{ id: 'customer', name: 'Existing customer', email: 'prospect@example.com' }] };
   const queryMock = require('../../tests/support/workspaceQueryMock.cjs').createWorkspaceQueryMock(React);
   env.user = { id: 'manager', companyId: 'acme', membershipId: 'member', role, companyName: 'Acme', services: ['Pest Control'] };
   const can = capability => policy.roles[env.role]?.includes(capability);
-  env.auth = () => ({ user: env.user, can, permissions: { can, canManage: can('jobs.schedule') }, accessStatus: 'ready', currentUser: { uid: env.user.id }, company: { id: env.user.companyId }, role: env.role });
+  env.auth = () => ({ user: env.user, can, permissions: { can, canManage: can('jobs.schedule'), isTechnician: role === 'technician' }, accessStatus: 'ready', currentUser: { uid: env.user.id }, company: { id: env.user.companyId }, role: env.role });
   env.window = { location: { hash: `#id=estimate&token=${token}`, pathname: '/estimate-approval', href: 'https://route-logistics.com/estimate-approval' }, history: { replaceState: () => { env.window.location.hash = ''; } }, addEventListener: (_name, listener) => listeners.add(listener), removeEventListener: (_name, listener) => listeners.delete(listener), confirm: () => false };
   env.document = { addEventListener: (_name, listener) => listeners.add(listener), removeEventListener: (_name, listener) => listeners.delete(listener) };
   env.url = { createObjectURL: () => { const value = `blob:photo-${sequence++}`; env.urls.push(value); return value; }, revokeObjectURL: value => env.revoked.push(value) };
@@ -21,7 +21,7 @@ function fixture(role = 'manager') {
     if (env.offline) throw Object.assign(new Error('Network unavailable'), { code: 'functions/unavailable' });
     if (action === 'list') return { estimates: env.record ? [env.record] : [], templates: [], enabled: true, emailEnabled: true };
     if (action === 'visit-context') return { existing: false, context: { sourceVisitId: fields.visitId, inquiryId: 'inquiry', customerId: 'customer', customerName: 'Existing customer', servicePropertyId: 'property', serviceProperty: { address: '1 Work Street' }, serviceCategory: 'Pest Control', serviceType: 'Termite Inspection', title: 'Termite Inspection estimate' } };
-    if (action === 'get') return { estimate: env.record, versions: env.record ? [{ version: env.record.version, status: env.record.status, totalCents: env.record.totalCents }] : [], photos: env.photos, emailEnabled: true, delivery: env.delivery, permissions: { canEdit: !['approved','converted','submitted-for-review'].includes(env.record?.status), canReview: ['draft','submitted-for-review'].includes(env.record?.status), canDeliver: env.record?.status === 'approved-for-delivery' } };
+    if (action === 'get') return { estimate: env.record, versions: env.record ? [{ version: env.record.version, status: env.record.status, totalCents: env.record.totalCents }] : [], photos: env.photos, emailEnabled: role !== 'technician', delivery: env.delivery, permissions: { canEdit: role === 'technician' ? ['draft','changes-requested'].includes(env.record?.status) : !['approved','converted'].includes(env.record?.status), canSubmit: role === 'technician' && ['draft','changes-requested'].includes(env.record?.status), canReview: role !== 'technician' && ['draft','submitted-for-review'].includes(env.record?.status), canDeliver: role !== 'technician' && env.record?.status === 'approved-for-delivery' } };
     if (action === 'save') {
       if (operations.has(fields.operationId)) return operations.get(fields.operationId);
       const result = { estimate: { ...fields.data, id: fields.estimateId || 'estimate', version: (env.record?.version || 0) + 1, status: 'draft', recipient: fields.data.prospect || { name: 'Existing customer', email: 'prospect@example.com' }, totalCents: 10023, subtotalCents: 9900, taxCents: 123, photoIds: fields.data.photoIds || [] } };
@@ -31,6 +31,8 @@ function fixture(role = 'manager') {
     }
     if (action === 'photo-upload') { if (env.uploadFailure) throw new Error('Photo upload failed. Retry while connected.'); return { id: `photo-${fields.operationId}` }; }
     if (action === 'photo-read') return { dataUri: 'data:image/jpeg;base64,AAAA' };
+    if (action === 'submit-review') { env.record = { ...env.record, status: 'submitted-for-review', submittedVersion: env.record.version }; return { submitted: true, version: env.record.version }; }
+    if (action === 'review') { env.record = { ...env.record, status: fields.decision === 'approve' ? 'approved-for-delivery' : 'changes-requested', approvedForDeliveryVersion: fields.decision === 'approve' ? env.record.version : null, reviewComments: fields.comments }; return { approved: fields.decision === 'approve' }; }
     if (action === 'deliver') { env.delivery = { status: 'queued', attempts: 0, recipient: fields.recipientEmail }; env.record = { ...env.record, status: 'sent' }; return { queued: true }; }
     if (action === 'convert') { env.converted++; env.record = { ...env.record, status: 'converted', convertedJobId: 'converted-job' }; return { jobId: 'converted-job', existing: false }; }
     return {};
@@ -61,7 +63,7 @@ function fixture(role = 'manager') {
       // This estimate/photo test does not exercise geographic policy. Keep its
       // newly composed child on the existing workspace API boundary.
       if (name.endsWith('/workspaceApi')) return { callWorkspace: async () => ({ settings: { configured: false }, availableCategories: [] }) };
-      if (name.endsWith('/estimateService')) return { callEstimate, prepareEstimatePhoto: async () => { if (env.compressionFailure) throw new Error('Photo preparation failed. Selection retained.'); return { base64: 'AAAA', uri: 'file:///compressed.jpg', dataUri: 'data:image/jpeg;base64,AAAA' }; }, shareEstimatePdf: async () => {}, downloadEstimatePdf: async () => {}, callEstimateApproval: async values => { if (values.action === 'get') { env.approvalGets.push(values); return { estimate: env.record || savedEstimate('sent'), photos: [], branding: { name: 'Acme' } }; } env.approvals++; env.approvalDecisions.push(values); return { approved: values.action === 'approve', decision: values.action === 'request-revision' ? 'revision-requested' : values.action === 'decline' ? 'declined' : 'approved' }; } };
+      if (name.endsWith('/estimateService')) return { callEstimate, prepareEstimatePhoto: async () => { if (env.compressionFailure) throw new Error('Photo preparation failed. Selection retained.'); return { base64: 'AAAA', uri: 'file:///compressed.jpg', dataUri: 'data:image/jpeg;base64,AAAA' }; }, previewEstimatePdf: async () => { env.previewed = true; }, downloadEstimatePdf: async () => {}, callEstimateApproval: async values => { if (values.action === 'get') { env.approvalGets.push(values); return { estimate: env.record || savedEstimate('sent'), photos: [], branding: { name: 'Acme' } }; } env.approvals++; env.approvalDecisions.push(values); return { approved: values.action === 'approve', decision: values.action === 'request-revision' ? 'revision-requested' : values.action === 'decline' ? 'declined' : 'approved' }; } };
       if (name.endsWith('/estimateDraftStore')) return { loadEstimateDraft: async identity => localDrafts.get(identity) || null, saveEstimateDraft: async (identity, payload) => { const value = { ...payload, identity, draftRevision: (localDrafts.get(identity)?.draftRevision || 0) + 1 }; localDrafts.set(identity, value); return value; }, retainEstimatePhoto: async (_identity, _id, asset) => asset, discardEstimateDraft: async identity => localDrafts.delete(identity), estimateDraftStateLabel: state => state };
       if (name.includes('functions/shared/estimateClient')) return helpers;
       if (name.startsWith('.')) { const next = path.resolve(path.dirname(filename), name); return load(path.extname(next) ? next : fs.existsSync(`${next}.jsx`) ? `${next}.jsx` : `${next}.js`); }
@@ -83,6 +85,7 @@ async function fillDraft(tree) { for (const [label, value] of [['Prospect name',
 
 test('draft helpers preserve canonical prospect recipients and never submit client totals or tenancy', () => {
   const draft = helpers.draftFromEstimate(savedEstimate('draft')); assert.equal(draft.prospect.email, 'prospect@example.com'); const payload = helpers.estimateInput(draft); assert.equal(payload.prospect.name, 'Prospect'); assert.equal(payload.totalCents, undefined); assert.equal(payload.companyId, undefined); assert.equal(payload.lineItems[0].unitPrice, 50);
+  assert.deepEqual(helpers.estimateInput({ ...draft, lineItems: [] }, { pricingRequired: false }).lineItems, []);
   assert.throws(() => helpers.estimateInput({ ...draft, lineItems: [{ kind: 'labor', description: 'Work', quantity: '1', unitPrice: '1.999' }] })); assert.throws(() => helpers.conversionInput({ date: '2026-02-30', time: '09:00' }));
   assert.deepEqual(helpers.conversionInput({ date: '2026-11-20', time: '09:00' }, { createCustomer: true }), { schedule: { date: '2026-11-20', time: '09:00' }, createCustomer: true });
 });
@@ -104,7 +107,7 @@ test('an assigned estimate visit opens and persists a device draft offline witho
 });
 test('photo-first native draft uploads and attaches photos to a server-priced version without modal layering', async () => {
   const env = fixture(), tree = await renderNative(env); await press(tree, 'New photo estimate'); await press(tree, 'Choose estimate photo'); await fillDraft(tree); await press(tree, 'Save estimate version');
-  assert.equal(env.calls.filter(call => call.action === 'save').length, 2); assert.equal(env.calls.filter(call => call.action === 'photo-upload').length, 1); assert.equal(env.record.photoIds.length, 1); assert.match(json(tree), /100\.23/); assert.match(json(tree), /Attached to saved version/); assert.equal(tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Estimate recipient email')[0].props.value, 'prospect@example.com'); assert.equal(tree.root.findAll(node => node.type === 'Modal').length, 0); assert.equal(env.interactions, 0); assert.equal(env.changes.at(-1).hasDraft, false); await act(async () => tree.unmount());
+  assert.equal(env.calls.filter(call => call.action === 'save').length, 2); assert.equal(env.calls.filter(call => call.action === 'photo-upload').length, 1); assert.equal(env.record.photoIds.length, 1); assert.match(json(tree), /100\.23/); assert.match(json(tree), /Attached to saved version/); assert.match(json(tree), /Formal review, PDF preview, delivery approval/); assert.doesNotMatch(json(tree), /Estimate recipient email|Email approved estimate|Share estimate PDF/); assert.equal(tree.root.findAll(node => node.type === 'Modal').length, 0); assert.equal(env.interactions, 0); assert.equal(env.changes.at(-1).hasDraft, false); await act(async () => tree.unmount());
 });
 test('native picker cancellation retains the estimate context and a subsequent photo selection works', async () => {
   const env = fixture(), tree = await renderNative(env); await press(tree, 'New photo estimate'); await fill(tree, 'Estimate title', 'Retained title'); env.cancelled = true; await press(tree, 'Choose estimate photo');
@@ -128,11 +131,11 @@ test('invalid estimate save shows a summary and inline field errors without clea
   await fill(tree, 'Estimate title', 'Retained title'); assert.equal(tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Estimate title')[0].props.value, 'Retained title'); await act(async () => tree.unmount());
 });
 
-test('authorized estimate delivery prefills an editable email without changing customer data', async () => {
-  const env = fixture(); env.record = savedEstimate('approved-for-delivery'); const original = structuredClone(env.customers[0]); const tree = await renderNative(env); await press(tree, 'Open estimate');
-  const recipient = tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Estimate recipient email')[0]; assert.equal(recipient.props.value, 'prospect@example.com');
-  await fill(tree, 'Estimate recipient email', 'alternate@example.com'); await press(tree, 'Email approved estimate'); assert.match(json(tree), /alternate@example\.com/); await press(tree, 'Confirm estimate email');
-  const delivery = env.calls.find(call => call.action === 'deliver'); assert.equal(delivery.recipientEmail, 'alternate@example.com'); assert.deepEqual(env.customers[0], original); assert.match(json(tree), /PDF email queued/); await act(async () => tree.unmount());
+test('technician submits an unpriced assigned estimate for web management review', async () => {
+  const env = fixture('technician'), initialVisit = { id: 'visit-review', snapshot: { id: 'visit-review', companyId: 'acme', customerId: 'customer', customerName: 'Jeremy Richards', serviceType: 'Termite Inspection', serviceCategory: 'Pest Control', servicePropertyId: 'property', serviceProperty: { address: '11503 Wrangler Drive' }, inquiryId: 'inquiry', appointmentKind: 'estimate_visit', billable: false, assignedTo: 'member', assignedToUid: 'manager', status: 'in-progress' } };
+  const tree = await renderNative(env, { active: true, initialVisit }); await fill(tree, 'Scope of work', 'Inspect termite activity and document proposed treatment.'); await press(tree, 'Save estimate version');
+  const saved = env.calls.find(call => call.action === 'save'); assert.deepEqual(saved.data.lineItems, []); assert.match(json(tree), /Pricing is optional for technicians/); await press(tree, 'Submit for Review');
+  assert.equal(env.record.status, 'submitted-for-review'); assert.match(json(tree), /submitted for management review/i); assert.match(json(tree), /read-only while management reviews it/); assert.doesNotMatch(json(tree), /Email approved estimate|Share estimate PDF|Approve for delivery/); await act(async () => tree.unmount());
 });
 test('approved prospect conversion requires explicit customer creation and preserves approved content', async () => {
   const env = fixture(); env.record = savedEstimate('approved'); const tree = await renderNative(env); await press(tree, 'Open estimate'); assert.equal(tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Estimate title')[0].props.editable, false);
@@ -151,9 +154,9 @@ test('native estimate conversion offers quarter-hour choices instead of an arbit
   await press(tree, 'Convert approved estimate to job'); await press(tree, 'Confirm job conversion');
   assert.equal(env.calls.find(call => call.action === 'convert').schedule.time, '09:45'); await act(async () => tree.unmount());
 });
-test('actual email failure is visible separately from sent status and cannot duplicate a completed delivery operation', async () => {
-  const env = fixture(); env.record = savedEstimate('sent'); env.delivery = { status: 'failed', attempts: 2, failureCode: 'SMTP_REJECTED', sentAt: null }; const tree = await renderNative(env); await press(tree, 'Open estimate'); assert.match(json(tree), /SMTP_REJECTED/); assert.match(json(tree), /2 attempts/);
-  const send = nativeButton(tree, 'Email approved estimate'); assert.ok(send); assert.equal(send.props.disabled, true); assert.equal(env.calls.filter(call => call.action === 'deliver').length, 0); await act(async () => tree.unmount());
+test('mobile managers cannot review, generate PDFs or initiate customer delivery', async () => {
+  const env = fixture(); env.record = savedEstimate('submitted-for-review'); const tree = await renderNative(env); await press(tree, 'Open estimate');
+  assert.match(json(tree), /read-only while management reviews it/); assert.doesNotMatch(json(tree), /Approve for delivery|Request changes|Share estimate PDF|Email approved estimate|Estimate recipient email/); assert.equal(env.calls.filter(call => ['review','pdf','deliver'].includes(call.action)).length, 0); await act(async () => tree.unmount());
 });
 test('public approval survives StrictMode effect replay while stripping token fragments and records one explicit approval', async () => {
   const env = fixture(), Component = env.load(path.join(web, 'src/pages/EstimateApprovalPage.jsx')).default; let tree;
@@ -185,6 +188,18 @@ test('web management retains a selected photo through preparation failure and re
   env.compressionFailure = true; await click('Save estimate version'); assert.match(json(tree), /preparation failed/); assert.match(json(tree), /blob:photo/); assert.equal(env.calls.filter(call => call.action === 'photo-upload').length, 0);
   env.compressionFailure = false; await click('Save estimate version'); assert.equal(env.record.photoIds.length, 1); assert.match(json(tree), /Server total/); assert.match(json(tree), /100\.23/); assert.equal(env.calls.filter(call => call.action === 'deliver').length, 0);
   await act(async () => tree.unmount()); assert.equal(env.revoked.length, 1);
+});
+test('web management finalizes a submitted version, previews the PDF and sends to an explicit one-time recipient', async () => {
+  const env = fixture(), originalCustomer = structuredClone(env.customers[0]); env.record = { ...savedEstimate('submitted-for-review'), preparedByName: 'Field Technician', submittedVersion: 2 }; const Component = env.load(path.join(web, 'src/pages/EstimatesPage.jsx')).default; let tree;
+  const button = title => tree.root.findAll(node => node.type === 'button' && node.children.filter(child => typeof child === 'string').join('') === title)[0];
+  const click = async title => { const action = button(title); assert.ok(action, title); assert.notEqual(action.props.disabled, true, `${title} disabled`); await act(async () => action.props.onClick()); await act(settle); };
+  await act(async () => { tree = create(React.createElement(Component)); }); await act(settle);
+  assert.match(json(tree), /Awaiting management review/); assert.match(json(tree), /Prepared by.*Field Technician/); await click('Open estimate');
+  assert.match(json(tree), /Saving management changes creates a new version/);
+  const title = tree.root.findAll(node => node.type === 'label' && node.children[0] === 'Estimate title')[0].findByType('input'); await act(async () => title.props.onChange({ target: { value: 'Management finalized proposal' } })); await click('Save estimate version');
+  assert.equal(env.record.version, 3); assert.equal(env.record.status, 'draft'); await click('Preview customer PDF'); assert.equal(env.previewed, true); await click('Approve for delivery');
+  const recipient = tree.root.findByProps({ 'aria-label': 'Estimate delivery email' }); assert.equal(recipient.props.value, 'prospect@example.com'); await act(async () => recipient.props.onChange({ target: { value: 'alternate@example.com' } })); await click('Email approved version'); assert.match(json(tree), /alternate@example\.com/); await click('Confirm estimate email');
+  const delivery = env.calls.find(call => call.action === 'deliver'); assert.equal(delivery.recipientEmail, 'alternate@example.com'); assert.deepEqual(env.customers[0], originalCustomer); assert.match(json(tree), /PDF email queued/); await act(async () => tree.unmount());
 });
 test('invalid public approval fragments never call the approval backend', async () => {
   const env = fixture(); env.window.location.hash = '#id=foreign/job&token=bad'; let tree;

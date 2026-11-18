@@ -37,7 +37,7 @@ test('assigned technicians prepare one visit-linked estimate, submit immutable r
   const reopened=await f.handlers.handle(f.request({action:'visit-context',visitId:visit.visitId},f.tech));assert.equal(reopened.estimate.id,created.estimate.id);
   await assert.rejects(f.handlers.handle(f.request({action:'save',operationId:`assigned-estimate-${f.id}-0002`,estimateId:created.estimate.id,expectedVersion:1,data:{...data,customerId:otherCustomer}},f.tech)),{code:'failed-precondition'});
   await f.handlers.handle(f.request({action:'submit-review',estimateId:created.estimate.id,expectedVersion:1},f.tech));
-  await assert.rejects(f.handlers.handle(f.request({action:'deliver',estimateId:created.estimate.id,expectedVersion:1},f.tech)),{code:'failed-precondition'});
+  await assert.rejects(f.handlers.handle(f.request({action:'deliver',estimateId:created.estimate.id,expectedVersion:1},f.tech)),{code:'permission-denied'});
   await f.handlers.handle(f.request({action:'review',estimateId:created.estimate.id,expectedVersion:1,decision:'request-changes',comments:'Clarify the treatment area.'}));
   const revised=await f.handlers.handle(f.request({action:'save',operationId:`assigned-estimate-${f.id}-0003`,estimateId:created.estimate.id,expectedVersion:1,data:{...data,scopeOfWork:'Clarified treatment area'}},f.tech));assert.equal(revised.estimate.version,2);assert.equal(revised.estimate.internalReviewNotes,undefined);
   await f.handlers.handle(f.request({action:'submit-review',estimateId:created.estimate.id,expectedVersion:2},f.tech));await f.handlers.handle(f.request({action:'review',estimateId:created.estimate.id,expectedVersion:2,decision:'approve',comments:'Approved exact version.'}));
@@ -45,12 +45,30 @@ test('assigned technicians prepare one visit-linked estimate, submit immutable r
   const linkedVisits=await db.collection('jobs').where('estimateId','==',created.estimate.id).get();assert.equal(linkedVisits.size,1);assert.equal(linkedVisits.docs[0].id,visit.visitId);assert.equal((await db.collection('invoices').where('estimateId','==',created.estimate.id).get()).size,0);
   const managerRevision=await f.save({...data,scopeOfWork:'House and detached garage'},{estimateId:created.estimate.id,expectedVersion:2});assert.equal(managerRevision.estimate.version,3);await assert.rejects(f.approve(revised.estimate,token),{code:'permission-denied'});
 });
-test('technician direct delivery is rechecked at send time and customer decline remains nonfinancial and idempotent',async()=>{
+test('technicians cannot generate formal PDFs or deliver estimates even when an obsolete company flag remains',async()=>{
   const f=await fixture(),visit=await f.addVisit(),data={...f.draft,sourceVisitId:visit.visitId,inquiryId:visit.inquiryId,servicePropertyId:visit.propertyId,serviceProperty:{address:'100 Synthetic Customer Street, Example, CA 93312'}};
-  const created=await f.handlers.handle(f.request({action:'save',operationId:`direct-estimate-${f.id}-0001`,data},f.tech));await assert.rejects(f.handlers.handle(f.request({action:'deliver',estimateId:created.estimate.id,expectedVersion:1},f.tech)),{code:'failed-precondition'});
-  await db.doc(`companies/${f.id}`).update({allowTechnicianEstimateSend:true});const sent=await f.handlers.handle(f.request({action:'deliver',estimateId:created.estimate.id,expectedVersion:1},f.tech)),mail=await db.doc(`rlMail/${sent.mailId}`).get(),token=mail.get('text').match(/token=([a-f0-9]{64})/)[1];
+  const created=await f.handlers.handle(f.request({action:'save',operationId:`direct-estimate-${f.id}-0001`,data},f.tech));
+  await db.doc(`companies/${f.id}`).update({allowTechnicianEstimateSend:true});
+  await assert.rejects(f.handlers.handle(f.request({action:'pdf',estimateId:created.estimate.id,expectedVersion:1},f.tech)),{code:'permission-denied'});
+  await assert.rejects(f.handlers.handle(f.request({action:'deliver',estimateId:created.estimate.id,expectedVersion:1},f.tech)),{code:'permission-denied'});
+  await f.handlers.handle(f.request({action:'review',estimateId:created.estimate.id,expectedVersion:1,decision:'approve',comments:'Management approved the exact version.'}));
+  const {mail,token}=await f.send(created.estimate);
   const first=await f.handlers.approval({data:{action:'decline',estimateId:created.estimate.id,token,reason:'Not at this time.'},rawRequest:{ip:f.id}}),second=await f.handlers.approval({data:{action:'decline',estimateId:created.estimate.id,token,reason:'Duplicate tap'},rawRequest:{ip:f.id}});assert.equal(first.decision,'declined');assert.equal(second.existing,true);
   await assert.rejects(f.approve(created.estimate,token),{code:'failed-precondition'});const linkedVisits=await db.collection('jobs').where('estimateId','==',created.estimate.id).get();assert.equal(linkedVisits.size,1);assert.equal(linkedVisits.docs[0].id,visit.visitId);assert.equal((await db.collection('invoices').where('estimateId','==',created.estimate.id).get()).size,0);
+  assert.equal((await db.doc(`rlAudit/estimate_${created.estimate.id}_v1_send`).get()).get('authorizedRole'),'owner');
+});
+test('technicians can submit unpriced scope while management pricing creates a new reviewable version',async()=>{
+  const f=await fixture(),visit=await f.addVisit(),data={...f.draft,lineItems:[],taxRate:0,sourceVisitId:visit.visitId,inquiryId:visit.inquiryId,servicePropertyId:visit.propertyId,serviceProperty:{address:'100 Synthetic Customer Street, Example, CA 93312'}};
+  const created=await f.handlers.handle(f.request({action:'save',operationId:`unpriced-estimate-${f.id}-0001`,data},f.tech));
+  assert.equal(created.estimate.totalCents,0);assert.deepEqual(created.estimate.lineItems,[]);
+  await f.handlers.handle(f.request({action:'submit-review',estimateId:created.estimate.id,expectedVersion:1},f.tech));
+  await assert.rejects(f.handlers.handle(f.request({action:'review',estimateId:created.estimate.id,expectedVersion:1,decision:'approve',comments:'Missing price.'})),{code:'failed-precondition'});
+  const priced=await f.handlers.handle(f.request({action:'save',operationId:`unpriced-estimate-${f.id}-0002`,estimateId:created.estimate.id,expectedVersion:1,data:{...data,lineItems:f.draft.lineItems,taxRate:f.draft.taxRate}}));
+  assert.equal(priced.estimate.version,2);assert.equal(priced.estimate.status,'draft');assert.equal(priced.estimate.totalCents,21500);
+  const oldVersion=await db.doc(`rlEstimateVersions/${hash(`${created.estimate.id}:1`)}`).get();assert.deepEqual(oldVersion.get('lineItems'),[]);
+  const oldTask=await db.doc(`rlEstimateTasks/${hash(`${created.estimate.id}:1:review`)}`).get();assert.equal(oldTask.get('status'),'superseded');assert.equal(oldTask.get('supersededByVersion'),2);
+  await f.handlers.handle(f.request({action:'review',estimateId:created.estimate.id,expectedVersion:2,decision:'approve',comments:'Management finalized pricing.'}));
+  const detail=await f.handlers.handle(f.request({action:'get',estimateId:created.estimate.id}));assert.equal(detail.permissions.canDeliver,true);
 });
 test('disabled estimate email queues nothing, existing legacy estimates and customer records are preserved',async()=>{
   const f=await fixture({email:false}),before=(await db.doc(`customers/${f.customerId}`).get()).data(),{estimate}=await f.save();

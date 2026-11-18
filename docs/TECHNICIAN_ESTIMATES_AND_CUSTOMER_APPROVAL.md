@@ -1,6 +1,6 @@
 # Route Logistics — Technician Estimates and Customer Approval
 
-Implementation baseline: November 16, 2026. This document describes Batch B's bounded technician-to-management-to-customer quotation workflow. It does not certify unperformed physical-device or real-email delivery tests.
+Implementation baseline: November 18, 2026. This document describes the bounded technician-to-management-to-customer quotation workflow. It does not certify unperformed physical-device or real-email delivery tests.
 
 ## Outcome
 
@@ -50,13 +50,13 @@ An assigned technician may:
 
 - open an eligible nonbillable estimate visit assigned to their current active membership;
 - create or reopen that visit's deterministic estimate;
-- edit drafts/changes-requested versions, attach private photos and submit a saved version;
+- edit drafts/changes-requested versions, attach private photos and submit a saved version; pricing lines are optional at the technician stage;
 - read only estimates still linked to their own current assignment;
-- deliver a draft only when the owner setting `allowTechnicianEstimateSend` is true at delivery time.
+- return directly to the originating work order after saving or submitting.
 
-A technician cannot change the visit's customer, inquiry or service property, access an unrelated estimate, approve a version for delivery, create invoices, or acquire management/financial capabilities. The backend takes visit geometry from the current authorized visit and ignores a technician attempt to substitute or revalidate it.
+A technician cannot change the visit's customer, inquiry or service property, access an unrelated estimate, generate the formal customer PDF, approve or initiate customer delivery, create invoices, or acquire management/financial capabilities. The backend takes visit geometry from the current authorized visit and ignores a technician attempt to substitute or revalidate it.
 
-Owner/admin/manager users may review the tenant's current version, request changes, approve that exact version and explicitly deliver it. Company owners control **Allow technicians to send estimates directly**, which defaults to off. The policy is checked again inside the delivery transaction.
+Owner/admin/manager users complete formal review in the web application. They may inspect field evidence, edit the submitted scope and pricing into a new immutable version, preview/download the customer PDF, approve that exact version, make a one-time recipient correction and explicitly deliver it. The server rejects technician PDF and delivery calls regardless of obsolete stored company settings.
 
 Customer links expose only the public version projection, public photos and PDF. Technician and internal review notes, tenant service-area records and unrelated customer data are excluded.
 
@@ -64,7 +64,7 @@ Customer links expose only the public version projection, public photos and PDF.
 
 Field Job Details shows **Prepare Estimate** or **View Estimate** for an eligible estimate visit. The existing editor is reused in Field Mode; Management Mode also exposes **Quotes**.
 
-The visit binds the customer, property, inquiry and service category. The editor supports scope, labor/material/service lines, quantity, unit price, bounded flat tax, customer notes, technician notes and private photos. Managers additionally see internal review notes.
+The visit binds the customer, property, inquiry and service category. The editor supports scope, optional technician-proposed labor/material/service lines, customer notes, technician notes and private photos. Managers finalize required quantities, unit prices, bounded flat tax and customer-facing descriptions in the web application and additionally see internal review notes.
 
 Active company estimate templates are returned as sanitized values. Choosing one copies its current scope and line prices into the draft. A later catalog edit cannot change an already saved quote or its version snapshot. The flat tax remains an explicit bounded input; Route Logistics does not claim to determine jurisdiction-specific tax.
 
@@ -87,9 +87,9 @@ Reconnect may synchronize a supported draft, but it never submits for review or 
 
 ## Review and customer decision integrity
 
-**Submit for Review** records the submitted version and one deterministic review task. Management approval records `approvedForDeliveryVersion`; modifying the estimate creates another immutable version and removes that authorization. A changes request includes comments and returns the estimate to the assigned preparer.
+**Submit for Review** records the submitted version and one deterministic review task. A management edit creates a new immutable draft version, preserves the technician-submitted snapshot and supersedes its open review task. Management can preview the customer PDF before approval. Approval requires at least one priced line and a valid recipient and records `approvedForDeliveryVersion`; modifying the estimate creates another immutable version and removes that authorization. A changes request includes comments and returns the estimate to the assigned preparer.
 
-Delivery validates live tenant access, policy, recipient, status and exact version, then reuses the existing private PDF/outbox. Retry uses the same versioned mail identity and cannot queue a second delivery.
+Delivery validates live management access, recipient, status and exact version, then reuses the existing private PDF/outbox. The prefilled delivery email may be corrected once for that version without changing the customer record. Retry uses the same versioned mail identity and cannot queue a second delivery or switch recipients.
 
 The secure customer page supports:
 

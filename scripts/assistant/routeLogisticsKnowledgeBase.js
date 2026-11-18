@@ -114,7 +114,7 @@ const PROCEDURES = Object.freeze([
   {
     "id": "CPE-10",
     "question": "How do I add labor to an estimate?",
-    "reply": "Open the draft, choose Add labor line, enter description, quantity and unit price, then save the versioned draft. Server calculation determines totals.",
+    "reply": "Open the draft and choose Add labor line. A technician may propose a description, quantity and price, but pricing is optional before Submit for Review. Management finalizes required pricing in the web Estimates page and saves the immutable customer version.",
     "intent": "estimate_workflow",
     "status": "implemented",
     "routes": [
@@ -126,7 +126,7 @@ const PROCEDURES = Object.freeze([
   {
     "id": "CPE-11",
     "question": "How do I add materials to an estimate?",
-    "reply": "Open the draft, choose Add material line, enter description, quantity and unit price, then save the versioned draft.",
+    "reply": "Open the draft and choose Add material line. A technician may include proposed material details but can submit scope without final pricing. Management completes quantities and pricing in the web app before approval.",
     "intent": "estimate_workflow",
     "status": "implemented",
     "routes": [
@@ -162,13 +162,15 @@ const PROCEDURES = Object.freeze([
   {
     "id": "CPE-14",
     "question": "How do I create or share an estimate PDF?",
-    "reply": "Open the saved estimate version and choose Share estimate PDF. Customer email delivery is a separate action and may require management approval and enabled email.",
+    "reply": "In the web app open the saved estimate version, then choose Preview customer PDF or Download estimate PDF. Technicians submit scope and evidence for review from mobile; they cannot generate or share the formal customer PDF.",
     "intent": "estimate_workflow",
     "status": "implemented",
     "routes": [
       "/estimates"
     ],
-    "deniedRoles": [],
+    "deniedRoles": [
+      "technician"
+    ],
     "denialReply": null
   },
   {
@@ -186,7 +188,7 @@ const PROCEDURES = Object.freeze([
   {
     "id": "CPE-16",
     "question": "How does a manager approve an estimate or request changes?",
-    "reply": "Open the submitted version. Enter review comments as needed, then choose Approve for delivery or Request changes. Approval applies only to that exact version.",
+    "reply": "Open the submitted version in the web app and inspect the technician evidence. Edit scope, quantities, pricing, tax or customer text as needed and save; that creates a new immutable version while preserving the submission. Preview the customer PDF, then approve the exact saved version or enter comments and request changes.",
     "intent": "estimate_workflow",
     "status": "implemented",
     "routes": [
@@ -198,7 +200,7 @@ const PROCEDURES = Object.freeze([
   {
     "id": "CPE-17",
     "question": "How is an approved estimate sent to the customer?",
-    "reply": "After management approves the exact version, choose Email approved estimate and monitor delivery status. A technician can send directly only if the company owner enabled that policy.",
+    "reply": "After management approves the exact version in the web app, verify the prefilled Estimate delivery email. You may make a one-time correction without changing the customer record, then choose Email approved version, confirm it and monitor delivery status. Technicians cannot initiate formal delivery.",
     "intent": "estimate_workflow",
     "status": "implemented",
     "routes": [

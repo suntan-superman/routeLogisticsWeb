@@ -10,7 +10,7 @@ function invalidEstimate(fieldErrors) {
   error.code = 'client-validation'; error.fieldErrors = fieldErrors; error.firstField = entries[0]?.[0] || null;
   throw error;
 }
-function estimateInput(draft) {
+function estimateInput(draft, { pricingRequired = true } = {}) {
   const errors = {};
   if (!draft.title?.trim()) errors.title = 'Estimate title is required.';
   if (!draft.serviceType?.trim()) errors.serviceType = 'Service type is required.';
@@ -19,7 +19,7 @@ function estimateInput(draft) {
   const prospectEmail = String(draft.prospect?.email || '').trim();
   if (!draft.customerId && prospectEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(prospectEmail)) errors['prospect.email'] = 'Enter a valid prospect email address.';
   const lines = (draft.lineItems || []).filter(line => line.description?.trim() || String(line.unitPrice).trim());
-  if (!lines.length) errors.lineItems = 'Add at least one labor, material, or service line.';
+  if (pricingRequired && !lines.length) errors.lineItems = 'Add at least one labor, material, or service line.';
   const cleaned = (draft.lineItems || []).map((line, index) => ({ line, index })).filter(({ line }) => line.description?.trim() || String(line.unitPrice).trim()).map(({ line, index }) => {
     const quantity = Number(line.quantity), unitPrice = Number(line.unitPrice);
     if (!['labor', 'material', 'service'].includes(line.kind)) errors[`lineItems.${index}.kind`] = `Line ${index + 1} has an unsupported type.`;

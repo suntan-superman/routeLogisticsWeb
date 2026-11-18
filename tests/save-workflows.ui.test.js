@@ -34,7 +34,7 @@ async function service(_name,data) {
 async function estimates(name,data) {
   env.calls.push({name,data});
   if(name==='list'){if(env.saved&&env.failListAfterSave)throw Error('List refresh failed.');return{estimates:[env.estimate],enabled:true,emailEnabled:false};}
-  if(name==='get')return{estimate:env.estimate,photos:[],versions:[]};
+  if(name==='get')return{estimate:env.estimate,photos:[],versions:[],emailEnabled:true,delivery:null,permissions:{canEdit:!['approved','converted'].includes(env.estimate.status),canReview:['draft','submitted-for-review'].includes(env.estimate.status),canDeliver:env.estimate.status==='approved-for-delivery'}};
   if(name==='save'){if(env.failSave)throw Error('Estimate save failed.');env.saved=true;env.estimate={...env.estimate,...data.data,version:env.estimate.version+1};return{estimate:env.estimate};}
   if(name==='convert'){env.estimate={...env.estimate,convertedJobId:'controlled-converted-job'};return{jobId:'controlled-converted-job'};}
   throw Error('Unexpected estimate operation');
@@ -67,7 +67,7 @@ const mock = name => {
   if(name.endsWith('/AddressValidationNotice'))return compile('components/AddressValidationNotice.jsx',mock);
   if(name.endsWith('/components/ServicePropertyEligibility'))return env.kind==='estimates-geography'?compile('components/ServicePropertyEligibility.jsx',mock):{__esModule:true,default:()=>null};
   if(name.endsWith('/services/customerService'))return{__esModule:true,default:{getCustomers:async()=>({success:true,customers:[{id:'customer-1',name:'Customer',address:'Customer billing address must not become the service property'}],hasMore:false})}};
-  if(name.endsWith('/services/estimateService'))return{callEstimate:estimates,prepareEstimatePhoto:()=>{},downloadEstimatePdf:()=>{}};
+  if(name.endsWith('/services/estimateService'))return{callEstimate:estimates,prepareEstimatePhoto:()=>{},previewEstimatePdf:()=>{},downloadEstimatePdf:()=>{}};
   throw Error('Unexpected dependency: '+name);
 };
 const page = relative => compile(relative,mock).default;

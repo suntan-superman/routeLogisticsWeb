@@ -13,11 +13,30 @@ export async function prepareEstimatePhoto(file) {
     return { base64, dataUri: `data:image/jpeg;base64,${base64}` };
   } finally { URL.revokeObjectURL(url); }
 }
-export async function downloadEstimatePdf(estimateId, version) {
+async function requestEstimatePdf(estimateId, version) {
   const scope = JSON.stringify([auth.currentUser?.uid, getClaims()]);
   const result = await callEstimate('pdf', { estimateId, expectedVersion: version });
   requireCapability('estimates.manage');
   if (JSON.stringify([auth.currentUser?.uid, getClaims()]) !== scope) throw new Error('Your work account changed. Reopen the estimate before downloading its PDF.');
   if (!/^data:application\/pdf;base64,[A-Za-z0-9+/=\r\n]+$/.test(result.dataUri || '')) throw new Error('The server returned no valid estimate PDF.');
-  const link = document.createElement('a'); link.href = result.dataUri; link.download = `estimate-${estimateId}-v${version}.pdf`; link.click();
+  return result.dataUri;
+}
+export async function previewEstimatePdf(estimateId, version) {
+  const popup = window.open('about:blank', '_blank');
+  if (!popup) throw new Error('Allow pop-ups for Route Logistics to preview this estimate PDF.');
+  popup.opener = null;
+  try {
+    const dataUri = await requestEstimatePdf(estimateId, version), base64 = dataUri.split(',')[1];
+    const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+    popup.location.replace(url);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (error) {
+    popup.close();
+    throw error;
+  }
+}
+export async function downloadEstimatePdf(estimateId, version) {
+  const dataUri = await requestEstimatePdf(estimateId, version);
+  const link = document.createElement('a'); link.href = dataUri; link.download = `estimate-${estimateId}-v${version}.pdf`; link.click();
 }

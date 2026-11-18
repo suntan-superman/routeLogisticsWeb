@@ -770,6 +770,7 @@ const JobManagementPage = () => {
               </div>
               
               <div className="flex justify-end space-x-3 mt-6">
+                {canManage() && ['scheduled', 'en-route'].includes(selectedJob.status) && <button onClick={() => openEditModal(selectedJob)} className="rounded-md border border-primary-600 px-4 py-2 font-medium text-primary-700 hover:bg-primary-50">Reschedule appointment</button>}
                 {can('jobs.cancel') && ['scheduled', 'en-route'].includes(selectedJob.status) && <button onClick={() => handleCancelJob(selectedJob)} className="rounded-md border border-amber-600 px-4 py-2 text-amber-800 hover:bg-amber-50">Cancel appointment</button>}
                 {can('jobs.cancel') && selectedJob.status !== 'in-progress' && !isEstimateVisit(selectedJob) && <button onClick={() => handleDeleteJob(selectedJob)} className="rounded-md border border-red-600 px-4 py-2 text-red-700 hover:bg-red-50">Permanently delete</button>}
                 {can('invoices.manage') && selectedJob.status === 'completed' && !isEstimateVisit(selectedJob) && selectedJob.billable !== false && (

@@ -99,3 +99,11 @@ test('detail permission loss does not fall back to a previously selected private
  await render('pages/JobManagementPage.jsx');await act(async()=>tree.root.findAll(node=>node.type==='button'&&node.props.title==='View Job')[0].props.onClick());await settle();assert.ok(tree.root.findAllByProps({'aria-label':'Job Details'}).length);
  env.detailError={message:'This job is not assigned to your workspace.',code:'permission-denied'};await refresh(['job']);assert.equal(tree.root.findAllByProps({'aria-label':'Job Details'}).length,0);assert.ok(button('Close unavailable job'));assert.match(text(tree.root),/not assigned to your workspace/);
 });
+
+test('scheduled Job Details opens the checked editor for date, time or technician rescheduling',async()=>{
+ env.jobs=[{...env.jobs[0],assignedTo:'member-david',assignedToName:'David Lopez'}];
+ await render('pages/JobManagementPage.jsx');await act(async()=>tree.root.findAll(node=>node.type==='button'&&node.props.title==='View Job')[0].props.onClick());await settle();
+ assert.ok(button('Reschedule appointment'));await click('Reschedule appointment');
+ assert.equal(tree.root.findAllByProps({'aria-label':'Job Details'}).length,0);assert.ok(tree.root.findByProps({'aria-label':'Job editor draft'}));
+ assert.equal(env.formProps.job.id,'job-one');assert.equal(env.formProps.job.assignedTo,'member-david');assert.equal(env.formProps.job.date,env.jobs[0].date);assert.equal(env.formProps.job.time,'10:00');
+});

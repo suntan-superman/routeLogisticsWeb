@@ -6,7 +6,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { auth } from '../constants/firebase';
 import { AppState } from 'react-native';
 import { getClaims, tenantFields, requireWorkspace } from './tenancy';
-import { createQueue, retryDelay, revisionOperation, linkRevision, advanceRevision, restoreLegacyDependencies } from './offlineQueueCore';
+import { createQueue, retryDelay, revisionOperation, linkRevision, advanceRevision, restoreLegacyDependencies, repairCompletionAfterDeparture } from './offlineQueueCore';
 import { createWorkNoteDraftStore } from './workNoteDraftCore';
 
 const queues = new Map(), draining = new Map(), listeners = new Set();
@@ -317,6 +317,8 @@ export const resolveOffline = (id, action) => saveWork(async () => {
     const row = rows.find((entry) => entry.id === id); if (!row) return;
     if (row.kind === 'visit' && action === 'discard') throw new Error('Saved visit evidence is retained for management reconciliation. It cannot be discarded from the device queue.');
     if (action === 'discard') { row.state = 'discarded'; return; }
+    const repaired = repairCompletionAfterDeparture(rows, id, Crypto.randomUUID());
+    if (repaired) { operationId = repaired.operationId; return; }
     if (row.state === 'conflict' && row.kind !== 'visit') {
       if (row.kind === 'service-form' && row.server?.assignmentVersion !== row.record.assignmentVersion) throw new Error('The assigned service template changed. Review the saved answers and current template before discarding this old change.');
       row.id = Crypto.randomUUID(); row.expectedVersion = row.serverVersion;

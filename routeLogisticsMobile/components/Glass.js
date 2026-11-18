@@ -29,14 +29,15 @@ export function IconButton({ icon, label, onPress, disabled = false }) {
   const { palette } = useTheme();
   return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={[styles.icon, { backgroundColor: palette.surface, borderColor: palette.border, opacity: disabled ? 0.5 : 1 }]}><Ionicons name={icon} size={21} color={palette.text} /></Pressable>;
 }
-export function GlassInput({ label, right, style, ...props }) {
+export function GlassInput({ label, right, style, inputRef, error, ...props }) {
   const { palette, isDark } = useTheme();
   return <View style={{ gap: 7 }}>
     {!!label && <Text style={{ color: palette.text, fontSize: 14, lineHeight: 21, fontWeight: '600' }}>{label}</Text>}
-    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: palette.input, borderWidth: 1, borderColor: palette.border, borderRadius: 14 }}>
-      <TextInput accessibilityLabel={label} keyboardAppearance={isDark ? 'dark' : 'light'} placeholderTextColor={palette.secondary} selectionColor={palette.accent} style={[{ flex: 1, minHeight: props.multiline ? 112 : 50, padding: 14, color: palette.text, fontSize: 16, lineHeight: 23, textAlignVertical: props.multiline ? 'top' : 'center' }, style]} {...props} />
+    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: palette.input, borderWidth: 1, borderColor: error ? palette.danger : palette.border, borderRadius: 14 }}>
+      <TextInput ref={inputRef} accessibilityLabel={label} accessibilityInvalid={!!error} keyboardAppearance={isDark ? 'dark' : 'light'} placeholderTextColor={palette.secondary} selectionColor={palette.accent} style={[{ flex: 1, minHeight: props.multiline ? 112 : 50, padding: 14, color: palette.text, fontSize: 16, lineHeight: 23, textAlignVertical: props.multiline ? 'top' : 'center' }, style]} {...props} />
       {right}
     </View>
+    {!!error && <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={{ color: palette.danger, fontSize: 13, lineHeight: 19 }}>{error}</Text>}
   </View>;
 }
 const styles = StyleSheet.create({

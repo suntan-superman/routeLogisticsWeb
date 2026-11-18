@@ -43,4 +43,44 @@ function restoreLegacyDependencies(rows) {
     previous.set(row.jobId,row);
   }
 }
-module.exports = { createQueue, retryDelay, revisionOperation, linkRevision, advanceRevision, restoreLegacyDependencies };
+function repairCompletionAfterDeparture(rows, completionId, replacementId) {
+  const completion = rows.find(row => row.id === completionId);
+  if (!completion || completion.kind !== 'job' || completion.patch?.status !== 'completed'
+    || !['failed', 'conflict'].includes(completion.state) || completion.patch?.departureExceptionReason
+    || !/depart/i.test(String(completion.error || ''))) return null;
+  const departure = [...rows].reverse().find(row => row.jobId === completion.jobId && row.kind === 'visit'
+    && row.record?.type === 'departed' && row.state !== 'discarded');
+  if (!departure || typeof replacementId !== 'string' || rows.some(row => row.id === replacementId)) return null;
+
+  // A completion rejected before its retained departure was acknowledged must
+  // not keep that evidence behind itself. The visit identity and captured time
+  // remain unchanged; only the stale completion request receives a new identity.
+  if (departure.versionDependency === completion.id && !departure.submittedAt) {
+    delete departure.versionDependency;
+    departure.expectedVersion = completion.expectedVersion ?? completion.baseVersion ?? departure.expectedVersion;
+    departure.baseVersion = departure.expectedVersion;
+  }
+  if (['failed', 'conflict'].includes(departure.state)) {
+    departure.state = 'pending'; departure.attempts = 0; departure.nextAttempt = 0;
+    departure.error = ''; departure.errorCode = null;
+  } else if (departure.state === 'pending') departure.nextAttempt = 0;
+
+  const expectedVersion = departure.state === 'synced' && departure.serverVersion
+    ? departure.serverVersion : departure.expectedVersion ?? completion.expectedVersion ?? completion.baseVersion;
+  const replacement = {
+    ...completion, id: replacementId, expectedVersion, baseVersion: expectedVersion,
+    state: 'pending', attempts: 0, nextAttempt: 0, error: '', errorCode: null,
+    originalOperationId: completion.originalOperationId || completion.id,
+    replacedAt: Date.now(),
+  };
+  delete replacement.server; delete replacement.serverVersion; delete replacement.submittedAt;
+  if (departure.state !== 'synced') replacement.versionDependency = departure.id;
+  else delete replacement.versionDependency;
+
+  completion.state = 'discarded'; completion.supersededBy = replacementId;
+  completion.supersededReason = 'departure-prerequisite';
+  for (const row of rows) if (row !== departure && row.versionDependency === completion.id) row.versionDependency = replacementId;
+  rows.push(replacement);
+  return { operationId: replacementId, departureId: departure.id };
+}
+module.exports = { createQueue, retryDelay, revisionOperation, linkRevision, advanceRevision, restoreLegacyDependencies, repairCompletionAfterDeparture };

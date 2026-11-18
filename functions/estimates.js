@@ -530,7 +530,7 @@ function estimateHandlers(db, config = {}) {
             canDeliver: manages(scope) ? estimate.status === 'approved-for-delivery' && estimate.approvedForDeliveryVersion === estimate.version : directTechnicianSend && estimate.status === 'draft',
             directTechnicianSend
           },
-          delivery: mail?.exists ? {status:mail.get('status'),attempts:mail.get('attempts') || 0,failureCode:mail.get('failureCode') || null,sentAt:dateString(mail.get('sentAt'))} : null,
+          delivery: mail?.exists ? {status:mail.get('status'),attempts:mail.get('attempts') || 0,failureCode:mail.get('failureCode') || null,sentAt:dateString(mail.get('sentAt')),recipient:normalizeEmail(mail.get('to'))} : null,
           versions: versions.docs.map(v => ({
             version: v.get('version'),
             status: v.get('version') === estimate.version ? estimate.status : 'superseded',
@@ -638,15 +638,15 @@ function estimateHandlers(db, config = {}) {
           directTechnicianSend = !manages(scope) && company?.get('allowTechnicianEstimateSend') === true;
         if (manages(scope) ? !['approved-for-delivery', 'sent'].includes(estimate.status) || estimate.status !== 'sent' && estimate.approvedForDeliveryVersion !== estimate.version
           : !directTechnicianSend || !['draft', 'sent'].includes(estimate.status)) fail('failed-precondition', manages(scope) ? 'Approve this exact estimate version for delivery before sending it.' : 'Management review is required before this estimate can be sent.');
-        if (!validEmail(estimate.recipient.email)) fail('failed-precondition', 'Add a valid customer or prospect email before sending.');
+        const recipientEmail = normalizeEmail(data.recipientEmail || estimate.recipient.email);
+        if (!validEmail(recipientEmail)) fail('invalid-argument', 'Enter a valid estimate recipient email before sending.');
         const mailId = `estimate_${id}_v${estimate.version}`,
           mailRef = ref('rlMail', mailId),
           previous = await mailRef.get();
-        if (previous.exists) return {
-          queued: true,
-          mailId,
-          existing: true
-        };
+        if (previous.exists) {
+          if (normalizeEmail(previous.get('to')) !== recipientEmail) fail('failed-precondition', 'This estimate version was already queued for a different recipient. Save a new version before sending it elsewhere.');
+          return { queued: true, mailId, existing: true };
+        }
         const pdf = await buildPdf(scope, id, estimate),
           path = `rlEstimateDocuments/${scope.companyId || estimate.userId}/${id}/v${estimate.version}.pdf`;
         await bucket().file(path).save(pdf, {
@@ -665,12 +665,11 @@ function estimateHandlers(db, config = {}) {
           await assertEstimateAccess(scope, current, tx);
           const technicianAllowed = !manages(scope) && currentCompany?.get('allowTechnicianEstimateSend') === true;
           if (current.get('version') !== estimate.version || (manages(scope) ? !['approved-for-delivery', 'sent'].includes(current.get('status')) || current.get('status') !== 'sent' && current.get('approvedForDeliveryVersion') !== current.get('version') : !technicianAllowed || !['draft', 'sent'].includes(current.get('status')))) fail('aborted', 'The quote or its delivery authorization changed before email was queued.');
-          if (customer && (!scoped(scope, customer.data()) || normalizeEmail(customer.get('email')) !== estimate.recipient.email)) fail('failed-precondition', 'Customer contact changed. Save a new estimate version before sending.');
-          if (old.exists) return {
-            queued: true,
-            mailId,
-            existing: true
-          };
+          if (customer && (!scoped(scope, customer.data()) || customer.get('isActive') === false || customer.get('deletedAt'))) fail('failed-precondition', 'The linked customer is no longer available for estimate delivery.');
+          if (old.exists) {
+            if (normalizeEmail(old.get('to')) !== recipientEmail) fail('failed-precondition', 'This estimate version was already queued for a different recipient. Save a new version before sending it elsewhere.');
+            return { queued: true, mailId, existing: true };
+          }
           const expiry = new Date(timestamp(estimate.validUntil));
           tx.set(secretRef(id), {
             companyId: scope.companyId || null,
@@ -680,10 +679,10 @@ function estimateHandlers(db, config = {}) {
             tokenHash,
             status: 'open',
             expiresAt: expiry,
-            recipientEmail: estimate.recipient.email
+            recipientEmail
           });
           tx.create(mailRef, {
-            to: estimate.recipient.email,
+            to: recipientEmail,
             subject: `Estimate ${estimate.estimateNumber} from your service provider`,
             text: `Review the attached estimate PDF and its quoted scope and total.\n\nReview and approve this specific version: ${link}\n\nThis private link expires ${estimate.validUntil.slice(0, 10)}. Contact your provider with questions.`,
             status: 'queued',
@@ -695,7 +694,7 @@ function estimateHandlers(db, config = {}) {
             estimateVersion: estimate.version,
             estimateApprovalHash: tokenHash,
             estimatePdfPath: path,
-            estimateRecipient: estimate.recipient.email,
+            estimateRecipient: recipientEmail,
             estimateCompanyId: scope.companyId || null,
             estimateSenderUid: scope.uid
           });
@@ -858,16 +857,17 @@ function estimateHandlers(db, config = {}) {
       const validate = (row, secret) => {
         if (!row.exists || row.get('rlManaged') !== true || !secret.exists || !['open', 'approved', 'declined', 'revision-requested'].includes(secret.get('status')) || secret.get('version') !== row.get('version') || (secret.get('companyId') || null) !== (row.get('companyId') || null) || secret.get('userId') !== row.get('userId') || !Number.isFinite(timestamp(secret.get('expiresAt'))) || timestamp(secret.get('expiresAt')) <= now() || typeof secret.get('tokenHash') !== 'string' || secret.get('tokenHash').length !== tokenHash.length || !timingSafeEqual(Buffer.from(secret.get('tokenHash')), Buffer.from(tokenHash))) fail('permission-denied', 'This estimate link is invalid, expired or superseded.');
       };
-      const validateRecipient = async (row, tx) => {
+      const validateRecipient = async (row, secret, tx) => {
+        if (!validEmail(secret.get('recipientEmail'))) fail('permission-denied','This estimate recipient is invalid. Ask the service provider for a new review link.');
         if (!row.get('customerId')) return;
         const target = ref('customers', documentId(row.get('customerId'), 'customer'));
         const customer = tx ? await tx.get(target) : await target.get();
-        if (!customer.exists || !scoped({companyId:row.get('companyId') || null,uid:row.get('userId')},customer.data()) || customer.get('isActive') === false || normalizeEmail(customer.get('email')) !== row.get('recipient')?.email) fail('permission-denied','This estimate recipient changed. Ask the service provider for a new review link.');
+        if (!customer.exists || !scoped({companyId:row.get('companyId') || null,uid:row.get('userId')},customer.data()) || customer.get('isActive') === false || customer.get('deletedAt')) fail('permission-denied','This estimate recipient changed. Ask the service provider for a new review link.');
       };
       if (['get', 'pdf'].includes(data.action)) {
         const [row, secret] = await Promise.all([target.get(), secretRef(id).get()]);
         validate(row, secret);
-        await validateRecipient(row);
+        await validateRecipient(row, secret);
         const snapshot = await versionRef(id, row.get('version')).get();
         if (!snapshot.exists || !scoped({companyId:row.get('companyId') || null,uid:row.get('userId')},snapshot.data()) || snapshot.get('totalCents') !== row.get('totalCents')) fail('not-found', 'Estimate version unavailable.');
         const value = snapshot.data(),
@@ -922,7 +922,7 @@ function estimateHandlers(db, config = {}) {
         const initial = await tx.get(target), inquiryId = initial.get('inquiryId') || null;
         const [row, secret, inquiry, task] = await Promise.all([Promise.resolve(initial), tx.get(secretRef(id)), inquiryId ? tx.get(ref('rlInquiries', inquiryId)) : Promise.resolve(null), tx.get(taskRef(id, initial.get('version'), 'customer-decision'))]);
         validate(row, secret);
-        await validateRecipient(row,tx);
+        await validateRecipient(row,secret,tx);
         const version = await tx.get(versionRef(id,row.get('version')));
         if (!version.exists || !scoped({companyId:row.get('companyId') || null,uid:row.get('userId')},version.data()) || version.get('totalCents') !== row.get('totalCents')) fail('failed-precondition','This quote version changed. Ask the provider for a new link.');
         if (secret.get('status') === decisionStatus) return {

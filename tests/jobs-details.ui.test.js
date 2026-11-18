@@ -62,7 +62,7 @@ const section = label => tree.root.findAll(node => node.type === 'section' && no
 const click = async label => { const target = button(label); assert.ok(target, label); await act(async () => target.props.onClick({ currentTarget: { focus() {}, isConnected: true } })); };
 const mount = async () => act(async () => { tree = create(React.createElement(Page), { createNodeMock: () => ({ focus() {}, contains: () => false, querySelectorAll: () => [], isConnected: true }) }); });
 beforeEach(() => {
-  global.window = new EventTarget(); global.document = { body: { style: { overflow: '' } }, activeElement: null, querySelectorAll: () => [] };
+  global.window = new EventTarget(); global.window.location = { search: '', pathname: '/jobs', hash: '' }; global.window.history = { state: null, replaceState(_state, _title, next) { const value = new URL(next, 'https://route-logistics.com'); global.window.location = { search: value.search, pathname: value.pathname, hash: value.hash }; } }; global.document = { body: { style: { overflow: '' } }, activeElement: null, querySelectorAll: () => [] };
   env = { jobs: [base('job-one', { workNotes: 'Observed exterior damage.\nDiscussed with dispatch.', dispatchNotes: 'Gate code 2468.', notes: 'Legacy instructions.', actualWorkDone: 'Exterior inspection', completionNotes: 'No product applied.' }), base('job-two', { workNotes: 'Second job work log.' })], visits: { 'job-one': [{ id: 'arrival-one', type: 'arrived', capturedAt: '2026-11-16T17:10:00Z', source: 'manual-gps', accuracy: 12, note: 'Access confirmed.' }, { id: 'departure-one', type: 'departed', capturedAt: '2026-11-16T17:50:00Z', source: 'manual', note: 'Service completed.' }] }, reads: [], calls: [], invoicePreviews: [], invoiceMutations: 0, navigation: [], toasts: [], visitFailure: null, visitPending: null, jobFailure: null };
 });
 afterEach(async () => { if (tree) await act(async () => tree.unmount()); tree = null; delete global.window; delete global.document; });
@@ -126,6 +126,25 @@ test('an authorization failure during refresh removes private selected job detai
   await act(async () => hooks.useInvalidateWorkspace()(['job']));
   assert.equal(dialog(), undefined); assert.doesNotMatch(content(), /Observed exterior damage|Access confirmed|Gate code 2468/);
   assert.ok(button('Close unavailable job'));
+});
+
+test('estimate visit details distinguish a prepared quote from server-acknowledged visit completion', async () => {
+  env.jobs[0] = base('job-one', { appointmentKind: 'estimate_visit', billable: false, status: 'in-progress', estimateId: 'estimate-one', estimateOutcome: 'quote_prepared' });
+  await mount(); await click('Ant prevention');
+  assert.match(textOf(section('Estimate visit')), /Quote prepared\. Visit remains in progress until completion synchronizes and the server acknowledges it/);
+  assert.doesNotMatch(textOf(section('Estimate visit')), /Visit completion is acknowledged/);
+  await act(async () => hooks.useInvalidateWorkspace()(['job']));
+  env.jobs[0] = { ...env.jobs[0], status: 'completed' }; await act(async () => hooks.useInvalidateWorkspace()(['job', 'jobs']));
+  assert.match(textOf(section('Estimate visit')), /Visit completion is acknowledged/);
+});
+
+test('a job deep link opens once and is consumed so a manual refresh does not reopen the dialog', async () => {
+  global.window.location.search = '?job=job-one&from=notification';
+  await mount(); assert.ok(dialog()); assert.match(global.window.location.search, /from=notification/); assert.doesNotMatch(global.window.location.search, /job=/);
+  const readsAfterOpen = env.reads.filter(read => read.id === 'job-one').length;
+  await click('Close'); assert.equal(dialog(), undefined);
+  await act(async () => tree.unmount()); tree = null;
+  await mount(); assert.equal(dialog(), undefined); assert.equal(env.reads.filter(read => read.id === 'job-one').length, readsAfterOpen);
 });
 
 test('completed Job Details opens an explicit invoice review and closing preview does not create or send an invoice', async () => {

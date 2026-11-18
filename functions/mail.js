@@ -39,12 +39,12 @@ async function deliverMail(db, ref, transport, from, now = Date.now(), options =
       const company = estimate.get('companyId') ? await tx.get(db.doc(`companies/${estimate.get('companyId')}`)) : null;
       const members = company && data.estimateSenderUid !== company.get('ownerId') ? await tx.get(db.collection('teamMembers').where('companyId','==',company.id).where('uid','==',data.estimateSenderUid || '').limit(5)) : null;
       const actorAuthorized = company ? data.estimateSenderUid === company.get('ownerId') || members?.docs.some(member => member.get('status') === 'active' && ['admin','manager'].includes(member.get('role'))) : data.estimateSenderUid === estimate.get('userId');
-      const customerValid = !customer || customer.exists && customer.get('isActive') !== false && normalizeEmail(customer.get('email')) === data.to
+      const customerValid = !customer || customer.exists && customer.get('isActive') !== false && !customer.get('deletedAt')
         && (estimate.get('companyId') ? customer.get('companyId') === estimate.get('companyId') : !customer.get('companyId') && customer.get('userId') === estimate.get('userId'));
       if (!estimate.exists || estimate.get('rlManaged') !== true || !['sent','approved'].includes(estimate.get('status')) || !version.exists || !secret.exists
         || estimate.get('version') !== data.estimateVersion || secret.get('version') !== data.estimateVersion || !['open','approved'].includes(secret.get('status'))
         || secret.get('tokenHash') !== data.estimateApprovalHash || secret.get('expiresAt')?.toMillis() <= now
-        || version.get('totalCents') !== estimate.get('totalCents') || normalizeEmail(estimate.get('recipient')?.email) !== data.to
+        || version.get('totalCents') !== estimate.get('totalCents') || secret.get('recipientEmail') !== data.to
         || data.estimateRecipient !== data.to || (estimate.get('companyId') || null) !== data.estimateCompanyId || data.estimatePdfPath !== expectedPath || !customerValid || !actorAuthorized) {
         tx.update(ref,{status:'cancelled',failureCode:'estimate-version-or-recipient-changed'}); return null;
       }

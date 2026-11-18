@@ -31,7 +31,7 @@ function fixture(role = 'manager') {
     }
     if (action === 'photo-upload') { if (env.uploadFailure) throw new Error('Photo upload failed. Retry while connected.'); return { id: `photo-${fields.operationId}` }; }
     if (action === 'photo-read') return { dataUri: 'data:image/jpeg;base64,AAAA' };
-    if (action === 'deliver') { env.delivery = { status: 'queued', attempts: 0 }; env.record = { ...env.record, status: 'sent' }; return { queued: true }; }
+    if (action === 'deliver') { env.delivery = { status: 'queued', attempts: 0, recipient: fields.recipientEmail }; env.record = { ...env.record, status: 'sent' }; return { queued: true }; }
     if (action === 'convert') { env.converted++; env.record = { ...env.record, status: 'converted', convertedJobId: 'converted-job' }; return { jobId: 'converted-job', existing: false }; }
     return {};
   }
@@ -104,7 +104,7 @@ test('an assigned estimate visit opens and persists a device draft offline witho
 });
 test('photo-first native draft uploads and attaches photos to a server-priced version without modal layering', async () => {
   const env = fixture(), tree = await renderNative(env); await press(tree, 'New photo estimate'); await press(tree, 'Choose estimate photo'); await fillDraft(tree); await press(tree, 'Save estimate version');
-  assert.equal(env.calls.filter(call => call.action === 'save').length, 2); assert.equal(env.calls.filter(call => call.action === 'photo-upload').length, 1); assert.equal(env.record.photoIds.length, 1); assert.match(json(tree), /100\.23/); assert.match(json(tree), /Attached to saved version/); assert.equal(tree.root.findAll(node => node.type === 'Modal').length, 0); assert.equal(env.interactions, 0); assert.equal(env.changes.at(-1).hasDraft, false); await act(async () => tree.unmount());
+  assert.equal(env.calls.filter(call => call.action === 'save').length, 2); assert.equal(env.calls.filter(call => call.action === 'photo-upload').length, 1); assert.equal(env.record.photoIds.length, 1); assert.match(json(tree), /100\.23/); assert.match(json(tree), /Attached to saved version/); assert.equal(tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Estimate recipient email')[0].props.value, 'prospect@example.com'); assert.equal(tree.root.findAll(node => node.type === 'Modal').length, 0); assert.equal(env.interactions, 0); assert.equal(env.changes.at(-1).hasDraft, false); await act(async () => tree.unmount());
 });
 test('native picker cancellation retains the estimate context and a subsequent photo selection works', async () => {
   const env = fixture(), tree = await renderNative(env); await press(tree, 'New photo estimate'); await fill(tree, 'Estimate title', 'Retained title'); env.cancelled = true; await press(tree, 'Choose estimate photo');
@@ -119,6 +119,20 @@ test('upload failure retains the selected URI and retries the same photo operati
 test('uncertain save retries its original operation instead of creating another estimate version', async () => {
   const env = fixture(), tree = await renderNative(env); await press(tree, 'New photo estimate'); await fillDraft(tree); env.ambiguousSave = true; await press(tree, 'Save estimate version'); assert.match(json(tree), /Retry saved request/);
   await press(tree, 'Retry saved request'); const saves = env.calls.filter(call => call.action === 'save'); assert.equal(saves[0].operationId, saves[1].operationId); assert.equal(env.record.version, 1); await act(async () => tree.unmount());
+});
+test('invalid estimate save shows a summary and inline field errors without clearing the device draft', async () => {
+  const env = fixture(), tree = await renderNative(env); await press(tree, 'New photo estimate'); await press(tree, 'Save estimate version');
+  assert.match(json(tree), /Please review this estimate/); assert.match(json(tree), /Estimate title is required/);
+  const title = tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Estimate title')[0];
+  assert.equal(title.props.error, 'Estimate title is required.'); assert.equal(env.calls.filter(call => call.action === 'save').length, 0); assert.equal(env.changes.at(-1).hasDraft, true);
+  await fill(tree, 'Estimate title', 'Retained title'); assert.equal(tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Estimate title')[0].props.value, 'Retained title'); await act(async () => tree.unmount());
+});
+
+test('authorized estimate delivery prefills an editable email without changing customer data', async () => {
+  const env = fixture(); env.record = savedEstimate('approved-for-delivery'); const original = structuredClone(env.customers[0]); const tree = await renderNative(env); await press(tree, 'Open estimate');
+  const recipient = tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Estimate recipient email')[0]; assert.equal(recipient.props.value, 'prospect@example.com');
+  await fill(tree, 'Estimate recipient email', 'alternate@example.com'); await press(tree, 'Email approved estimate'); assert.match(json(tree), /alternate@example\.com/); await press(tree, 'Confirm estimate email');
+  const delivery = env.calls.find(call => call.action === 'deliver'); assert.equal(delivery.recipientEmail, 'alternate@example.com'); assert.deepEqual(env.customers[0], original); assert.match(json(tree), /PDF email queued/); await act(async () => tree.unmount());
 });
 test('approved prospect conversion requires explicit customer creation and preserves approved content', async () => {
   const env = fixture(); env.record = savedEstimate('approved'); const tree = await renderNative(env); await press(tree, 'Open estimate'); assert.equal(tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Estimate title')[0].props.editable, false);

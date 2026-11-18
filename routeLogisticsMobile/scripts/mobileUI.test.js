@@ -67,6 +67,14 @@ test('keyboard-aware scrolling keeps multiline Android editors reachable above t
  assert.equal(scroll.props.keyboardDismissMode,'on-drag');
  assert.equal(scroll.props.automaticallyAdjustKeyboardInsets,true);
  assert.equal(scrollRef.current.scrollTo,scrollTo);
+ const styles=scroll.props.contentContainerStyle;assert.ok(Array.isArray(styles));assert.ok(styles.some(value=>value?.paddingBottom>=280));
+});
+
+test('invalid glass inputs are visibly and accessibly identified beside the field',async()=>{
+ await render(Glass.GlassInput,{label:'Scope of work',multiline:true,value:'',error:'Scope of work is required.',onChangeText(){}});
+ const field=tree.root.findByType('TextInput');assert.equal(field.props.accessibilityInvalid,true);
+ assert.equal(tree.root.findAll(node=>node.type==='Text'&&node.props.accessibilityRole==='alert')[0].children.join(''),'Scope of work is required.');
+ const wrapper=field.parent;assert.equal(wrapper.props.style.borderColor,palette.danger);
 });
 
 test('screen headers and status labels remain explicit and safe-area edges are configurable',async()=>{

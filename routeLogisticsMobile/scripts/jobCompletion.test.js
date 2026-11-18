@@ -240,6 +240,28 @@ test('arrival, work notes, departure and completion inherit only their explicit 
  for(let index=1;index<after.length;index++)assert.equal(revisionCalls[index].expectedVersion,after[index-1].serverVersion);
 });
 
+test('a completion rejected before departure safely supersedes its stale request and synchronizes retained departure first',async()=>{
+ const f=fixture();f.failSync(Object.assign(new Error('Record departure before completing this visit.'),{code:'functions/failed-precondition'}));
+ let original;await assert.rejects(f.completeJob({...f.job},draft),error=>{original=error.operationId;return error.code==='functions/failed-precondition';});
+ assert.equal((await f.getQueuedOperation(original)).state,'failed');
+ f.online(false);const departure=visit('departed',{operationId:'offline-visit-departed-recovery01'});await f.saveVisitOffline({...f.job},departure);
+ const before=await f.queuedWork();assert.equal(before.find(row=>row.id===departure.operationId).versionDependency,original);
+ f.failSync(null);f.online(true);const restarted=f.restartOffline(),retry=await restarted.resolveOffline(original,'retry');assert.notEqual(retry.operationId,original);await restarted.flushOffline();
+ const rows=await restarted.queuedWork(),old=rows.find(row=>row.id===original),savedDeparture=rows.find(row=>row.id===departure.operationId),replacement=rows.find(row=>row.id===retry.operationId);
+ assert.equal(old.state,'discarded');assert.equal(old.supersededBy,retry.operationId);assert.equal(savedDeparture.state,'synced');assert.equal(savedDeparture.id,departure.operationId);
+ assert.equal(replacement.state,'synced');assert.equal(replacement.originalOperationId,original);assert.equal(replacement.expectedVersion,savedDeparture.serverVersion);assert.equal(f.job.status,'completed');
+ const order=f.calls.filter(call=>['rlJobVisit','rlApplyJobOperation'].includes(call.name)&&call.operationId!==original).map(call=>call.name);
+ assert.deepEqual(order,['rlJobVisit','rlApplyJobOperation']);assert.equal(f.visitOperations.size,1);assert.equal(f.operations.size,1);
+});
+
+test('completion repair is limited to an actual missing-departure rejection',()=>{
+ const core=require('../services/offlineQueueCore'),rows=[
+  {id:'completion',kind:'job',jobId:'job',state:'failed',error:'Permission denied for this assignment.',patch:{status:'completed'},expectedVersion:'v1'},
+  {id:'departure',kind:'visit',jobId:'job',state:'pending',record:{type:'departed'},expectedVersion:'v1',versionDependency:'completion'},
+ ];
+ assert.equal(core.repairCompletionAfterDeparture(rows,'completion','replacement'),null);assert.equal(rows.length,2);assert.equal(rows[0].state,'failed');assert.equal(rows[1].versionDependency,'completion');
+});
+
 test('reassigned or changed jobs retain visit conflicts and block dependent completion without rebasing the evidence',async()=>{
  for(const reassign of [false,true]){
   const f=fixture();f.online(false);const original=visit();await f.saveVisitOffline({...f.job},original);await f.completeJob({...f.job},draft);

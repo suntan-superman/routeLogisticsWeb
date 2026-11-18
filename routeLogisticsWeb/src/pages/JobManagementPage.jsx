@@ -115,7 +115,14 @@ const JobManagementPage = () => {
   useEffect(() => {
     if (!requestedJob || !jobsQuery.readable || openedJobLink.current === `${jobsQuery.scopeId}:${requestedJob}`) return;
     openedJobLink.current = `${jobsQuery.scopeId}:${requestedJob}`; let current = true; const ticket = ++localAction.current;
-    JobManagementService.getJob(requestedJob).then(result => { if (!current || !live.current || ticket !== localAction.current) return; if (!result.success || !result.job) { toast.error(result.error || 'This appointment is not available in your workspace.'); return; } setSelectedJob(result.job); setShowStatusModal(false); setShowEditModal(false); setShowViewModal(true); });
+    JobManagementService.getJob(requestedJob).then(result => { if (!current || !live.current || ticket !== localAction.current) return; if (!result.success || !result.job) { toast.error(result.error || 'This appointment is not available in your workspace.'); return; } setSelectedJob(result.job); setShowStatusModal(false); setShowEditModal(false); setShowViewModal(true);
+      const browser = globalThis.window;
+      if (browser?.history?.replaceState && browser.location) {
+        const params = new URLSearchParams(browser.location.search || ''); params.delete('job');
+        const query = params.toString(), next = `${browser.location.pathname || '/jobs'}${query ? `?${query}` : ''}${browser.location.hash || ''}`;
+        browser.history.replaceState(browser.history.state, '', next);
+      }
+    });
     return () => { current = false; };
   }, [requestedJob, jobsQuery.scopeId, jobsQuery.readable, setSelectedJob]);
 

@@ -12,9 +12,13 @@ export const FormField = props => <GlassInput {...props} />;
 export const Card = props => <GlassCard {...props} />;
 const KeyboardContainer = KeyboardAvoidingView || View;
 
-export function KeyboardAwareScrollView({ children, contentContainerStyle, style, scrollRef, ...props }) {
+export function KeyboardAwareScrollView({ children, contentContainerStyle, style, scrollRef, keyboardBottomPadding, ...props }) {
+  const bottomPadding = keyboardBottomPadding ?? (Platform?.OS === 'android' ? 280 : 140);
+  const contentStyle = Array.isArray(contentContainerStyle)
+    ? [...contentContainerStyle, { paddingBottom: bottomPadding }]
+    : [contentContainerStyle, { paddingBottom: bottomPadding }];
   return <KeyboardContainer style={{ flex: 1 }} behavior={Platform?.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={0}>
-    <ScrollView ref={scrollRef} style={[{ flex: 1 }, style]} contentContainerStyle={contentContainerStyle} keyboardShouldPersistTaps="handled"
+    <ScrollView ref={scrollRef} style={[{ flex: 1 }, style]} contentContainerStyle={contentStyle} keyboardShouldPersistTaps="handled"
       keyboardDismissMode={Platform?.OS === 'ios' ? 'interactive' : 'on-drag'} automaticallyAdjustKeyboardInsets {...props}>{children}</ScrollView>
   </KeyboardContainer>;
 }

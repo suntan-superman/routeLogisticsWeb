@@ -13,7 +13,7 @@ const { workspaceStatus } = require('./workspace');
 const capabilityPolicy = require('./shared/capabilities.json');
 
 const PRODUCT = 'route-logistics';
-const KNOWLEDGE_VERSION = '2026-11-17.2';
+const KNOWLEDGE_VERSION = '2026-11-18.1';
 const MAX_MESSAGE_LENGTH = 1_000;
 const MAX_SESSION_MESSAGES = 30;
 const MAX_RETURNED_MESSAGES = 40;

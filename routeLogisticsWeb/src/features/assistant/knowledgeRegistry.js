@@ -1,6 +1,6 @@
 import { routeCapabilities } from '../../utils/routeAccess.js';
 
-export const ROUTE_LOGISTICS_KNOWLEDGE_VERSION = '2026-11-17.2';
+export const ROUTE_LOGISTICS_KNOWLEDGE_VERSION = '2026-11-18.1';
 
 export const assistantActions = Object.freeze({
   dashboard: { id: 'dashboard', label: 'Go to Dashboard', route: '/', capability: 'jobs.read' },
@@ -22,11 +22,11 @@ export const assistantActions = Object.freeze({
 const registry = [
   {
     id: 'customer-intake', route: '/customers', displayName: 'Customers and inquiries', category: 'customers',
-    description: 'Create customers and prospects, reuse an existing customer, add service properties, manage follow-up, and convert a prospect.',
+    description: 'Capture estimate requests from existing customers or new prospects before scheduling an estimate visit.',
     requiredCapability: 'customers.read', supportedRoles: ['owner', 'admin', 'manager', 'technician'], status: 'implemented',
-    keywords: ['customer', 'prospect', 'inquiry', 'follow-up', 'follow up', 'service property'],
-    steps: ['Open Customers.', 'Choose New Inquiry.', 'Search before creating a prospect, select the service property, describe the requested service, and assign follow-up.', 'Use the inquiry lifecycle actions to schedule an estimate or convert the prospect when appropriate.'],
-    commonProblems: ['Save remains disabled when a required service description or contact field is missing.', 'A property must be selected before an estimate visit can be scheduled.'],
+    keywords: ['customer', 'prospect', 'prospective customer', 'potential customer', 'new customer', 'inquiry', 'estimate request', 'request an estimate', 'follow-up', 'follow up', 'service property'],
+    steps: ['Open Customers.', 'Choose New Inquiry.', 'Search for an existing customer first; if this is a new contact, choose Create inquiry for a new prospect.', 'Enter the prospect contact information, service property, requested service, and follow-up details, then save the inquiry.', 'From the saved inquiry, choose Schedule Estimate and select the date, quarter-hour time, and eligible field worker.', 'The contact remains a prospect until conversion is appropriate; do not create an unrelated job from Schedule New Job.'],
+    commonProblems: ['Schedule New Job requires an established customer and is not the starting point for a new prospect.', 'Save remains disabled when a required service description or contact field is missing.', 'A property must be selected before an estimate visit can be scheduled.'],
     actionIds: ['customers'],
   },
   {

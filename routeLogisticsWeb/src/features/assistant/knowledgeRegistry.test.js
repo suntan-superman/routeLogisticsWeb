@@ -19,8 +19,13 @@ test('assistant knowledge registry references only verified routes and actions',
 
 test('new inquiry guidance points authorized managers to Customers', () => {
   capabilities.clear(); capabilities.add('customers.read'); capabilities.add('customers.manage');
-  const result = deterministicHelp('How do I create an inquiry for a new prospect?', context('manager'));
+  const result = deterministicHelp('How do I create a request for an estimate for a new or prospective customer?', context('manager'));
+  assert.equal(result.knowledgeId, 'customer-intake');
   assert.match(result.text, /New Inquiry/);
+  assert.match(result.text, /Create inquiry for a new prospect/);
+  assert.match(result.text, /Schedule Estimate/);
+  assert.match(result.text, /remains a prospect until conversion is appropriate/);
+  assert.doesNotMatch(result.text, /Open Estimates or the assigned estimate visit/);
   assert.deepEqual(result.actions.map(action => action.id), ['customers']);
 });
 

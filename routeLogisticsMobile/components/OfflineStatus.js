@@ -61,7 +61,7 @@ export default function OfflineStatus({ onSynced }) {
   const outstanding = rows.filter(row => !['synced', 'discarded'].includes(row.state));
   const failed = outstanding.filter(row => ['failed', 'conflict'].includes(row.state)).length;
   const syncing = outstanding.filter(row => row.state === 'syncing').length;
-  const status = failed ? 'Needs attention' : syncing ? 'Syncing' : outstanding.length ? 'Pending' : 'Synced';
+  const status = failed ? 'Needs attention' : syncing ? 'Synchronizing' : outstanding.length ? 'Saved on device' : 'All work synchronized';
   const count = failed || syncing || outstanding.length;
   return <GlassCard contentStyle={{ padding: 16, gap: 9 }}>
     <Pressable accessibilityRole="button" accessibilityLabel={`Sync status: ${status}${count ? `, ${count} changes` : ''}. ${expanded ? 'Hide' : 'Show'} saved work`} accessibilityState={{ expanded }} onPress={() => setExpanded(value => !value)} style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -71,7 +71,7 @@ export default function OfflineStatus({ onSynced }) {
     {!!error && <Text accessibilityRole="alert" style={{ color: palette.danger, lineHeight: 21 }}>{error}</Text>}
     {expanded && <View style={{ gap: 14 }}>
       <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{offline ? 'Saved changes stay on this device and resume when you reconnect.' : 'Changes synchronize while the app is open and connected.'}</Text>
-      {!outstanding.length && <Text style={{ color: palette.secondary, lineHeight: 21 }}>All saved changes are synchronized.</Text>}
+      {!outstanding.length && <Text style={{ color: palette.secondary, lineHeight: 21 }}>All work synchronized.</Text>}
       {outstanding.map(row => <View key={row.id} style={{ borderTopWidth: 1, borderColor: palette.border, paddingTop: 12, gap: 8 }}>
         <Text style={{ color: palette.text, fontWeight: '600' }}>{workName(row)} · {row.state === 'conflict' ? 'Needs review' : row.state}</Text>
         {!!row.error && <Text accessibilityRole="alert" style={{ color: palette.danger, lineHeight: 21 }}>{row.error}</Text>}

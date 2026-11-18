@@ -13,7 +13,7 @@ async function fixture(){
  await db.doc(`jobs/${jobId}`).set({companyId,assignedTo:memberId,assignedToUid:uid,status:'in-progress',date:'2026-11-15',updatedAt:version,latitude:35,longitude:-119});
  const auth={uid,token:{companyId,membershipId:memberId,role:'technician',email_verified:true}},owner={uid:ownerId,token:{companyId,role:'owner',email_verified:true}};
  const handlers=locationHandlers(db,{now:()=>clock}),request=(data,caller=auth)=>({auth:caller,data});
- const payload=(type='arrived',extra={})=>({action:'record',evidenceVersion:1,jobId,operationId:`${companyId}-${type}-operation`,type,note:type==='access-blocked'?'Gate locked; contacted dispatcher.':'Original field report',occurredAt:new Date(clock-2*86400000).toISOString(),expectedVersion:version,expectedAssignee:memberId,...extra});
+ const payload=(type='arrived',extra={})=>({action:'record',evidenceVersion:1,allowCompatibleRevision:true,expectedJobState:{date:'2026-11-15'},jobId,operationId:`${companyId}-${type}-operation`,type,note:type==='access-blocked'?'Gate locked; contacted dispatcher.':'Original field report',occurredAt:new Date(clock-2*86400000).toISOString(),expectedVersion:version,expectedAssignee:memberId,...extra});
  return{companyId,uid,memberId,jobId,clock,version,auth,owner,handlers,request,payload,job:db.doc(`jobs/${jobId}`)};
 }
 for(const type of ['arrived','departed','access-blocked'])test(`delayed ${type} evidence retains original time and current authenticated identity without fabricating GPS`,async()=>{
@@ -34,11 +34,22 @@ test('accepted delayed evidence replays exactly once after later job changes and
  await assert.rejects(f.handlers.visit(f.request({...data,note:'Changed retry'})),{code:'already-exists'});
  await f.job.update({assignedTo:'someone-else',assignedToUid:'someone-else'});await assert.rejects(f.handlers.visit(f.request(data)),{code:'permission-denied'});
 });
-test('stale revisions and changed assignments never commit pending evidence or overwrite current work',async()=>{
+test('append-only visit evidence safely reconciles a compatible revision while retaining original time and audit versions',async()=>{
  const f=await fixture(),data=f.payload();await f.job.update({updatedAt:'2026-11-16T17:00:00.000Z',workNotes:'New online work'});
- const result=await f.handlers.visit(f.request(data));assert.equal(result.status,'conflict');assert.equal((await db.collection('rlJobVisits').where('companyId','==',f.companyId).get()).size,0);assert.equal((await f.job.get()).get('workNotes'),'New online work');
- await f.job.update({updatedAt:f.version,assignedTo:'other'});await assert.rejects(f.handlers.visit(f.request(data)),{code:'permission-denied'});
- const ownerResult=await f.handlers.visit(f.request(data,f.owner));assert.equal(ownerResult.status,'conflict','management permission must not silently rebase stale technician evidence');
+ const result=await f.handlers.visit(f.request(data));assert.equal(result.status,'synced');assert.equal(result.reconciled,true);assert.equal(result.event.occurredAt,data.occurredAt);assert.equal((await f.job.get()).get('workNotes'),'New online work');
+ const event=await db.doc(`rlJobVisits/${result.event.id}`).get();assert.equal(event.get('originalJobVersion'),f.version);assert.equal(event.get('reconciledJobVersion'),'2026-11-16T17:00:00.000Z');assert.equal(event.get('revisionReconciled'),true);
+});
+test('a changed service date or property remains a genuine conflict even when the technician is still assigned',async()=>{
+ const f=await fixture(),data=f.payload();await f.job.update({updatedAt:'2026-11-16T17:00:00.000Z',date:'2026-11-17',address:'A different service property'});
+ const result=await f.handlers.visit(f.request(data));assert.equal(result.status,'conflict');assert.match(result.message,/schedule, service property/);
+ assert.equal((await db.collection('rlJobVisits').where('companyId','==',f.companyId).get()).size,0);
+});
+test('legacy callers, changed assignments, closed jobs and deleted jobs cannot use compatible reconciliation to bypass state checks',async()=>{
+ const legacy=await fixture(),legacyData=legacy.payload();delete legacyData.allowCompatibleRevision;await legacy.job.update({updatedAt:'2026-11-16T17:00:00.000Z'});
+ assert.equal((await legacy.handlers.visit(legacy.request(legacyData))).status,'conflict');assert.equal((await db.collection('rlJobVisits').where('companyId','==',legacy.companyId).get()).size,0);
+ const reassigned=await fixture(),data=reassigned.payload();await reassigned.job.update({assignedTo:'other'});await assert.rejects(reassigned.handlers.visit(reassigned.request(data)),{code:'permission-denied'});
+ const cancelled=await fixture();await cancelled.job.update({status:'cancelled',updatedAt:'2026-11-16T17:00:00.000Z'});await assert.rejects(cancelled.handlers.visit(cancelled.request(cancelled.payload())),error=>error.code==='failed-precondition'&&error.details?.reason==='job-closed');
+ const deleted=await fixture();await deleted.job.delete();await assert.rejects(deleted.handlers.visit(deleted.request(deleted.payload())),{code:'permission-denied'});
 });
 test('current member, verified identity and company isolation are rechecked on every replay',async()=>{
  const f=await fixture(),other=await fixture(),data=f.payload();await assert.rejects(other.handlers.visit(other.request(data)),{code:'permission-denied'});

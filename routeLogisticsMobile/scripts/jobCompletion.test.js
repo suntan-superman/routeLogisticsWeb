@@ -12,6 +12,7 @@ function fixture() {
   const claims = { companyId: 'acme', role: 'technician', membershipId: 'member' };
   const auth = { currentUser: { uid: 'tech', emailVerified: true }, app: { options: { projectId: 'mi-factotum-field-service' } } };
   const job = { id: 'job', companyId: 'acme', assignedTo: 'member', status: 'in-progress', updatedAt: '2026-11-13T10:00:00.000Z' };
+  const compatibleState=()=>({customerId:job.customerId??null,serviceType:job.serviceType??job.serviceName??null,serviceCategory:job.serviceCategory??null,servicePropertyId:job.servicePropertyId??null,date:job.date??null,time:job.time??null,windowStart:job.windowStart??null,windowEnd:job.windowEnd??null,duration:job.estimatedDuration??job.duration??null,address:typeof job.address==='string'?job.address:null,city:job.city??null,state:job.state??null,zipCode:job.zipCode??job.postalCode??null,appointmentKind:job.appointmentKind??null});
   const assertAccess = () => {
     if (!auth.currentUser || !auth.currentUser.emailVerified || !['technician','manager','admin','owner'].includes(claims.role)) throw Object.assign(new Error('Active verified membership required.'), { code: 'functions/permission-denied' });
     if (job.companyId !== claims.companyId || (claims.role === 'technician' && job.assignedTo !== claims.membershipId)) throw Object.assign(new Error('This job is no longer assigned to your workspace.'), { code: 'functions/permission-denied' });
@@ -21,9 +22,10 @@ function fixture() {
     callWorkspace: async (name, data) => { calls.push({ name, ...data }); if(name==='rlApplyJobOperation') return applyJob(data); assertAccess(); if (syncError) throw syncError;
       if(name==='rlJobVisit'){
         if(visitOperations.has(data.operationId))return visitOperations.get(data.operationId);
-        if(data.expectedVersion!==job.updatedAt||data.expectedAssignee!==job.assignedTo)return{status:'conflict',version:job.updatedAt,server:{status:job.status}};
+        if(['completed','cancelled','canceled'].includes(job.status))throw Object.assign(new Error('This job is closed.'),{code:'functions/failed-precondition'});
+        if(data.expectedAssignee!==job.assignedTo||data.expectedVersion!==job.updatedAt&&(data.allowCompatibleRevision!==true||JSON.stringify(data.expectedJobState)!==JSON.stringify(compatibleState())))return{status:'conflict',version:job.updatedAt,server:{status:job.status}};
         const version=new Date(Date.parse(job.updatedAt)+1).toISOString(),event={id:`server-${data.operationId}`,jobId:data.jobId,type:data.type,note:data.note,source:data.latitude==null?'manual':'manual-gps',occurredAt:data.occurredAt,recordedAt:new Date().toISOString(),capturedAt:data.capturedAt};
-        job.updatedAt=version;const result={status:'synced',version,event};visitOperations.set(data.operationId,result);return result;
+        const reconciled=data.expectedVersion!==job.updatedAt;job.updatedAt=version;const result={status:'synced',version,event,reconciled};visitOperations.set(data.operationId,result);return result;
       }
       return name==='rlServiceForms'?serviceResult:{ status: 'synced' }; },
   };
@@ -49,7 +51,7 @@ function fixture() {
       };
       if (name === '@react-native-community/netinfo') return { fetch: async () => ({ isConnected: online, isInternetReachable: online }) };
       if (name === 'expo-crypto') return { randomUUID: () => `00000000-0000-4000-8000-${String(++nextId).padStart(12, '0')}` };
-      if (name === 'expo-file-system/legacy') return { documentDirectory: 'file:///documents/', makeDirectoryAsync: async () => {}, copyAsync: async data => copies.push(data), readAsStringAsync: async () => 'base64', deleteAsync: async () => {} };
+      if (name === 'expo-file-system/legacy') return { documentDirectory: 'file:///documents/', EncodingType:{Base64:'base64'}, makeDirectoryAsync: async () => {}, copyAsync: async data => copies.push(data), readAsStringAsync: async () => 'base64', deleteAsync: async () => {} };
       if (name === '../constants/firebase') return { auth, functions: {} };
       if (name === 'react-native') return { AppState: { currentState: 'active' } };
       if (name === './tenancy') return { getClaims: () => claims, requireWorkspace: () => { if (!auth.currentUser || !claims.companyId) throw new Error('Accept your company invitation or refresh your workspace before continuing.'); }, tenantFields: () => ({ userId: auth.currentUser.uid, companyId: claims.companyId }) };
@@ -230,25 +232,26 @@ test('visit storage failure retains the unsaved event and cannot report or send 
  const f=fixture();f.online(false);f.failStorage(new Error('Storage full.'));await assert.rejects(f.saveVisitOffline({...f.job},visit()),/Storage full/);f.failStorage(null);assert.equal((await f.queuedWork()).length,0);assert.equal(f.calls.length,0);
 });
 
-test('arrival, work notes, departure and completion inherit only their explicit acknowledged revision chain',async()=>{
+test('arrival, work notes, photo, departure and completion inherit only their explicit acknowledged revision chain',async()=>{
  const f=fixture();f.online(false);await f.writeCache('job-bases',{job:{...f.job}});
- await f.saveVisitOffline({...f.job},visit());await f.saveJobOffline('job',{notes:'Preserved offline observations'});await f.saveVisitOffline({...f.job},visit('departed'));
- const result=await f.completeJob({...f.job},draft);assert.equal(result.status,'queued');const before=await f.queuedWork();assert.equal(before.length,4);
- f.online(true);await f.flushOffline();const after=await f.queuedWork();assert.ok(after.every(row=>row.state==='synced'));assert.equal(f.job.status,'completed');assert.equal(f.visitOperations.size,2);
+  await f.saveVisitOffline({...f.job},visit());await f.saveJobOffline('job',{notes:'Preserved offline observations'});await f.savePhotoOffline({...f.job},'file:///evidence.jpg');await f.saveVisitOffline({...f.job},visit('departed'));
+  const result=await f.completeJob({...f.job},draft);assert.equal(result.status,'queued');const before=await f.queuedWork();assert.equal(before.length,5);
+  f.online(true);await f.flushOffline();const after=await f.queuedWork();assert.ok(after.every(row=>row.state==='synced'),JSON.stringify(after));assert.equal(f.job.status,'completed');assert.equal(f.visitOperations.size,2);
  const revisionCalls=f.calls.filter(call=>['rlJobVisit','rlApplyJobOperation'].includes(call.name));
  assert.deepEqual(revisionCalls.map(call=>call.name),['rlJobVisit','rlApplyJobOperation','rlJobVisit','rlApplyJobOperation']);
- for(let index=1;index<after.length;index++)assert.equal(revisionCalls[index].expectedVersion,after[index-1].serverVersion);
+  const revisions=after.filter(row=>['job','visit'].includes(row.kind));for(let index=1;index<revisions.length;index++)assert.equal(revisionCalls[index].expectedVersion,revisions[index-1].serverVersion);
+  assert.equal(f.calls.filter(call=>call.name==='rlJobPhoto').length,1);
 });
 
-test('a completion rejected before departure safely supersedes its stale request and synchronizes retained departure first',async()=>{
+test('a completion rejected before departure is repaired automatically and synchronizes retained departure first',async()=>{
  const f=fixture();f.failSync(Object.assign(new Error('Record departure before completing this visit.'),{code:'functions/failed-precondition'}));
  let original;await assert.rejects(f.completeJob({...f.job},draft),error=>{original=error.operationId;return error.code==='functions/failed-precondition';});
  assert.equal((await f.getQueuedOperation(original)).state,'failed');
  f.online(false);const departure=visit('departed',{operationId:'offline-visit-departed-recovery01'});await f.saveVisitOffline({...f.job},departure);
  const before=await f.queuedWork();assert.equal(before.find(row=>row.id===departure.operationId).versionDependency,original);
- f.failSync(null);f.online(true);const restarted=f.restartOffline(),retry=await restarted.resolveOffline(original,'retry');assert.notEqual(retry.operationId,original);await restarted.flushOffline();
- const rows=await restarted.queuedWork(),old=rows.find(row=>row.id===original),savedDeparture=rows.find(row=>row.id===departure.operationId),replacement=rows.find(row=>row.id===retry.operationId);
- assert.equal(old.state,'discarded');assert.equal(old.supersededBy,retry.operationId);assert.equal(savedDeparture.state,'synced');assert.equal(savedDeparture.id,departure.operationId);
+  f.failSync(null);f.online(true);const restarted=f.restartOffline();await restarted.flushOffline();
+  const rows=await restarted.queuedWork(),old=rows.find(row=>row.id===original),savedDeparture=rows.find(row=>row.id===departure.operationId),replacement=rows.find(row=>row.id===old.supersededBy);
+  assert.equal(old.state,'discarded');assert.ok(old.supersededBy);assert.equal(savedDeparture.state,'synced');assert.equal(savedDeparture.id,departure.operationId);
  assert.equal(replacement.state,'synced');assert.equal(replacement.originalOperationId,original);assert.equal(replacement.expectedVersion,savedDeparture.serverVersion);assert.equal(f.job.status,'completed');
  const order=f.calls.filter(call=>['rlJobVisit','rlApplyJobOperation'].includes(call.name)&&call.operationId!==original).map(call=>call.name);
  assert.deepEqual(order,['rlJobVisit','rlApplyJobOperation']);assert.equal(f.visitOperations.size,1);assert.equal(f.operations.size,1);
@@ -262,14 +265,25 @@ test('completion repair is limited to an actual missing-departure rejection',()=
  assert.equal(core.repairCompletionAfterDeparture(rows,'completion','replacement'),null);assert.equal(rows.length,2);assert.equal(rows[0].state,'failed');assert.equal(rows[1].versionDependency,'completion');
 });
 
-test('reassigned or changed jobs retain visit conflicts and block dependent completion without rebasing the evidence',async()=>{
- for(const reassign of [false,true]){
-  const f=fixture();f.online(false);const original=visit();await f.saveVisitOffline({...f.job},original);await f.completeJob({...f.job},draft);
-  if(reassign)f.job.assignedTo='another-member';else f.job.updatedAt='2026-11-13T10:30:00.000Z';
-  f.online(true);await f.flushOffline();const [event,completion]=await f.queuedWork();assert.equal(event.state,'conflict');assert.equal(completion.state,'pending');assert.equal(f.job.status,'in-progress');assert.equal(f.calls.some(call=>call.name==='rlApplyJobOperation'),false);
-  const pinned=event.expectedVersion;await f.resolveOffline(event.id,'retry');await f.flushOffline();const retained=await f.getQueuedOperation(event.id);assert.equal(retained.id,original.operationId);assert.equal(retained.expectedVersion,pinned);assert.equal(retained.record.occurredAt,original.occurredAt);
-  await assert.rejects(f.resolveOffline(event.id,'discard'),/retained for management/);
- }
+test('compatible server revisions reconcile append-only evidence before dependent completion',async()=>{
+ const f=fixture();f.online(false);const original=visit();await f.saveVisitOffline({...f.job},original);await f.completeJob({...f.job},draft);f.job.updatedAt='2026-11-13T10:30:00.000Z';
+ f.online(true);await f.flushOffline();const [event,completion]=await f.queuedWork();assert.equal(event.state,'synced');assert.equal(event.event.occurredAt,original.occurredAt);assert.equal(event.server,null);assert.equal(completion.state,'synced');assert.equal(f.job.status,'completed');
+ const submitted=f.calls.find(call=>call.name==='rlJobVisit');assert.equal(submitted.expectedVersion,'2026-11-13T10:00:00.000Z');assert.equal(submitted.allowCompatibleRevision,true);
+});
+
+test('an existing version-1 retained conflict receives exactly one version-2 automatic authorized recovery attempt',async()=>{
+ const f=fixture();f.online(false);const original=visit('departed');await f.saveVisitOffline({...f.job},original);await f.completeJob({...f.job},draft);
+ const key=[...f.storage.keys()].find(value=>value.endsWith(':queue')),saved=JSON.parse(f.storage.get(key));saved[0].state='conflict';saved[0].serverVersion='2026-11-13T10:30:00.000Z';saved[0].server={status:'in-progress',updatedAt:saved[0].serverVersion};saved[0].error='The job revision changed while this evidence was saved.';saved[0].submittedAt=Date.now();saved[0].automaticRecoveryVersion=1;saved[0].reconciliationHistory=[{expectedVersion:saved[0].expectedVersion,serverVersion:saved[0].serverVersion,recordedAt:Date.now()-1000}];f.storage.set(key,JSON.stringify(saved));f.job.updatedAt=saved[0].serverVersion;
+ f.online(true);const restarted=f.restartOffline();await restarted.flushOffline();const rows=await restarted.queuedWork(),departure=rows.find(row=>row.id===original.operationId),completion=rows.find(row=>row.patch?.status==='completed');
+ assert.equal(departure.state,'synced');assert.equal(departure.automaticRecoveryVersion,2);assert.equal(departure.reconciliationHistory.length,2);assert.equal(departure.reconciliationHistory[1].expectedVersion,'2026-11-13T10:00:00.000Z');assert.equal(departure.record.occurredAt,original.occurredAt);assert.equal(completion.state,'synced');assert.equal(f.job.status,'completed');
+ const visitCallCount=f.calls.filter(call=>call.name==='rlJobVisit').length;await restarted.flushOffline();const stable=await restarted.getQueuedOperation(original.operationId);assert.equal(f.calls.filter(call=>call.name==='rlJobVisit').length,visitCallCount);assert.equal(stable.reconciliationHistory.length,2);
+});
+
+test('reassignment remains a genuine visit conflict and blocks dependent completion',async()=>{
+ const f=fixture();f.online(false);const original=visit();await f.saveVisitOffline({...f.job},original);await f.completeJob({...f.job},draft);f.job.assignedTo='another-member';
+ f.online(true);await f.flushOffline();const [event,completion]=await f.queuedWork();assert.equal(event.state,'conflict');assert.equal(completion.state,'pending');assert.equal(f.job.status,'in-progress');assert.equal(f.calls.some(call=>call.name==='rlApplyJobOperation'),false);
+ const pinned=event.expectedVersion;await f.resolveOffline(event.id,'retry');await f.flushOffline();const retained=await f.getQueuedOperation(event.id);assert.equal(retained.id,original.operationId);assert.equal(retained.expectedVersion,pinned);assert.equal(retained.record.occurredAt,original.occurredAt);
+ await assert.rejects(f.resolveOffline(event.id,'discard'),/retained for management/);
 });
 
 test('a previously acknowledged visit replay returns its original identity once and does not create another record',async()=>{
@@ -280,14 +294,14 @@ test('a previously acknowledged visit replay returns its original identity once 
  assert.equal(f.calls.filter(call=>call.name==='rlJobVisit').length,2);
 });
 
-test('lost visit acknowledgement cannot rebase dependent evidence onto an unrelated later server revision',async()=>{
+test('a lost acknowledgement replays exactly once and a later compatible revision preserves dependent evidence',async()=>{
  const f=fixture();f.online(false);const arrival=visit(),departure=visit('departed');await f.saveVisitOffline({...f.job},arrival);await f.saveVisitOffline({...f.job},departure);
  // Simulate the server having committed the first event before the device died,
  // then a separate dispatcher edit. Only its original receipt may advance the chain.
  const firstVersion='2026-11-13T10:00:00.001Z';
  f.visitOperations.set(arrival.operationId,{status:'synced',version:firstVersion,event:{id:'saved-arrival',jobId:'job',type:'arrived',source:'manual',occurredAt:arrival.occurredAt,recordedAt:new Date().toISOString()}});
- f.job.updatedAt='2026-11-13T12:00:00.000Z';f.online(true);await f.flushOffline();const rows=await f.queuedWork();
- assert.equal(rows[0].state,'synced');assert.equal(rows[1].expectedVersion,firstVersion);assert.equal(rows[1].state,'conflict');assert.equal(f.visitOperations.size,1);assert.equal(f.job.updatedAt,'2026-11-13T12:00:00.000Z');
+  f.job.updatedAt='2026-11-13T12:00:00.000Z';f.online(true);await f.flushOffline();const rows=await f.queuedWork();
+  assert.equal(rows[0].state,'synced');assert.equal(rows[1].expectedVersion,firstVersion);assert.equal(rows[1].state,'synced');assert.equal(f.visitOperations.size,2);assert.equal(rows[1].event.occurredAt,departure.occurredAt);
 });
 
 test('an upgrade preserves the previous release unsent same-baseline notes/completion chain without rebasing attempted changes',async()=>{

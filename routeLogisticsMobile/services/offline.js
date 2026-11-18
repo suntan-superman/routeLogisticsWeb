@@ -6,7 +6,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { auth } from '../constants/firebase';
 import { AppState } from 'react-native';
 import { getClaims, tenantFields, requireWorkspace } from './tenancy';
-import { createQueue, retryDelay, revisionOperation, linkRevision, advanceRevision, restoreLegacyDependencies, repairCompletionAfterDeparture } from './offlineQueueCore';
+import { createQueue, retryDelay, revisionOperation, compatibleJobState, linkRevision, advanceRevision, restoreLegacyDependencies, repairCompletionAfterDeparture, prepareAutomaticRecovery } from './offlineQueueCore';
 import { createWorkNoteDraftStore } from './workNoteDraftCore';
 
 const queues = new Map(), draining = new Map(), listeners = new Set();
@@ -220,7 +220,7 @@ export const saveVisitOffline = (job, input) => saveWork(async () => {
   await queue(scope).edit(rows => {
     const existing = rows.find(row => row.id === id);
     if (existing) { if (existing.kind !== 'visit' || existing.jobId !== job.id || JSON.stringify(existing.record) !== JSON.stringify(record)) throw new Error('This visit operation belongs to different evidence. Retry the original saved event.'); return; }
-    rows.push(linkRevision(rows, { id, kind: 'visit', jobId: job.id, record, attribution: { ...attribution, userId: uid, memberId: claims.membershipId || uid, role: claims.role }, expectedAssignee: job.assignedTo || null,
+    rows.push(linkRevision(rows, { id, kind: 'visit', jobId: job.id, record, attribution: { ...attribution, userId: uid, memberId: claims.membershipId || uid, role: claims.role }, expectedAssignee: job.assignedTo || null, expectedJobState: compatibleJobState(job),
       expectedVersion: offlineVersion(base.updatedAt), createdAt: Date.now(), state: 'pending', attempts: 0, nextAttempt: 0 }));
   });
   void flushOffline().catch(() => {});
@@ -257,7 +257,21 @@ export function flushOffline() {
   const task = (async () => {
     if (await isOffline()) return;
     try {
-    await work.edit((rows) => { restoreLegacyDependencies(rows);rows.forEach((row) => { if (row.state === 'syncing') row.state = 'pending'; }); });
+    const bases = await readCache('job-bases', scope) || {};
+    await work.edit((rows) => {
+      restoreLegacyDependencies(rows);
+      rows.forEach((row) => { if (row.state === 'syncing') row.state = 'pending'; });
+      // Queues from the immediately preceding release did not copy the stable
+      // business snapshot onto visit rows. Recover it from the job cache that
+      // was already required before offline work; never fetch or invent it.
+      for (const row of rows) if (row.kind === 'visit' && !row.expectedJobState && bases[row.jobId]) row.expectedJobState = compatibleJobState(bases[row.jobId]);
+      // Upgrade retained evidence in place. Missing-departure completions receive
+      // a superseding operation while the original failure remains in the audit
+      // trail. Structured visit revision conflicts get one automatic server
+      // recheck under the compatible-revision protocol; genuine conflicts are
+      // left for review and are never retried in a loop.
+      prepareAutomaticRecovery(rows, () => Crypto.randomUUID());
+    });
     for (const saved of await work.read()) {
       const row = (await work.read()).find((entry) => entry.id === saved.id);
       if (!row) continue;
@@ -271,7 +285,7 @@ export function flushOffline() {
       try {
         const result = row.kind === 'job' ? await callWorkspace('rlApplyJobOperation', { operationId: row.id, jobId: row.jobId, patch: row.patch, expectedVersion: row.expectedVersion }) : row.kind === 'application' ? await callWorkspace('rlRecordApplication', { jobId: row.jobId, operationId: row.id, record: row.record }).then(() => ({ status: 'synced' }))
           : row.kind === 'service-form' ? await callWorkspace('rlServiceForms', { action: 'save', jobId: row.jobId, operationId: row.id, ...row.record })
-          : row.kind === 'visit' ? await callWorkspace('rlJobVisit', { action:'record', jobId:row.jobId, operationId:row.id, evidenceVersion:1, expectedVersion:row.expectedVersion, expectedAssignee:row.expectedAssignee, ...row.record })
+          : row.kind === 'visit' ? await callWorkspace('rlJobVisit', { action:'record', jobId:row.jobId, operationId:row.id, evidenceVersion:1, expectedVersion:row.expectedVersion, expectedAssignee:row.expectedAssignee, expectedJobState:row.expectedJobState || null, allowCompatibleRevision:true, ...row.record })
           : row.kind === 'photo' ? await sendPhoto(row, scope) : (() => { throw new Error('Unsupported saved-work type. Retain this change for review.'); })();
         if(row.kind==='visit'&&(!['synced','conflict'].includes(result?.status)||result.status==='synced'&&(!result.event?.id||result.event.type!==row.record.type||!['manual','manual-gps'].includes(result.event.source)||!Number.isFinite(Date.parse(result.event.recordedAt))))) throw Object.assign(new Error('The server did not confirm a saved manual visit report. The durable event remains available to retry with the same identity.'),{code:'functions/internal'});
         await work.edit((rows) => {

@@ -20,6 +20,26 @@ const { availabilityRef, availabilityView, assertAvailable } = require('./staffA
 const { servicePropertySite } = require('./serviceAreaWorkflows');
 const ms = value => value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : typeof value === 'string' ? Date.parse(value) : NaN;
 const iso = value => Number.isFinite(ms(value)) ? new Date(ms(value)).toISOString() : null;
+const compatibleJobState = job => {
+  const data = typeof job?.data === 'function' ? job.data() : job || {}, address = data.address && typeof data.address === 'object' ? data.address : {};
+  const value = key => data[key] ?? address[key] ?? null;
+  return {
+    customerId: data.customerId ?? null,
+    serviceType: data.serviceType ?? data.serviceName ?? null,
+    serviceCategory: data.serviceCategory ?? null,
+    servicePropertyId: data.servicePropertyId ?? null,
+    date: data.date ?? null,
+    time: data.time ?? null,
+    windowStart: data.windowStart ?? null,
+    windowEnd: data.windowEnd ?? null,
+    duration: data.estimatedDuration ?? data.duration ?? null,
+    address: typeof data.address === 'string' ? data.address : address.line1 ?? address.street ?? null,
+    city: value('city'),
+    state: value('state'),
+    zipCode: data.zipCode ?? data.postalCode ?? address.zipCode ?? address.postalCode ?? null,
+    appointmentKind: data.appointmentKind ?? null,
+  };
+};
 function policyFor(company) {
   const get = key => typeof company.get === 'function' ? company.get(key) : company[key];
   const intervalMinutes = [1, 3, 5].includes(get('rlLocationIntervalMinutes')) ? get('rlLocationIntervalMinutes') : 3;
@@ -517,6 +537,10 @@ function workTrackingHandlers(db, legacy, {
       const gps = request.data.latitude != null || request.data.longitude != null || request.data.accuracy != null;
       const durable = request.data.evidenceVersion === 1;
       if (request.data.evidenceVersion != null && !durable) throw new HttpsError('invalid-argument','Unsupported visit evidence version.');
+      if (request.data.allowCompatibleRevision != null && typeof request.data.allowCompatibleRevision !== 'boolean') throw new HttpsError('invalid-argument','Compatible revision reconciliation must be explicitly enabled or disabled.');
+      const allowCompatibleRevision = durable && request.data.allowCompatibleRevision === true;
+      if (request.data.expectedJobState != null && (typeof request.data.expectedJobState !== 'object' || Array.isArray(request.data.expectedJobState))) throw new HttpsError('invalid-argument','The saved job state is invalid.');
+      const expectedJobState = request.data.expectedJobState == null ? null : compatibleJobState(request.data.expectedJobState);
       const expectedVersion = request.data.expectedVersion ?? null;
       if (durable && (!Object.hasOwn(request.data,'expectedVersion') || expectedVersion !== null && (typeof expectedVersion !== 'string' || !Number.isFinite(Date.parse(expectedVersion)))
         || !Object.hasOwn(request.data,'expectedAssignee') || request.data.expectedAssignee !== null && typeof request.data.expectedAssignee !== 'string')) throw new HttpsError('invalid-argument','The saved job revision and assignment are required for visit replay.');
@@ -551,7 +575,10 @@ function workTrackingHandlers(db, legacy, {
         }
         if (['completed', 'cancelled','canceled'].includes(job.get('status'))) fail('job-closed', 'This job is closed. Its history is available, but new events cannot be added.');
         const currentVersion=iso(job.get('updatedAt')) || job.get('updatedAt') || null;
-        if (durable && (currentVersion !== expectedVersion || (job.get('assignedTo') || null) !== payload.expectedAssignee)) return {status:'conflict',version:currentVersion,server:{status:job.get('status'),updatedAt:currentVersion},message:'The job revision or assignment changed while this evidence was saved. Management attention is required; the original event remains on the device.'};
+        const assignmentChanged = durable && (job.get('assignedTo') || null) !== payload.expectedAssignee,
+          revisionChanged = durable && currentVersion !== expectedVersion,
+          businessStateChanged = revisionChanged && (!expectedJobState || JSON.stringify(compatibleJobState(job)) !== JSON.stringify(expectedJobState));
+        if (assignmentChanged || revisionChanged && (!allowCompatibleRevision || businessStateChanged)) return {status:'conflict',version:currentVersion,server:{status:job.get('status'),updatedAt:currentVersion},message:assignmentChanged?'The job assignment changed while this evidence was saved. Management review is required; the original event remains on the device.':businessStateChanged?'The job schedule, service property, customer or service details changed while this evidence was saved. Management review is required; the original event remains on the device.':'The job revision changed while this evidence was saved. The original event remains on the device.'};
         const occurred = durable ? typeof payload.occurredAt === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(payload.occurredAt) ? Date.parse(payload.occurredAt) : NaN : time;
         if (!Number.isFinite(occurred) || occurred>time+120000 || occurred<time-30*86400000) throw new HttpsError('invalid-argument','The original visit time is invalid or older than the supported 30-day offline evidence window. Retain it for management review.');
         let at = occurred,
@@ -585,6 +612,9 @@ function workTrackingHandlers(db, legacy, {
           fingerprint,
           evidenceOnly: true,
           verifiedAccess: false,
+          originalJobVersion: expectedVersion,
+          revisionReconciled: revisionChanged,
+          ...(revisionChanged ? { reconciledJobVersion: currentVersion, originalJobState: expectedJobState } : {}),
           ...(gps ? {
             accuracy
           } : {}),
@@ -600,6 +630,7 @@ function workTrackingHandlers(db, legacy, {
         return {
           event: eventView(event),
           status:'synced',version:updatedAt,
+          reconciled: revisionChanged,
           duplicate: false
         };
       });

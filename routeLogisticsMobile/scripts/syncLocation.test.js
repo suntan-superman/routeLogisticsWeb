@@ -95,7 +95,7 @@ test('synced transitions invalidate work once and account changes clear prior di
   await notifyQueue(); assert.equal(refreshed, 1);
   const original = rows; rows = []; user = { ...user, id: 'another', membershipId: 'different' };
   await act(async () => tree.update(React.createElement(Offline, { onSynced: () => refreshed++ }))); await settle();
-  assert.match(text(), /Synced/); assert.equal(original[0].state, 'synced'); assert.equal(refreshed, 1);
+  assert.match(text(), /All work synchronized/); assert.equal(original[0].state, 'synced'); assert.equal(refreshed, 1);
 });
 
 test('queue read failures are visible without discarding local work', async () => {

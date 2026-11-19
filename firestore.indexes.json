@@ -51,6 +51,24 @@
       ]
     },
     {
+      "collectionGroup": "rlLocationHistory",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "memberId", "order": "ASCENDING" },
+        { "fieldPath": "capturedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "rlLocationHistoryEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "memberId", "order": "ASCENDING" },
+        { "fieldPath": "occurredAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "jobs",
       "queryScope": "COLLECTION",
       "fields": [

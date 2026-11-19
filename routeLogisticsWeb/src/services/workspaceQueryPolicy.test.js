@@ -20,7 +20,7 @@ test('authorization errors stop retrying while transient reads get at most one r
 test('only successful writes invalidate affected controls; reads, provider work and GPS never loop', () => {
   assert.deepEqual(mutationResources('rlManageCustomer'), ['customers', 'customer', 'customer-stats', 'jobs', 'job']);
   assert.ok(mutationResources('rlManageJob').includes('jobs'));
-  for (const name of ['rlReadWorkspace', 'rlCheckAvailability', 'rlGetTeamLocations', 'rlUpdateWorkLocation', 'rlQuickBooksOptions', 'rlQuickBooksSync', 'rlCreateInvoicePayment', 'rlRequestCustomerOTP']) assert.deepEqual(mutationResources(name), []);
+  for (const name of ['rlReadWorkspace', 'rlCheckAvailability', 'rlGetTeamLocations', 'rlGetLocationHistoryMembers', 'rlGetLocationHistory', 'rlUpdateWorkLocation', 'rlQuickBooksOptions', 'rlQuickBooksSync', 'rlCreateInvoicePayment', 'rlRequestCustomerOTP']) assert.deepEqual(mutationResources(name), []);
   assert.deepEqual(mutationResources('rlJobVisit', { action: 'list' }), []);
   assert.deepEqual(mutationResources('rlJobException', { action: 'list' }), []);
   assert.deepEqual(mutationResources('rlJobException', { action: 'resolve' }), ['jobs', 'job', 'job-exceptions']);

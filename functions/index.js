@@ -273,6 +273,8 @@ exports.rlSetLocationPolicy = onCall(locations.policy);
 exports.rlJobVisit = onCall(locations.visit);
 exports.rlUpdateWorkLocation = onCall(locations.update);
 exports.rlGetTeamLocations = onCall(locations.list);
+exports.rlGetLocationHistoryMembers = onCall(locations.historyMembers);
+exports.rlGetLocationHistory = onCall(locations.history);
 exports.rlSetLocationRetention = onCall(locations.retention);
 exports.rlCleanupLocations = onSchedule({ schedule: 'every 60 minutes', maxInstances: 1, timeoutSeconds: 540 }, locations.cleanup);
 const qbEnabled = () => process.env.RL_QB_ENABLED === 'true';

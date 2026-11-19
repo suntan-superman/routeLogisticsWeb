@@ -56,7 +56,7 @@ function accountDeletionHandlers(db, auth, { now = () => Date.now() } = {}) {
     const data = saved.data();
     for (const [collection, field] of [
       ['rlPushDevices', 'uid'], ['rlPushPreferences', 'uid'], ['rlPushInstallations', 'uid'], ['rlPushDeliveries', 'uid'],
-      ['deviceTokens', 'userId'], ['rlNotifications', 'userId'], ['rlLocations', 'userId'], ['rlWorkShifts', 'userId'],
+      ['deviceTokens', 'userId'], ['rlNotifications', 'userId'], ['rlLocations', 'userId'], ['rlLocationHistory', 'userId'], ['rlLocationHistoryEvents', 'userId'], ['rlWorkShifts', 'userId'],
       ['rlJobVisitStates', 'userId'], ['rlQbOAuthStates', 'userId'],
     ]) await deleteQuery(db.collection(collection).where(field, '==', uid));
     // Authentication mail contains one-time credentials, not accounting/message history.

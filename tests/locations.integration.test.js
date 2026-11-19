@@ -147,11 +147,50 @@ test('retention clears raw GPS without ending an authorized shift or losing its 
   // Policy changes also work before the first coordinate has been captured.
   await f.handlers.retention(f.request({companyId:f.companyId,hours:1},f.owner));
   await f.fix(session.sessionId); f.advance(2*3600000);
-  const cleanup = await f.handlers.cleanup(); assert.ok(cleanup.clearedFixes >= 1);
+  const cleanup = await f.handlers.cleanup(); assert.ok(cleanup.clearedFixes >= 1); assert.ok(cleanup.removed >= 3);
+  assert.equal((await db.collection('rlLocationHistory').where('companyId', '==', f.companyId).get()).size, 0);
+  assert.equal((await db.collection('rlLocationHistoryEvents').where('companyId', '==', f.companyId).get()).size, 0);
   assert.equal((await f.row.get()).get('lat'), undefined);
   assert.equal((await f.row.get()).get('sessionId'), session.sessionId);
   assert.equal((await f.fix(session.sessionId)).accepted, true);
   assert.equal((await f.handlers.list(f.request({},f.owner))).locations[0].state, 'live');
+});
+test('GPS history is append-only, keeps original offline times and returns only authorized tenant records in pages', async () => {
+  const f = await fixture(), managerId = `${f.companyId}-manager`, managerUid = `${f.companyId}-manager-uid`, secondId = `${f.companyId}-second-tech`;
+  await db.doc(`teamMembers/${managerId}`).set({ companyId: f.companyId, uid: managerUid, role: 'manager', status: 'active', name: 'Test manager' });
+  await db.doc(`teamMembers/${secondId}`).set({ companyId: f.companyId, uid: `${f.companyId}-second-uid`, role: 'technician', status: 'active', name: 'Second technician' });
+  const manager = { uid: managerUid, token: { companyId: f.companyId, membershipId: managerId, role: 'manager', email_verified: true } };
+  const { shift } = await f.start(), session = await f.handlers.update(f.request({ action: 'start', shiftId: shift.id }));
+  await f.fix(session.sessionId); const firstCaptured = f.time();
+  f.advance(3 * 60000); await f.fix(session.sessionId);
+  f.advance(3 * 60000);
+  const late = new Date(firstCaptured + 60000).toISOString();
+  const delayed = await f.fix(session.sessionId, { capturedAt: late });
+  assert.equal(delayed.accepted, false); assert.equal(delayed.historyRecorded, true);
+  const startAt = new Date(firstCaptured - 60000).toISOString(), endAt = new Date(f.time() + 60000).toISOString();
+  const members = await f.handlers.historyMembers(f.request({}, manager));
+  assert.equal(members.technicians.length, 2);
+  const page = await f.handlers.history(f.request({ memberId: f.memberId, startAt, endAt, limit: 2 }, manager));
+  assert.equal(page.points.length, 2); assert.equal(page.hasMore, true); assert.ok(page.nextCursor);
+  const next = await f.handlers.history(f.request({ memberId: f.memberId, startAt, endAt, limit: 2, cursor: page.nextCursor }, manager));
+  assert.equal(next.points.length, 1); assert.equal(next.hasMore, false);
+  assert.deepEqual([...page.points, ...next.points].map(point => point.capturedAt), [new Date(firstCaptured).toISOString(), late, new Date(firstCaptured + 3 * 60000).toISOString()]);
+  assert.equal((await f.handlers.history(f.request({ memberId: secondId, startAt, endAt }, manager))).points.length, 0);
+  await assert.rejects(f.handlers.history(f.request({ memberId: f.memberId, startAt, endAt }, f.auth)), { code: 'permission-denied' });
+  const other = await fixture();
+  await assert.rejects(f.handlers.history(f.request({ memberId: other.memberId, startAt, endAt }, f.owner)), { code: 'permission-denied' });
+});
+test('sharing-disabled and shift-ended states are retained as explicit history events', async () => {
+  const f = await fixture(), { shift } = await f.start(), session = await f.handlers.update(f.request({ action: 'start', shiftId: shift.id }));
+  f.advance(60000);
+  await f.handlers.update(f.request({ action: 'stop', sessionId: session.sessionId, reason: 'permission-lost' }));
+  await assert.rejects(f.fix(session.sessionId), error => error.code === 'failed-precondition' && error.details?.reason === 'session-ended');
+  assert.equal((await db.collection('rlLocationHistory').where('companyId', '==', f.companyId).where('memberId', '==', f.memberId).count().get()).data().count, 0);
+  const disabled = await db.collection('rlLocationHistoryEvents').where('companyId', '==', f.companyId).where('memberId', '==', f.memberId).get();
+  assert.ok(disabled.docs.some(row => row.get('event') === 'sharing-stopped' && row.get('reason') === 'permission-lost'));
+  await f.handlers.shift(f.request({ action: 'end', shiftId: shift.id }));
+  const complete = await db.collection('rlLocationHistoryEvents').where('companyId', '==', f.companyId).where('memberId', '==', f.memberId).get();
+  assert.ok(complete.docs.some(row => row.get('event') === 'shift-ended'));
 });
 test('an explicit unverified property cannot create proximity evidence using old customer or root job coordinates', async () => {
   const f = await fixture(), jobId = `${f.companyId}-unverified-job`, customerId = `${f.companyId}-old-location-customer`;

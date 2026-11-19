@@ -40,6 +40,7 @@ const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
 const TermsPage = lazy(() => import('./pages/TermsPage'));
 const RoutesPage = lazy(() => import('./pages/RoutesPage'));
 const TeamLocationsPage = lazy(() => import('./pages/TeamLocationsPage'));
+const LocationHistoryPage = lazy(() => import('./pages/LocationHistoryPage'));
 const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
 
 // Components
@@ -114,6 +115,7 @@ function AppContent() {
                 <Route path="/terms" element={<TermsPage />} />
                 <Route path="/notifications" element={<ProtectedRoute><Layout><NotificationsPage /></Layout></ProtectedRoute>} />
                 <Route path="/routes" element={<ProtectedRoute><Layout><RoutesPage /></Layout></ProtectedRoute>} />
+                <Route path="/location-history" element={<ProtectedRoute><Layout><LocationHistoryPage /></Layout></ProtectedRoute>} />
                 <Route path="/team-locations" element={<ProtectedRoute><Layout><TeamLocationsPage /></Layout></ProtectedRoute>} />
                 <Route path="/integrations" element={<ProtectedRoute><Layout><IntegrationsPage /></Layout></ProtectedRoute>} />
 

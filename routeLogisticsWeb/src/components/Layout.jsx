@@ -54,6 +54,7 @@ const Layout = ({ children }) => {
     { name: 'Calendar', href: '/calendar', icon: CalendarIcon },
     { name: 'Daily Routes', href: '/routes', icon: ArrowPathIcon },
     { name: 'Team Locations', href: '/team-locations', icon: UserGroupIcon },
+    { name: 'Location History', href: '/location-history', icon: UserGroupIcon },
     { name: 'Service Plans', href: '/service-plans', icon: ArrowPathIcon },
     { name: 'Invoices', href: '/invoices', icon: BanknotesIcon },
     { name: 'Reports', href: '/reports', icon: ChartBarIcon },

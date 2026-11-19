@@ -69,8 +69,17 @@ function legacyLocationHandlers(db) {
       const hours = request.data?.hours;
       if (!Number.isInteger(hours) || hours < 1 || hours > 168) throw new HttpsError('invalid-argument', 'Retention must be between 1 and 168 hours.');
       await company.ref.update({ rlLocationRetentionHours: hours });
-      const rows = await db.collection('rlLocations').where('companyId', '==', company.id).get();
-      for (let offset = 0; offset < rows.size; offset += 400) { const batch = db.batch(); rows.docs.slice(offset, offset + 400).forEach((row) => batch.update(row.ref, { expiresAt: new Date(Math.min(row.get('expiresAt').toMillis(), row.get('updatedAt').toMillis() + hours * 3600_000)) })); await batch.commit(); }
+      for (const [collection, timestampField] of [['rlLocations', 'updatedAt'], ['rlLocationHistory', 'capturedAt'], ['rlLocationHistoryEvents', 'occurredAt']]) {
+        const rows = await db.collection(collection).where('companyId', '==', company.id).get();
+        for (let offset = 0; offset < rows.size; offset += 400) {
+          const batch = db.batch();
+          rows.docs.slice(offset, offset + 400).forEach(row => {
+            const capturedAt = row.get(timestampField)?.toMillis?.(), existingExpiry = row.get('expiresAt')?.toMillis?.();
+            if (Number.isFinite(capturedAt) && Number.isFinite(existingExpiry)) batch.update(row.ref, { expiresAt: new Date(Math.min(existingExpiry, capturedAt + hours * 3600_000)) });
+          });
+          await batch.commit();
+        }
+      }
       return { hours };
     },
     cleanup: async () => {

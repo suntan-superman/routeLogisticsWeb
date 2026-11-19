@@ -80,6 +80,10 @@ export async function stopShiftTracking({ endShift = false, reason = 'Location s
   let nativeFailure;
   try { await stopNative(); } catch (failure) { nativeFailure = failure; }
   await clearing;
+  if (previous?.sessionId) {
+    const historyReason = endShift ? 'shift-ended' : /permission/i.test(reason) ? 'permission-lost' : /expired/i.test(reason) ? 'shift-expired' : 'client-stopped';
+    try { await callWorkspace('rlUpdateWorkLocation', { action: 'stop', sessionId: previous.sessionId, reason: historyReason }, { timeout: 8000 }); } catch { /* Local privacy stop remains immediate while offline or after access changes. */ }
+  }
   if (endShift && shiftId) {
     try {
       if (!currentRequest(ticket, key, account)) return;
@@ -105,7 +109,7 @@ export async function stopShiftTracking({ endShift = false, reason = 'Location s
   if (nativeFailure && currentRequest(ticket, key, account)) { update({ error: 'Unable to confirm native location shutdown. Turn off location permission in device Settings and reopen the app.' }); throw nativeFailure; }
 }
 async function failClosed(failure) {
-  await stopShiftTracking({ reason: 'Location sharing stopped. Resume only after checking your shift and workspace access.' });
+  await stopShiftTracking({ reason: code(failure) === 'permission-denied' ? 'Location permission or authorization changed. Sharing stopped.' : 'Location sharing stopped. Resume only after checking your shift and workspace access.' });
   update({ error: failure.message || 'The current shift is no longer authorized.' });
 }
 function publishMetadata() {

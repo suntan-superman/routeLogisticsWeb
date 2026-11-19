@@ -146,6 +146,18 @@ function workTrackingHandlers(db, legacy, {
       shift: db.doc(`rlWorkShifts/${id}`)
     };
   };
+  const historyEvent = (staff, shiftId, sessionId, event, occurredAt, reason = null) => ({
+    id: hash(`${staff.company.id}:${staff.memberId || staff.uid}:${shiftId}:${sessionId || ''}:${event}`),
+    companyId: staff.company.id,
+    userId: staff.uid,
+    memberId: staff.memberId || staff.uid,
+    shiftId,
+    ...(sessionId ? { sessionId } : {}),
+    event,
+    ...(reason ? { reason } : {}),
+    occurredAt: new Date(occurredAt),
+    expiresAt: new Date(occurredAt + policyFor(staff.company).retentionHours * 3600000)
+  });
   const staffFor = request => {
     const {
       token
@@ -285,6 +297,7 @@ function workTrackingHandlers(db, legacy, {
             event: 'end',
             recordedAt: new Date(time)
           });
+          tx.set(db.doc(`rlLocationHistoryEvents/${historyEvent(staff, data.id, null, 'shift-ended', time, data.endReason).id}`), historyEvent(staff, data.id, null, 'shift-ended', time, data.endReason));
           if (location.exists && location.get('shiftId') === data.id) tx.update(target.location, {
             sharing: false,
             stoppedAt: new Date(time)
@@ -309,6 +322,7 @@ function workTrackingHandlers(db, legacy, {
             event: 'start',
             recordedAt: new Date(time)
           });
+          tx.set(db.doc(`rlLocationHistoryEvents/${historyEvent(staff, newId, null, 'shift-started', time).id}`), historyEvent(staff, newId, null, 'shift-started', time));
         }
         return shiftView(data, time);
       });
@@ -335,10 +349,11 @@ function workTrackingHandlers(db, legacy, {
       if (action === 'stop') {
         await db.runTransaction(async tx => {
           const current = await tx.get(target.location);
-          if (current.exists && current.get('sessionId') === request.data.sessionId) tx.update(target.location, {
-            sharing: false,
-            stoppedAt: new Date(time)
-          });
+          if (current.exists && current.get('sessionId') === request.data.sessionId) {
+            tx.update(target.location, { sharing: false, stoppedAt: new Date(time) });
+            const event = historyEvent(staff, current.get('shiftId') || null, current.get('sessionId'), 'sharing-stopped', time, ['permission-lost', 'authorization-lost', 'client-stopped', 'shift-ended', 'shift-expired'].includes(request.data.reason) ? request.data.reason : 'client-stopped');
+            tx.set(db.doc(`rlLocationHistoryEvents/${event.id}`), event);
+          }
         });
         return {
           sharing: false,
@@ -352,6 +367,7 @@ function workTrackingHandlers(db, legacy, {
         assertAvailable(availability.data(), time);
         ownShift(shift, staff, request.data.shiftId, time);
         const sessionId = location.get('sharing') && location.get('shiftId') === shift.id ? location.get('sessionId') : randomBytes(24).toString('hex');
+        const event = historyEvent(staff, shift.id, sessionId, 'sharing-started', time);
         tx.set(target.location, {
           companyId: staff.company.id,
           userId: staff.uid,
@@ -366,6 +382,7 @@ function workTrackingHandlers(db, legacy, {
         }, {
           merge: true
         });
+        tx.set(db.doc(`rlLocationHistoryEvents/${event.id}`), event);
         return {
           sessionId,
           sharing: true,
@@ -387,6 +404,22 @@ function workTrackingHandlers(db, legacy, {
         shift = saved.data();
         ownShift(shift, staff, current.get('shiftId'), time);
         at = captureTime(request.data.capturedAt, time, ms(shift.startedAt), policy.retentionHours);
+        const sampleId = hash(`${staff.company.id}:${staff.uid}:${shift.id}:${at}:${point.lat}:${point.lng}:${accuracy}`);
+        const sampleRef = db.doc(`rlLocationHistory/${sampleId}`), savedSample = await tx.get(sampleRef);
+        const historySample = {
+          companyId: staff.company.id,
+          userId: staff.uid,
+          memberId: staff.memberId || staff.uid,
+          shiftId: shift.id,
+          sessionId: current.get('sessionId'),
+          lat: point.lat,
+          lng: point.lng,
+          accuracy,
+          capturedAt: new Date(at),
+          receivedAt: new Date(time),
+          expiresAt: new Date(at + policy.retentionHours * 3600000)
+        };
+        if (!savedSample.exists) tx.create(sampleRef, historySample);
         const previous = ms(current.get('capturedAt'));
         if (Number.isFinite(previous) && at <= previous) {
           const duplicate = at === previous && current.get('lat') === point.lat && current.get('lng') === point.lng && current.get('accuracy') === accuracy;
@@ -397,6 +430,7 @@ function workTrackingHandlers(db, legacy, {
             ...(duplicate ? {} : {
               reason: 'out-of-order'
             }),
+            historyRecorded: !savedSample.exists,
             shift: shiftView(shift, time),
             policy
           };
@@ -415,6 +449,7 @@ function workTrackingHandlers(db, legacy, {
           sharing: true,
           accepted: true,
           duplicate: false,
+          historyRecorded: !savedSample.exists,
           shift: shiftView(shift, time),
           policy
         };
@@ -429,6 +464,55 @@ function workTrackingHandlers(db, legacy, {
         };
       }
       return result;
+    },
+    historyMembers: async request => {
+      const staff = await staffFor(request);
+      if (!['owner', 'admin', 'manager'].includes(staff.role)) throw new HttpsError('permission-denied', 'Management access is required to view technician location history.');
+      await rateLimit(db, 'location-history-members', staff.uid, 20);
+      const members = await db.collection('teamMembers').where('companyId', '==', staff.company.id).limit(501).get();
+      const technicians = members.docs.filter(row => row.get('role') === 'technician' && row.get('uid') && ['active', 'inactive', 'removed'].includes(row.get('status')))
+        .map(row => ({ memberId: row.id, name: row.get('name') || row.get('email') || 'Technician', status: row.get('status') }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return { technicians, truncated: members.size > 500 };
+    },
+    history: async request => {
+      const staff = await staffFor(request);
+      if (!['owner', 'admin', 'manager'].includes(staff.role)) throw new HttpsError('permission-denied', 'Management access is required to view technician location history.');
+      await rateLimit(db, 'location-history', staff.uid, 20);
+      const currentTime = now();
+      const memberId = documentId(request.data?.memberId, 'technician');
+      const member = await db.collection('teamMembers').doc(memberId).get();
+      if (!member.exists || member.get('companyId') !== staff.company.id || member.get('role') !== 'technician' || !member.get('uid') || !['active', 'inactive', 'removed'].includes(member.get('status'))) throw new HttpsError('permission-denied', 'This technician is not available in your company history.');
+      const startAt = Date.parse(request.data?.startAt), endAt = Date.parse(request.data?.endAt), limit = request.data?.limit ?? 200;
+      if (!Number.isFinite(startAt) || !Number.isFinite(endAt) || endAt <= startAt || endAt - startAt > 8 * 86400000 || endAt > currentTime + 120000 || !Number.isInteger(limit) || limit < 1 || limit > 200) throw new HttpsError('invalid-argument', 'Choose a valid history range of seven days or less and a page size up to 200.');
+      const policy = policyFor(staff.company);
+      if (startAt < currentTime - policy.retentionHours * 3600000) throw new HttpsError('failed-precondition', 'The selected start is outside this company’s location retention window.');
+      let cursor = null;
+      if (request.data?.cursor) {
+        const cursorId = documentId(request.data.cursor, 'history cursor');
+        cursor = await db.collection('rlLocationHistory').doc(cursorId).get();
+        if (!cursor.exists || cursor.get('companyId') !== staff.company.id || cursor.get('memberId') !== memberId || ms(cursor.get('capturedAt')) < startAt || ms(cursor.get('capturedAt')) >= endAt) throw new HttpsError('invalid-argument', 'The history page cursor is invalid. Restart the query.');
+      }
+      let query = db.collection('rlLocationHistory').where('companyId', '==', staff.company.id).where('memberId', '==', memberId)
+        .where('capturedAt', '>=', new Date(startAt)).where('capturedAt', '<', new Date(endAt)).orderBy('capturedAt', 'asc').limit(limit + 1);
+      if (cursor) query = query.startAfter(cursor);
+      const [rows, events] = await Promise.all([
+        query.get(),
+        db.collection('rlLocationHistoryEvents').where('companyId', '==', staff.company.id).where('memberId', '==', memberId)
+          .where('occurredAt', '>=', new Date(startAt)).where('occurredAt', '<', new Date(endAt)).orderBy('occurredAt', 'asc').limit(201).get()
+      ]);
+      const documents = rows.docs.slice(0, limit), last = documents.at(-1);
+      return {
+        points: documents.map(row => ({ id: row.id, lat: row.get('lat'), lng: row.get('lng'), accuracy: row.get('accuracy'), capturedAt: iso(row.get('capturedAt')) })),
+        events: events.docs.map(row => ({ id: row.id, event: row.get('event'), reason: row.get('reason') || null, occurredAt: iso(row.get('occurredAt')) })),
+        nextCursor: rows.size > limit && last ? last.id : null,
+        hasMore: rows.size > limit,
+        eventsTruncated: events.size > 200,
+        retentionHours: policy.retentionHours,
+        intervalMinutes: policy.intervalMinutes,
+        timeZone: staff.company.get('timeZone') || 'UTC',
+        technician: { memberId, name: member.get('name') || member.get('email') || 'Technician', status: member.get('status') }
+      };
     },
     list: async request => {
       const staff = await staffFor(request);
@@ -637,7 +721,7 @@ function workTrackingHandlers(db, legacy, {
     },
     cleanup: async () => {
       let removed = 0, clearedFixes = 0;
-      for (const name of ['rlLocations', 'rlJobVisitStates']) for (let page = 0; page < 10; page++) {
+      for (const name of ['rlLocations', 'rlJobVisitStates', 'rlLocationHistory', 'rlLocationHistoryEvents']) for (let page = 0; page < 10; page++) {
         const rows = await db.collection(name).where('expiresAt', '<=', new Date(now())).limit(400).get();
         if (rows.empty) break;
         const batch = db.batch();

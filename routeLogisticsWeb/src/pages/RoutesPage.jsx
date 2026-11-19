@@ -10,33 +10,35 @@ import toast from 'react-hot-toast';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
 import { workspaceAccessError } from '../services/workspaceQueryPolicy';
+import { currentOrNextJob, serviceVehicleMarkerElement, teamLocationPopupElement } from '../utils/teamLocationMap';
 const call = (name, data) => callWorkspace(name, data);
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
 function RoutePlanner({ initialMemberId = '', initialDate = today() }) {
   const [memberId, setMemberId] = useState(initialMemberId), [date, setDate] = useState(initialDate);
   const teamQuery = useWorkspaceQuery(['team'], () => call('rlGetRoutingTeam'));
+  const locationsQuery = useWorkspaceQuery(['team-locations'], () => call('rlGetTeamLocations'), { enabled: false });
   const team = teamQuery.data?.team || [];
   const routeQuery = useWorkspaceQuery(['route', memberId, date], () => call('rlGetDailyRoute', { memberId, date }), { enabled: !!memberId });
   const [stops, setStops] = useState([]), [selected, setSelected] = useState([]), [revision, setRevision] = useState(0);
   const [startAddress, setStartAddress] = useState(''), [returnToStart, setReturnToStart] = useState(true), [keepAppointments, setKeepAppointments] = useState(true), [startTime, setStartTime] = useState('08:00');
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState(''), [estimate, setEstimate] = useState(null);
   const [savedRoute, setSavedRoute] = useState(null);
-  const element = useRef(null), map = useRef(null), overlays = useRef([]), cache = useRef(null), generation = useRef(0);
+  const element = useRef(null), map = useRef(null), overlays = useRef([]), detailWindow = useRef(null), cache = useRef(null), generation = useRef(0);
   const saving = useRef(false), touched = useRef(false), editor = useRef(null);
   const chosen = stops.filter((stop) => selected.includes(stop.id));
   const routeInput = { memberId, date, jobIds: chosen.map(stop => stop.id), startAddress, returnToStart };
   const changed = !!savedRoute && JSON.stringify(routeInput) !== JSON.stringify(savedRoute);
   editor.current = { memberId, date, startAddress, returnToStart, changed, busy, stops, selected };
   const { confirmDiscard } = useUnsavedChanges(changed, { scope: 'route-planner', message: 'Your route changes have not been saved. Leave without saving the stop order?' });
-  const clearRoute = useCallback(() => { overlays.current.forEach((item) => { if (item.setMap) item.setMap(null); else item.map = null; }); overlays.current = []; setEstimate(null); }, []);
+  const clearRoute = useCallback(() => { detailWindow.current?.close(); detailWindow.current = null; overlays.current.forEach((item) => { if (item.setMap) item.setMap(null); else item.map = null; }); overlays.current = []; setEstimate(null); }, []);
   useEffect(() => {
     const data = teamQuery.data;
     if (!data) return;
     setMemberId(current => current || data.team[0]?.id || '');
     if (!touched.current && !editor.current.stops.length) setStartAddress(data.startAddress || '');
   }, [teamQuery.data]);
-  useEffect(() => { const lifecycle = generation; return () => { lifecycle.current++; overlays.current.forEach((item) => { if (item.setMap) item.setMap(null); else item.map = null; }); }; }, []);
+  useEffect(() => { const lifecycle = generation; return () => { lifecycle.current++; detailWindow.current?.close(); overlays.current.forEach((item) => { if (item.setMap) item.setMap(null); else item.map = null; }); }; }, []);
   const applyRoute = useCallback(data => {
     const state = editor.current, order = data.saved?.jobIds || [];
     const next = [...data.stops].sort((a, b) => (order.includes(a.id) ? order.indexOf(a.id) : 1000) - (order.includes(b.id) ? order.indexOf(b.id) : 1000));
@@ -70,7 +72,7 @@ function RoutePlanner({ initialMemberId = '', initialDate = today() }) {
     if (!startAddress.trim() && chosen.length < 2) { setError('Enter a starting address for a single-stop route.'); return; }
     touched.current = true; setBusy(true); setError(''); clearRoute();
     try {
-      const maps = await loadMaps(); const { Map } = await maps.importLibrary('maps'); const { Route } = await maps.importLibrary('routes'); await maps.importLibrary('marker');
+      const maps = await loadMaps(); const { Map } = await maps.importLibrary('maps'); const { Route } = await maps.importLibrary('routes'); const { AdvancedMarkerElement } = await maps.importLibrary('marker');
       map.current ||= new Map(element.current, { center: chosen[0].location || { lat: 39, lng: -98 }, zoom: 10, mapId: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || 'DEMO_MAP_ID' });
       const ordered = keepAppointments ? [...chosen].sort((a, b) => a.time.localeCompare(b.time)) : [...chosen];
       const location = (s) => s.location || s.address;
@@ -85,8 +87,21 @@ function RoutePlanner({ initialMemberId = '', initialDate = today() }) {
       const optimized = route.optimizedIntermediateWaypointIndices?.length ? route.optimizedIntermediateWaypointIndices.map((i) => middle[i]) : middle;
       const final = [...(startAddress.trim() ? [] : [ordered[0]]), ...optimized, ...(startAddress.trim() && returnToStart ? [] : [ordered.at(-1)])];
       setStops([...final, ...stops.filter((s) => !selected.includes(s.id))]);
-      const lines = route.createPolylines(); lines.forEach((line) => line.setMap(map.current)); overlays.current = [...lines, ...(await route.createWaypointAdvancedMarkers({ map: map.current }))];
-      const bounds = new maps.LatLngBounds(); lines.forEach((line) => line.getPath().forEach((point) => bounds.extend(point))); if (!bounds.isEmpty()) map.current.fitBounds(bounds);
+      const lines = route.createPolylines(); lines.forEach((line) => line.setMap(map.current)); const waypointMarkers = await route.createWaypointAdvancedMarkers({ map: map.current }); overlays.current = [...lines, ...waypointMarkers];
+      const bounds = new maps.LatLngBounds(); lines.forEach((line) => line.getPath().forEach((point) => bounds.extend(point)));
+      const locationResult = locationsQuery.data || (await locationsQuery.refetch()).data;
+      const liveLocation = (locationResult?.locations || []).find(location => location.memberId === memberId || location.userId === memberId);
+      if (liveLocation) {
+        const state = liveLocation.state || (liveLocation.stale ? 'stale' : 'live'), assignment = currentOrNextJob(liveLocation, stops);
+        const marker = new AdvancedMarkerElement({ map: map.current, position: { lat: liveLocation.lat, lng: liveLocation.lng }, content: serviceVehicleMarkerElement(liveLocation, state), title: `${liveLocation.name} service vehicle` });
+        marker.addListener('click', () => {
+          detailWindow.current?.close();
+          detailWindow.current = new maps.InfoWindow({ content: teamLocationPopupElement({ location: liveLocation, assignment, stateLabel: liveLocation.sharing ? 'Current GPS location' : 'Last known GPS location', assignmentLabel: assignment?.kind === 'current' ? 'Current job' : 'Next route stop' }), ariaLabel: `${liveLocation.name} service vehicle details` });
+          detailWindow.current.open({ map: map.current, anchor: marker, shouldFocus: true });
+        });
+        overlays.current.push(marker); bounds.extend({ lat: liveLocation.lat, lng: liveLocation.lng });
+      }
+      if (!bounds.isEmpty()) map.current.fitBounds(bounds);
       setEstimate({ minutes: Math.ceil(route.durationMillis / 60000), miles: (route.distanceMeters / 1609.344).toFixed(1), warnings: appointmentWarnings(final, route.legs || [], startTime, !startAddress.trim()) });
     } catch (e) { setError(e.message || 'Route calculation failed. Check Maps configuration and addresses.'); } finally { setBusy(false); }
   };
@@ -106,7 +121,7 @@ function RoutePlanner({ initialMemberId = '', initialDate = today() }) {
     <ol className="divide-y rounded border bg-white">{stops.map((stop, i) => <li key={stop.id} className="flex flex-wrap items-center gap-3 p-3"><input aria-label={`Include ${stop.customerName}`} type="checkbox" checked={selected.includes(stop.id)} disabled={busy || (!stop.location && !stop.address)} onChange={(e) => { touched.current = true; setSelected(e.target.checked ? [...selected, stop.id] : selected.filter((id) => id !== stop.id)); clearRoute(); }} /><div className="min-w-0 flex-1"><strong>{stop.customerName}</strong><p className="text-sm">{stop.time} · {stop.serviceType} · {stop.address || (stop.location ? 'Coordinates available' : 'Add a valid address or coordinates')}</p></div><button disabled={busy || i === 0} onClick={() => move(i, -1)} aria-label={`Move ${stop.customerName} earlier`}>↑</button><button disabled={busy || i === stops.length - 1} onClick={() => move(i, 1)} aria-label={`Move ${stop.customerName} later`}>↓</button></li>)}</ol>
     <div className="flex flex-wrap gap-3"><button disabled={busy || !chosen.length} onClick={calculate} className="rounded bg-primary-600 px-4 py-2 text-white disabled:opacity-50">{busy ? 'Working…' : 'Calculate route'}</button><button disabled={busy || !changed || !chosen.length || chosen.length > 25} onClick={save} className="rounded border px-4 py-2 disabled:opacity-50">Save stop order</button>{Array.from({ length: Math.ceil(chosen.length / 4) }, (_, i) => <a key={i} href={googleNavigation(chosen.slice(i * 4, i * 4 + 4))} target="_blank" rel="noreferrer" className="self-center underline">Navigate stops {i * 4 + 1}–{Math.min(chosen.length, i * 4 + 4)}</a>)}</div>
     {estimate && <div className="rounded border bg-white p-4"><p className="font-semibold">Estimated driving: {estimate.minutes} minutes · {estimate.miles} miles</p>{estimate.warnings.map((warning) => <p className="mt-2 text-amber-800" key={warning}>{warning}</p>)}</div>}
-    <div ref={element} className="h-80 rounded border bg-gray-100" aria-label="Daily route map" />{message && <p role="status">{message}</p>}{(error || teamQuery.error || routeQuery.error) && <p role="alert" className="text-red-700">{error || (teamQuery.error || routeQuery.error).message}</p>}
+    <div ref={element} className="h-80 rounded border bg-gray-100" aria-label="Daily route map" />{message && <p role="status">{message}</p>}{(error || teamQuery.error || routeQuery.error || locationsQuery.error) && <p role="alert" className="text-red-700">{error || (teamQuery.error || routeQuery.error || locationsQuery.error).message}</p>}
   </div>;
 }
 export default function RoutesPage(props) {

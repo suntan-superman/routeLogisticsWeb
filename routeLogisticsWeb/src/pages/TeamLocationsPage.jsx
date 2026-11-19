@@ -1,6 +1,6 @@
 import SelectControl from '../components/SelectControl';
 import { useEffect, useRef, useState } from 'react';
-import { callWorkspace } from '../services/workspaceApi';
+import { callWorkspace, readWorkspace } from '../services/workspaceApi';
 import { useAuth } from '../contexts/AuthContext';
 import { loadMaps } from '../services/maps';
 import TeamLocationStatus from '../components/TeamLocationStatus';
@@ -9,7 +9,9 @@ import { locationState, LOCATION_LABELS } from '../utils/workLocations';
 import toast from 'react-hot-toast';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
+import { currentOrNextJob, serviceVehicleMarkerElement, teamLocationPopupElement } from '../utils/teamLocationMap';
 const EMPTY_LOCATIONS = [];
+const localDay = timeZone => new Date().toLocaleDateString('en-CA', timeZone ? { timeZone } : undefined);
 
 export default function TeamLocationsPage() {
   const { company, currentUser } = useAuth();
@@ -18,14 +20,17 @@ export default function TeamLocationsPage() {
 
 function TeamLocationsWorkspace() {
   const { company, currentUser, role } = useAuth();
+  const [intervalMinutes, setIntervalMinutes] = useState(3), [hours, setHours] = useState(24);
+  const [error, setError] = useState(''), [message, setMessage] = useState(''), [busy, setBusy] = useState(false), [mapReady, setMapReady] = useState(false), [now, setNow] = useState(Date.now);
+  const serviceDate = localDay(company?.timeZone);
   const teamQuery = useWorkspaceQuery(['team-locations'], () => callWorkspace('rlGetTeamLocations'));
+  const jobsQuery = useWorkspaceQuery(['jobs', serviceDate, 500], () => readWorkspace('jobs', { date: serviceDate, limit: 500 }), { enabled: mapReady });
   const locations = teamQuery.data?.locations || EMPTY_LOCATIONS;
+  const jobs = jobsQuery.data?.jobs || [];
   const roster = teamQuery.data?.roster || locations.map(row => ({ ...row, dutyStatus: 'unknown', location: row }));
   const policy = teamQuery.data?.policy || { intervalMinutes: 3, retentionHours: 24, freshAfterSeconds: 300, maxShiftHours: 12 };
   const setPolicy = updater => teamQuery.setData(previous => ({ ...previous, policy: typeof updater === 'function' ? updater(previous?.policy || policy) : updater }));
-  const [intervalMinutes, setIntervalMinutes] = useState(3), [hours, setHours] = useState(24);
-  const [error, setError] = useState(''), [message, setMessage] = useState(''), [busy, setBusy] = useState(false), [mapReady, setMapReady] = useState(false), [now, setNow] = useState(Date.now);
-  const element = useRef(null), map = useRef(null), markers = useRef([]), generation = useRef(0), dirtyRef = useRef({ interval: false, retention: false }), saving = useRef(false);
+  const element = useRef(null), map = useRef(null), markers = useRef([]), detailWindow = useRef(null), generation = useRef(0), dirtyRef = useRef({ interval: false, retention: false }), saving = useRef(false);
   const intervalChanged = Number(intervalMinutes) !== Number(policy.intervalMinutes), retentionChanged = Number(hours) !== Number(policy.retentionHours);
   dirtyRef.current = { interval: intervalChanged, retention: retentionChanged };
   useUnsavedChanges(company?.ownerId === currentUser?.uid && (intervalChanged || retentionChanged), { message: 'You have unsaved location policy changes. Leave without saving them?' });
@@ -45,26 +50,31 @@ function TeamLocationsWorkspace() {
   useEffect(() => {
     const lifecycle = generation;
     lifecycle.current++; dirtyRef.current = { interval: false, retention: false };
-    return () => { lifecycle.current++; markers.current.forEach(marker => { marker.map = null; }); };
+    return () => { lifecycle.current++; detailWindow.current?.close(); markers.current.forEach(marker => { marker.map = null; }); };
   }, [company?.id]);
   useEffect(() => {
     if (!mapReady) return;
     let active = true;
     (async () => {
-      const maps = await loadMaps(), { AdvancedMarkerElement, PinElement } = await maps.importLibrary('marker');
+      const maps = await loadMaps(), { AdvancedMarkerElement } = await maps.importLibrary('marker');
       if (!active) return;
-      markers.current.forEach(marker => { marker.map = null; }); markers.current = [];
+      detailWindow.current?.close(); detailWindow.current = null; markers.current.forEach(marker => { marker.map = null; }); markers.current = [];
       const bounds = new maps.LatLngBounds();
       markers.current = locations.map(location => {
         const position = { lat: location.lat, lng: location.lng }, state = locationState(location, now, policy.freshAfterSeconds);
         bounds.extend(position);
-        const pin = new PinElement({ background: state === 'live' ? '#047857' : '#64748b', glyph: 'T', glyphColor: '#ffffff' });
-        return new AdvancedMarkerElement({ map: map.current, position, content: pin.element, title: location.name + ' · ' + (LOCATION_LABELS[state] || LOCATION_LABELS.unavailable) + ' · ' + (location.capturedAt || location.updatedAt) });
+        const marker = new AdvancedMarkerElement({ map: map.current, position, content: serviceVehicleMarkerElement(location, state), title: location.name + ' · ' + (LOCATION_LABELS[state] || LOCATION_LABELS.unavailable) + ' · ' + (location.capturedAt || location.updatedAt) });
+        marker.addListener('click', () => {
+          detailWindow.current?.close();
+          detailWindow.current = new maps.InfoWindow({ content: teamLocationPopupElement({ location, assignment: currentOrNextJob(location, jobs), stateLabel: LOCATION_LABELS[state] || LOCATION_LABELS.unavailable }), ariaLabel: `${location.name} service vehicle details` });
+          detailWindow.current.open({ map: map.current, anchor: marker, shouldFocus: true });
+        });
+        return marker;
       });
       if (!bounds.isEmpty()) map.current.fitBounds(bounds, 40);
     })().catch(failure => { if (active) setError(failure.message); });
-    return () => { active = false; markers.current.forEach(marker => { marker.map = null; }); markers.current = []; };
-  }, [locations, mapReady, now, policy.freshAfterSeconds]);
+    return () => { active = false; detailWindow.current?.close(); detailWindow.current = null; markers.current.forEach(marker => { marker.map = null; }); markers.current = []; };
+  }, [locations, jobs, mapReady, now, policy.freshAfterSeconds]);
   const showMap = async () => {
     setBusy(true); setError('');
     try {
@@ -101,7 +111,7 @@ function TeamLocationsWorkspace() {
     </section>}
     <div className="flex flex-wrap items-center gap-4"><button onClick={load} className="underline">Refresh list</button>{!mapReady && <button onClick={showMap} disabled={busy || !locations.length} className="underline disabled:opacity-50">Show team locations on map</button>}</div>
     {message && <p role="status" className="text-emerald-800">{message}</p>}
-    {(error || teamQuery.error || teamQuery.data?.truncated) && <p role="alert" className="text-red-700">{error || teamQuery.error?.message || 'Showing the first 500 location records.'}</p>}
+    {(error || teamQuery.error || jobsQuery.error || teamQuery.data?.truncated) && <p role="alert" className="text-red-700">{error || teamQuery.error?.message || jobsQuery.error?.message || 'Showing the first 500 location records.'}</p>}
     <ul className="divide-y rounded border bg-white">{roster.map(member => <li className="space-y-2 p-4" key={member.memberId}><strong>{member.name}</strong><TeamLocationStatus member={member} now={now} freshAfterSeconds={policy.freshAfterSeconds} /><StaffAvailabilityEditor companyId={company?.id} member={member} allowed={['owner', 'manager'].includes(role)} onChanged={load} /></li>)}</ul>
     {!roster.length && !error && <p>No active team members are available to display.</p>}
     <div ref={element} className={mapReady ? 'h-96 rounded border bg-gray-100' : 'h-0'} aria-label="Team location map" />

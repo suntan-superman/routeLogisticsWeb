@@ -52,6 +52,7 @@ const mock = name => {
   if(name.endsWith('/services/tenancy'))return{can:()=>true,getClaims:()=>({membershipId:'membership-1'})};
   if(name.endsWith('/services/maps'))return{loadMaps:()=>{throw Error('Maps must not be called during save tests');}};
   if(name.endsWith('/utils/routePlanning'))return{googleNavigation:()=>'',appointmentWarnings:()=>[]};
+  if(name.endsWith('/utils/teamLocationMap'))return utilities('teamLocationMap');
   if(name==='./MyWorkPage'||name==='./ServiceTemplateEditor')return{__esModule:true,default:()=>null};
   if(name.endsWith('/contexts/AuthContext'))return{useAuth:()=>({currentUser:{uid:'user-1'},company:{id:'company-1',ownerId:'user-1',serviceCategories:['Pest Control','Pool Cleaning']},role:env.kind==='estimates-geography'?'owner':'technician',can:capability=>env.kind.startsWith('estimates')&&(capability==='estimates.manage'||env.kind==='estimates-geography'&&['customers.manage','jobs.schedule'].includes(capability))})};
   if(name.endsWith('/services/workspaceApi'))return{callWorkspace:async(name,data)=>{

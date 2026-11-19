@@ -9,7 +9,7 @@ function load(relative){
  const file=path.join(root,relative);if(modules.has(file))return modules.get(file).exports;const module={exports:{}};modules.set(file,module);
  const importer=name=>{
   if(name==='react')return React;if(name==='react-native')return native;
-  if(name==='@expo/vector-icons')return{Ionicons:'Icon'};if(name==='react-native-safe-area-context')return{SafeAreaView:'SafeAreaView'};
+  if(name==='@expo/vector-icons')return{Ionicons:'Icon'};if(name==='react-native-safe-area-context')return{SafeAreaView:'SafeAreaView',useSafeAreaInsets:()=>({top:0,right:0,bottom:0,left:0})};
   if(name==='@react-native-community/datetimepicker')return{__esModule:true,default:'DateTimePicker'};
   if(name==='expo-constants')return{__esModule:true,default:{expoConfig:{extra:{nativeMaps:{androidConfigured:false}}}}};
   if(name==='react-native-maps')return{__esModule:true,default:React.forwardRef((props,ref)=>{React.useImperativeHandle(ref,()=>({fitToCoordinates:(...args)=>mapFits.push(args)}));return React.createElement('MapView',props,props.children);}),Marker:'Marker'};

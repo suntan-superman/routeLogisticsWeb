@@ -194,7 +194,7 @@ export default function EstimatesScreen({ onInteractionChange, active = true, in
     onReturnToVisit?.(originVisit);
   };
   return <View style={{ flex: 1 }}><ScreenHeader title="Estimates" subtitle="Photos, scope and a priced proposal" onBack={editing ? close : undefined} />
-    <KeyboardAwareScrollView scrollRef={scrollRef} keyboardBottomPadding={300} contentContainerStyle={{ padding: 20, gap: 16 }}>
+    <KeyboardAwareScrollView scrollRef={scrollRef} contentContainerStyle={{ padding: 20, gap: 16 }}>
       {!!error && <Text accessibilityRole="alert" style={{ color: palette.danger, lineHeight: 22 }}>{error}</Text>}{!!message && <Text accessibilityLiveRegion="polite" style={{ color: palette.accent, lineHeight: 22 }}>{message}</Text>}{editing && <Text accessibilityLiveRegion="polite" style={{ color: draftState === 'failed' || draftState === 'conflict' ? palette.danger : palette.secondary, fontWeight: '600' }}>{estimateDraftStateLabel(draftState)}</Text>}
       {!!validationSummary && <GlassCard><Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={{ color: palette.danger, fontWeight: '700', lineHeight: 22 }}>Please review this estimate</Text><Text style={{ color: palette.danger, lineHeight: 21 }}>{validationSummary}</Text></GlassCard>}
       {availability === 'disabled' && <Text style={{ color: palette.secondary }}>New estimate workflows are disabled by the current production configuration. Existing estimates remain available to review.</Text>}

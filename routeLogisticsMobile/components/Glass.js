@@ -32,13 +32,15 @@ export function IconButton({ icon, label, onPress, disabled = false }) {
 }
 export function GlassInput({ label, right, style, inputRef, error, ...props }) {
   const { palette, isDark } = useTheme();
-  const localRef = useRef(null), keyboardScroll = useKeyboardScroll();
+  const localRef = useRef(null), focused = useRef(false), keyboardScroll = useKeyboardScroll();
   const ref = inputRef || localRef;
-  const onFocus = event => { keyboardScroll?.(ref.current); props.onFocus?.(event); };
+  const onFocus = event => { focused.current = true; keyboardScroll?.(ref.current); props.onFocus?.(event); };
+  const onBlur = event => { focused.current = false; props.onBlur?.(event); };
+  const onContentSizeChange = event => { if (focused.current) keyboardScroll?.(ref.current); props.onContentSizeChange?.(event); };
   return <View style={{ gap: 7 }}>
     {!!label && <Text style={{ color: palette.text, fontSize: 14, lineHeight: 21, fontWeight: '600' }}>{label}</Text>}
     <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: palette.input, borderWidth: 1, borderColor: error ? palette.danger : palette.border, borderRadius: 14 }}>
-      <TextInput ref={ref} accessibilityLabel={label} accessibilityInvalid={!!error} keyboardAppearance={isDark ? 'dark' : 'light'} placeholderTextColor={palette.secondary} selectionColor={palette.accent} style={[{ flex: 1, minHeight: props.multiline ? 112 : 50, padding: 14, color: palette.text, fontSize: 16, lineHeight: 23, textAlignVertical: props.multiline ? 'top' : 'center' }, style]} {...props} onFocus={onFocus} />
+      <TextInput ref={ref} accessibilityLabel={label} accessibilityInvalid={!!error} keyboardAppearance={isDark ? 'dark' : 'light'} placeholderTextColor={palette.secondary} selectionColor={palette.accent} style={[{ flex: 1, minHeight: props.multiline ? 112 : 50, padding: 14, color: palette.text, fontSize: 16, lineHeight: 23, textAlignVertical: props.multiline ? 'top' : 'center' }, style]} {...props} onFocus={onFocus} onBlur={onBlur} onContentSizeChange={onContentSizeChange} />
       {right}
     </View>
     {!!error && <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={{ color: palette.danger, fontSize: 13, lineHeight: 19 }}>{error}</Text>}

@@ -8,13 +8,13 @@ import { Card, SectionHeader, PrimaryButton, SecondaryButton, FormField, InlineN
 import { useJobResourceRefresh } from '../services/useJobResources';
 const { validateAnswers } = require('../../functions/shared/serviceFormSchema');
 
-export default function ServiceChecklist({ job, readOnly = false, onBusyChange, onDraftChange, draftActionsRef, active = true }) {
+export default function ServiceChecklist({ job, readOnly = false, onBusyChange, onDraftChange, onLocalSave, draftActionsRef, active = true }) {
   const { permissions } = useAuth(), { palette } = useTheme();
   const [data, setData] = useState(null), [catalog, setCatalog] = useState([]), [catalogChecked, setCatalogChecked] = useState(false), [answers, setAnswers] = useState({}), [pending, setPending] = useState(null);
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [dirty, setDirty] = useState(false), [loading, setLoading] = useState(true);
   const [ready, setReady] = useState(null), refresh = useRef(null);
-  const mounted = useRef(false), sequence = useRef(0), lock = useRef(false), dirtyRef = useRef(false), currentJob = useRef(job), callbacks = useRef({ onBusyChange, onDraftChange }), formRef = useRef(null);
-  currentJob.current = job; callbacks.current = { onBusyChange, onDraftChange };
+  const mounted = useRef(false), sequence = useRef(0), lock = useRef(false), dirtyRef = useRef(false), currentJob = useRef(job), callbacks = useRef({ onBusyChange, onDraftChange, onLocalSave }), formRef = useRef(null);
+  currentJob.current = job; callbacks.current = { onBusyChange, onDraftChange, onLocalSave };
   const load = useCallback(async ({ query = false } = {}) => {
     const id = currentJob.current?.id, ticket = ++sequence.current;
     try {
@@ -62,7 +62,8 @@ export default function ServiceChecklist({ job, readOnly = false, onBusyChange, 
     const clean = validateAnswers(form.template, numeric, { complete: status === 'completed' });
     await saveServiceFormOffline(job, { templateId: form.template.id, templateVersion: form.template.version, assignmentVersion: form.assignmentVersion, expectedVersion: form.responseVersion, answers: clean, status });
     if (!mounted.current) return;
-    dirtyRef.current = false; setDirty(false); callbacks.current.onDraftChange?.(false); setNotice('Service report saved on this device. Synchronization verifies your current assignment and template version.'); await load();
+    dirtyRef.current = false; setDirty(false); callbacks.current.onDraftChange?.(false); setNotice('Service report saved on this device. Synchronization verifies your current assignment and template version.');
+    callbacks.current.onLocalSave?.({ status }); await load();
   });
   const assign = template => perform(async () => {
     if (dirtyRef.current || pending) throw new Error('Save or explicitly discard current service answers before changing templates.');

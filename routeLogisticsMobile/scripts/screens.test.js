@@ -34,7 +34,7 @@ function load(relative) {
   const localRequire = createRequire(filename);
   const mockRequire = specifier => {
     if (specifier === 'react-native') return native;
-    if (specifier === 'react-native-safe-area-context') return { SafeAreaView: 'SafeAreaView', SafeAreaProvider: pass };
+    if (specifier === 'react-native-safe-area-context') return { SafeAreaView: 'SafeAreaView', SafeAreaProvider: pass, useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }) };
     if (specifier === 'expo-status-bar') return { StatusBar: 'StatusBar' };
     if (specifier === 'expo-application') return nativeApplication;
     if (specifier === 'expo-crypto') return { randomUUID: require('node:crypto').randomUUID };

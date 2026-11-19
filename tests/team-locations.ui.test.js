@@ -67,10 +67,10 @@ test('unchanged and reverted location policy values disable Save and leave prote
 test('saving interval retains an independently unsaved retention change',async()=>{
   await render(true);
   await act(async()=>tree.root.findByProps({'aria-label':'On-duty GPS update interval'}).props.onChange({target:{value:'5'}}));
-  await act(async()=>tree.root.findByProps({'aria-label':'Last-location retention (hours)'}).props.onChange({target:{value:'48'}}));
+  await act(async()=>tree.root.findByProps({'aria-label':'Location history retention (hours)'}).props.onChange({target:{value:'48'}}));
   await act(async()=>button('Save interval').props.onClick());
   assert.equal(button('Save interval').props.disabled,true);assert.equal(button('Save retention').props.disabled,false);assert.equal(unsaved,true);
-  assert.equal(tree.root.findByProps({'aria-label':'Last-location retention (hours)'}).props.value,'48');
+  assert.equal(tree.root.findByProps({'aria-label':'Location history retention (hours)'}).props.value,'48');
   await act(async()=>button('Save retention').props.onClick());assert.equal(unsaved,false);assert.equal(button('Save retention').props.disabled,true);assert.equal(toasts.length,2);
 });
 test('failed location policy saves retain edits and show an actionable toast',async()=>{

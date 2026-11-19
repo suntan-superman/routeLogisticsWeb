@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import SelectControl from '../components/SelectControl';
 import { useAuth } from '../contexts/AuthContext';
 import { callWorkspace } from '../services/workspaceApi';
 import { loadMaps } from '../services/maps';
@@ -160,7 +161,7 @@ export default function LocationHistoryPage() {
     <header><h1 className="text-2xl font-bold">Technician location history</h1><p className="mt-1 text-sm text-gray-600">Recorded GPS fixes only. Lines connect observed fixes; they do not represent a road-matched or fabricated route.</p></header>
     <p className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">History begins when this feature is deployed. Company location retention is currently {retentionHours} hours (maximum 168 hours). Missing fixes are shown as gaps and may reflect GPS, permission, app, or network interruptions.</p>
     <section className="grid gap-3 rounded-lg border bg-white p-4 sm:grid-cols-2 lg:grid-cols-5" aria-label="Location history filters">
-      <label className="text-sm font-medium">Technician<select className="mt-1 block w-full rounded border-gray-300" value={memberId} onChange={event => { setMemberId(event.target.value); setPoints([]); setEvents([]); setLoadedRange(null); }}><option value="">Choose technician</option>{(membersQuery.data?.technicians || []).map(person => <option key={person.memberId} value={person.memberId}>{person.name}{person.status !== 'active' ? ` (${person.status})` : ''}</option>)}</select></label>
+      <label className="text-sm font-medium">Technician<SelectControl className="mt-1 block w-full rounded border-gray-300" value={memberId} onChange={event => { setMemberId(event.target.value); setPoints([]); setEvents([]); setLoadedRange(null); }}><option value="">Choose technician</option>{(membersQuery.data?.technicians || []).map(person => <option key={person.memberId} value={person.memberId}>{person.name}{person.status !== 'active' ? ` (${person.status})` : ''}</option>)}</SelectControl></label>
       <label className="text-sm font-medium">Start date<input type="date" className="mt-1 block w-full rounded border-gray-300" value={startDate} max={endDate || today} onChange={event => setStartDate(event.target.value)} /></label>
       <label className="text-sm font-medium">End date<input type="date" className="mt-1 block w-full rounded border-gray-300" value={endDate} min={startDate} max={today} onChange={event => setEndDate(event.target.value)} /></label>
       <label className="text-sm font-medium">Minimum stop duration (minutes)<input type="number" min="1" max="240" className="mt-1 block w-full rounded border-gray-300" value={minimumDwell} onChange={event => setMinimumDwell(Math.min(240, Math.max(1, Number(event.target.value) || 1)))} /></label>

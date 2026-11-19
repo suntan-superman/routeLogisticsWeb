@@ -63,6 +63,27 @@ test('duplicate triggers create one delivery and disabled preferences prevent en
   await Promise.all([api.enqueue(null, job, 'job', 'event'), api.enqueue(null, job, 'job', 'event')]); assert.equal((await db.collection('rlPushDeliveries').get()).size, 1);
   await api.manage(request({ action: 'preferences', preferences: { assignments: false } })); await api.enqueue(null, job, 'job', 'another'); assert.equal((await db.collection('rlPushDeliveries').get()).size, 1);
 });
+test('routine self-status changes notify management without sending redundant technician alerts', async () => {
+  const { db, api, register } = await setup();
+  const technician = await register();
+  const manager = await register('manager', 'manager', 'manager', 'ExpoPushToken[manager-status-device-12345678]', '22222222-2222-4222-8222-222222222222', 'android');
+  const scheduled = (await db.collection('jobs').doc('job').get()).data();
+  const inProgress = { ...scheduled, status: 'in-progress' };
+  await db.collection('jobs').doc('job').set(inProgress);
+  await api.enqueue(scheduled, inProgress, 'job', 'status-in-progress');
+  let rows = (await db.collection('rlPushDeliveries').get()).docs;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].get('deviceId'), manager.deviceId);
+  assert.equal(rows[0].get('kind'), 'status');
+  assert.notEqual(rows[0].get('deviceId'), technician.deviceId);
+
+  const cancelled = { ...inProgress, status: 'cancelled' };
+  await db.collection('jobs').doc('job').set(cancelled);
+  await api.enqueue(inProgress, cancelled, 'job', 'status-cancelled');
+  rows = (await db.collection('rlPushDeliveries').get()).docs;
+  assert.equal(rows.length, 3);
+  assert.ok(rows.some(row => row.get('deviceId') === technician.deviceId && row.get('kind') === 'status'));
+});
 test('delivery revalidates job assignment and membership before exposing a notification', async () => {
   const { db, env, api, register } = await setup(); await register(); const job = (await db.collection('jobs').doc('job').get()).data(); await api.enqueue(null, job, 'job', 'event');
   await db.collection('jobs').doc('job').update({ assignedTo: 'manager' }); await api.drain(); assert.equal(env.requests.length, 0); assert.equal((await db.collection('rlPushDeliveries').get()).docs[0].get('state'), 'superseded');

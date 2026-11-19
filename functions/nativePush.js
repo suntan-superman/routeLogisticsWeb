@@ -6,6 +6,7 @@ const defaultPreferences = { enabled: true, assignments: true, schedule: true, s
 const tokenPattern = /^(?:ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]{10,200}\]$/;
 const scopeMatches = (first, second) => ['uid', 'companyId', 'membershipId', 'role'].every(key => (first?.[key] || null) === (second?.[key] || null));
 const preferenceId = scope => hash([scope.uid, scope.companyId, scope.membershipId || '', scope.role].join(':'));
+const routineTechnicianStatuses = new Set(['en-route', 'in-progress', 'completed']);
 function jobEvents(before, after) {
   if (!after?.companyId) return [];
   const events = [];
@@ -30,6 +31,11 @@ function nativePushHandlers(db, { enabled = () => false, fetcher = fetch, access
   }
   async function currentRecipient(scope, job, kind) {
     if (job.companyId !== scope.companyId) return false;
+    // Technicians initiate and immediately see these routine transitions in the
+    // work-order UI. Sending the same transition back to their own device adds
+    // noise without conveying new information. Cancellation remains important
+    // and is deliberately still delivered to the assigned technician.
+    if (scope.role === 'technician' && kind === 'status' && routineTechnicianStatuses.has(job.status)) return false;
     const company = await db.collection('companies').doc(scope.companyId).get();
     if (!company.exists || company.get('isActive') === false || company.get('deletedAt')) return false;
     if (scope.role === 'owner') { if (company.get('ownerId') !== scope.uid) return false; }

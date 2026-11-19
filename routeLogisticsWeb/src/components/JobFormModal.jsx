@@ -112,6 +112,7 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
   const currentAddress = company?.id ? property.address : form.address;
   const estimateVisit = form.appointmentKind === 'estimate_visit';
   const inquiryLinked = !!form.inquiryId;
+  const compactInquirySchedule = !isEdit && inquiryLinked && estimateVisit;
   const canSaveCustomerAddress = !!can?.('customers.manage') && !!selectedCustomer && !!currentAddress.trim() && currentAddress.trim() !== selectedCustomerAddress.trim();
   const alive = useRef(false), savingRef = useRef(false), closing = useRef(false);
   const addressEditCustomer = useRef(null);
@@ -264,7 +265,7 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-gray-900/50 p-4 sm:py-12">
       <form onSubmit={submit} className="w-full max-w-xl rounded-xl bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-          <h3 className="text-lg font-semibold text-gray-900">{isEdit ? 'Edit Job' : 'Schedule New Job'}</h3>
+          <h3 className="text-lg font-semibold text-gray-900">{isEdit ? 'Edit Job' : compactInquirySchedule ? 'Schedule Estimate Visit' : 'Schedule New Job'}</h3>
           <button type="button" disabled={saving} onClick={requestClose} className="text-gray-400 hover:text-gray-600" aria-label="Close">
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -273,12 +274,18 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
         </div>
 
         <div className="space-y-4 px-6 py-5">
-          <ThemedSelect label="Customer" required value={form.customerId} options={[{ value: '', label: 'Select a customer…' }, ...customers.map(customer => ({ value: customer.id, label: customer.name }))]} onChange={pickCustomer} disabled={saving || inquiryLinked} placeholder={customers.length ? 'Select a customer…' : 'No customers yet – add one first'} autoFocus />
-          <label className={label}>Appointment kind<SelectControl aria-label="Appointment kind" className={input} value={form.appointmentKind} disabled={saving || isEdit || inquiryLinked} onChange={event => set('appointmentKind', event.target.value)}><option value="service">Service job</option><option value="estimate_visit">Estimate visit</option></SelectControl></label>
-          {estimateVisit && <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">Free estimate visit — nonbillable. Completing this visit does not approve work or create an invoice. Quote preparation follows separately.</p>}
+          {compactInquirySchedule ? <section aria-label="Saved inquiry details" className="space-y-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-semibold text-emerald-950">Saved inquiry details</h4><span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-900">Estimate visit · Nonbillable</span></div>
+            <dl className="grid gap-2 sm:grid-cols-2"><div><dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Customer</dt><dd className="font-medium">{selectedCustomer?.name || 'Saved customer'}</dd></div><div><dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Requested service</dt><dd className="font-medium">{form.serviceType}</dd></div><div className="sm:col-span-2"><dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Service property</dt><dd>{currentAddress}</dd></div>{property.serviceCategory && <div><dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Category</dt><dd>{property.serviceCategory}</dd></div>}{form.notes && <div className="sm:col-span-2"><dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Inquiry instructions</dt><dd className="whitespace-pre-wrap">{form.notes}</dd></div>}</dl>
+            <p className="text-xs text-gray-600">These details are retained from the inquiry. Close this dialog and review the inquiry if they need to change.</p>
+          </section> : <>
+            <ThemedSelect label="Customer" required value={form.customerId} options={[{ value: '', label: 'Select a customer…' }, ...customers.map(customer => ({ value: customer.id, label: customer.name }))]} onChange={pickCustomer} disabled={saving || inquiryLinked} placeholder={customers.length ? 'Select a customer…' : 'No customers yet – add one first'} autoFocus />
+            <label className={label}>Appointment kind<SelectControl aria-label="Appointment kind" className={input} value={form.appointmentKind} disabled={saving || isEdit || inquiryLinked} onChange={event => set('appointmentKind', event.target.value)}><option value="service">Service job</option><option value="estimate_visit">Estimate visit</option></SelectControl></label>
+          </>}
+          {estimateVisit && !compactInquirySchedule && <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">Free estimate visit — nonbillable. Completing this visit does not approve work or create an invoice. Quote preparation follows separately.</p>}
           {isEdit && estimateVisit && <label className={label}>Estimate outcome<SelectControl aria-label="Estimate outcome" className={input} value={form.estimateOutcome} disabled={saving} onChange={event => set('estimateOutcome', event.target.value)}>{estimateOutcomes.map(row => <option key={row.value} value={row.value}>{row.label}</option>)}</SelectControl></label>}
 
-          <div>
+          {!compactInquirySchedule && <div>
             <label className={label}>Service type *</label>
             <input
               list="job-service-types"
@@ -290,7 +297,7 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
             <datalist id="job-service-types">
               {SERVICE_TYPES.map((t) => <option key={t} value={t} />)}
             </datalist>
-          </div>
+          </div>}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
@@ -314,13 +321,13 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
           {isEdit && job.servicePlanId && <p className="text-sm text-gray-600">This is a recurring visit. Changes here apply to this visit only; the service plan controls later visits.</p>}
 
           <div ref={propertyPanel}>
-          {company?.id && form.customerId && <ServicePropertyDirectory key={form.customerId} customerId={form.customerId} value={form.servicePropertyId} disabled={saving} locked={inquiryLinked} onSelect={saved => {
+          {!compactInquirySchedule && company?.id && form.customerId && <ServicePropertyDirectory key={form.customerId} customerId={form.customerId} value={form.servicePropertyId} disabled={saving} locked={inquiryLinked} onSelect={saved => {
             if (savingRef.current || !saved) return;
             initialCustomerPending.current = false; setAddressEditing(false); setSaveCustomerAddress(false); setAddressValidation(null);
             setProperty(previous => ({ ...previous, address: saved.address, serviceCategory: saved.serviceCategory || previous.serviceCategory, exceptionId: saved.serviceAreaExceptionId || null, confirmed: false }));
             setForm(previous => ({ ...previous, servicePropertyId: saved.id, address: saved.address }));
           }} />}
-          {!company?.id && <div>
+          {!compactInquirySchedule && !company?.id && <div>
             <label className={label}>Service address</label>
             <input
               value={form.address}
@@ -330,21 +337,21 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
               placeholder="Defaults to the customer's address"
             />
           </div>}
-          <div className="rounded-lg border border-gray-200 p-3">
+          {!compactInquirySchedule && <div className="rounded-lg border border-gray-200 p-3">
             {!addressEditing ? <button type="button" disabled={saving || !form.customerId || inquiryLinked} className="text-sm font-medium text-primary-700 underline disabled:opacity-50" onClick={enableAddressEditing}>Enable Editing</button> : <p className="text-sm font-medium text-gray-700">Address editing enabled for this job.</p>}
             {addressEditing && canSaveCustomerAddress && <label className="mt-3 flex items-start gap-2 text-sm"><input type="checkbox" aria-label="Update customer's saved address" checked={saveCustomerAddress} disabled={saving} onChange={event => setSaveCustomerAddress(event.target.checked)} /><span>Update customer's saved address<span className="mt-1 block text-xs text-gray-600">New jobs will default to this address. Recorded job and service-plan addresses will not be rewritten.</span></span></label>}
-          </div>
+          </div>}
           {company?.id && <>
             {isEdit && job.address && !job.serviceProperty && <p className="text-sm text-gray-600">Recorded service address: {typeof job.address === 'string' ? job.address : customerAddress({ address: job.address })}. Normal edits preserve this appointment; enter a service property only when changing its location.</p>}
             {!!selectedCustomerAddress && property.address === selectedCustomerAddress && <p className="text-sm text-gray-600">Using the customer's saved address. Change the service property below if this visit is at a different location.</p>}
-            <ServicePropertyEligibility key={form.customerId} companyId={company.id} serviceCategories={company.serviceCategories || []} value={property} validation={addressValidation} purpose="scheduling" existing={isEdit} disabled={saving} fixedProperty={inquiryLinked} addressReadOnly={!addressEditing} onEnableAddressEditing={enableAddressEditing} billingAddress={selectedCustomerAddress} onPolicyLoaded={setServiceAreaPolicy} onChange={next => { if (savingRef.current || !addressEditing && next.address !== property.address) return; initialCustomerPending.current = false; if (next.address.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false); if (next.address !== property.address) setAddressValidation(null); setProperty(next); if (next.address !== property.address) setForm(previous => ({ ...previous, address: next.address, servicePropertyId: '' })); }} />
+            <ServicePropertyEligibility key={form.customerId} companyId={company.id} serviceCategories={company.serviceCategories || []} value={property} validation={addressValidation} purpose="scheduling" existing={isEdit} disabled={saving} fixedProperty={inquiryLinked} compact={compactInquirySchedule} addressReadOnly={!addressEditing} onEnableAddressEditing={enableAddressEditing} billingAddress={selectedCustomerAddress} onPolicyLoaded={setServiceAreaPolicy} onChange={next => { if (savingRef.current || !addressEditing && next.address !== property.address) return; initialCustomerPending.current = false; if (next.address.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false); if (next.address !== property.address) setAddressValidation(null); setProperty(next); if (next.address !== property.address) setForm(previous => ({ ...previous, address: next.address, servicePropertyId: '' })); }} />
           </>}
           {!company?.id && <AddressValidationNotice validation={addressValidation} disabled={saving} onAccept={!addressEditing ? undefined : address => { if (savingRef.current) return; initialCustomerPending.current = false; setAddressValidation(null); if (address.trim() === selectedCustomerAddress.trim()) setSaveCustomerAddress(false); setForm(previous => ({ ...previous, address })); }}>
             {!addressEditing && <div className="space-y-2"><p>The saved address is locked. Enable Editing, then use the suggested address.</p><button type="button" aria-label="Enable Editing for suggested address" disabled={saving || !form.customerId} className="rounded-lg bg-primary-700 px-4 py-2 font-medium text-white hover:bg-primary-800 disabled:opacity-50" onClick={enableAddressEditing}>Enable Editing</button></div>}
           </AddressValidationNotice>}
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {!compactInquirySchedule && <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className={label}>Price ($)</label>
               <input
@@ -364,9 +371,9 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
                 <option value="high">High</option>
               </SelectControl>
             </div>
-          </div>
+          </div>}
 
-          <div>
+          {!compactInquirySchedule && <div>
             <label htmlFor="job-notes" className={label}>Notes</label>
             <textarea
               id="job-notes"
@@ -378,7 +385,7 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
               placeholder="Gate code, pets, areas of concern…"
             />
             <p id="job-notes-help" className="mt-1 text-xs text-gray-500">Shared with assigned staff. Use for gate codes and service instructions.</p>
-          </div>
+          </div>}
         </div>
 
         {isEdit && (
@@ -423,7 +430,7 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
             type="submit" disabled={saving || !canSubmit || !!company?.id && (!isEdit || locationChanged) && !serviceAreaPolicy}
             className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
           >
-            {saving ? 'Saving…' : pastAck ? 'Schedule anyway' : isEdit ? 'Save Changes' : 'Schedule Job'}
+            {saving ? 'Saving…' : pastAck ? 'Schedule anyway' : isEdit ? 'Save Changes' : compactInquirySchedule ? 'Schedule Estimate Visit' : 'Schedule Job'}
           </button>
           </div>
         </div>

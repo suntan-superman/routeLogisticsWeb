@@ -47,6 +47,7 @@ import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import { ConfirmProvider } from './components/ConfirmProvider';
 import { UnsavedChangesProvider } from './components/UnsavedChangesProvider';
+import KeyboardFocusVisibility from './components/KeyboardFocusVisibility';
 
 // Create a client
 // Register Syncfusion license
@@ -83,6 +84,7 @@ function PrivateRouteMetadata() {
 function AppContent() {
   return (
           <UnsavedChangesProvider>
+            <KeyboardFocusVisibility />
             <div className="min-h-screen bg-gray-50">
               <PrivateRouteMetadata />
               <Suspense fallback={<div className="p-8" role="status">Loading…</div>}>

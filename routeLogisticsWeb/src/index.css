@@ -20,6 +20,20 @@ body {
   background-color: #f9fafb;
 }
 
+/* Keyboard users should never tab a form control underneath a sticky page or
+   dialog action bar. The focus manager scrolls only after Tab/Shift+Tab; these
+   margins give the browser room for the workspace header and modal footers. */
+:where(input:not([type='hidden']),
+  textarea,
+  select,
+  [role='combobox'],
+  [contenteditable='true']),
+:where(form, [role='dialog'], [data-rl-keep-focus-visible]) :where(button, [tabindex]:not([tabindex='-1'])) {
+  scroll-margin-block-start: 5rem;
+  scroll-margin-block-end: 8rem;
+  scroll-margin-inline: 1rem;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

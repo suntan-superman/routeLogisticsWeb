@@ -7,6 +7,7 @@ export async function readManagementJobs(date) {
   } while(page.hasMore&&after&&jobs.length<5000);
   return {jobs,hasMore:page.hasMore};
 }
+export const readManagementAttention=()=>readWorkspace('managementAttention');
 export const readManagementTeam=()=>callWorkspace('rlGetRoutingTeam');
 export const readManagementLocations=()=>callWorkspace('rlGetTeamLocations');
 export const readManagementRoute=(memberId,date)=>callWorkspace('rlGetDailyRoute',{memberId,date});

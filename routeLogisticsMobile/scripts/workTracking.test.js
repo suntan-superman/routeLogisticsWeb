@@ -21,7 +21,7 @@ function harness(seed = []) {
       if (name === 'react') return React;
       if (name.endsWith('/services/useJobResources')) return { useJobResourceRefresh: (_resource, id, loader, { enabled }) => { React.useEffect(() => { if (enabled) loader({ query: true }).catch(() => {}); }, [id, enabled, loader]); return { refetch: () => loader().catch(() => {}) }; } };
       if (name.startsWith('@babel/runtime/')) return require(name);
-      if (name === 'react-native') return { View: 'View', Text: 'Text', Pressable: 'Pressable', ScrollView: 'ScrollView', ActivityIndicator: 'ActivityIndicator', AppState: env.app, BackHandler: { addEventListener: (_event, callback) => { env.back = callback; return { remove: () => { if (env.back === callback) env.back = null; } }; } } };
+      if (name === 'react-native') return { View: 'View', Text: 'Text', Pressable: 'Pressable', ScrollView: 'ScrollView', ActivityIndicator: 'ActivityIndicator', AppState: env.app, Linking: { openSettings: async () => { env.settingsOpened = (env.settingsOpened || 0) + 1; } }, BackHandler: { addEventListener: (_event, callback) => { env.back = callback; return { remove: () => { if (env.back === callback) env.back = null; } }; } } };
       if (name.endsWith('/AuthContext')) return { useAuth: () => ({ user: env.user, accessStatus: env.accessStatus }) };
       if (name.endsWith('/ThemeProvider')) return { useTheme: () => ({ palette }) };
       if (name === './Glass') return { GlassCard: ({ children }) => React.createElement('View', null, children), GlassButton: ({ title, onPress, disabled, busy }) => React.createElement('Pressable', { accessibilityLabel: title, disabled: disabled || busy, onPress }, React.createElement('Text', null, title)), IconButton: ({ label, onPress, disabled }) => React.createElement('Pressable', { accessibilityLabel: label, onPress, disabled }) };
@@ -85,6 +85,24 @@ test('background consent requests both permissions and enables visible native in
   assert.equal(env.foregroundRequests, 1); assert.equal(env.backgroundRequests, 1); assert.equal(env.native, true);
   const options = env.nativeOptions[0]; assert.equal(options.timeInterval, 300000); assert.equal(options.deferredUpdatesInterval, 300000); assert.equal(options.showsBackgroundLocationIndicator, true); assert.match(options.foregroundService.notificationBody, /End shift/);
   env.nativeState('background'); assert.equal(env.intervals.size, 0); assert.equal(env.native, true);
+});
+test('an active app-open shift can enable background sharing without ending or restarting its server sessions', async () => {
+  const env = harness(); await start(env, false);
+  const shiftsBefore = env.calls.filter(call => call.name === 'rlWorkShift' && call.action === 'start').length;
+  const sessionsBefore = env.calls.filter(call => call.name === 'rlUpdateWorkLocation' && call.action === 'start').length;
+  await env.service.enableBackgroundWorkTracking(env.user); await settle();
+  const snapshot = env.service.workTrackingSnapshot(env.user);
+  assert.equal(snapshot.tracking, true); assert.equal(snapshot.background, true); assert.equal(env.backgroundRequests, 1); assert.equal(env.native, true);
+  assert.equal(env.calls.filter(call => call.name === 'rlWorkShift' && call.action === 'start').length, shiftsBefore);
+  assert.equal(env.calls.filter(call => call.name === 'rlUpdateWorkLocation' && call.action === 'start').length, sessionsBefore);
+  assert.match(snapshot.message, /did not need to end or restart/);
+});
+test('denying an in-shift background upgrade preserves foreground sharing and the active shift', async () => {
+  const env = harness(); await start(env, false); env.background = false;
+  await assert.rejects(env.service.enableBackgroundWorkTracking(env.user), /Background permission was not granted/); await settle();
+  const snapshot = env.service.workTrackingSnapshot(env.user);
+  assert.equal(snapshot.tracking, true); assert.equal(snapshot.background, false); assert.equal(snapshot.shift.status, 'on-duty'); assert.equal(env.native, false);
+  assert.equal(env.calls.filter(call => call.name === 'rlWorkShift' && call.action === 'end').length, 0);
 });
 test('denied background permission starts no shift or native tracking and remains retryable', async () => {
   const env = harness(); env.background = false;
@@ -192,6 +210,18 @@ test('header shift dialog requires explicit consent, keeps background optional a
   assert.equal(env.calls.filter(call => call.action === 'end').length, 0);
   const end = button('End shift'); await act(async () => { await Promise.all([end.props.onPress(), end.props.onPress()]); }); await act(settle);
   assert.equal(env.calls.filter(call => call.action === 'end').length, 1); assert.equal(env.service.workTrackingSnapshot().tracking, false);
+  await act(async () => tree.unmount());
+});
+test('header shift dialog upgrades an active shift to background sharing without duty cycling', async () => {
+  const env = harness(); await start(env, false); const Component = env.load('components/WorkLocation.js').default; let tree;
+  const button = label => tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === label)[0];
+  await act(async () => { tree = create(React.createElement(Component)); }); await act(settle);
+  await act(async () => tree.root.findByProps({ testID: 'duty-status-button' }).props.onPress()); await act(settle);
+  assert.ok(button('Enable background sharing')); assert.ok(button('Open device location settings'));
+  await act(async () => button('Enable background sharing').props.onPress()); await act(settle);
+  assert.equal(env.service.workTrackingSnapshot(env.user).background, true); assert.match(JSON.stringify(tree.toJSON()), /Background location is enabled/);
+  assert.equal(env.calls.filter(call => call.name === 'rlWorkShift' && call.action === 'start').length, 1);
+  assert.equal(env.calls.filter(call => call.name === 'rlWorkShift' && call.action === 'end').length, 0);
   await act(async () => tree.unmount());
 });
 test('header dialog End shift remains enabled offline and stops locally before reporting an unconfirmed server end', async () => {

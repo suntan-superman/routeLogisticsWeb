@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useWorkQueryScope } from '../contexts/WorkQueryProvider';
 import { WORK_POLL_MS, accessError, workScopeKey } from './workQueryPolicy';
-import { readManagementJobs, readManagementTeam, readManagementLocations, readManagementRoute } from './managementOperations';
+import { readManagementJobs, readManagementAttention, readManagementTeam, readManagementLocations, readManagementRoute } from './managementOperations';
 
 export function useManagementRead(name,args,fetcher,{enabled=true}={}) {
   const context=useWorkQueryScope(),client=useQueryClient(),scope=JSON.stringify(context.scope);
@@ -22,10 +22,11 @@ export function useManagementRead(name,args,fetcher,{enabled=true}={}) {
 }
 export function useManagementData(date,{enabled=true,canViewLocations=true}={}){
   const jobs=useManagementRead('jobs',[date],()=>readManagementJobs(date),{enabled});
+  const attention=useManagementRead('attention',[],readManagementAttention,{enabled});
   const team=useManagementRead('team',[],readManagementTeam,{enabled});
   const positions=useManagementRead('locations',[],readManagementLocations,{enabled:enabled&&canViewLocations});
-  const refresh=useCallback(()=>Promise.all([jobs.refetch(),team.refetch(),...(canViewLocations?[positions.refetch()]:[])]),[jobs.refetch,team.refetch,positions.refetch,canViewLocations]);
-  return {jobs,team,positions,refresh};
+  const refresh=useCallback(()=>Promise.all([jobs.refetch(),attention.refetch(),team.refetch(),...(canViewLocations?[positions.refetch()]:[])]),[jobs.refetch,attention.refetch,team.refetch,positions.refetch,canViewLocations]);
+  return {jobs,attention,team,positions,refresh};
 }
 export function useManagementRoute(memberId,date,{enabled=true}={}){
   return useManagementRead('route',[date,memberId],()=>readManagementRoute(memberId,date),{enabled:enabled&&!!memberId});

@@ -8,7 +8,7 @@ const transformed=babel.transformSync(fs.readFileSync(file,'utf8'),{filename:fil
 new Function('require','module','exports',transformed.code)(name=>{
  if(name==='react')return React;if(name==='@tanstack/react-query')return require(path.join(root,'node_modules/@tanstack/react-query'));
  if(name.includes('WorkQueryProvider'))return{useWorkQueryScope:()=>context};if(name==='./workQueryPolicy')return require('../services/workQueryPolicy');
- if(name==='./managementOperations')return{readManagementJobs:async date=>{requests.push(['jobs',date]);return loader('jobs',date);},readManagementTeam:async()=>{requests.push(['team']);return loader('team');},readManagementLocations:async()=>{requests.push(['locations']);return loader('locations');},readManagementRoute:async(id,date)=>{requests.push(['route',id,date]);return loader('route');}};
+ if(name==='./managementOperations')return{readManagementJobs:async date=>{requests.push(['jobs',date]);return loader('jobs',date);},readManagementAttention:async()=>{requests.push(['attention']);return loader('attention');},readManagementTeam:async()=>{requests.push(['team']);return loader('team');},readManagementLocations:async()=>{requests.push(['locations']);return loader('locations');},readManagementRoute:async(id,date)=>{requests.push(['route',id,date]);return loader('route');}};
  throw Error(`Unexpected dependency: ${name}`);
 },moduleCache,moduleCache.exports);
 const {useManagementData}=moduleCache.exports;
@@ -17,21 +17,21 @@ async function settle(){for(let i=0;i<5;i++)await act(async()=>{await new Promis
 async function render(){await act(async()=>{tree=create(React.createElement(QueryClientProvider,{client},React.createElement(Probe)));});await settle();}
 async function update(){await act(async()=>tree.update(React.createElement(QueryClientProvider,{client},React.createElement(Probe))));await settle();}
 beforeEach(()=>{
- tree=null;requests=[];registered=new Set();enabled=true;operationsCalls=[];loader=async name=>name==='jobs'?{jobs:[{id:'synthetic-acme'}]}:name==='team'?{team:[]}:{roster:[],locations:[]};
+ tree=null;requests=[];registered=new Set();enabled=true;operationsCalls=[];loader=async name=>name==='jobs'?{jobs:[{id:'synthetic-acme'}]}:name==='attention'?{attention:{counts:{missed:0},jobIds:{missed:[]}},jobs:[]}:name==='team'?{team:[]}:{roster:[],locations:[]};
  const user={id:'owner',companyId:'acme',role:'owner',membershipId:null,emailVerified:true,workspace:{status:'company'}};
  context={user,scope:require('../services/workQueryPolicy').workScopeKey(user),active:true,online:true,canReadWork:true,accessStatus:'ready',registerVisibleQuery:key=>{const value=JSON.stringify(key);registered.add(value);return()=>registered.delete(value);},refreshAccess:async()=>({success:true,authoritative:true,user,accessStatus:'ready'})};
  client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:Infinity}}});
 });
 afterEach(async()=>{if(tree)await act(async()=>tree.unmount());client.clear();assert.equal(registered.size,0);});
 test('management queries share identity scope, selected date and visibility registration',async()=>{
- await render();assert.equal(requests.length,3);assert.equal(registered.size,3);assert.equal(result.jobs.data.jobs[0].id,'synthetic-acme');
+ await render();assert.equal(requests.length,4);assert.equal(registered.size,4);assert.equal(result.jobs.data.jobs[0].id,'synthetic-acme');
  for(const query of client.getQueryCache().findAll()){assert.deepEqual(query.queryKey.slice(0,context.scope.length),context.scope);assert.equal(query.queryKey[context.scope.length],'management');}
  assert.deepEqual(requests.find(row=>row[0]==='jobs'),['jobs','2026-11-15']);
 });
 test('hidden, inactive, offline and unauthorized views cannot continue a management polling loop',async()=>{
  enabled=false;await render();assert.equal(requests.length,0);assert.equal(registered.size,0);
  enabled=true;context.active=false;await update();assert.equal(requests.length,0);
- context.active=true;await update();assert.equal(requests.length,3);
+ context.active=true;await update();assert.equal(requests.length,4);
  const query=client.getQueryCache().findAll()[0];assert.equal(query.options.refetchInterval(query),30000);
  context.online=false;await update();assert.equal(query.options.refetchInterval(query),false);
  context.canReadWork=false;await update();assert.equal(result.jobs.data,undefined);assert.equal(query.options.refetchInterval(query),false);

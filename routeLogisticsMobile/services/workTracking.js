@@ -11,7 +11,7 @@ const storageKey = `rl-work-tracking-v1:${auth.app.options.projectId}`;
 const maximumSamples = 60, listeners = new Set();
 const defaultPolicy = { intervalMinutes: 3, retentionHours: 24, maxShiftHours: 12, freshAfterSeconds: 300 };
 let metadata = null, samples = [], loaded = false, loading, persistence = Promise.resolve();
-let generation = 0, shiftReadSequence = 0, timer, expiryTimer, capturing = null, sending = null, starting = false, initialized = false, pendingActive = null;
+let generation = 0, shiftReadSequence = 0, timer, expiryTimer, capturing = null, sending = null, starting = false, upgradingBackground = false, initialized = false, pendingActive = null;
 const emptyView = () => ({ scopeKey: null, shift: null, policy: defaultPolicy, tracking: false, background: false, pendingCount: 0, lastCapturedAt: null, lastAcceptedAt: null, lastAccuracy: null, error: '', message: '' });
 let view = emptyView();
 let boundScope = null;
@@ -230,6 +230,65 @@ export async function startWorkShift(user, { trackingConsent = false, background
     void captureWorkPosition(); return workTrackingSnapshot();
   } catch (failure) { update({ error: failure.message || 'Your shift could not start. Check your connection and permissions.' }); throw failure; }
   finally { starting = false; release(); }
+}
+export async function enableBackgroundWorkTracking(user) {
+  if (upgradingBackground) return workTrackingSnapshot(user);
+  upgradingBackground = true;
+  const ticket = generation, release = beginNativeInteraction();
+  let changed = false, current = null;
+  const valid = () => {
+    if (ticket !== generation || metadata !== current) throw Object.assign(new Error('Background sharing change was cancelled. Your existing shift setting is unchanged.'), { code: 'cancelled' });
+  };
+  try {
+    await load();
+    const scope = userScope(user);
+    bindView(scope);
+    await verifiedAccount(scope);
+    current = metadata;
+    if (!current || !sameScope(current, scope) || expired(current) || view.shift?.status !== 'on-duty') throw new Error('Start or resume location sharing for the active shift before enabling background sharing.');
+    if (current.backgroundConsent) return workTrackingSnapshot(user);
+    valid();
+    const foreground = await Location.getForegroundPermissionsAsync();
+    valid();
+    if (!foreground.granted) throw new Error('Location permission is required. Enable location in device Settings, then try again.');
+    const background = await Location.requestBackgroundPermissionsAsync();
+    valid();
+    if (!background.granted) throw new Error('Background permission was not granted. Enable Always location in device Settings, then try again.');
+    await waitForForeground(ticket);
+    valid();
+    await verifiedAccount(scope);
+    valid();
+    const result = await callWorkspace('rlWorkShift', { action: 'status' });
+    valid();
+    if (!result.shift || result.shift.id !== current.shiftId || result.shift.status !== 'on-duty' || result.shift.trackingConsent !== true || expired(result.shift)) throw new Error('The active shift could not be verified. Refresh your shift before changing background sharing.');
+    const policy = policyFor(result.policy);
+    current.backgroundConsent = true;
+    current.intervalMinutes = policy.intervalMinutes;
+    current.retentionHours = policy.retentionHours;
+    changed = true;
+    await persist();
+    valid();
+    update({ shift: result.shift, policy, error: '', message: 'Background location is enabled for the current shift. You did not need to end or restart it.' });
+    await configureTracking();
+    valid();
+    void captureWorkPosition();
+    return workTrackingSnapshot(user);
+  } catch (failure) {
+    if (changed && ticket === generation && metadata === current) {
+      current.backgroundConsent = false;
+      try {
+        await persist();
+        await stopNative();
+        await configureTracking();
+      } catch {}
+      publishMetadata();
+    }
+    if (ticket === generation) update({ error: failure.message || 'Background sharing could not be enabled. Your existing shift remains active.' });
+    throw failure;
+  } finally {
+    upgradingBackground = false;
+    release();
+  }
 }
 export async function refreshWorkShift(user, { reconfigure = true } = {}) {
   await load();

@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, BackHandler, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, BackHandler, Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../theme/ThemeProvider';
 import { GlassCard, GlassButton, IconButton } from './Glass';
-import { refreshWorkShift, startWorkShift, stopShiftTracking, subscribeWorkTracking, workTrackingSnapshot } from '../services/workTracking';
+import { enableBackgroundWorkTracking, refreshWorkShift, startWorkShift, stopShiftTracking, subscribeWorkTracking, workTrackingSnapshot } from '../services/workTracking';
 import { useJobResourceRefresh } from '../services/useJobResources';
 
 export default function WorkLocation({ active = true, disabled = false, onInteractionChange, children }) {
@@ -81,6 +81,7 @@ export default function WorkLocation({ active = true, disabled = false, onIntera
     locked.current = true; setBusy(true); setError('');
     try {
       if (action === 'end') await stopShiftTracking({ endShift: true });
+      else if (action === 'background') await enableBackgroundWorkTracking(user);
       else await startWorkShift(user, { trackingConsent: true, backgroundConsent: background });
       if (alive.current && request === generation.current && current.current.scope === identity) setCheck({ scope, status: 'ready' });
     } catch (failure) {
@@ -127,6 +128,11 @@ export default function WorkLocation({ active = true, disabled = false, onIntera
           {!!(error || state.error) && <Text accessibilityRole="alert" style={{ color: palette.danger, lineHeight: 22 }}>{error || state.error}</Text>}
           {!onDuty && !known && <Text style={{ color: palette.secondary, lineHeight: 22 }}>Your current shift has not been verified. Reconnect and refresh its status before starting.</Text>}
           {(onDuty || state.tracking) && <GlassButton title="End shift" busy={busy} disabled={busy} onPress={() => operate('end')} />}
+          {onDuty && state.tracking && !state.background && <>
+            <Text style={{ color: palette.secondary, lineHeight: 22 }}>Background sharing is off. You can enable it for this active shift without going off duty. Your current shift and saved GPS history are preserved.</Text>
+            <GlassButton title="Enable background sharing" busy={busy} disabled={busy || accessStatus !== 'ready' || check.status === 'checking'} onPress={() => operate('background')} />
+            <GlassButton secondary title="Open device location settings" disabled={busy} onPress={() => { void Linking.openSettings().catch(() => setError('Device location settings could not be opened. Open Settings and choose Route Logistics → Location.')); }} />
+          </>}
           {!state.tracking && (known || onDuty) && <>
             <Text style={{ color: palette.secondary, lineHeight: 22 }}>By selecting {onDuty ? 'Resume location sharing' : 'Start shift'}, you confirm work location sharing for this shift.</Text>
             <Pressable accessibilityRole="checkbox" accessibilityLabel="Allow location sharing in the background during this shift" accessibilityState={{ checked: background, disabled: busy }} disabled={busy} onPress={() => setBackground(value => !value)}

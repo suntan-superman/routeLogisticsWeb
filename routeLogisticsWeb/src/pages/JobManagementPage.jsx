@@ -81,7 +81,8 @@ const JobManagementPage = () => {
   const stats=useMemo(()=>jobsQuery.data?summarizeJobs(jobs,calendarDay(todayKey)||new Date()):unknownStats,[jobsQuery.data,jobs,todayKey]);
   const attentionFilter=new URLSearchParams(globalThis.window?.location?.search||'').get('attention');
   const validAttention=['missed','assignment','reschedule'].includes(attentionFilter)?attentionFilter:null;
-  const attentionQuery=useWorkspaceQuery(['management-attention'],()=>readWorkspace('managementAttention'),{enabled:can('dispatch.manage')&&!!validAttention});
+  const attentionQuery=useWorkspaceQuery(['management-attention'],()=>readWorkspace('managementAttention'),{enabled:can('dispatch.manage')});
+  const missedAttentionCount=attentionQuery.data?.attention?.counts?.missed||0;
 
   // Filter states
   const [activeFilter, setActiveFilter] = useState('all'); // all, scheduled, in-progress, completed, cancelled
@@ -392,6 +393,11 @@ const JobManagementPage = () => {
         <p>{jobsQuery.error?.message||customersQuery.error?.message||detailQuery.error?.message} {jobsQuery.data?'Previously loaded work stays visible while refresh is retried.':''}</p>
         <button type="button" className="mt-2 underline" onClick={()=>Promise.all([jobsQuery.refetch(),customersQuery.refetch(),...(showViewModal&&selectedSnapshot?[detailQuery.refetch()]:[])])}>Retry job refresh</button>
         {showViewModal&&!selectedJob&&<button type="button" className="ml-4 underline" onClick={closeView}>Close unavailable job</button>}
+      </div>}
+      {!validAttention&&missedAttentionCount>0&&<div role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+        <p className="font-semibold">{missedAttentionCount} missed visit{missedAttentionCount===1?'':'s'} require{missedAttentionCount===1?'s':''} management review.</p>
+        <p className="mt-1">The scheduled end passed without confirmed arrival or work start. Offline evidence may still synchronize, so review before rescheduling or changing the appointment.</p>
+        <button type="button" className="mt-2 font-medium text-primary-700 underline" onClick={()=>navigate('/jobs?attention=missed')}>Review missed visits</button>
       </div>}
       {jobsQuery.data?.hasMore&&<p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Showing the first 500 jobs. Summary counts and totals apply to these loaded records.</p>}
 

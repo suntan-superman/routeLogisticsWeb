@@ -39,6 +39,10 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
   const readable=allowed&&context.canReadWork;
   const team=useMemo(()=>readable?mergeTeam(data.team.data?.team,data.positions.data?.roster,data.positions.data?.locations).map(row=>({...row,fieldWorkEnabled:row.fieldWorkEnabled!==false&&row.availability?.fieldWorkEnabled!==false})):[],[readable,data.team.data,data.positions.data]);
   const jobs=readable?sortJobs(data.jobs.data?.jobs||[]):[],policy=data.positions.data?.policy||{};
+  const attention=readable?data.attention.data?.attention:null;
+  const missedIds=new Set(attention?.jobIds?.missed||[]);
+  const missedJobs=readable?sortJobs((data.attention.data?.jobs||[]).filter(job=>missedIds.has(job.id))):[];
+  const missedCount=attention?.counts?.missed||0;
   const current=team.find(row=>row.id===selected),availabilityMember=team.find(row=>row.id===availability);
   const route=useManagementRoute(selected,date,{enabled:active&&allowed&&!!selected&&showRoute&&view==='team'});
   const hasDraft=!!assignment||!!availability||!!exceptionJob;
@@ -110,12 +114,12 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
   if(!allowed)return <InlineNotice tone="error" message="Your current role does not permit management operations."/>;
   if(!readable)return <View style={{padding:20,gap:16}}><ScreenHeader title="Management"/>{context.accessStatus==='checking'?<LoadingState message="Checking management access…"/>:<InlineNotice tone="error" message={context.accessError?.message||context.accessError||'Your company access could not be verified.'}/>}<SecondaryButton title="Retry management access" onPress={context.refreshAccess}/></View>;
   return <View style={{flex:1}}><View style={{flex:1}} pointerEvents={assignment||exceptionJob?'none':'auto'} accessibilityElementsHidden={!!assignment||!!exceptionJob} importantForAccessibility={assignment||exceptionJob?'no-hide-descendants':'auto'}><ScreenHeader title={view==='overview'?'Operations':view==='team'?'Team':view==='map'?'Team map':'Team schedule'} subtitle={user.companyName||'Company operations'}/>
-    <ScrollView testID="management-scroll" keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={active&&[data.jobs,data.team,data.positions].some(query=>query.isFetching&&!query.isLoading)} onRefresh={refresh} tintColor={palette.accent}/>}
+    <ScrollView testID="management-scroll" keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={active&&[data.jobs,data.attention,data.team,data.positions].some(query=>query.isFetching&&!query.isLoading)} onRefresh={refresh} tintColor={palette.accent}/>}
       contentContainerStyle={{paddingHorizontal:20,paddingBottom:28,gap:16,width:'100%',maxWidth:760,alignSelf:'center'}}>
       {!context.online&&<InlineNotice message="Offline: showing previously loaded company information. Assignment and availability changes require a connection; your saved fieldwork remains in the same offline queue."/>}
       {!!notice&&!assignment&&!exceptionJob&&<InlineNotice {...notice}/>}
       {!!availability&&!availabilityMember&&data.team.isSuccess&&<InlineNotice tone="error" message="This staff member is no longer in the active team. Availability cannot be changed for an inactive membership."><SecondaryButton title="Cancel unavailable staff changes" onPress={()=>{setAvailability(null);setSelected(null);}}/></InlineNotice>}
-      {[data.jobs,data.team,...(canLocations?[data.positions]:[])].filter(query=>query.error).map((query,index)=><InlineNotice key={index} tone="error" message={query.error.message||'Company operations could not be loaded.'}><SecondaryButton title="Retry company data" onPress={refresh}/></InlineNotice>)}
+      {[data.jobs,data.attention,data.team,...(canLocations?[data.positions]:[])].filter(query=>query.error).map((query,index)=><InlineNotice key={index} tone="error" message={query.error.message||'Company operations could not be loaded.'}><SecondaryButton title="Retry company data" onPress={refresh}/></InlineNotice>)}
       {[data.jobs,data.team].some(query=>query.isLoading)&&<LoadingState message="Loading company operations…"/>}
       {counts.truncated&&<InlineNotice message="This large company has more records than this view can load. Counts are partial; use the web dispatch board for full review."/>}
       <View style={{gap:8}}><View style={{flexDirection:'row',flexWrap:'wrap',gap:8}}>
@@ -125,6 +129,10 @@ export default function ManagementScreen({user,permissions,active,onOpenJob,onCh
       </View>
       {(view==='overview'||view==='schedule')&&<Card><SectionHeader title="Needs attention" subtitle="Selected service date · No arrival confirmed does not mean a technician failed to arrive."/>
         <View style={{flexDirection:'row',flexWrap:'wrap',gap:8}}>{[['potentiallyLate','Potentially late'],['overdue','Overdue'],['reassignmentRequested','Reassignment requested']].map(([key,label])=><SecondaryButton key={key} title={`${label}: ${data.jobs.isSuccess?exceptionCounts[key]:'—'}`} disabled={busy||checking||hasDraft} onPress={()=>openSchedule('all','all',key)}/>)}</View>
+      </Card>}
+      {(view==='overview'||view==='schedule')&&missedCount>0&&<Card><SectionHeader title={`Missed visits requiring action · ${missedCount}`} subtitle="All service dates · The scheduled end passed without confirmed arrival or work start. Offline evidence may still synchronize."/>
+        {missedJobs.slice(0,5).map(job=><JobCard key={job.id} job={job} onPress={()=>{if(!busy&&!hasDraft)onOpenJob?.(job);}}/>)}
+        {missedCount>missedJobs.length&&<Text style={{color:palette.secondary,lineHeight:22}}>Some missed visits are not included in the loaded records. Review the complete list in the web application.</Text>}
       </Card>}
       {view==='overview'&&<><SectionHeader title={`Selected-day overview · ${dayLabel(date)}`} subtitle="Duty is based on recorded shifts, separately from location freshness."/>
         <View style={{flexDirection:'row',flexWrap:'wrap',gap:10}}>{[['On duty now',counts.onDuty],['Off duty now',counts.offDuty],['Scheduled jobs',counts.scheduled,'scheduled'],['Completed jobs',counts.completed,'completed'],['In progress',counts.inProgress,'in-progress'],['Unassigned jobs',counts.unassigned,'all','unassigned']].map(([label,count,status,assignee])=>{

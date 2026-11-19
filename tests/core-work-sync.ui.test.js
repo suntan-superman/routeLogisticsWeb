@@ -119,6 +119,11 @@ test('Jobs attention links render only authoritative tenant-scoped results',asyn
  finally{global.window.location=originalLocation;}
 });
 
+test('Jobs surfaces missed work prominently without requiring a preselected attention filter',async()=>{
+ env.managementAttention={attention:{counts:{missed:1,unassignedOrReassignment:0,rescheduleRequired:0,totalUnique:1},jobIds:{missed:['missed-job'],unassignedOrReassignment:[],rescheduleRequired:[]}},jobs:[{...env.jobs[0],id:'missed-job',customerName:'Drew Brees'}]};
+ await render('pages/JobManagementPage.jsx');const page=text(tree.root);assert.match(page,/1 missed visit requires management review/);assert.match(page,/Review missed visits/);assert.equal(env.calls.filter(value=>value==='management-attention').length,1);
+});
+
 test('detail permission loss does not fall back to a previously selected private job snapshot',async()=>{
  await render('pages/JobManagementPage.jsx');await act(async()=>tree.root.findAll(node=>node.type==='button'&&node.props.title==='View Job')[0].props.onClick());await settle();assert.ok(tree.root.findAllByProps({'aria-label':'Job Details'}).length);
  env.detailError={message:'This job is not assigned to your workspace.',code:'permission-denied'};await refresh(['job']);assert.equal(tree.root.findAllByProps({'aria-label':'Job Details'}).length,0);assert.ok(button('Close unavailable job'));assert.match(text(tree.root),/not assigned to your workspace/);

@@ -38,7 +38,7 @@ beforeEach(()=>{
  context={day:'2026-11-15',online:true,active:true,canReadWork:true,accessStatus:'ready',refreshAccess:async()=>{calls.push(['access']);}};
  const team=[{id:'owner',name:'Company owner',role:'owner'},{id:'manager',name:'Manager',role:'manager'},{id:'tech',name:'Luis',role:'technician'}];
  const roster=[{memberId:'owner',dutyStatus:'off-duty',availability:{state:'normal',active:false,revision:0,scheduled:0}},{memberId:'manager',dutyStatus:'off-duty',availability:{state:'normal',active:false,revision:0,scheduled:0}},{memberId:'tech',dutyStatus:'on-duty',availability:{state:'normal',active:false,revision:0,scheduled:0}}];
- data={jobs:q({jobs:[job('own','owner'),job('tech','tech'),job('done','tech',{status:'completed'}),job('open',null)]}),team:q({team}),positions:q({roster,locations:[],policy:{freshAfterSeconds:300}}),refresh:async()=>calls.push(['refresh'])};
+ data={jobs:q({jobs:[job('own','owner'),job('tech','tech'),job('done','tech',{status:'completed'}),job('open',null)]}),attention:q({attention:{counts:{missed:0,unassignedOrReassignment:0,rescheduleRequired:0,totalUnique:0},jobIds:{missed:[],unassignedOrReassignment:[],rescheduleRequired:[]}},jobs:[]}),team:q({team}),positions:q({roster,locations:[],policy:{freshAfterSeconds:300}}),refresh:async()=>calls.push(['refresh'])};
  routeData=q({stops:[{id:'tech',customerName:'Customer tech',time:'09:00',address:'1 Synthetic Street'}],saved:{jobIds:['tech']}});
  operations={check:async(...args)=>{calls.push(['check',...args]);return{available:true};},assign:async(...args)=>{calls.push(['assign',...args]);return{assignedTo:args[1]};},availability:async(...args)=>{calls.push(['availability',...args]);return{};}};
 });
@@ -47,6 +47,13 @@ test('overview counts recorded shifts independently of GPS and links web creatio
  await render();assert.match(texts(),/On duty now\n1|1\nOff duty now/);assert.match(texts(),/selected service|Selected-day overview|Saved jobs/);assert.doesNotMatch(texts(),/No active team/);
  await press('Schedule new work on web');assert.equal(calls.find(row=>row[0]==='web')[1],'https://route-logistics.com/jobs');
  data.positions.error=new Error('Location access denied');await act(async()=>tree.update(React.createElement(App)));assert.match(texts(),/Location access denied/);assert.match(texts(),/—/);
+});
+test('global missed visits remain visible and openable when management is viewing another service date',async()=>{
+ const missed=job('missed','manager',{customerName:'Drew Brees',date:'2026-11-14',time:'21:00'});
+ data.attention=q({attention:{counts:{missed:1,unassignedOrReassignment:0,rescheduleRequired:0,totalUnique:1},jobIds:{missed:['missed'],unassignedOrReassignment:[],rescheduleRequired:[]}},jobs:[missed]});
+ await render();assert.match(texts(),/Missed visits requiring action · 1/);assert.match(texts(),/Drew Brees/);
+ const card=tree.root.findAll(node=>node.type==='Pressable'&&node.props.testID==='job-card-missed')[0];assert.ok(card);await act(async()=>card.props.onPress());
+ assert.deepEqual(calls.find(row=>row[0]==='open'),['open','missed']);
 });
 
 test('management schedule and reassignment show estimate kind, outcome and inquiry without adding financial actions',async()=>{

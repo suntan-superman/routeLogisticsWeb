@@ -8,7 +8,7 @@ const text=node=>typeof node==='string'||typeof node==='number'?String(node):(no
 const button=label=>tree.root.findAll(node=>node.type==='button'&&text(node).trim()===label)[0];
 const labelStat=name=>{const title=tree.root.findAll(node=>node.type==='dt'&&text(node).trim()===name)[0];return title?text(title.parent.findByType('dd')).trim():undefined;};
 const settle=async()=>{for(let index=0;index<5;index++)await act(async()=>{await new Promise(done=>setTimeout(done,2));});};
-const can=()=>true;
+const can=capability=>!env?.deniedCapabilities?.has(capability);
 const jobService={
  getJobs:async()=>{env.calls.push('jobs');return env.jobsFailure?{success:false,error:env.jobsFailure}:{success:true,jobs:env.jobs,hasMore:false};},
  getJob:async id=>{env.calls.push(`job:${id}`);if(env.detailError)return{success:false,error:env.detailError.message,code:env.detailError.code};return{success:true,job:env.jobs.find(row=>row.id===id)};},
@@ -22,7 +22,7 @@ function load(relative){
  const module={exports:{}};modules.set(file,module);
  const mock=name=>{
   if(name==='react')return React;if(name==='@tanstack/react-query')return mobile('@tanstack/react-query');
-  if(name.endsWith('/services/workspaceApi'))return{callWorkspace:async(name,data)=>{assert.equal(name,'rlJobVisit');assert.equal(data.action,'list');return{events:[]};}};
+  if(name.endsWith('/services/workspaceApi'))return{readWorkspace:async resource=>{assert.equal(resource,'managementAttention');env.calls.push('management-attention');return env.managementAttention;},callWorkspace:async(name,data)=>{assert.equal(name,'rlJobVisit');assert.equal(data.action,'list');return{events:[]};}};
   if(name.endsWith('/contexts/AuthContext'))return{useAuth:()=>({currentUser:env.auth.currentUser,userProfile:{name:'Synthetic owner'},company:{id:env.claims.companyId},workspace:env.workspace,loading:false})};
   if(name.endsWith('/services/firebase'))return{auth:env.auth};
   if(name.endsWith('/services/tenancy'))return{getClaims:()=>env.claims,getWorkspace:()=>env.workspace,can,canManage:can};
@@ -59,7 +59,7 @@ async function change(label,value){await act(async()=>tree.root.findByProps({'ar
 beforeEach(()=>{
  const now=new Date(),day=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
  const auth={app:{options:{projectId:'demo-routelogistics'}},currentUser:{uid:'synthetic-owner',emailVerified:true}};
- env={auth,claims:{companyId:'synthetic-acme',role:'owner'},workspace:{status:'company'},calls:[],toasts:[],jobsFailure:null,detailError:null,statsFailure:null,estimateAttention:{estimates:[],quoteNeededVisits:[]},formProps:null,formMounts:0,formUnmounts:0,scheduleProps:null,scheduleMounts:0,scheduleUnmounts:0,
+ env={auth,claims:{companyId:'synthetic-acme',role:'owner'},workspace:{status:'company'},calls:[],toasts:[],deniedCapabilities:new Set(),jobsFailure:null,detailError:null,statsFailure:null,estimateAttention:{estimates:[],quoteNeededVisits:[]},managementAttention:{attention:{counts:{missed:0,unassignedOrReassignment:0,rescheduleRequired:0,totalUnique:0},jobIds:{missed:[],unassignedOrReassignment:[],rescheduleRequired:[]}},jobs:[]},formProps:null,formMounts:0,formUnmounts:0,scheduleProps:null,scheduleMounts:0,scheduleUnmounts:0,
   jobs:[{id:'job-one',companyId:'synthetic-acme',customerId:'customer-one',customerName:'Synthetic customer',serviceType:'Inspection',date:day,time:'10:00',status:'scheduled',estimatedDuration:1,totalCost:100,updatedAt:'version-one',createdAt:day}],customers:[{id:'customer-one',name:'Synthetic customer'}]};
  modules=new Map();client=new QueryClient({defaultOptions:{queries:{gcTime:Infinity,retry:false,retryDelay:1}}});focusManager.setFocused(true);
 });
@@ -101,6 +101,22 @@ test('dashboard derives one idempotent management alert from quote-needed visits
  await render('pages/HomePage.jsx');const page=text(tree.root);
  assert.match(page,/Estimates need management attention/);assert.match(page,/1 completed visits need quotes · 1 drafts await review/);
  assert.equal(tree.root.findAll(node=>node.type==='a'&&node.props.href==='/estimates'&&text(node).includes('Estimates need management attention')).length,1);
+});
+
+test('dashboard shows authoritative management counts with direct filtered links only to authorized roles',async()=>{
+ env.managementAttention={attention:{counts:{missed:2,unassignedOrReassignment:3,rescheduleRequired:1,totalUnique:4},jobIds:{missed:['missed-one','overlap'],unassignedOrReassignment:['unassigned-one','overlap','reassign-one'],rescheduleRequired:['overlap']}},jobs:[]};
+ await render('pages/HomePage.jsx');const page=text(tree.root);assert.match(page,/Missed visits/);assert.match(page,/Assignment attention/);assert.match(page,/Rescheduling required/);
+ for(const href of ['/jobs?attention=missed','/jobs?attention=assignment','/jobs?attention=reschedule'])assert.equal(tree.root.findAll(node=>node.type==='a'&&node.props.href===href).length,1);
+ assert.equal(env.calls.filter(value=>value==='management-attention').length,1);
+ await act(async()=>tree.unmount());tree=null;client.clear();env.deniedCapabilities.add('dispatch.manage');env.calls=[];modules=new Map();client=new QueryClient({defaultOptions:{queries:{gcTime:Infinity,retry:false,retryDelay:1}}});
+ await render('pages/HomePage.jsx');assert.doesNotMatch(text(tree.root),/Missed visits|Assignment attention|Rescheduling required/);assert.equal(env.calls.includes('management-attention'),false);
+});
+
+test('Jobs attention links render only authoritative tenant-scoped results',async()=>{
+ const originalLocation=global.window.location;global.window.location={pathname:'/jobs',search:'?attention=missed',hash:''};
+ env.managementAttention={attention:{counts:{missed:1,unassignedOrReassignment:0,rescheduleRequired:0,totalUnique:1},jobIds:{missed:['missed-job'],unassignedOrReassignment:[],rescheduleRequired:[]}},jobs:[{...env.jobs[0],id:'missed-job',customerName:'Missed synthetic customer'}]};
+ try{await render('pages/JobManagementPage.jsx');assert.match(text(tree.root),/Management attention: missed visits/);assert.match(text(tree.root),/Missed synthetic customer/);assert.doesNotMatch(text(tree.root),/Synthetic customerSynthetic customer/);assert.equal(env.calls.filter(value=>value==='management-attention').length,1);}
+ finally{global.window.location=originalLocation;}
 });
 
 test('detail permission loss does not fall back to a previously selected private job snapshot',async()=>{

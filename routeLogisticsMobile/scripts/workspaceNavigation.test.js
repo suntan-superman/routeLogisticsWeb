@@ -26,13 +26,20 @@ const buttonElement = ({ title, accessibilityLabel, onPress, disabled, busy, ...
 }, React.createElement('Text', null, title));
 function Workflow(props) {
   workflowProps = props;
-  const [draft, setDraft] = React.useState('');
+  const [draft, setDraft] = React.useState(''), [step, setStep] = React.useState(null);
   React.useEffect(() => { workflowMounts++; return () => { workflowUnmounts++; }; }, []);
+  React.useEffect(() => { props.onNavigationStateChange?.({ jobId: props.job.id, activeStep: step, mode: 'details', label: step === 'work' ? 'Work details' : 'Visit Workflow' }); }, [props.job.id, step]);
+  React.useEffect(() => {
+    if (props.navigationActionsRef) props.navigationActionsRef.current = { handleBack: () => { if (step) setStep(null); else props.onClose(); return true; } };
+    return () => { if (props.navigationActionsRef) props.navigationActionsRef.current = null; };
+  }, [props.navigationActionsRef, props.onClose, step]);
   return React.createElement('View', { testID: 'test-workflow' },
     React.createElement('Text', null, `Work order ${props.job.customerName || props.job.id}`),
     React.createElement('Text', null, `Status ${props.job.status}`),
     React.createElement('Text', null, draft),
+    React.createElement('Text', null, `Workflow step ${step || 'overview'}`),
     buttonElement({ title: 'Close job details', onPress: props.onClose }),
+    buttonElement({ title: 'Open work details', onPress: () => setStep('work') }),
     buttonElement({ title: 'Create photo draft', onPress: () => { setDraft('Retained selected photo'); props.onInteractionChange({ busy: false, hasDraft: true }); } }),
     buttonElement({ title: 'Begin photo picker', onPress: () => props.onInteractionChange({ busy: true, hasDraft: false }) }),
     buttonElement({ title: 'Finish photo picker', onPress: () => props.onInteractionChange({ busy: false, hasDraft: false }) }),
@@ -61,6 +68,7 @@ function load(relative) {
   const mockRequire = name => {
     if (name === 'react-native') return native;
     if (name === '@expo/vector-icons') return { Ionicons: 'Icon' };
+    if (name === 'react-native-safe-area-context') return { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }) };
     if (name === '@react-native-async-storage/async-storage') return { getItem: async key => modeStorage.get(key) || null, setItem: async (key, value) => modeStorage.set(key, value) };
     if (name.endsWith('/AuthContext')) return { useAuth: () => currentAuth };
     if (name.endsWith('/ThemeProvider')) return { useTheme: () => ({ palette, isDark: true }) };
@@ -195,16 +203,26 @@ test('authoritative checking hides private work without a repeated revocation al
   assert.equal(visibleNodes(node => node.props.testID === 'test-workflow').length, 1); assert.equal(workflowMounts, 1);
 });
 
-test('tab navigation preserves a draft and blocks changing screens during a photo operation', async () => {
+test('tab navigation suspends the exact job step with its draft and blocks changing screens during a photo operation', async () => {
   await render(); await openCard('active'); await press('Create photo draft'); await press('Route tab');
-  assert.match(visibleText(), /Your draft is still here/); assert.equal(workflowMounts, 1); assert.match(visibleText(), /Retained selected photo/);
-  assert.equal(button('Home tab').props.accessibilityState.selected, true);
+  assert.match(visibleText(), /open work order and unsaved entries are retained/); assert.equal(workflowMounts, 1); assert.equal(workflowUnmounts,0);
+  assert.equal(workflowProps.visible,false);
+  assert.equal(button('Route tab').props.accessibilityState.selected, true);assert.ok(button('Back to Job'));
+  await press('Back to Job');assert.equal(workflowProps.visible,true);assert.match(visibleText(), /Retained selected photo/);
   await press('Discard draft and close'); assert.equal(button('Route tab').props.accessibilityState.selected, true);
   detail.job = currentJob; await press('Home tab'); await openCard('active'); await press('Begin photo picker');
   assert.equal(button('Settings tab').props.disabled, true);
   await act(async () => button('Settings tab').props.onPress()); await settle();
   assert.match(visibleText(), /Finish or cancel the current photo/); assert.equal(button('Home tab').props.accessibilityState.selected, true);
   await press('Finish photo picker'); await press('Close job details');
+});
+
+test('tab return and Android Back restore the same workflow step without remounting or losing draft text', async () => {
+  await render();await openCard('active');await press('Open work details');await press('Create photo draft');
+  assert.match(visibleText(),/Workflow step work|Retained selected photo/);await press('Settings tab');
+  assert.match(visibleText(),/remains open at Work details/);assert.equal(workflowMounts,1);assert.equal(workflowUnmounts,0);
+  await act(async()=>{assert.equal([...backListeners][0](),true);});await settle();assert.match(visibleText(),/Workflow step work/);assert.match(visibleText(),/Retained selected photo/);
+  await act(async()=>{assert.equal([...backListeners][0](),true);});await settle();assert.match(visibleText(),/Workflow step overview/);
 });
 
 test('Route uses saved stop order, provides maps handoff and opens the correct work order', async () => {
@@ -237,27 +255,19 @@ test('manager defaults to personal Field Mode and can switch to scoped Managemen
   assert.equal(modeStorage.size, 1);
 });
 
-test('manager work-order editing and follow-up use the web workflow while retaining the current work order', async () => {
+test('technician work orders do not expose web editing or follow-up redirects to managers', async () => {
   setRole('manager'); await render(); await press('Schedule tab'); await openCard('active');
-  assert.equal(typeof workflowProps.onEdit, 'function');
-  await act(async () => workflowProps.onEdit(workflowProps.job)); await settle();
+  assert.equal(workflowProps.onEdit, undefined); assert.equal(workflowProps.onFollowUp, undefined);
   assert.equal(workflowProps.job.id, 'active'); assert.equal(workflowMounts, 1);
-  assert.match(visibleText(), /full job editing.*continue on the web|work order remains open here/);
-  assert.equal(navigationCalls[0], 'https://route-logistics.com/jobs');
-  await press('Close job details');
-  await press('Route tab'); detail.job = { ...route.stops[0], status: 'completed' };
-  await press('Open work order for stop 1');
-  await act(async () => workflowProps.onFollowUp(workflowProps.job)); await settle();
-  assert.equal(workflowProps.job.id, 'second-stop');
-  assert.deepEqual(navigationCalls, ['https://route-logistics.com/jobs', 'https://route-logistics.com/jobs']);
+  assert.deepEqual(navigationCalls, []);
 });
 
-test('technicians never receive management callbacks and manager handoff cannot discard a draft', async () => {
+test('technicians and managers never receive web handoff callbacks and drafts stay local', async () => {
   await render(); await openCard('active');
   assert.equal(workflowProps.onEdit, undefined); assert.equal(workflowProps.onFollowUp, undefined);
   await press('Close job details'); setRole('manager'); await rerender(); await press('Schedule tab'); await openCard('active');
   await press('Create photo draft');
-  await act(async () => workflowProps.onEdit(workflowProps.job)); await settle();
+  assert.equal(workflowProps.onEdit, undefined); assert.equal(workflowProps.onFollowUp, undefined);
   assert.equal(navigationCalls.length, 0); assert.match(visibleText(), /Retained selected photo/);
 });
 

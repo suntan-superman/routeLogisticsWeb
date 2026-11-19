@@ -7,11 +7,14 @@ const { create, act } = require('react-test-renderer');
 const babel = require('@babel/core');
 const { workspacePermissions } = require('../services/workspacePolicy');
 global.IS_REACT_ACT_ENVIRONMENT = true;
-let account, tree, photoProps, workProps, checklistProps, requestProps, outcomeProps, photoMounts, photoUnmounts, calls, loader, savedRead, reads, changes, closes, interactions, discarded, navigationCalls;
+let account, tree, photoProps, workProps, checklistProps, requestProps, photoMounts, photoUnmounts, calls, loader, savedRead, reads, changes, closes, interactions, discarded, navigationCalls, scrollCommands;
 let workDrafts, checklistDrafts, savedDraftCalls, discardedDraftCalls, saveWorkDrafts, saveChecklistDrafts, discardWorkDrafts, visitStatus, departureOpened;
 const saved = new Map();
 const native = Object.fromEntries(['View', 'Text', 'ScrollView', 'ActivityIndicator'].map(name => [name, name]));
 native.Linking = { openURL: async url => navigationCalls.push(url) };
+native.Keyboard = { dismiss() {} };
+const appStateHandlers = new Set();
+native.AppState = { addEventListener: (_event, handler) => { appStateHandlers.add(handler); return { remove: () => appStateHandlers.delete(handler) }; } };
 const palette = { text: '#FFF', secondary: '#CCC', danger: '#F00', accent: '#0F0', background: '#000' };
 function Photos(props) {
   photoProps = props;
@@ -32,11 +35,15 @@ function load() {
     if (specifier === './Glass') return { GlassButton: button, GlassInput: ({ label, ...props }) => React.createElement('TextInput', { accessibilityLabel: label, ...props }) };
     if (specifier === './MobileUI') {
       const panel = ({ title, message, children, ...props }) => React.createElement('View', props, title && React.createElement('Text', null, title), message && React.createElement('Text', null, message), children);
-      return { Card: panel, ScreenHeader: panel, SectionHeader: panel, InlineNotice: panel, ConfirmationPanel: panel, ActionDialog: panel, KeyboardAwareScrollView: ({ children, ...props }) => React.createElement('ScrollView', props, children), StatusBadge: ({ status, syncState }) => React.createElement('Text', null, status || syncState) };
+      const KeyboardAwareScrollView = ({ children, scrollRef, ...props }) => {
+        const api = React.useRef({ scrollTo: options => scrollCommands.push(options) });
+        React.useEffect(() => { if (scrollRef) scrollRef.current = api.current; return () => { if (scrollRef?.current === api.current) scrollRef.current = null; }; }, [scrollRef]);
+        return React.createElement('ScrollView', props, children);
+      };
+      return { Card: panel, ScreenHeader: panel, SectionHeader: panel, InlineNotice: panel, ConfirmationPanel: panel, ActionDialog: panel, KeyboardAwareScrollView, StatusBadge: ({ status, syncState }) => React.createElement('Text', null, status || syncState) };
     }
     if (specifier === './JobPhotos') return Photos;
     if (specifier === './JobReassignmentRequest') return props => {requestProps=props;return null;};
-    if (specifier === './EstimateVisitOutcome') return props => {outcomeProps=props;return null;};
     if (specifier.endsWith('/services/estimateVisitPolicy')) return require('../services/estimateVisitPolicy');
     if (specifier.endsWith('/services/workPresentation')) return require('../services/workPresentation');
     if (specifier === './FieldWorkTools') return props => {
@@ -63,14 +70,17 @@ const props = selected => ({ job: selected, onClose: () => { closes++; }, onChan
 async function render(selected = job(), overrides = {}) { await act(async () => { tree = create(React.createElement(Workflow, { ...props(selected), ...overrides })); }); }
 const text = () => JSON.stringify(tree.toJSON());
 const visible = node => { for (let parent = node; parent; parent = parent.parent) { if (parent.props.accessibilityElementsHidden) return false; const styles = Array.isArray(parent.props.style) ? parent.props.style.flat(Infinity) : [parent.props.style]; if (styles.some(style => style?.display === 'none')) return false; } return true; };
-const control = label => { const matches=tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === label);return matches.find(visible)||(['Complete','Resume completion','Prepare Estimate','View Estimate'].includes(label)?matches[0]:undefined); };
-async function press(label) { const node = control(label); assert.ok(node, `Expected ${label}`); assert.equal(!!node.props.disabled, false, `${label} should be enabled`); await act(async () => node.props.onPress()); }
+const aliases = { 'Return to work order': 'Return to My Work' };
+const control = label => { label=aliases[label]||label;const matches=tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === label);return matches.find(visible)||(['Complete Visit','Prepare Estimate','View Estimate'].includes(label)?matches[0]:undefined); };
+async function press(label) {
+  const node = control(label); assert.ok(node, `Expected ${label}`); assert.equal(!!node.props.disabled, false, `${label} should be enabled`); await act(async () => node.props.onPress());
+}
 async function input(label, value) { const field = tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === label && visible(node))[0]; assert.ok(field, `Expected visible ${label}`); await act(async () => field.props.onChangeText(value)); }
-async function draft() { await press('Complete'); await input('Work completed', 'Inspected and treated the site'); await input('Actual hours worked', '1.5'); await input('Completion notes', 'Gate secured'); }
+async function draft() { if (control('Review and completion')) await press('Review and completion'); await input('Work completed', 'Inspected and treated the site'); await input('Actual hours worked', '1.5'); await input('Completion notes', 'Gate secured'); }
 beforeEach(() => {
   const user = { id: 'technician', companyId: 'acme', membershipId: 'member', role: 'technician', emailVerified: true, workspace: { status: 'company' } };
   account = { user, permissions: workspacePermissions(user.workspace, user) };
-  tree = null; photoProps = workProps = requestProps = outcomeProps = null; navigationCalls = []; photoMounts = photoUnmounts = changes = closes = 0; calls = []; interactions = []; discarded = []; reads = []; saved.clear(); savedRead = async id => saved.get(id);
+  tree = null; photoProps = workProps = requestProps = null; navigationCalls = []; scrollCommands = []; photoMounts = photoUnmounts = changes = closes = 0; calls = []; interactions = []; discarded = []; reads = []; saved.clear(); savedRead = async id => saved.get(id);
   loader = async selected => ({ status: 'synced', operationId: 'operation', jobId: selected.id, message: 'Job completed and synchronized.' });
   workDrafts = checklistDrafts = undefined; savedDraftCalls = []; discardedDraftCalls = []; checklistProps = null;
   saveWorkDrafts = async () => { savedDraftCalls.push('work'); workDrafts = { notes: false, application: false, visit: false, hasDraft: false }; workProps.onDraftChange(false); return { success: true }; };
@@ -78,118 +88,140 @@ beforeEach(() => {
   discardWorkDrafts = () => { discardedDraftCalls.push('work'); workDrafts = { notes: false, application: false, visit: false, hasDraft: false }; workProps.onDraftChange(false); return { success: true }; };
   visitStatus = { arrival: null, departure: null }; departureOpened = 0;
 });
-afterEach(async () => { if (tree) await act(async () => tree.unmount()); });
+afterEach(async () => { if (tree) await act(async () => tree.unmount()); assert.equal(appStateHandlers.size, 0); });
 
 test('estimate details retain property access and dispatcher notes and completion offers quote-needed outcome',async()=>{
  let prepared=null;await render(job({appointmentKind:'estimate_visit',billable:false,estimateOutcome:'estimate_pending',inquiryId:'inquiry-one',serviceProperty:{address:'22 Rental Road',label:'Rental',unit:'B'},address:'Old billing street',propertyAccessInstructions:'Gate 2468',dispatchNotes:'Inspect exterior only'}),{onPrepareEstimate:selected=>{prepared=selected;}});
- assert.match(text(),/Estimate Visit/);assert.match(text(),/22 Rental Road/);assert.match(text(),/Gate 2468/);assert.match(text(),/Inspect exterior only/);assert.doesNotMatch(text(),/Old billing street/);assert.equal(outcomeProps.job.inquiryId,'inquiry-one');assert.equal(outcomeProps.readOnly,false);
+ assert.match(text(),/Estimate Visit/);assert.match(text(),/22 Rental Road/);assert.match(text(),/Gate 2468/);assert.match(text(),/Inspect exterior only/);assert.doesNotMatch(text(),/Old billing street/);
  await press('Prepare Estimate');assert.equal(prepared.id,'assigned');
- await press('Complete');assert.match(text(),/Document estimate visit/);assert.ok(control('Completion outcome: Visit completed — quote needed'));await input('Work completed','Inspected for a quote');await press('Completion outcome: Customer declined');await press('Review completion');assert.match(text(),/Customer declined/);await press('Confirm completion');assert.equal(calls[0].draft.estimateOutcome,'customer_declined');assert.equal(calls[0].job.billable,false);assert.equal(photoMounts,1);
+ await press('Review and completion');assert.match(text(),/Review & Complete/);assert.ok(control('Completion outcome: Visit completed — quote needed'));await input('Work completed','Inspected for a quote');await press('Completion outcome: Customer declined');await press('Complete Visit');assert.equal(calls[0].draft.estimateOutcome,'customer_declined');assert.equal(calls[0].job.billable,false);assert.equal(photoMounts,1);
 });
 
-test('guided workflow shows one primary step, advances after durable local saves and reopens completed steps',async()=>{
+test('guided workflow shows one focused stage, returns after durable saves and reopens completed steps',async()=>{
  await render();
- assert.equal(workProps.section,'arrival');assert.ok(control('Arrival, current step'));
- await act(async()=>workProps.onLocalSave('arrived',{state:'pending'}));assert.equal(workProps.section,'work');assert.ok(checklistProps);
- await act(async()=>workProps.onLocalSave('work',{state:'pending'}));assert.ok(control('Photos and evidence, current step'));
- await act(async()=>photoProps.onLocalSave({state:'pending'}));assert.equal(workProps.section,'departure');assert.ok(control('Departure, current step'));
- await act(async()=>workProps.onLocalSave('departed',{state:'pending'}));assert.ok(control('Review and completion, current step'));assert.ok(control('Complete'));
- await press('Arrival, completed');assert.equal(workProps.section,'arrival');assert.equal(photoMounts,1);assert.equal(photoUnmounts,0);
+ assert.equal(workProps.section,'hidden');assert.ok(control('Arrival'));assert.match(text(),/Visit Workflow/);
+ await press('Arrival');assert.equal(workProps.section,'arrival');assert.ok(control('Back to Visit Workflow'));assert.doesNotMatch(text(),/Service location/);
+ await act(async()=>workProps.onLocalSave('arrived',{state:'pending'}));assert.equal(workProps.section,'hidden');assert.ok(control('Arrival, completed, Arrival saved'));assert.equal(control('Work details, current step'),undefined);
+ await press('Work details');assert.equal(workProps.section,'work');assert.ok(checklistProps);
+ await act(async()=>workProps.onLocalSave('work',{state:'pending'}));assert.ok(control('Work details, completed, Work details saved'));
+ await press('Photos and evidence');await act(async()=>photoProps.onLocalSave({state:'pending'}));assert.ok(control('Photos and evidence, completed, Evidence reviewed'));
+ await press('Departure');await act(async()=>workProps.onLocalSave('departed',{state:'pending'}));assert.ok(control('Departure, completed, Departure saved'));
+ await press('Review and completion');assert.ok(control('Complete Visit'));await press('Back to Visit Workflow');
+ await press('Arrival, completed, Arrival saved');assert.equal(workProps.section,'arrival');assert.equal(photoMounts,1);assert.equal(photoUnmounts,0);
 });
 
-test('unfinished estimate outcome participates in close, completion and mode-switch guards without discarding other work',async()=>{
- await render(job({appointmentKind:'estimate_visit',billable:false,estimateOutcome:'estimate_pending'}));await act(async()=>outcomeProps.onDraftChange(true));assert.equal(interactions.at(-1).hasDraft,true);
- await press('Complete');assert.match(text(),/Save the selected estimate outcome/);assert.equal(control('Save drafts and continue').props.disabled,true);assert.equal(control('Discard unsaved drafts and continue').props.disabled,true);assert.equal(calls.length,0);
- await press('Keep editing');await press('Close job details');assert.equal(closes,0);assert.match(text(),/Keep current outcome/);await press('Keep editing');await act(async()=>outcomeProps.onDraftChange(false));await press('Close job details');assert.equal(closes,1);assert.equal(photoMounts,1);
+test('workflow view changes use measured stage positions and resume at the active stage',async()=>{
+ await render(undefined,{visible:true});
+ const layout=async(testID,y)=>act(async()=>tree.root.findByProps({testID}).props.onLayout({nativeEvent:{layout:{y,height:320}}}));
+ await layout('workflow-stage-selector',36);scrollCommands.length=0;
+ await press('Work details');await layout('workflow-stage-work',240);assert.deepEqual(scrollCommands.at(-1),{y:240,animated:false});
+ const beforeResume=scrollCommands.length;await act(async()=>[...appStateHandlers][0]('active'));await new Promise(resolve=>setTimeout(resolve,5));
+ assert.ok(scrollCommands.length>beforeResume);assert.deepEqual(scrollCommands.at(-1),{y:240,animated:false});
+ await act(async()=>workProps.onLocalSave('work',{state:'pending'}));await layout('workflow-stage-selector',36);assert.deepEqual(scrollCommands.at(-1),{y:36,animated:false});
+ await press('Work details, completed, Work details saved');await layout('workflow-stage-work',240);assert.deepEqual(scrollCommands.at(-1),{y:240,animated:false});
+});
+
+test('each workflow stage opens at its measured beginning and Back restores the selector position',async()=>{
+ await render(undefined,{visible:true});
+ const layout=async(testID,y)=>act(async()=>tree.root.findByProps({testID}).props.onLayout({nativeEvent:{layout:{y,height:300}}}));
+ await layout('workflow-stage-selector',28);scrollCommands.length=0;
+ const stages=[['Arrival','arrival',140],['Work details','work',180],['Photos and evidence','photos',220],['Departure','departure',260],['Review and completion','review',300]];
+ for(const[label,id,y]of stages){
+   await press(label);await layout(`workflow-stage-${id}`,y);assert.deepEqual(scrollCommands.at(-1),{y,animated:false});
+   await press('Back to Visit Workflow');assert.deepEqual(scrollCommands.at(-1),{y:28,animated:false});
+ }
+});
+
+test('estimate outcome is part of the single completion draft and survives stage navigation',async()=>{
+ await render(job({appointmentKind:'estimate_visit',billable:false,estimateOutcome:'estimate_pending'}));await press('Review and completion');
+ assert.ok(control('Completion outcome: Visit completed — quote needed'));await press('Completion outcome: Customer declined');await input('Work completed','Customer declined the proposed work');
+ await press('Back to Visit Workflow');assert.equal(interactions.at(-1).hasDraft,true);await press('Review and completion');
+ assert.equal(tree.root.findByProps({accessibilityLabel:'Work completed'}).props.value,'Customer declined the proposed work');assert.ok(control('Completion outcome: Customer declined'));
 });
 
 test('an open reassignment request cannot be silently discarded by job close or completion',async()=>{
- await render();assert.equal(requestProps.active,true);await act(async()=>requestProps.onDraftChange(true));assert.equal(interactions.at(-1).hasDraft,true);
- await press('Complete');assert.match(text(),/Finish submitting or explicitly cancel the reassignment request/);assert.equal(control('Save drafts and continue').props.disabled,true);assert.equal(control('Discard unsaved drafts and continue').props.disabled,true);assert.equal(calls.length,0);
- await press('Keep editing');await press('Close job details');assert.equal(closes,0);assert.match(text(),/before closing this work order/);
- await press('Keep editing');await act(async()=>requestProps.onDraftChange(false));await press('Complete');assert.ok(control('Review completion'));assert.equal(requestProps.active,false);assert.equal(photoMounts,1);
+ await render();assert.equal(requestProps.active,false);await press('Review and completion');assert.equal(requestProps.active,true);await act(async()=>requestProps.onDraftChange(true));assert.equal(interactions.at(-1).hasDraft,true);
+ await press('Complete Visit');assert.match(text(),/Finish submitting or explicitly cancel the reassignment request/);assert.equal(control('Save drafts and continue').props.disabled,true);assert.equal(control('Discard unsaved drafts and continue').props.disabled,true);assert.equal(calls.length,0);
+ await press('Keep editing');await press('Back to Visit Workflow');await press('Close job details');assert.equal(closes,0);assert.match(text(),/before closing this work order/);
+ await press('Keep editing');await act(async()=>requestProps.onDraftChange(false));assert.equal(requestProps.active,false);assert.equal(photoMounts,1);
 });
 
 test('reassignment request submission participates in the existing work-order busy guard',async()=>{
- await render();await act(async()=>requestProps.onBusyChange(true));assert.equal(interactions.at(-1).busy,true);assert.equal(control('Complete').props.disabled,true);
- const close=control('Close job details');await act(async()=>close.props.onPress());assert.equal(closes,0);
- await act(async()=>requestProps.onBusyChange(false));await press('Close job details');assert.equal(closes,1);assert.equal(calls.length,0);
+ await render();await press('Review and completion');await act(async()=>requestProps.onBusyChange(true));assert.equal(interactions.at(-1).busy,true);assert.equal(control('Complete Visit').props.disabled,true);
+ assert.equal(control('Close job details'),undefined);await act(async()=>requestProps.onBusyChange(false));await press('Back to Visit Workflow');await press('Close job details');assert.equal(closes,1);assert.equal(calls.length,0);
 });
 
 test('job workflow uses exclusive inline pages and preserves one photo owner through child navigation', async () => {
   await render(); assert.equal(photoMounts, 1); assert.equal(tree.root.findAllByType('Modal').length, 0);
-  await draft(); await press('Review completion');
-  assert.match(text(), /Review completion/); assert.equal(control('Complete'), undefined);
-  await press('Back to completion'); await press('Cancel completion');
-  assert.match(text(), /Job Details/); assert.ok(control('Resume completion')); assert.equal(photoMounts, 1); assert.equal(photoUnmounts, 0);
-  await press('Resume completion');
+  await draft(); assert.match(text(), /Review & Complete/); assert.ok(control('Complete Visit'));
+  await press('Back to Visit Workflow'); assert.match(text(), /Visit Workflow/); assert.equal(photoMounts, 1); assert.equal(photoUnmounts, 0);
+  await press('Review and completion');
   assert.equal(tree.root.findByProps({ accessibilityLabel: 'Work completed' }).props.value, 'Inspected and treated the site');
 });
 
 test('native picker and unsaved photo state block transitions until cancellation or save completes', async () => {
   await render();
   await act(async () => photoProps.onBusyChange(true));
-  assert.equal(control('Complete').props.disabled, true); assert.equal(control('Close job details').props.disabled, true);
+  assert.equal(control('Review and completion').props.disabled, true); assert.equal(control('Close job details').props.disabled, true);
   assert.deepEqual(interactions.at(-1), { busy: true, hasDraft: false });
   await act(async () => { photoProps.onBusyChange(false); photoProps.onDraftChange(true); });
-  await press('Complete'); assert.match(text(), /A selected photo has not been saved/); assert.match(text(), /Job Details/);
+  await press('Review and completion'); await press('Complete Visit'); assert.match(text(), /A selected photo has not been saved/);
   await press('Keep editing');
-  await press('Close job details'); assert.equal(closes, 0);
+  await press('Back to Visit Workflow'); await press('Close job details'); assert.equal(closes, 0);
   await act(async () => photoProps.onDraftChange(false));
   await press('Close job details'); assert.equal(closes, 1);
 });
 
 test('completion validates fields, shows saving, suppresses duplicate taps and returns to updated details', async () => {
-  await render(); await press('Complete'); await press('Review completion');
+  await render(); await press('Review and completion'); await press('Complete Visit');
   assert.match(text(), /Describe the work completed/); assert.equal(calls.length, 0);
   await press('Keep editing');
-  await input('Work completed', 'Inspection'); await input('Actual hours worked', '-1'); await press('Review completion');
-  assert.match(text(), /between 0 and 744/); await press('Keep editing'); await input('Actual hours worked', '1'); await press('Review completion');
+  await input('Work completed', 'Inspection'); await input('Actual hours worked', '-1'); await press('Complete Visit');
+  assert.match(text(), /between 0 and 744/); await press('Keep editing'); await input('Actual hours worked', '1');
   let resolve;
   loader = () => new Promise(done => { resolve = done; });
-  const confirm = control('Confirm completion').props.onPress;
+  const confirm = control('Complete Visit').props.onPress;
   let first, second;
   await act(async () => { first = confirm(); second = confirm(); });
-  assert.equal(calls.length, 1); assert.match(text(), /Saving completion/); assert.equal(control('Close job details').props.disabled, true);
+  assert.equal(calls.length, 1); assert.match(text(), /Saving completion/); assert.equal(control('Close job details'), undefined);
   await act(async () => { resolve({ status: 'synced', operationId: 'once', jobId: 'assigned' }); await Promise.all([first, second]); });
-  assert.equal(changes, 1); assert.match(text(), /Job Details/); assert.match(text(), /Status:.*completed/); assert.match(text(), /Job completed and synchronized/);
-  assert.equal(control('Complete'), undefined); assert.ok(control('Return to work order'));
-  await press('Return to work order'); assert.equal(interactions.at(-1).hasDraft, false);
+  assert.equal(changes, 1); assert.match(text(), /Visit Workflow/); assert.match(text(), /Status:.*completed/); assert.match(text(), /Visit Completed/);
+  assert.equal(control('Complete Visit'), undefined); assert.ok(control('Return to work order'));
+  await press('Return to work order'); assert.equal(closes, 1);
 });
 
 test('an arrival without departure offers direct departure recording or a documented exception', async () => {
   visitStatus = { arrival: { id: 'arrival', type: 'arrived', recordedAt: '2026-11-18T17:00:00.000Z' }, departure: null };
-  await render(); await draft(); await press('Review completion');
+  await render(); await draft(); await press('Complete Visit');
   assert.match(text(), /Departure has not been recorded/); assert.ok(control('Record departure')); assert.ok(control('Continue with documented exception'));
   await press('Record departure'); assert.equal(departureOpened, 1); assert.match(text(), /Departure entry is open/);
-  await press('Resume completion'); await press('Review completion'); await input('Reason for completing without departure', 'Customer asked the technician to leave immediately.');
-  await press('Continue with documented exception'); assert.match(text(), /Departure exception: Customer asked/);
-  await press('Confirm completion'); assert.equal(calls[0].draft.departureExceptionReason, 'Customer asked the technician to leave immediately.');
+  await press('Back to Visit Workflow'); await press('Review and completion'); await press('Complete Visit'); await input('Reason for completing without departure', 'Customer asked the technician to leave immediately.');
+  await press('Continue with documented exception'); assert.equal(calls[0].draft.departureExceptionReason, 'Customer asked the technician to leave immediately.');
 });
 
 test('completion failure keeps context and draft and retries the same durable operation after review', async () => {
-  await render(); await draft(); await press('Review completion');
+  await render(); await draft();
   loader = async () => { throw Object.assign(new Error('Assignment changed. Ask your manager.'), { code: 'permission-denied', operationId: 'saved-failure' }); };
-  await press('Confirm completion');
+  await press('Complete Visit');
   assert.match(text(), /Assignment changed/); assert.match(text(), /Assigned Customer/);
   assert.equal(tree.root.findByProps({ accessibilityLabel: 'Work completed' }).props.value, 'Inspected and treated the site');
   saved.set('saved-failure', { state: 'conflict', server: { status: 'in-progress', actualWorkDone: 'Existing work', notes: 'Manager note' } });
   await press('Keep editing');
-  await press('Review completion'); assert.match(text(), /Review the latest online work/); assert.match(text(), /Manager note/);
+  await press('Complete Visit'); assert.match(text(), /Review the latest online work/);await press('Keep editing');assert.match(text(), /Manager note/);
   loader = async () => ({ status: 'synced', operationId: 'reviewed' });
-  await press('Confirm completion'); assert.equal(calls[1].options.retryOperationId, 'saved-failure'); assert.equal(changes, 1);
+  await press('Complete Visit'); assert.equal(calls[1].options.retryOperationId, 'saved-failure'); assert.equal(changes, 1);
 });
 
 test('queued completion is explicit and later synchronization failure restores its draft for retry', async () => {
-  await render(); await draft(); await press('Review completion');
+  await render(); await draft();
   loader = async () => ({ status: 'queued', operationId: 'offline-completion', message: 'Completion saved on this device and awaiting authorized synchronization.' });
-  await press('Confirm completion'); assert.match(text(), /awaiting authorized synchronization/); assert.match(text(), /awaiting synchronization/);
+  await press('Complete Visit'); assert.match(text(), /Awaiting Synchronization/); assert.match(text(), /awaiting synchronization/);
   await act(async () => tree.update(React.createElement(Workflow, props(job({ status: 'in-progress', syncState: 'failed', syncOperationId: 'offline-completion', syncError: 'Your assignment was removed.' })))));
   assert.match(text(), /Your assignment was removed/);
   assert.equal(tree.root.findByProps({ accessibilityLabel: 'Work completed' }).props.value, 'Inspected and treated the site');
   await press('Keep editing');
-  await press('Review completion'); loader = async () => ({ status: 'synced', operationId: 'offline-completion' });
-  await press('Confirm completion'); assert.equal(calls.at(-1).options.retryOperationId, 'offline-completion');
+  loader = async () => ({ status: 'synced', operationId: 'offline-completion' });await press('Complete Visit');
+  assert.equal(calls.at(-1).options.retryOperationId, 'offline-completion');
 });
 
 test('unauthorized, unverified and cross-company jobs cannot submit completion or show management actions', async () => {
@@ -211,48 +243,48 @@ test('closing and reopening the same job or selecting another job produces clean
     return selected ? React.createElement(Workflow, { ...props(selected), onClose: close }) : React.createElement('Pressable', { accessibilityLabel: 'Open job', onPress: () => select(job()) });
   }
   await act(async () => { tree = create(React.createElement(Host)); });
-  for (let count = 0; count < 3; count++) { await press('Close job details'); assert.equal(tree.root.findAllByType(Workflow).length, 0); await press('Open job'); assert.match(text(), /Job Details/); }
+  for (let count = 0; count < 3; count++) { await press('Close job details'); assert.equal(tree.root.findAllByType(Workflow).length, 0); await press('Open job'); assert.match(text(), /Visit Workflow/); }
   assert.equal(tree.root.findAllByType('Modal').length, 0);
   await act(async () => tree.update(React.createElement(Workflow, props(job({ id: 'another', customerName: 'Another Customer' })))));
   assert.match(text(), /Another Customer/); assert.doesNotMatch(text(), /Assigned Customer/);
 });
 
 test('discarding a failed saved completion is explicit and a late completion callback cannot navigate an unmounted job', async () => {
-  await render(); await draft(); await press('Review completion');
+  await render(); await draft();
   loader = async () => { throw Object.assign(new Error('Sync failed'), { operationId: 'saved-draft' }); };
-  await press('Confirm completion'); await press('Keep editing'); await press('Cancel completion'); await press('Close job details');
+  await press('Complete Visit'); await press('Keep editing'); await press('Back to Visit Workflow'); await press('Close job details');
   assert.equal(closes, 0); await press('Keep editing'); assert.equal(discarded.length, 0);
   await press('Close job details'); await press('Discard draft and close');
   assert.deepEqual(discarded, [{ id: 'saved-draft', action: 'discard' }]); assert.equal(closes, 1);
   await act(async () => tree.unmount()); tree = null;
-  await render(); await draft(); await press('Review completion');
+  await render(); await draft();
   let resolve, pending;
   loader = () => new Promise(done => { resolve = done; });
-  await act(async () => { pending = control('Confirm completion').props.onPress(); });
+  await act(async () => { pending = control('Complete Visit').props.onPress(); });
   await act(async () => tree.unmount()); tree = null;
   await act(async () => { resolve({ status: 'synced', operationId: 'late' }); await pending; });
   assert.equal(changes, 0);
 });
 
 test('a confirmed server refresh supersedes local completion when management reopens or cancels the job', async () => {
-  await render(job({ updatedAt: '2026-11-13T20:00:00.000Z' })); await draft(); await press('Review completion'); await press('Confirm completion');
+  await render(job({ updatedAt: '2026-11-13T20:00:00.000Z' })); await draft(); await press('Complete Visit');
   assert.match(text(), /Status:.*completed/);
-  await press('Return to work order');
+  await press('Review Visit');
   await act(async () => tree.update(React.createElement(Workflow, props(job({ status: 'completed', updatedAt: '2026-11-13T20:01:00.000Z' })))));
   await act(async () => tree.update(React.createElement(Workflow, props(job({ status: 'scheduled', updatedAt: '2026-11-13T20:02:00.000Z' })))));
-  assert.match(text(), /Status:.*scheduled/); assert.ok(control('Complete'));
+  assert.ok(control('Complete Visit')); await press('Back to Visit Workflow'); assert.match(text(), /Status:.*scheduled/);
   await act(async () => tree.update(React.createElement(Workflow, props(job({ status: 'cancelled', updatedAt: '2026-11-13T20:03:00.000Z' })))));
   assert.match(text(), /Status:.*cancelled/); assert.equal(control('Complete'), undefined);
 });
 
 test('saved-work review ignores duplicate taps and asynchronous results after unmount', async () => {
-  await render(); await draft(); await press('Review completion');
+  await render(); await draft();
   loader = async () => { throw Object.assign(new Error('Job changed online'), { operationId: 'conflict' }); };
-  await press('Confirm completion');
+  await press('Complete Visit');
   await press('Keep editing');
   let resolve, first, second;
   savedRead = () => new Promise(done => { resolve = done; });
-  const review = control('Review completion').props.onPress;
+  const review = control('Complete Visit').props.onPress;
   await act(async () => { first = review(); second = review(); });
   assert.deepEqual(reads, ['conflict']); assert.match(text(), /Loading saved work/);
   await act(async () => tree.unmount()); tree = null;
@@ -261,10 +293,11 @@ test('saved-work review ignores duplicate taps and asynchronous results after un
 });
 
 test('work details retain durations and completion facts while quote prices require the pricing capability', async () => {
-  const selected = job({ estimatedDuration: 2.5, estimatedCost: 123.45, actualHours: 1.5, completedAt: '2026-11-13T20:01:00.000Z' });
-  await render(selected); assert.match(text(), /Estimated duration:.*2.5/); assert.match(text(), /Actual hours:.*1.5/); assert.match(text(), /Completed:/); assert.doesNotMatch(text(), /123.45/);
+  const selected = job({ status:'completed',estimatedDuration: 2.5, estimatedCost: 123.45, actualHours: 1.5, completedAt: '2026-11-13T20:01:00.000Z' });
+  await render(selected);assert.match(text(), /Estimated duration:.*2.5/);await press('Review and completion, completed, Completion saved'); assert.match(text(), /Actual hours:.*1.5/); assert.match(text(), /Completed:/); assert.doesNotMatch(text(), /123.45/);
   account.user = { ...account.user, role: 'manager' }; account.permissions = workspacePermissions(account.user.workspace, account.user);
   await act(async () => tree.update(React.createElement(Workflow, props(selected))));
+  await press('Back to Visit Workflow');
   assert.match(text(), /Estimated cost:.*123.45/);
 });
 
@@ -272,13 +305,12 @@ test('work-note, application and visit drafts protect back navigation and comple
   await render();
   await act(async () => workProps.onDraftChange(true));
   assert.deepEqual(interactions.at(-1), { busy: false, hasDraft: true });
-  await press('Complete'); assert.match(text(), /Work notes, a product application or a visit record has unsaved changes/); assert.equal(calls.length, 0);
-  await press('Keep editing');
+  await press('Review and completion'); await press('Complete Visit'); assert.match(text(), /Work notes, a product application or a visit record has unsaved changes/); assert.equal(calls.length, 0);
+  await press('Keep editing'); await press('Back to Visit Workflow');
   await press('Close job details'); assert.equal(closes, 0); await press('Keep editing');
   await act(async () => workProps.onBusyChange(true));
   assert.equal(control('Close job details').props.disabled, true);
   await act(async () => { workProps.onBusyChange(false); workProps.onDraftChange(false); });
-  await press('Complete'); await press('Cancel completion');
   assert.equal(photoMounts, 1); assert.equal(photoUnmounts, 0);
 });
 
@@ -294,11 +326,11 @@ test('technician and management roles see selectable multiline dispatch instruct
   for (const role of ['technician', 'owner', 'manager']) {
     if (tree) { await act(async () => tree.unmount()); tree = null; }
     account.user = { ...account.user, role }; account.permissions = workspacePermissions(account.user.workspace, account.user);
-    await render(job({ dispatchNotes: instructions, serviceInstructions: 'Customer prefers the rear path.', workNotes: 'Technician observed activity.', notes: 'Legacy work-note alias.', completionNotes: 'Previous completion summary.' }));
+    await render(job({ status: 'completed', dispatchNotes: instructions, serviceInstructions: 'Customer prefers the rear path.', workNotes: 'Technician observed activity.', notes: 'Legacy work-note alias.', completionNotes: 'Previous completion summary.' }));
     const note = tree.root.findAll(node => node.type === 'Text' && node.props.testID === 'job-dispatch-notes');
     assert.equal(note.length, 1); assert.equal(note[0].props.selectable, true);
     assert.equal(note[0].children.join(''), instructions);
-    assert.match(text(), /Job instructions/); assert.match(text(), /Customer prefers the rear path/); assert.match(text(), /Previous completion summary/);
+    assert.match(text(), /Job instructions/); assert.match(text(), /Customer prefers the rear path/);await press('Review and completion, completed, Completion saved'); assert.match(text(), /Previous completion summary/);await press('Back to Visit Workflow');
     assert.equal(workProps.job.workNotes, 'Technician observed activity.');
     assert.equal(tree.root.findAll(node => node.type === 'TextInput' && node.props.value === instructions).length, 0);
     assert.doesNotMatch(text(), /Legacy work-note alias/);
@@ -335,7 +367,7 @@ test('same-job instruction refresh preserves photo, work-tool and completion dra
   await act(async () => { await Promise.resolve(); tree.update(React.createElement(Workflow, props(selected))); });
   assert.equal(tree.root.findByProps({ accessibilityLabel: 'Work completed' }).props.value, 'Inspected and treated the site');
   assert.equal(tree.root.findByProps({ accessibilityLabel: 'Completion notes' }).props.value, 'Gate secured');
-  await press('Cancel completion');
+  await press('Back to Visit Workflow');
   assert.equal(tree.root.findByProps({ testID: 'job-dispatch-notes' }).children.join(''), 'Newest gate instructions');
   assert.equal(photoMounts, 1); assert.equal(photoUnmounts, 0);
   assert.equal(calls.length, 0); assert.equal(reads.length, 0); assert.equal(changes, 0);
@@ -361,14 +393,14 @@ test('switching jobs replaces dispatch instructions and never carries another vi
   await act(async () => tree.update(React.createElement(Workflow, props(job({ id: 'another', customerName: 'Another property', dispatchNotes: 'Second property access instructions' })))));
   assert.match(text(), /Second property access instructions/); assert.doesNotMatch(text(), /First property gate instructions|Gate secured/);
   assert.equal(tree.root.findByProps({ testID: 'job-dispatch-notes' }).children.join(''), 'Second property access instructions');
-  assert.ok(control('Complete')); assert.equal(control('Resume completion'), undefined);
+  await press('Review and completion');assert.ok(control('Complete Visit'));
   assert.equal(calls.length, 0); assert.equal(photoMounts, 2); assert.equal(photoUnmounts, 1);
 });
 
 test('an untouched optional product form does not require a product application to begin completion', async () => {
   await render();
   workDrafts = { notes: false, application: false, visit: false, hasDraft: false };
-  await press('Complete');
+  await press('Review and completion');
   assert.ok(tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Work completed' && visible(node)).length);
   assert.equal(tree.root.findAll(node => node.props.testID === 'completion-action-dialog').length, 0);
   assert.deepEqual(savedDraftCalls, []); assert.deepEqual(discardedDraftCalls, []); assert.equal(calls.length, 0);
@@ -378,7 +410,7 @@ test('completion explains an optional product draft in an overlay and requires e
   await render(job({ dispatchNotes: 'Read-only gate access instructions' }));
   workDrafts = { notes: false, application: true, visit: false, hasDraft: true };
   await act(async () => workProps.onDraftChange(true));
-  await press('Complete');
+  await press('Review and completion');await press('Complete Visit');
   const dialog = tree.root.findByProps({ testID: 'completion-action-dialog' });
   const ancestors = []; for (let parent = dialog.parent; parent; parent = parent.parent) ancestors.push(parent);
   assert.equal(ancestors.some(node => node.type === 'ScrollView'), false);
@@ -388,9 +420,10 @@ test('completion explains an optional product draft in an overlay and requires e
   assert.deepEqual(discardedDraftCalls, []); assert.equal(tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === 'Complete' && visible(node)).length, 0);
   assert.deepEqual(interactions.at(-1), { busy: false, hasDraft: true });
   await press('Keep editing'); assert.equal(workDrafts.application, true);
-  await press('Complete'); await press('Discard unsaved drafts and continue');
+  await press('Complete Visit'); await press('Discard unsaved drafts and continue');
   assert.deepEqual(discardedDraftCalls, ['work']); assert.deepEqual(savedDraftCalls, []);
   assert.equal(calls.length, 0); assert.equal(photoMounts, 1); assert.equal(photoUnmounts, 0);
+  assert.match(text(), /Describe the work completed/); await press('Keep editing');
   assert.ok(tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Work completed' && visible(node)).length);
   assert.equal(workProps.job.dispatchNotes, 'Read-only gate access instructions');
 });
@@ -400,28 +433,29 @@ test('save-and-continue names and saves pending work and checklist drafts before
   workDrafts = { notes: true, application: true, visit: true, visitType: 'arrived', visitAttempted: false, hasDraft: true };
   checklistDrafts = { checklist: true, hasDraft: true };
   await act(async () => { workProps.onDraftChange(true); checklistProps.onDraftChange(true); });
-  await press('Complete');
+  await press('Review and completion');await press('Complete Visit');
   assert.match(text(), /Work notes have unsaved changes/); assert.match(text(), /An arrival record has not been saved on this device/); assert.match(text(), /service checklist has unsaved answers/);
   await press('Save drafts and continue');
   assert.deepEqual(savedDraftCalls, ['work', 'checklist']); assert.deepEqual(discardedDraftCalls, []);
   assert.equal(calls.length, 0); assert.equal(photoMounts, 1);
-  await input('Work completed', 'Completed the assigned visit'); await press('Review completion'); await press('Confirm completion');
+  assert.match(text(), /Describe the work completed/); await press('Keep editing');
+  await input('Work completed', 'Completed the assigned visit'); await press('Complete Visit');
   assert.equal(calls.length, 1); assert.ok(control('Return to work order'));
-  await press('Return to work order'); assert.equal(interactions.at(-1).hasDraft, false);
+  await press('Return to work order'); assert.equal(closes, 1);
 });
 
 test('an invalid optional draft shows its actual save error in the overlay and retains the draft for correction', async () => {
   await render(); workDrafts = { application: true, hasDraft: true };
   await act(async () => workProps.onDraftChange(true));
   saveWorkDrafts = async () => { savedDraftCalls.push('work'); return { success: false, message: 'Enter a product, target pest and positive quantity before saving.' }; };
-  await press('Complete'); await press('Save drafts and continue');
+  await press('Review and completion');await press('Complete Visit'); await press('Save drafts and continue');
   const dialog = tree.root.findByProps({ testID: 'completion-action-dialog' });
   assert.equal(dialog.props.tone, 'error'); assert.match(text(), /Enter a product, target pest and positive quantity/);
   assert.equal(workDrafts.application, true); assert.deepEqual(discardedDraftCalls, []); assert.equal(calls.length, 0);
   await press('Keep editing');
   saveWorkDrafts = async () => { savedDraftCalls.push('work'); workDrafts = { hasDraft: false }; workProps.onDraftChange(false); return { success: true }; };
-  await press('Complete'); await press('Save drafts and continue');
-  assert.equal(tree.root.findAll(node => node.props.testID === 'completion-action-dialog').length, 0);
+  await press('Complete Visit'); await press('Save drafts and continue');
+  assert.match(text(), /Describe the work completed/);
   assert.deepEqual(savedDraftCalls, ['work', 'work']); assert.equal(calls.length, 0);
 });
 
@@ -429,7 +463,7 @@ test('an unconfirmed attempted visit cannot be discarded and retains its retry i
   await render(); workDrafts = { visit: true, visitType: 'arrived', visitAttempted: true, operationId: 'same-visit-attempt', hasDraft: true };
   await act(async () => workProps.onDraftChange(true));
   saveWorkDrafts = async () => { savedDraftCalls.push('work'); return { success: false, unconfirmed: true, message: 'The visit could not be confirmed. Retry the same arrival record.' }; };
-  await press('Complete');
+  await press('Review and completion'); await press('Complete Visit');
   const discard = control('Discard unsaved drafts and continue');
   assert.equal(discard.props.disabled, true);
   await act(async () => discard.props.onPress());
@@ -442,7 +476,7 @@ test('an unconfirmed attempted visit cannot be discarded and retains its retry i
 
 test('draft saving suppresses duplicate taps and ignores continuation after its work order unmounts', async () => {
   await render(); workDrafts = { notes: true, hasDraft: true };
-  await act(async () => workProps.onDraftChange(true)); await press('Complete');
+  await act(async () => workProps.onDraftChange(true)); await press('Review and completion'); await press('Complete Visit');
   let resolve, first, second;
   saveWorkDrafts = () => { savedDraftCalls.push('work'); return new Promise(done => { resolve = done; }); };
   const save = control('Save drafts and continue').props.onPress;
@@ -455,11 +489,11 @@ test('draft saving suppresses duplicate taps and ignores continuation after its 
 });
 
 test('required completion validation stays visible outside the scroll view and preserves invalid input', async () => {
-  await render(); await press('Complete');
-  await input('Work completed', 'x'.repeat(10001)); await press('Review completion');
+  await render(); await press('Review and completion');
+  await input('Work completed', 'x'.repeat(10001)); await press('Complete Visit');
   const dialog = tree.root.findByProps({ testID: 'completion-action-dialog' });
   assert.match(dialog.props.message, /at most 10,000 characters/);
-  assert.equal(control('Review completion'), undefined);
+  assert.equal(control('Complete Visit').props.disabled, false);
   assert.equal(interactions.at(-1).hasDraft, true);
   await press('Keep editing');
   assert.equal(tree.root.findByProps({ accessibilityLabel: 'Work completed' }).props.value.length, 10001);

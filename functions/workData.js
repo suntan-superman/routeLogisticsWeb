@@ -11,8 +11,9 @@ const { prepareAssignmentException, commitAssignmentException, summary: exceptio
 const { appointmentPatch, isEstimateVisit } = require('./shared/appointments');
 const { propertyFor, lifecycleFor, customerArchived } = require('./shared/customerLifecycle');
 const { prepareAppointmentLinks, commitAppointmentLinks } = require('./appointmentLinks');
+const { summarizeManagementAttention } = require('./shared/managementAttention');
 
-const JOB_FIELDS = ['userId', 'companyId', 'customerId', 'customerName', 'customerPhone', 'serviceType', 'serviceCategory', 'title', 'address', 'city', 'state', 'zipCode', 'serviceArea', 'date', 'time', 'windowStart', 'windowEnd', 'estimatedDuration', 'duration', 'priority', 'status', 'assignedTo', 'assignedToUid', 'assignedToName', 'assignmentNeedsAttention', 'assignmentReview', 'servicePlanId', 'servicePlanDate', 'workNotes', 'actualWorkDone', 'actualHours', 'completionNotes', 'departureExceptionReason', 'completedAt', 'cancelledAt', 'cancellationReason', 'cancelledBy', 'createdAt', 'updatedAt', 'appointmentKind', 'billable', 'estimateOutcome', 'inquiryId', 'servicePropertyId', 'propertyAccessInstructions'];
+const JOB_FIELDS = ['userId', 'companyId', 'customerId', 'customerName', 'customerPhone', 'serviceType', 'serviceCategory', 'title', 'address', 'city', 'state', 'zipCode', 'serviceArea', 'date', 'time', 'windowStart', 'windowEnd', 'estimatedDuration', 'duration', 'priority', 'status', 'assignedTo', 'assignedToUid', 'assignedToName', 'assignmentNeedsAttention', 'assignmentReview', 'rescheduleRequired', 'servicePlanId', 'servicePlanDate', 'workNotes', 'actualWorkDone', 'actualHours', 'completionNotes', 'departureExceptionReason', 'completedAt', 'cancelledAt', 'cancellationReason', 'cancelledBy', 'createdAt', 'updatedAt', 'appointmentKind', 'billable', 'estimateOutcome', 'inquiryId', 'servicePropertyId', 'propertyAccessInstructions'];
 const PRICING_FIELDS = ['totalCost', 'estimatedCost', 'laborRate', 'laborHours', 'materialCost', 'materials', 'scopeOfWork', 'notes', 'description', 'servicePlanId'];
 const CUSTOMER_FIELDS = ['userId', 'companyId', 'name', 'firstName', 'lastName', 'email', 'emailNormalized', 'phone', 'phoneNumber', 'address', 'city', 'state', 'zipCode', 'postalCode', 'isActive', 'status', 'createdAt', 'updatedAt', 'lastServiceDate', 'totalJobs', 'emailConsent', 'notes', 'serviceInstructions'];
 const APPLICATION_FIELDS = ['product', 'epaRegNo', 'activeIngredient', 'amount', 'unit', 'targetPest', 'areaTreated', 'method', 'applicatorLicense', 'notes'];
@@ -99,6 +100,14 @@ function workDataHandlers(db, config = {}) {
         const rows = await scoped(db, 'customers', scope).select('isActive', 'status', 'deletedAt').get();
         const active = rows.docs.filter(row => row.get('isActive') !== false && !row.get('deletedAt') && !['inactive', 'deleted', 'archived'].includes(row.get('status'))).length;
         return { stats: { totalCustomers: rows.size, activeCustomers: active, inactiveCustomers: rows.size - active } };
+      }
+      if (resource === 'managementAttention') {
+        if (!hasCapability(scope.role, 'dispatch.manage')) throw new HttpsError('permission-denied', 'Management attention access is required.');
+        const rows = await scoped(db, 'jobs', scope).select('companyId', 'userId', 'customerId', 'customerName', 'customerPhone', 'serviceType', 'serviceCategory', 'address', 'city', 'state', 'zipCode', 'appointmentKind', 'estimateOutcome', 'status', 'date', 'time', 'windowStart', 'windowEnd', 'estimatedDuration', 'duration', 'assignedTo', 'assignedToName', 'reassignmentRequest', 'assignmentNeedsAttention', 'assignmentReview', 'rescheduleRequired', 'schedulingAttention', 'visitEvidence', 'arrivedAt', 'workStartedAt', 'actualStartedAt', 'startedAt', 'deletedAt', 'updatedAt').get();
+        const source = rows.docs.map(row => ({ id: row.id, ...row.data() }));
+        const attention = summarizeManagementAttention(source, { now: Date.now(), timeZone: scope.company?.get('timeZone') });
+        const wanted = new Set(Object.values(attention.jobIds).flat());
+        return { attention, jobs: source.filter(row => wanted.has(row.id)).map(row => projectJob(row.id, row, scope.role)) };
       }
       if (!['jobs', 'customers', 'photos', 'serviceLogs'].includes(resource)) throw new HttpsError('invalid-argument', 'Unknown workspace resource.');
       if (resource === 'jobs') {

@@ -39,6 +39,7 @@ import { formatCalendarDate } from '../utils/calendarDate';
 import { useWorkspaceQuery, useInvalidateWorkspace } from '../hooks/useWorkspaceQuery';
 import { summarizeJobs, inJobPeriod, calendarDay, jobDateRange } from '../utils/jobSummary';
 import { workspaceAccessError } from '../services/workspaceQueryPolicy';
+import { readWorkspace } from '../services/workspaceApi';
 
 const statusInput = job => ({ status: job?.status || '', actualWorkDone: job?.actualWorkDone || '', actualHours: String(job?.actualHours ?? ''), completionNotes: job?.completionNotes || '', cancellationReason: job?.cancellationReason || '', ...(isEstimateVisit(job) ? { estimateOutcome: job?.estimateOutcome || 'estimate_pending' } : {}) });
 const EMPTY=[];
@@ -78,6 +79,9 @@ const JobManagementPage = () => {
   const selectedJob=showViewModal?(detailQuery.readable&&!deniedJobRead(detailQuery.error)?detailQuery.data?.job||jobs.find(row=>row.id===selectedSnapshot?.id)||selectedSnapshot:null):selectedSnapshot;
   const todayKey=new Date().toLocaleDateString('en-CA');
   const stats=useMemo(()=>jobsQuery.data?summarizeJobs(jobs,calendarDay(todayKey)||new Date()):unknownStats,[jobsQuery.data,jobs,todayKey]);
+  const attentionFilter=new URLSearchParams(globalThis.window?.location?.search||'').get('attention');
+  const validAttention=['missed','assignment','reschedule'].includes(attentionFilter)?attentionFilter:null;
+  const attentionQuery=useWorkspaceQuery(['management-attention'],()=>readWorkspace('managementAttention'),{enabled:can('dispatch.manage')&&!!validAttention});
 
   // Filter states
   const [activeFilter, setActiveFilter] = useState('all'); // all, scheduled, in-progress, completed, cancelled
@@ -135,7 +139,9 @@ const JobManagementPage = () => {
   };
 
   const filteredJobs = useMemo(() => {
-    let filtered = [...jobs];
+    const attentionKey={missed:'missed',assignment:'unassignedOrReassignment',reschedule:'rescheduleRequired'}[validAttention];
+    const ids=attentionKey?new Set(attentionQuery.data?.attention?.jobIds?.[attentionKey]||[]):null;
+    let filtered = attentionKey ? (attentionQuery.data?.jobs||[]).filter(job=>ids.has(job.id)) : [...jobs];
 
     // Apply search filter
     if (searchTerm) {
@@ -180,7 +186,7 @@ const JobManagementPage = () => {
     });
 
     return filtered;
-  }, [jobs, searchTerm, activeFilter, dateFilter, sortBy,todayKey]);
+  }, [jobs, searchTerm, activeFilter, dateFilter, sortBy,todayKey,validAttention,attentionQuery.data]);
 
   const handleStatusUpdate = async () => {
     if (statusSaving.current || !statusChanged || !selectedJob) return;
@@ -567,12 +573,11 @@ const JobManagementPage = () => {
       {/* Jobs Table */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200">
         <div className="px-6 py-4 border-b border-gray-200">
-          <h3 className="text-lg font-medium text-gray-900">
-            Jobs ({filteredJobs.length})
-          </h3>
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-lg font-medium text-gray-900">Jobs ({filteredJobs.length})</h3>{validAttention&&<p className="text-sm text-amber-800">Management attention: {{missed:'missed visits',assignment:'unassigned or reassignment-requested work',reschedule:'explicitly requires rescheduling'}[validAttention]}</p>}</div>{validAttention&&<button type="button" className="text-sm text-primary-700 underline" onClick={()=>navigate('/jobs',{replace:true})}>Clear attention filter</button>}</div>
         </div>
+        {attentionQuery.error&&<p role="alert" className="m-4 rounded bg-red-50 p-3 text-sm text-red-800">{attentionQuery.error.message||'Management attention could not be loaded.'}</p>}
         
-        {isLoading ? (
+        {isLoading || (validAttention&&attentionQuery.isLoading&&!attentionQuery.data) ? (
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
           </div>

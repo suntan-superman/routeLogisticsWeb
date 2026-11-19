@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, ActivityIndicator, ScrollView, BackHandler, Keyboard, KeyboardAvoidingView, Platform, AccessibilityInfo, findNodeHandle } from 'react-native';
+import { View, Text, Pressable, ActivityIndicator, ScrollView, BackHandler, Keyboard, Platform, AccessibilityInfo, findNodeHandle } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeProvider';
 import { GlassCard, GlassButton, GlassInput, IconButton } from './Glass';
@@ -11,33 +12,88 @@ export const PrimaryButton = props => <GlassButton {...props} />;
 export const SecondaryButton = props => <GlassButton secondary {...props} />;
 export const FormField = props => <GlassInput {...props} />;
 export const Card = props => <GlassCard {...props} />;
-const KeyboardContainer = KeyboardAvoidingView || View;
 
 export function KeyboardAwareScrollView({ children, contentContainerStyle, style, scrollRef, keyboardBottomPadding, ...props }) {
-  const ownRef = useRef(null), activeRef = scrollRef || ownRef, [keyboardHeight, setKeyboardHeight] = useState(0), focused = useRef(null);
-  useEffect(() => {
-    const show = Keyboard?.addListener?.(Platform?.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', event => {
-      setKeyboardHeight(event?.endCoordinates?.height || 0);
-      if (focused.current) setTimeout(() => activeRef.current?.scrollResponderScrollNativeHandleToKeyboard?.(findNodeHandle(focused.current), 28, true), 0);
+  const { onLayout, onScroll, onContentSizeChange, ...scrollProps } = props;
+  const insets = useSafeAreaInsets(), ownRef = useRef(null), activeRef = scrollRef || ownRef;
+  const focused = useRef(null), keyboardFrame = useRef(null), scrollY = useRef(0), frames = useRef([]), [keyboardInset, setKeyboardInset] = useState(0);
+  const clearFrames = useCallback(() => {
+    const cancel = globalThis.cancelAnimationFrame || clearTimeout;
+    frames.current.forEach(cancel); frames.current = [];
+  }, []);
+  const schedule = useCallback(callback => {
+    const frame = globalThis.requestAnimationFrame || (next => setTimeout(next, 0));
+    clearFrames();
+    const first = frame(() => {
+      const second = frame(callback);
+      frames.current = [second];
     });
-    const hide = Keyboard?.addListener?.(Platform?.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => setKeyboardHeight(0));
-    return () => { show?.remove?.(); hide?.remove?.(); };
+    frames.current = [first];
+  }, [clearFrames]);
+  const measureViewport = useCallback(frame => {
+    const viewport = activeRef.current;
+    if (!viewport?.measureInWindow) return;
+    viewport.measureInWindow((_x, y, _width, height) => {
+      const keyboardTop = Number(frame?.screenY);
+      const overlap = Number.isFinite(keyboardTop) && keyboardTop > 0 ? Math.max(0, y + height - keyboardTop) : 0;
+      setKeyboardInset(previous => previous === overlap ? previous : overlap);
+    });
   }, [activeRef]);
+  const revealFocused = useCallback(() => {
+    const input = focused.current, viewport = activeRef.current;
+    if (!input?.measureInWindow || !viewport?.measureInWindow) return;
+    input.measureInWindow((_inputX, inputY, _inputWidth, inputHeight) => {
+      viewport.measureInWindow((_viewX, viewY, _viewWidth, viewHeight) => {
+        const frameTop = Number(keyboardFrame.current?.screenY);
+        const viewBottom = viewY + viewHeight;
+        const visibleBottom = Math.min(viewBottom, Number.isFinite(frameTop) && frameTop > 0 ? frameTop : viewBottom) - Math.max(0, insets.bottom) - SPACING.lg;
+        const visibleTop = Math.max(viewY, insets.top) + SPACING.lg;
+        const inputBottom = inputY + inputHeight;
+        const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+        let delta = 0;
+        if (inputHeight > visibleHeight || inputY < visibleTop) delta = inputY - visibleTop;
+        else if (inputBottom > visibleBottom) delta = inputBottom - visibleBottom;
+        if (Math.abs(delta) < 1) return;
+        const target = Math.max(0, scrollY.current + delta);
+        scrollY.current = target;
+        viewport.scrollTo?.({ y: target, animated: true });
+      });
+    });
+  }, [activeRef, insets.bottom, insets.top]);
+  const scheduleReveal = useCallback(() => schedule(() => {
+    measureViewport(keyboardFrame.current);
+    revealFocused();
+  }), [measureViewport, revealFocused, schedule]);
+  useEffect(() => {
+    const update = event => {
+      keyboardFrame.current = event?.endCoordinates || null;
+      scheduleReveal();
+    };
+    const show = Keyboard?.addListener?.(Platform?.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', update);
+    const change = Keyboard?.addListener?.(Platform?.OS === 'ios' ? 'keyboardWillChangeFrame' : 'keyboardDidChangeFrame', update);
+    const hide = Keyboard?.addListener?.(Platform?.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => {
+      clearFrames(); keyboardFrame.current = null; setKeyboardInset(0);
+    });
+    return () => { clearFrames(); show?.remove?.(); change?.remove?.(); hide?.remove?.(); };
+  }, [clearFrames, scheduleReveal]);
   const reveal = useCallback(node => {
     focused.current = node;
-    const handle = node && findNodeHandle?.(node);
-    if (handle != null) setTimeout(() => activeRef.current?.scrollResponderScrollNativeHandleToKeyboard?.(handle, 28, true), 0);
-  }, [activeRef]);
-  // Android's adjustResize already resizes the root view. A second
-  // KeyboardAvoidingView with `height` caused the Samsung viewport to shrink
-  // twice and trapped multiline fields under the bottom actions.
-  const bottomPadding = keyboardBottomPadding ?? (keyboardHeight ? 36 : 24);
+    if (node) scheduleReveal();
+  }, [scheduleReveal]);
+  // Android adjustResize and iOS ScrollView keyboard insets each resize the
+  // viewport once. The measured reveal then handles the focused field; wrapping
+  // this ScrollView in KeyboardAvoidingView would apply a second iOS offset.
+  const bottomPadding = (keyboardBottomPadding ?? SPACING.xxl) + keyboardInset + Math.max(0, insets.bottom);
   const contentStyle = Array.isArray(contentContainerStyle)
     ? [...contentContainerStyle, { paddingBottom: bottomPadding }]
     : [contentContainerStyle, { paddingBottom: bottomPadding }];
+  const handleLayout = event => { onLayout?.(event); if (keyboardFrame.current) scheduleReveal(); };
+  const handleScroll = event => { scrollY.current = event?.nativeEvent?.contentOffset?.y || 0; onScroll?.(event); };
+  const handleContentSizeChange = (width, height) => { onContentSizeChange?.(width, height); if (focused.current && keyboardFrame.current) scheduleReveal(); };
   const scroll = <KeyboardScrollContext.Provider value={reveal}><ScrollView ref={activeRef} style={[{ flex: 1 }, style]} contentContainerStyle={contentStyle} keyboardShouldPersistTaps="handled"
-    keyboardDismissMode={Platform?.OS === 'ios' ? 'interactive' : 'on-drag'} automaticallyAdjustKeyboardInsets={Platform?.OS === 'ios'} {...props}>{children}</ScrollView></KeyboardScrollContext.Provider>;
-  return Platform?.OS === 'ios' ? <KeyboardContainer style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={0}>{scroll}</KeyboardContainer> : scroll;
+    keyboardDismissMode={Platform?.OS === 'ios' ? 'interactive' : 'on-drag'} automaticallyAdjustKeyboardInsets={Platform?.OS === 'ios'} scrollEventThrottle={16}
+    onLayout={handleLayout} onScroll={handleScroll} onContentSizeChange={handleContentSizeChange} {...scrollProps}>{children}</ScrollView></KeyboardScrollContext.Provider>;
+  return scroll;
 }
 
 export function ScreenHeader({ title, subtitle, onBack, children }) {
@@ -148,7 +204,7 @@ export function ActionDialog({ title, message, tone = 'info', busy = false, onCl
         <Text ref={heading} accessibilityRole="header" style={{ flex: 1, color: palette.text, fontSize: 20, fontWeight: '700', lineHeight: 27 }}>{title}</Text>
         {!!onClose && <GlassButton secondary title="Close" accessibilityLabel="Close dialog" disabled={busy} onPress={close} />}
       </View>
-      <KeyboardAwareScrollView keyboardShouldPersistTaps="handled" style={{ flexGrow: 0, flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20, gap: 12 }} keyboardBottomPadding={20}>
+      <KeyboardAwareScrollView keyboardShouldPersistTaps="handled" style={{ flexGrow: 0, flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 20, gap: 12 }}>
         {!!message && <Text accessibilityRole={tone === 'error' ? 'alert' : 'text'} accessibilityLiveRegion="polite" style={{ color: tone === 'error' ? palette.danger : tone === 'success' ? palette.accent : palette.secondary, fontSize: 15, lineHeight: 23 }}>{message}</Text>}
         {busy && <ActivityIndicator accessibilityLabel="Saving changes" color={palette.accent} />}
         {children}

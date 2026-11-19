@@ -9,6 +9,9 @@ import EmailVerificationBanner from './EmailVerificationBanner';
 import ConnectionStatus from './ConnectionStatus';
 import RouteLogisticsAssistant from '../features/assistant/RouteLogisticsAssistant';
 import { useConfirmUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
+import { readWorkspace } from '../services/workspaceApi';
+import { callEstimate } from '../services/estimateService';
 import { 
   HomeIcon, 
   BuildingOfficeIcon, 
@@ -35,6 +38,10 @@ const Layout = ({ children }) => {
   };
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const operationsAttention=useWorkspaceQuery(['management-attention'],()=>readWorkspace('managementAttention'),{enabled:can('dispatch.manage')});
+  const estimateAttention=useWorkspaceQuery(['estimates','management-attention'],()=>callEstimate('list'),{enabled:can('estimates.manage')});
+  const estimateCount=(estimateAttention.data?.quoteNeededVisits?.length||0)+(estimateAttention.data?.estimates||[]).filter(row=>row.status==='submitted-for-review').length;
+  const jobAttentionCount=operationsAttention.data?.attention?.counts?.totalUnique||0;
 
   const navigation = [
     { name: role === 'technician' ? 'My Work' : 'Dashboard', href: '/', icon: HomeIcon },
@@ -42,8 +49,8 @@ const Layout = ({ children }) => {
     { name: can('company.edit') ? 'Company Setup' : 'Company', href: '/company-setup', icon: BuildingOfficeIcon },
     { name: 'Customers', href: '/customers', icon: UsersIcon },
     { name: 'Estimate Templates', href: '/estimate-templates', icon: DocumentTextIcon },
-    { name: 'Estimates', href: '/estimates', icon: DocumentTextIcon },
-    { name: 'Jobs', href: '/jobs', icon: ClipboardDocumentListIcon },
+    { name: 'Estimates', href: '/estimates', icon: DocumentTextIcon, badge: estimateCount },
+    { name: 'Jobs', href: '/jobs', icon: ClipboardDocumentListIcon, badge: jobAttentionCount },
     { name: 'Calendar', href: '/calendar', icon: CalendarIcon },
     { name: 'Daily Routes', href: '/routes', icon: ArrowPathIcon },
     { name: 'Team Locations', href: '/team-locations', icon: UserGroupIcon },
@@ -99,7 +106,7 @@ const Layout = ({ children }) => {
                   onClick={() => setSidebarOpen(false)}
                 >
                   <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
-                  {item.name}
+                  <span className="flex-1">{item.name}</span>{item.badge > 0 && <span aria-label={`${item.badge} items need attention`} className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">{item.badge}</span>}
                 </Link>
               );
             })}
@@ -157,7 +164,7 @@ const Layout = ({ children }) => {
                   }`}
                 >
                   <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
-                  {item.name}
+                  <span className="flex-1">{item.name}</span>{item.badge > 0 && <span aria-label={`${item.badge} items need attention`} className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">{item.badge}</span>}
                 </Link>
               );
             })}

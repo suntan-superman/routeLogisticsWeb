@@ -21,7 +21,7 @@ function load(relative) {
   if(name === 'react') return React;
   if(name === 'react-native') return native;
   if(name === '@expo/vector-icons') return { Ionicons: 'Icon' };
-  if(name === 'react-native-safe-area-context') return { SafeAreaView: 'SafeAreaView' };
+  if(name === 'react-native-safe-area-context') return { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 24, right: 0, bottom: 24, left: 0 }) };
   if(name.endsWith('/theme/ThemeProvider')) return { useTheme: () => ({ palette: dark ? { ...palette, background: '#07120F', surface: '#14241F', text: '#EFFAF5', secondary: '#B0C8BE' } : palette, isDark: dark }) };
   if(name.startsWith('.')) return load(path.relative(path.resolve(__dirname,'..'), path.resolve(path.dirname(filename), name + (name.endsWith('.js') ? '' : '.js'))));
   throw Error('Unexpected dependency '+name);
@@ -31,7 +31,7 @@ function load(relative) {
 }
 const UI=load('components/MobileUI.js'),Glass=load('components/Glass.js');
 async function render(Component,props,options){await act(async()=>{tree=create(React.createElement(Component,props),options)});return tree;}
-afterEach(async()=>{if(tree)await act(async()=>tree.unmount());tree=null;dark=false;assert.equal(backHandlers.size,0);assert.equal(keyboardHandlers.size,0);announcements.length=0;focusTargets.length=0;keyboardDismissals=0;});
+afterEach(async()=>{if(tree)await act(async()=>tree.unmount());tree=null;dark=false;native.Platform.OS='android';assert.equal(backHandlers.size,0);assert.equal(keyboardHandlers.size,0);announcements.length=0;focusTargets.length=0;keyboardDismissals=0;});
 
 test('job cards expose clear accessible actions and statuses without financial fields',async()=>{
  let opened=0;await render(UI.JobCard,{job:{id:'job',customerName:'Customer',serviceType:'Inspection',date:'2026-11-13',time:'15:00',status:'in-progress',estimatedCost:999,totalCost:999},onPress:()=>opened++});
@@ -59,18 +59,32 @@ test('buttons and fields provide accessible targets and solid readable surfaces 
 });
 
 test('keyboard-aware scrolling keeps multiline Android editors reachable above the keyboard',async()=>{
- const scrollRef=React.createRef(),scrollTo=()=>{},reveals=[];
- await render(UI.KeyboardAwareScrollView,{scrollRef,testID:'keyboard-form',children:React.createElement(Glass.GlassInput,{label:'Android multiline notes',multiline:true,value:'Retained text',onChangeText(){}})},{createNodeMock:element=>element.type==='ScrollView'?{scrollTo,scrollResponderScrollNativeHandleToKeyboard:(...args)=>reveals.push(args)}:element.type==='TextInput'?{nativeTag:77}:null});
+ const scrollRef=React.createRef(),scrolls=[];let inputBox={x:20,y:470,width:320,height:112};
+ const viewport={scrollTo:options=>scrolls.push(options),measureInWindow:callback=>callback(0,100,360,600)};
+ const input={measureInWindow:callback=>callback(inputBox.x,inputBox.y,inputBox.width,inputBox.height)};
+ await render(UI.KeyboardAwareScrollView,{scrollRef,testID:'keyboard-form',children:React.createElement(Glass.GlassInput,{label:'Android multiline notes',multiline:true,value:'Retained text',onChangeText(){}})},{createNodeMock:element=>element.type==='ScrollView'?viewport:element.type==='TextInput'?input:null});
  let scroll=tree.root.findByType('ScrollView');
  assert.equal(tree.root.findAllByType('KeyboardAvoidingView').length,0);
  assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');
  assert.equal(scroll.props.keyboardDismissMode,'on-drag');
  assert.equal(scroll.props.automaticallyAdjustKeyboardInsets,false);
- assert.equal(scrollRef.current.scrollTo,scrollTo);
- const styles=scroll.props.contentContainerStyle;assert.ok(Array.isArray(styles));assert.ok(styles.some(value=>value?.paddingBottom===24));
- await act(async()=>{tree.root.findByType('TextInput').props.onFocus({});for(const handler of keyboardHandlers.get('keyboardDidShow')||[])handler({endCoordinates:{height:312}});await new Promise(resolve=>setTimeout(resolve,5));});
- scroll=tree.root.findByType('ScrollView');assert.ok(scroll.props.contentContainerStyle.some(value=>value?.paddingBottom===36));assert.ok(reveals.some(args=>args[0]===77&&args[1]===28&&args[2]===true));
+ assert.equal(scrollRef.current,viewport);
+ const styles=scroll.props.contentContainerStyle;assert.ok(Array.isArray(styles));assert.ok(styles.some(value=>value?.paddingBottom===48));
+ await act(async()=>{tree.root.findByType('TextInput').props.onFocus({});for(const handler of keyboardHandlers.get('keyboardDidShow')||[])handler({endCoordinates:{height:300,screenY:500}});await new Promise(resolve=>setTimeout(resolve,40));});
+ scroll=tree.root.findByType('ScrollView');assert.ok(scroll.props.contentContainerStyle.some(value=>value?.paddingBottom===248));assert.ok(scrolls.some(value=>value.y===122&&value.animated===true));
+ const prior=scrolls.length;inputBox={...inputBox,y:510,height:140};
+ await act(async()=>{tree.root.findByType('TextInput').props.onContentSizeChange({nativeEvent:{contentSize:{height:140}}});await new Promise(resolve=>setTimeout(resolve,40));});
+ assert.ok(scrolls.length>prior);assert.ok(scrolls.at(-1).y>122);
  assert.equal(tree.root.findByType('TextInput').props.value,'Retained text');
+});
+
+test('iOS uses one keyboard-inset strategy and measured focus visibility',async()=>{
+ native.Platform.OS='ios';const scrolls=[];const viewport={scrollTo:options=>scrolls.push(options),measureInWindow:callback=>callback(0,60,390,720)};
+ const input={measureInWindow:callback=>callback(20,600,350,120)};
+ await render(UI.KeyboardAwareScrollView,{children:React.createElement(Glass.GlassInput,{label:'iOS completion notes',multiline:true,value:'Several retained lines',onChangeText(){}})},{createNodeMock:element=>element.type==='ScrollView'?viewport:element.type==='TextInput'?input:null});
+ const scroll=tree.root.findByType('ScrollView');assert.equal(tree.root.findAllByType('KeyboardAvoidingView').length,0);assert.equal(scroll.props.automaticallyAdjustKeyboardInsets,true);assert.equal(scroll.props.keyboardDismissMode,'interactive');
+ await act(async()=>{tree.root.findByType('TextInput').props.onFocus({});for(const handler of keyboardHandlers.get('keyboardWillShow')||[])handler({endCoordinates:{height:300,screenY:500}});await new Promise(resolve=>setTimeout(resolve,40));});
+ assert.ok(scrolls.some(value=>value.y>0&&value.animated===true));assert.equal(tree.root.findByType('TextInput').props.value,'Several retained lines');
 });
 
 test('invalid glass inputs are visibly and accessibly identified beside the field',async()=>{

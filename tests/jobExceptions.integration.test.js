@@ -56,4 +56,12 @@ test('concurrent assignment changes honor the job revision and resolve the reque
 test('list is tenant scoped; technicians see only own pending requests on a currently assigned job',async()=>{
  const f=await fixture(),other=await fixture();const r=await f.submit();await other.submit();assert.equal((await f.api(f.request({action:'list',jobId:f.jobId}))).requests.length,1);assert.equal((await f.api(f.request({action:'list'},'manager'))).requests.length,1);await assert.rejects(f.api(f.request({action:'list'})),{code:'permission-denied'});await assert.rejects(f.api(f.request({action:'list',jobId:other.jobId})),{code:'permission-denied'});await f.close(r.request);assert.equal((await f.api(f.request({action:'list',jobId:f.jobId}))).requests.length,0);
 });
+test('management attention is tenant scoped, deduplicated and denied to technicians',async()=>{
+ const f=await fixture({assignedTo:null,assignedToUid:null,rescheduleRequired:true,reassignmentRequest:{id:'summary-request',status:'pending',revision:1,reason:'other'}}),other=await fixture({assignedTo:null,rescheduleRequired:true});
+ const owner=await f.work.read(f.request({resource:'managementAttention'},'owner'));
+ assert.deepEqual(owner.attention.jobIds.unassignedOrReassignment,[f.jobId]);assert.deepEqual(owner.attention.jobIds.rescheduleRequired,[f.jobId]);assert.equal(owner.attention.counts.totalUnique,1);
+ assert.deepEqual(owner.jobs.map(row=>row.id),[f.jobId]);assert.equal(owner.jobs.some(row=>row.id===other.jobId),false);
+ const manager=await f.work.read(f.request({resource:'managementAttention'},'manager'));assert.equal(manager.attention.counts.totalUnique,1);
+ await assert.rejects(f.work.read(f.request({resource:'managementAttention'},'tech')),{code:'permission-denied'});
+});
 for(const status of ['completed','cancelled'])test(`${status} work cannot create a reassignment request`,async()=>{const f=await fixture({status});await assert.rejects(f.submit(),{code:'failed-precondition'});});

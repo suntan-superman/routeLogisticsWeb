@@ -343,12 +343,16 @@ function estimateHandlers(db, config = {}) {
           enabled: false,
           emailEnabled: false,
           estimates: [],
+          quoteNeededVisits: [],
           hasMore: false
         };
         const rows = manages(scope)
           ? await db.collection('estimates').where(scope.companyId ? 'companyId' : 'userId', '==', scope.companyId || scope.uid).orderBy('createdAt', 'desc').limit(101).get()
           : await db.collection('estimates').where('preparedByUid', '==', scope.uid).limit(101).get();
-        const templateRows = await db.collection('estimateTemplates').where(scope.companyId ? 'companyId' : 'userId', '==', scope.companyId || scope.uid).limit(101).get();
+        const [templateRows, visitRows] = await Promise.all([
+          db.collection('estimateTemplates').where(scope.companyId ? 'companyId' : 'userId', '==', scope.companyId || scope.uid).limit(101).get(),
+          manages(scope) ? db.collection('jobs').where(scope.companyId ? 'companyId' : 'userId', '==', scope.companyId || scope.uid).limit(501).get() : Promise.resolve({ docs: [] }),
+        ]);
         const visibleRows = manages(scope) ? rows.docs : (await Promise.all(rows.docs.map(async row => {
           if (!scoped(scope, row.data()) || !row.get('sourceVisitId')) return null;
           const visit = await ref('jobs', row.get('sourceVisitId')).get();
@@ -359,6 +363,21 @@ function estimateHandlers(db, config = {}) {
           emailEnabled: manages(scope) && emailEnabled(),
           templates: templateRows.docs.filter(row => row.get('isActive') !== false).slice(0, 100).map(estimateTemplateView),
           estimates: visibleRows.slice(0, 100).filter(row => scoped(scope, row.data())).map(row => staffView(scope, row.id, row.data())).sort((a, b) => timestamp(b.createdAt) - timestamp(a.createdAt)),
+          // A completed estimate visit is actionable even when field staff did
+          // not prepare a draft. This is a derived management queue: it does
+          // not create pricing, mutate the visit, or duplicate an estimate.
+          quoteNeededVisits: visitRows.docs.filter(row => {
+            const visit = row.data();
+            return scoped(scope, visit) && visit.appointmentKind === 'estimate_visit' && visit.status === 'completed'
+              && (visit.estimateOutcome || 'quote_needed') === 'quote_needed' && !visit.estimateId;
+          }).slice(0, 100).map(row => {
+            const visit = row.data();
+            return { id: row.id, customerId: visit.customerId || null, customerName: String(visit.customerName || 'Customer').slice(0, 200),
+              serviceType: String(visit.serviceType || 'Estimate visit').slice(0, 200), serviceCategory: String(visit.serviceCategory || '').slice(0, 200),
+              serviceProperty: { address: String(visit.serviceProperty?.address || visit.address || '').slice(0, 500) },
+              date: dateString(visit.date) || visit.date || null, completedAt: dateString(visit.completedAt) || visit.completedAt || null,
+              inquiryId: visit.inquiryId || null, servicePropertyId: visit.servicePropertyId || null, state: 'quote-needed' };
+          }).sort((a,b) => timestamp(b.completedAt || b.date) - timestamp(a.completedAt || a.date)),
           hasMore: rows.size > 100
         };
       }

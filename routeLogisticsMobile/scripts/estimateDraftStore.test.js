@@ -10,6 +10,7 @@ function fixture() {
     if (name === 'expo-file-system/legacy') return { documentDirectory: 'file:///documents/', makeDirectoryAsync: async uri => files.set(uri, 'directory'), copyAsync: async ({ from, to }) => { env.copies.push({ from, to }); files.set(to, files.get(from) || 'photo'); }, deleteAsync: async uri => { env.deleted.push(uri); files.delete(uri); } };
     if (name === '../constants/firebase') return { auth: { app: { options: { projectId: 'mi-factotum-field-service' } }, get currentUser() { return env.uid ? { uid: env.uid } : null; } } };
     if (name === './tenancy') return { getClaims: () => env.claims };
+    if (name === './offlineTimings') return { recordOfflineTiming() {} };
     throw new Error(`Unexpected dependency ${name}`);
   };
   const filename = path.resolve(__dirname, '../services/estimateDraftStore.js'), module = { exports: {} };

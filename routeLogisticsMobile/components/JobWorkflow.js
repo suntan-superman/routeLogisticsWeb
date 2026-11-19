@@ -15,6 +15,18 @@ import { completeJob } from '../services/jobCompletion';
 import { getQueuedOperation, resolveOffline } from '../services/offline';
 
 const emptyDraft = () => ({ actualWorkDone: '', actualHours: '', completionNotes: '', departureExceptionReason: '' });
+const workflowSteps = [
+  ['arrival', 'Arrival'], ['work', 'Work details'], ['photos', 'Photos and evidence'], ['departure', 'Departure'], ['review', 'Review and completion'],
+];
+function WorkflowSteps({ active, completed, onSelect, palette }) {
+  return <Card><SectionHeader title="Visit workflow" subtitle="One step at a time. Completed steps can be reopened without losing evidence." />
+    <View style={{ gap: 8 }}>{workflowSteps.map(([id, label], index) => {
+      const done = !!completed[id], selected = active === id;
+      return <GlassButton key={id} secondary={!selected} title={`${done ? '✓ ' : ''}${index + 1}. ${label}`} accessibilityLabel={`${label}${done ? ', completed' : ''}${selected ? ', current step' : ''}`}
+        style={done ? { borderColor: palette.accent } : undefined} onPress={() => onSelect(id)} />;
+    })}</View>
+  </Card>;
+}
 function workAccessReason(job, user, permissions) {
   if (!user?.emailVerified || !permissions?.canAccess || !permissions.can?.('jobs.work')) return 'Verify your email and refresh your workspace before changing this job.';
   if (!job?.id) return 'Reopen the job from your job list.';
@@ -28,6 +40,7 @@ function workAccessReason(job, user, permissions) {
 export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowUp, onPrepareEstimate, onInteractionChange }) {
   const { user, permissions } = useAuth(), { palette } = useTheme();
   const [mode, setMode] = useState('details'), [draft, setDraft] = useState(emptyDraft);
+  const [activeStep, setActiveStep] = useState('arrival'), [stepProgress, setStepProgress] = useState({});
   const [error, setError] = useState(''), [notice, setNotice] = useState('');
   const [saving, setSaving] = useState(false), [reviewing, setReviewing] = useState(false), [photoBusy, setPhotoBusy] = useState(false), [photoDraft, setPhotoDraft] = useState(false);
   const [workBusy, setWorkBusy] = useState(false), [workDraft, setWorkDraft] = useState(false);
@@ -51,7 +64,7 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
   useEffect(() => { notify.current?.({ busy, hasDraft }); }, [busy, hasDraft]);
   useEffect(() => {
     generation.current++; submitting.current = null; reviewPending.current = null;
-    setMode('details'); setDraft(emptyDraft()); setError(''); setNotice(''); setSaving(false); setReviewing(false);
+    setMode('details'); setActiveStep('arrival'); setStepProgress({}); setDraft(emptyDraft()); setError(''); setNotice(''); setSaving(false); setReviewing(false);
     setPhotoBusy(false); setPhotoDraft(false); photoBusyRef.current = false; photoDraftRef.current = false;
     setWorkBusy(false); setWorkDraft(false); workBusyRef.current = false; workDraftRef.current = false;
     setServiceBusy(false); setServiceDraft(false); serviceBusyRef.current = false; serviceDraftRef.current = false;
@@ -91,6 +104,22 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
   const displayJob = submitted?.jobId === job?.id ? { ...job, ...submitted.draft, status: submitted.status === 'synced' ? 'completed' : job.status, ...(submitted.status === 'queued' ? { syncState: 'pending', localCompletionPending: true } : {}), ...(isEstimateVisit(job) ? { estimateOutcome: completionEstimateOutcome(job, submitted.draft.estimateOutcome) } : {}) } : job;
   const estimateVisit = isEstimateVisit(displayJob);
   const canComplete = !accessReason && ['scheduled', 'en-route', 'in-progress'].includes(displayJob?.status);
+  const advance = useCallback((completed, next, message) => {
+    setStepProgress(previous => ({ ...previous, [completed]: true }));
+    setActiveStep(next); if (message) setNotice(message);
+  }, []);
+  const workProgress = useCallback(progress => {
+    setStepProgress(previous => ({ ...previous, arrival: !!progress.arrival, departure: !!progress.departure, work: previous.work || !!progress.notesSaved }));
+    setActiveStep(current => current === 'arrival' && progress.arrival ? 'work' : current === 'departure' && progress.departure ? 'review' : current);
+  }, []);
+  const localWorkSaved = useCallback(type => {
+    if (type === 'arrived') advance('arrival', 'work', 'Arrival saved on this device. Continue with work details.');
+    else if (type === 'departed') advance('departure', 'review', 'Departure saved on this device. Review the visit before completion.');
+    else if (type === 'work') advance('work', 'photos', 'Work details saved on this device. Add supporting evidence or continue.');
+  }, [advance]);
+  const photoProgress = useCallback(progress => {
+    setStepProgress(previous => ({ ...previous, photos: previous.photos || !!progress.hasPhotos }));
+  }, []);
   const explainBlockedPhoto = () => {
     if (photoBusyRef.current) { setError('Finish or cancel the camera/photo selection before leaving this job.'); return true; }
     if (photoDraftRef.current) { setError('Save or discard the selected photo before leaving this page.'); return true; }
@@ -200,7 +229,7 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
   };
   const recordDeparture = () => {
     if (busy) return;
-    setCompletionDialog(null); setMode('details'); setError(''); setNotice('Departure entry is open in the Visit record. Save it before completing the work order.');
+    setCompletionDialog(null); setMode('details'); setActiveStep('departure'); setError(''); setNotice('Departure entry is open. Save it before completing the work order.');
     workActionsRef.current?.beginDeparture?.();
     scrollRef.current?.scrollTo?.({ y: Math.max(0, fieldWorkY.current + visitSectionY.current - 12), animated: true });
   };
@@ -277,6 +306,7 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
         {(displayJob.estimatedDuration ?? displayJob.duration) != null && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Estimated duration: {displayJob.estimatedDuration ?? displayJob.duration} hours</Text>}
         {!estimateVisit && permissions.can?.('jobs.pricing') && (displayJob.estimatedCost ?? displayJob.totalCost) != null && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Estimated cost: {'$' + Number(displayJob.estimatedCost ?? displayJob.totalCost).toFixed(2)}</Text>}
       </Card>
+      {mode === 'details' && <WorkflowSteps active={activeStep} completed={stepProgress} palette={palette} onSelect={step => { setError(''); setActiveStep(step); }} />}
       {mode === 'details' && <Card><SectionHeader title="Service location" />
         <Text style={{ color: palette.text, fontSize: 15, lineHeight: 23 }}>{address || 'No service address supplied. Contact your manager before travelling.'}</Text>
         {!!displayJob.serviceInstructions && <Text style={{ color: palette.text, fontSize: 15, lineHeight: 23 }}>Service instructions: {displayJob.serviceInstructions}</Text>}
@@ -289,35 +319,38 @@ export default function JobWorkflow({ job, onClose, onChanged, onEdit, onFollowU
         <Text testID="job-dispatch-notes" selectable style={{ color: palette.text, fontSize: 15, lineHeight: 23 }}>{dispatchNotes}</Text>
       </Card>}
       {mode === 'details' && !!accessReason && <InlineNotice tone="error" message={accessReason} />}
-      {estimateVisit && <View style={{ display: mode === 'details' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details'} pointerEvents={mode === 'details' ? 'auto' : 'none'}>
+      {estimateVisit && <View style={{ display: mode === 'details' && activeStep === 'review' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details' || activeStep !== 'review'} pointerEvents={mode === 'details' && activeStep === 'review' ? 'auto' : 'none'}>
         <EstimateVisitOutcome key={job.id} job={displayJob} active={mode === 'details' && !completionDialog} readOnly={!!accessReason || ['cancelled','canceled'].includes(displayJob.status)} onChanged={onChanged} onBusyChange={updateOutcomeBusy} onDraftChange={updateOutcomeDraft} />
       </View>}
       <View onLayout={event => { fieldWorkY.current = event.nativeEvent.layout.y; }} style={{ display: mode === 'details' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details'} importantForAccessibility={mode === 'details' ? 'auto' : 'no-hide-descendants'} pointerEvents={mode === 'details' ? 'auto' : 'none'}>
-        <FieldWorkTools key={job.id} job={job} active={mode === 'details' && !completionDialog} draftActionsRef={workActionsRef} readOnly={!!accessReason || ['completed', 'cancelled', 'canceled'].includes(displayJob.status)} showNavigation={false} onChanged={onChanged} onBusyChange={updateWorkBusy} onDraftChange={updateWorkDraft} onVisitSectionLayout={event => { visitSectionY.current = event.nativeEvent.layout.y; }} />
+        <FieldWorkTools key={job.id} job={job} section={activeStep === 'arrival' || activeStep === 'departure' || activeStep === 'work' ? activeStep : 'hidden'} active={mode === 'details' && !completionDialog} draftActionsRef={workActionsRef} readOnly={!!accessReason || ['completed', 'cancelled', 'canceled'].includes(displayJob.status)} showNavigation={false} onChanged={onChanged} onBusyChange={updateWorkBusy} onDraftChange={updateWorkDraft} onProgressChange={workProgress} onLocalSave={localWorkSaved} onVisitSectionLayout={event => { visitSectionY.current = event.nativeEvent.layout.y; }} />
       </View>
-      <View style={{ display: mode === 'details' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details'} importantForAccessibility={mode === 'details' ? 'auto' : 'no-hide-descendants'} pointerEvents={mode === 'details' ? 'auto' : 'none'}>
+      <View style={{ display: mode === 'details' && activeStep === 'work' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details' || activeStep !== 'work'} importantForAccessibility={mode === 'details' && activeStep === 'work' ? 'auto' : 'no-hide-descendants'} pointerEvents={mode === 'details' && activeStep === 'work' ? 'auto' : 'none'}><Card><SectionHeader title={estimateVisit ? 'Inspection scope and draft estimate' : 'Service checklist'} subtitle={estimateVisit ? 'Record inspection notes and scope. Pricing and customer delivery remain under management control.' : 'Complete the assigned service observations and product applications.'} />
+        {estimateVisit && onPrepareEstimate && (permissions.can?.('estimates.manage') || permissions.can?.('estimates.prepareAssigned')) && !['cancelled', 'canceled'].includes(displayJob.status) && <GlassButton title={displayJob.estimateId ? 'View Estimate' : 'Prepare Estimate'} disabled={busy || hasDraft} onPress={() => onPrepareEstimate(displayJob)} />}
+        {!estimateVisit && <ServiceChecklist key={job.id} job={job} active={!completionDialog} draftActionsRef={checklistActionsRef} readOnly={!!accessReason || ['completed','cancelled','canceled'].includes(displayJob.status)} onBusyChange={updateServiceBusy} onDraftChange={updateServiceDraft} />}
+        <GlassButton secondary title="Continue to photos" disabled={busy} onPress={() => advance('work', 'photos')} />
+      </Card></View>
+      <View style={{ display: mode === 'details' && activeStep === 'photos' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details' || activeStep !== 'photos'} importantForAccessibility={mode === 'details' && activeStep === 'photos' ? 'auto' : 'no-hide-descendants'} pointerEvents={mode === 'details' && activeStep === 'photos' ? 'auto' : 'none'}>
         <Card><SectionHeader title="Visit photos" subtitle="Document the site and completed work. Saved photos show their upload status." />
-          <JobPhotos key={job.id} job={job} active={mode === 'details' && !completionDialog} onBusyChange={updatePhotoBusy} onDraftChange={updatePhotoDraft} />
+          <JobPhotos key={job.id} job={job} active={mode === 'details' && activeStep === 'photos' && !completionDialog} onBusyChange={updatePhotoBusy} onDraftChange={updatePhotoDraft} onProgressChange={photoProgress} onLocalSave={() => advance('photos', 'departure', 'Photo saved on this device. Continue with departure when the visit is finished.')} />
+          <GlassButton secondary title="Continue without another photo" disabled={busy || photoDraft} onPress={() => advance('photos', 'departure')} />
         </Card>
       </View>
-      <View style={{ display: mode === 'details' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details'} importantForAccessibility={mode === 'details' ? 'auto' : 'no-hide-descendants'} pointerEvents={mode === 'details' ? 'auto' : 'none'}>
-        <ServiceChecklist key={job.id} job={job} active={mode === 'details' && !completionDialog} draftActionsRef={checklistActionsRef} readOnly={!!accessReason || ['completed','cancelled','canceled'].includes(displayJob.status)} onBusyChange={updateServiceBusy} onDraftChange={updateServiceDraft} />
-      </View>
-      <View style={{display:mode==='details'?'flex':'none'}} accessibilityElementsHidden={mode!=='details'} importantForAccessibility={mode==='details'?'auto':'no-hide-descendants'} pointerEvents={mode==='details'?'auto':'none'}>
+      <View style={{display:mode==='details'&&activeStep==='review'?'flex':'none'}} accessibilityElementsHidden={mode!=='details'||activeStep!=='review'} importantForAccessibility={mode==='details'&&activeStep==='review'?'auto':'no-hide-descendants'} pointerEvents={mode==='details'&&activeStep==='review'?'auto':'none'}>
         <JobReassignmentRequest key={job.id} job={job} user={user} permissions={permissions} active={mode==='details'&&!completionDialog} readOnly={!!accessReason||['completed','cancelled','canceled'].includes(displayJob.status)} onChanged={onChanged} onBusyChange={updateRequestBusy} onDraftChange={updateRequestDraft}/>
       </View>
-      {mode === 'details' && (displayJob.actualWorkDone || displayJob.completedAt || displayJob.completionNotes) && <Card><SectionHeader title="Completion summary" />
+      <View style={{ display: mode === 'details' && activeStep === 'review' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details' || activeStep !== 'review'} pointerEvents={mode === 'details' && activeStep === 'review' ? 'auto' : 'none'}>{(displayJob.actualWorkDone || displayJob.completedAt || displayJob.completionNotes) && <Card><SectionHeader title="Completion summary" />
         {!!displayJob.actualWorkDone && <Text style={{ color: palette.text, fontSize: 15, lineHeight: 23 }}>Work completed: {displayJob.actualWorkDone}</Text>}
         {displayJob.actualHours != null && displayJob.actualHours !== '' && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Actual hours: {displayJob.actualHours}</Text>}
         {!!displayJob.completedAt && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Completed: {new Date(displayJob.completedAt).toLocaleString()}</Text>}
         {!!displayJob.completionNotes && <Text style={{ color: palette.secondary, fontSize: 15, lineHeight: 23 }}>Completion notes: {displayJob.completionNotes}</Text>}
-      </Card>}
-      {mode === 'details' && <View style={{ gap: 10 }}>
-        {estimateVisit && onPrepareEstimate && (permissions.can?.('estimates.manage') || permissions.can?.('estimates.prepareAssigned')) && !['cancelled', 'canceled'].includes(displayJob.status) && <GlassButton title={displayJob.estimateId ? 'View Estimate' : 'Prepare Estimate'} disabled={busy || hasDraft} onPress={() => onPrepareEstimate(displayJob)} />}
+      </Card>}</View>
+      <View style={{ display: mode === 'details' && activeStep === 'review' ? 'flex' : 'none', gap: 10 }} accessibilityElementsHidden={mode !== 'details' || activeStep !== 'review'} pointerEvents={mode === 'details' && activeStep === 'review' ? 'auto' : 'none'}>
+        {estimateVisit && <InlineNotice message={displayJob.estimateId ? 'A draft estimate is linked to this visit. Management review and customer delivery remain separate.' : 'Completing this visit will place it in management’s Quote Needed queue. It will not create pricing or contact the customer.'} />}
         {canComplete && <GlassButton title={hasCompletionDraft ? 'Resume completion' : 'Complete'} secondary={displayJob.status !== 'in-progress'} disabled={busy} onPress={openCompletion} />}
         {permissions.canManage && onEdit && !submitted && <GlassButton secondary title="Edit job" disabled={busy} onPress={edit} />}
         {permissions.canManage && onFollowUp && displayJob.status === 'completed' && <GlassButton secondary title="Schedule follow-up" disabled={busy} onPress={() => { if (!explainBlockedPhoto() && !workDraftRef.current && !serviceDraftRef.current && !hasCompletionDraft) onFollowUp(displayJob); }} />}
-      </View>}
+      </View>
       {mode === 'completion' && <Card><SectionHeader title={estimateVisit ? 'Document estimate visit' : 'Document completed work'} subtitle={estimateVisit ? 'Record what was observed. Completing this free visit does not approve a quote or create an invoice.' : 'Work description is required. Actual hours and completion notes are optional.'} />
         {estimateVisit && <View style={{ gap: 8 }}><SectionHeader title="Visit outcome" />{Object.entries(ESTIMATE_OUTCOMES).filter(([value]) => value !== 'estimate_pending').map(([value,label]) => <GlassButton key={value} secondary={completionEstimateOutcome(displayJob, draft.estimateOutcome) !== value} title={label} accessibilityLabel={`Completion outcome: ${label}`} disabled={saving} onPress={() => setDraft(current => ({ ...current, estimateOutcome: value }))} />)}</View>}
         <GlassInput label="Work completed" value={draft.actualWorkDone} onChangeText={value => setDraft(current => ({ ...current, actualWorkDone: value }))} editable={!saving} multiline />

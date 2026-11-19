@@ -8,10 +8,19 @@ import { AppState } from 'react-native';
 import { getClaims, tenantFields, requireWorkspace } from './tenancy';
 import { createQueue, retryDelay, revisionOperation, compatibleJobState, linkRevision, advanceRevision, restoreLegacyDependencies, repairCompletionAfterDeparture, prepareAutomaticRecovery } from './offlineQueueCore';
 import { createWorkNoteDraftStore } from './workNoteDraftCore';
+import { recordOfflineTiming } from './offlineTimings';
 
 const queues = new Map(), draining = new Map(), listeners = new Set();
 const pausedAccounts = new Set(), writing = new Map();
 const noteDraftStores = new Map();
+const timingKind = row => {
+  if (row.kind === 'job' && row.patch?.status === 'completed') return 'completion';
+  if (row.kind === 'job' && Object.hasOwn(row.patch || {}, 'notes')) return 'notes';
+  if (row.kind === 'service-form') return 'checklist';
+  if (row.kind === 'visit' && row.record?.type === 'arrived') return 'arrival';
+  if (row.kind === 'visit' && row.record?.type === 'departed') return 'departure';
+  return row.kind;
+};
 const accountPrefix = uid => `rl-offline-v1:${auth.app.options.projectId}:${uid}:`;
 const pausedScope = scope => [...pausedAccounts].some(uid => scope.startsWith(accountPrefix(uid)));
 function trackWrite(uid, task) {
@@ -100,6 +109,7 @@ export async function readWorkNoteDraft(jobId) {
 }
 export function persistWorkNoteDraft(job, text, { editedAt = Date.now() } = {}) {
   try {
+    const timing = Date.now();
     const scope = offlineScope(), uid = auth.currentUser?.uid, claims = getClaims();
     if (pausedScope(scope)) throw new Error('Account deletion is in progress. Work notes remain on this screen.');
     if (!auth.currentUser?.emailVerified || typeof text !== 'string' || text.length > 10000 || !Number.isFinite(editedAt)
@@ -111,7 +121,7 @@ export function persistWorkNoteDraft(job, text, { editedAt = Date.now() } = {}) 
       jobBase: { ...Object.fromEntries(['customerId','customerName','serviceType','serviceName','date','time','estimatedDuration','duration','address','serviceAddress','serviceProperty','location','workNotes','notes','dispatchNotes','appointmentKind','billable','estimateOutcome','inquiryId','servicePropertyId','propertyAccessInstructions','serviceInstructions'].filter(key=>job[key]!==undefined).map(key=>[key,job[key]])),
         id: job.id, companyId: job.companyId || null, userId: job.userId || uid, assignedTo: job.assignedTo || null, assignedToUid: job.assignedToUid || null, status: job.status, updatedAt: offlineVersion(job.updatedAt) },
       state: 'draft', dirty: true };
-    return trackWrite(uid, store.persist(record));
+    return trackWrite(uid, store.persist(record).then(saved => { recordOfflineTiming('notes','local-save',timing); return saved; }));
   } catch (error) { return Promise.reject(error); }
 }
 export const saveWorkNoteDraft = (jobId, { revision } = {}) => {
@@ -148,6 +158,7 @@ export const discardWorkNoteDraft = (jobId, { revision } = {}) => {
   });
 };
 export const saveJobOffline = (jobId, patch, options = {}) => saveWork(async () => {
+  const timing = Date.now();
   const scope = offlineScope();
   if(options.expectedScope&&options.expectedScope!==scope)throw new Error('Your workspace changed. Reopen the job before saving.');
   const jobs = await readCache('job-bases', scope) || {};
@@ -175,10 +186,11 @@ export const saveJobOffline = (jobId, patch, options = {}) => saveWork(async () 
     rows.push(linkRevision(rows, { id, kind: 'job', jobId, patch, expectedVersion: Object.hasOwn(options, 'expectedVersion') ? options.expectedVersion : offlineVersion(base.updatedAt),
       ...(options.workNoteDraft ? { workNoteDraft: options.workNoteDraft } : {}), createdAt: Date.now(), state: 'pending', attempts: 0, nextAttempt: 0 }));
   });
-  void flushOffline().catch(() => {});
+  recordOfflineTiming(patch.status === 'completed' ? 'completion' : Object.hasOwn(patch,'notes') ? 'notes' : 'job','local-save',timing); void flushOffline().catch(() => {});
   return { success: true, queued: true, operationId: id };
 });
 export const savePhotoOffline = (job, uri, metadata = {}) => saveWork(async () => {
+  const timing = Date.now();
   const scope = offlineScope(), id = Crypto.randomUUID(), attribution = tenantFields();
   const directory = `${FileSystem.documentDirectory}rl-photos/`;
   await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
@@ -189,7 +201,7 @@ export const savePhotoOffline = (job, uri, metadata = {}) => saveWork(async () =
   const safeMetadata = Object.fromEntries(['source', 'fileName', 'mimeType'].filter(key => typeof metadata[key] === 'string').map(key => [key, metadata[key].slice(0, 255)]));
   for (const key of ['width', 'height']) if (Number.isFinite(metadata[key]) && metadata[key] > 0) safeMetadata[key] = metadata[key];
   await queue(scope).add({ id, kind: 'photo', jobId: job.id, customerId: job.customerId || null, localUri, metadata: safeMetadata, attribution, storagePath: `${base}/jobs/${job.id}/${id}.jpg`, createdAt: Date.now() });
-  void flushOffline().catch(() => {}); return id;
+  recordOfflineTiming('photo','local-save',timing); void flushOffline().catch(() => {}); return id;
 });
 async function sendPhoto(row, scope) {
   if (offlineScope() !== scope) throw new Error('Workspace changed.');
@@ -198,11 +210,13 @@ async function sendPhoto(row, scope) {
   return { status: 'synced' };
 }
 export const saveApplicationOffline = (jobId, record) => saveWork(async () => {
+  const timing = Date.now();
   const scope = offlineScope(), id = Crypto.randomUUID();
   await queue(scope).add({ id, kind: 'application', jobId, record, createdAt: Date.now() });
-  void flushOffline().catch(() => {}); return { success: true, queued: true };
+  recordOfflineTiming('application','local-save',timing); void flushOffline().catch(() => {}); return { success: true, queued: true };
 });
 export const saveVisitOffline = (job, input) => saveWork(async () => {
+  const timing = Date.now();
   const scope = offlineScope(), claims = getClaims(), attribution = tenantFields(), uid = auth.currentUser?.uid;
   if (!auth.currentUser?.emailVerified || !claims?.companyId || !job?.id || job.companyId !== claims.companyId || ['completed','cancelled','canceled'].includes(job.status)
     || claims.role === 'technician' && (job.assignedTo !== claims.membershipId || job.assignedToUid && job.assignedToUid !== uid)) throw new Error('Your verified current company and job assignment are required to save visit evidence.');
@@ -223,10 +237,11 @@ export const saveVisitOffline = (job, input) => saveWork(async () => {
     rows.push(linkRevision(rows, { id, kind: 'visit', jobId: job.id, record, attribution: { ...attribution, userId: uid, memberId: claims.membershipId || uid, role: claims.role }, expectedAssignee: job.assignedTo || null, expectedJobState: compatibleJobState(job),
       expectedVersion: offlineVersion(base.updatedAt), createdAt: Date.now(), state: 'pending', attempts: 0, nextAttempt: 0 }));
   });
-  void flushOffline().catch(() => {});
+  recordOfflineTiming(input.type === 'arrived' ? 'arrival' : input.type === 'departed' ? 'departure' : 'visit','local-save',timing); void flushOffline().catch(() => {});
   return { success: true, queued: true, operationId: id };
 });
 export const saveServiceFormOffline = (job, record) => saveWork(async () => {
+  const timing = Date.now();
   const scope = offlineScope(), claims = getClaims();
   if (!auth.currentUser?.emailVerified || !job?.id || ['completed','cancelled','canceled'].includes(job.status) || (claims?.companyId ? job.companyId !== claims.companyId : job.companyId || job.userId !== auth.currentUser.uid)
     || claims?.role === 'technician' && job.assignedTo !== claims.membershipId) throw new Error('Your verified current workspace and job assignment are required to save this service form.');
@@ -237,7 +252,7 @@ export const saveServiceFormOffline = (job, record) => saveWork(async () => {
     if (rows.some(row => row.kind === 'service-form' && row.jobId === job.id && !['synced','discarded'].includes(row.state))) throw new Error('A service report is already saved for this job. Synchronize or review it before adding another revision.');
     rows.push({ id, kind: 'service-form', jobId: job.id, record: payload, template: cached.form.template, createdAt: Date.now(), state: 'pending', attempts: 0, nextAttempt: 0 });
   });
-  void flushOffline().catch(() => {}); return { success: true, queued: true, operationId: id };
+  recordOfflineTiming('checklist','local-save',timing); void flushOffline().catch(() => {}); return { success: true, queued: true, operationId: id };
 });
 export async function purgeLegacyReadCaches() {
   const keys = await AsyncStorage.getAllKeys();
@@ -272,7 +287,12 @@ export function flushOffline() {
       // left for review and are never retried in a loop.
       prepareAutomaticRecovery(rows, () => Crypto.randomUUID());
     });
-    for (const saved of await work.read()) {
+    // A photo upload can be much slower than a Firestore/callable operation.
+    // Photos do not advance the job revision chain, so drain other runnable
+    // evidence first while retaining FIFO order within each class.
+    const queued = await work.read();
+    const scheduled = [...queued.filter(row => row.kind !== 'photo'), ...queued.filter(row => row.kind === 'photo')];
+    for (const saved of scheduled) {
       const row = (await work.read()).find((entry) => entry.id === saved.id);
       if (!row) continue;
       if (pausedScope(scope) || AppState.currentState !== 'active' || offlineScope() !== scope || await isOffline()) break;
@@ -282,6 +302,7 @@ export function flushOffline() {
       if (revisionOperation(row) && earlier) continue;
       if (row.versionDependency && !ordered.some(other => other.id === row.versionDependency && other.state === 'synced')) { await work.patch(row.id, { state:'conflict', error:'An earlier saved operation was changed or discarded. This evidence is retained for management review.', errorCode:'revision-chain-changed' }); continue; }
       await work.patch(row.id, { state: 'syncing', submittedAt: row.submittedAt || Date.now() });
+      const syncTiming = Date.now();
       try {
         const result = row.kind === 'job' ? await callWorkspace('rlApplyJobOperation', { operationId: row.id, jobId: row.jobId, patch: row.patch, expectedVersion: row.expectedVersion }) : row.kind === 'application' ? await callWorkspace('rlRecordApplication', { jobId: row.jobId, operationId: row.id, record: row.record }).then(() => ({ status: 'synced' }))
           : row.kind === 'service-form' ? await callWorkspace('rlServiceForms', { action: 'save', jobId: row.jobId, operationId: row.id, ...row.record })
@@ -313,7 +334,9 @@ export function flushOffline() {
           const cached = await readCache(`service-form:${row.jobId}`, scope);
           if (cached?.form?.assignmentVersion === row.record.assignmentVersion) await writeCache(`service-form:${row.jobId}`, { ...cached, form: { ...cached.form, answers: row.record.answers, status: row.record.status, responseVersion: result.version } }, scope);
         }
+        recordOfflineTiming(timingKind(row), 'sync', syncTiming, result.status === 'conflict' ? 'conflict' : 'ok');
       } catch (error) {
+        recordOfflineTiming(timingKind(row), 'sync', syncTiming, 'failed');
         const attempts = row.attempts + 1, retryable = ['functions/unavailable', 'functions/deadline-exceeded', 'functions/internal', 'functions/resource-exhausted', 'storage/retry-limit-exceeded', 'unavailable'].includes(error.code) || await isOffline();
         const conflict = row.kind === 'visit' && ['permission-denied','unauthenticated','aborted','failed-precondition'].includes(String(error.code || '').split('/').pop());
         await work.patch(row.id, { state: conflict ? 'conflict' : retryable && attempts < 5 ? 'pending' : 'failed', attempts, nextAttempt: Date.now() + retryDelay(attempts), error: error.message || 'Sync failed.', errorCode: error.code || null });

@@ -7,7 +7,7 @@ const root = path.resolve(__dirname, '..'), web = path.resolve(root, '../routeLo
 const policy = require('../../functions/shared/capabilities.json');
 function fixture(role = 'manager') {
   const modules = new Map(), calls = [], operations = new Map(), listeners = new Set(), localDrafts = new Map(); let sequence = 0;
-  const env = { calls, record: null, photos: [], delivery: null, cancelled: false, uploadFailure: false, ambiguousSave: false, compressionFailure: false, offline: false, interactions: 0, converted: 0, previewed: false, approvalGets: [], approvalDecisions: [], approvals: 0, changes: [], urls: [], revoked: [], role, customers: [{ id: 'customer', name: 'Existing customer', email: 'prospect@example.com' }] };
+  const env = { calls, record: null, quoteNeededVisits: [], photos: [], delivery: null, cancelled: false, uploadFailure: false, ambiguousSave: false, compressionFailure: false, offline: false, interactions: 0, converted: 0, previewed: false, approvalGets: [], approvalDecisions: [], approvals: 0, changes: [], urls: [], revoked: [], role, customers: [{ id: 'customer', name: 'Existing customer', email: 'prospect@example.com' }] };
   const queryMock = require('../../tests/support/workspaceQueryMock.cjs').createWorkspaceQueryMock(React);
   env.user = { id: 'manager', companyId: 'acme', membershipId: 'member', role, companyName: 'Acme', services: ['Pest Control'] };
   const can = capability => policy.roles[env.role]?.includes(capability);
@@ -19,7 +19,7 @@ function fixture(role = 'manager') {
   async function callEstimate(action, fields = {}) {
     calls.push({ action, ...fields });
     if (env.offline) throw Object.assign(new Error('Network unavailable'), { code: 'functions/unavailable' });
-    if (action === 'list') return { estimates: env.record ? [env.record] : [], templates: [], enabled: true, emailEnabled: true };
+    if (action === 'list') return { estimates: env.record ? [env.record] : [], quoteNeededVisits: env.quoteNeededVisits, templates: [], enabled: true, emailEnabled: true };
     if (action === 'visit-context') return { existing: false, context: { sourceVisitId: fields.visitId, inquiryId: 'inquiry', customerId: 'customer', customerName: 'Existing customer', servicePropertyId: 'property', serviceProperty: { address: '1 Work Street' }, serviceCategory: 'Pest Control', serviceType: 'Termite Inspection', title: 'Termite Inspection estimate' } };
     if (action === 'get') return { estimate: env.record, versions: env.record ? [{ version: env.record.version, status: env.record.status, totalCents: env.record.totalCents }] : [], photos: env.photos, emailEnabled: role !== 'technician', delivery: env.delivery, permissions: { canEdit: role === 'technician' ? ['draft','changes-requested'].includes(env.record?.status) : !['approved','converted'].includes(env.record?.status), canSubmit: role === 'technician' && ['draft','changes-requested'].includes(env.record?.status), canReview: role !== 'technician' && ['draft','submitted-for-review'].includes(env.record?.status), canDeliver: role !== 'technician' && env.record?.status === 'approved-for-delivery' } };
     if (action === 'save') {
@@ -65,6 +65,7 @@ function fixture(role = 'manager') {
       if (name.endsWith('/workspaceApi')) return { callWorkspace: async () => ({ settings: { configured: false }, availableCategories: [] }) };
       if (name.endsWith('/estimateService')) return { callEstimate, prepareEstimatePhoto: async () => { if (env.compressionFailure) throw new Error('Photo preparation failed. Selection retained.'); return { base64: 'AAAA', uri: 'file:///compressed.jpg', dataUri: 'data:image/jpeg;base64,AAAA' }; }, previewEstimatePdf: async () => { env.previewed = true; }, downloadEstimatePdf: async () => {}, callEstimateApproval: async values => { if (values.action === 'get') { env.approvalGets.push(values); return { estimate: env.record || savedEstimate('sent'), photos: [], branding: { name: 'Acme' } }; } env.approvals++; env.approvalDecisions.push(values); return { approved: values.action === 'approve', decision: values.action === 'request-revision' ? 'revision-requested' : values.action === 'decline' ? 'declined' : 'approved' }; } };
       if (name.endsWith('/estimateDraftStore')) return { loadEstimateDraft: async identity => localDrafts.get(identity) || null, saveEstimateDraft: async (identity, payload) => { const value = { ...payload, identity, draftRevision: (localDrafts.get(identity)?.draftRevision || 0) + 1 }; localDrafts.set(identity, value); return value; }, retainEstimatePhoto: async (_identity, _id, asset) => asset, discardEstimateDraft: async identity => localDrafts.delete(identity), estimateDraftStateLabel: state => state };
+      if (name.endsWith('/offlineTimings')) return { recordOfflineTiming: () => 0 };
       if (name.includes('functions/shared/estimateClient')) return helpers;
       if (name.startsWith('.')) { const next = path.resolve(path.dirname(filename), name); return load(path.extname(next) ? next : fs.existsSync(`${next}.jsx`) ? `${next}.jsx` : `${next}.js`); }
       throw new Error(`Unexpected dependency ${name}`);
@@ -189,12 +190,23 @@ test('web management retains a selected photo through preparation failure and re
   env.compressionFailure = false; await click('Save estimate version'); assert.equal(env.record.photoIds.length, 1); assert.match(json(tree), /Server total/); assert.match(json(tree), /100\.23/); assert.equal(env.calls.filter(call => call.action === 'deliver').length, 0);
   await act(async () => tree.unmount()); assert.equal(env.revoked.length, 1);
 });
+test('web management sees completed quote-needed visits separately and opens their deterministic estimate context', async () => {
+  const env = fixture(); env.quoteNeededVisits = [{ id: 'visit-quote-needed', customerName: 'Mike Hunt', serviceType: 'Termite Inspection', serviceProperty: { address: '4700 Stockdale Highway' }, state: 'quote-needed' }];
+  const Component = env.load(path.join(web, 'src/pages/EstimatesPage.jsx')).default; let tree;
+  await act(async () => { tree = create(React.createElement(Component)); }); await act(settle);
+  assert.match(json(tree), /Completed Estimate Visits — Quote Needed/); assert.match(json(tree), /Mike Hunt/); assert.match(json(tree), /Draft estimates — awaiting review/);
+  const createButton = tree.root.findAll(node => node.type === 'button' && node.children.filter(child => typeof child === 'string').join('') === 'Create estimate from visit')[0];
+  assert.ok(createButton); await act(async () => createButton.props.onClick()); await act(settle);
+  assert.equal(env.calls.filter(call => call.action === 'visit-context' && call.visitId === 'visit-quote-needed').length, 1);
+  assert.match(json(tree), /Completed estimate visit loaded/); assert.equal(env.calls.filter(call => ['review','deliver'].includes(call.action)).length, 0);
+  await act(async () => tree.unmount());
+});
 test('web management finalizes a submitted version, previews the PDF and sends to an explicit one-time recipient', async () => {
   const env = fixture(), originalCustomer = structuredClone(env.customers[0]); env.record = { ...savedEstimate('submitted-for-review'), preparedByName: 'Field Technician', submittedVersion: 2 }; const Component = env.load(path.join(web, 'src/pages/EstimatesPage.jsx')).default; let tree;
   const button = title => tree.root.findAll(node => node.type === 'button' && node.children.filter(child => typeof child === 'string').join('') === title)[0];
   const click = async title => { const action = button(title); assert.ok(action, title); assert.notEqual(action.props.disabled, true, `${title} disabled`); await act(async () => action.props.onClick()); await act(settle); };
   await act(async () => { tree = create(React.createElement(Component)); }); await act(settle);
-  assert.match(json(tree), /Awaiting management review/); assert.match(json(tree), /Prepared by.*Field Technician/); await click('Open estimate');
+  assert.match(json(tree), /awaiting review/i); assert.match(json(tree), /Prepared by.*Field Technician/); await click('Review estimate');
   assert.match(json(tree), /Saving management changes creates a new version/);
   const title = tree.root.findAll(node => node.type === 'label' && node.children[0] === 'Estimate title')[0].findByType('input'); await act(async () => title.props.onChange({ target: { value: 'Management finalized proposal' } })); await click('Save estimate version');
   assert.equal(env.record.version, 3); assert.equal(env.record.status, 'draft'); await click('Preview customer PDF'); assert.equal(env.previewed, true); await click('Approve for delivery');

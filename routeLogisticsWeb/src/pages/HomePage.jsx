@@ -8,6 +8,7 @@ import { can } from '../services/tenancy';
 import { motion as Motion } from 'framer-motion';
 import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
 import { summarizeJobs, calendarDay } from '../utils/jobSummary';
+import { callEstimate } from '../services/estimateService';
 import { 
   BuildingOfficeIcon, 
   UsersIcon, 
@@ -25,6 +26,7 @@ const HomePage = () => {
   const customersQuery=useWorkspaceQuery(['customer-stats'],()=>CustomerService.getCustomerStats());
   const jobsQuery=useWorkspaceQuery(['jobs',500],()=>JobManagementService.getJobs(500));
   const templatesQuery=useWorkspaceQuery(['template-stats'],()=>EstimateTemplateService.getTemplateStats());
+  const estimateAttentionQuery=useWorkspaceQuery(['estimates','management-attention'],()=>callEstimate('list'),{enabled:can('estimates.manage')});
   const todayKey=new Date().toLocaleDateString('en-CA');
   const counts=useMemo(()=>{const summary=jobsQuery.data?summarizeJobs(jobsQuery.data.jobs,calendarDay(todayKey)||new Date()):null;return{
     customers:customersQuery.data?.stats?.totalCustomers??null,activeJobs:summary?.activeJobs??null,
@@ -64,6 +66,9 @@ const HomePage = () => {
 
   return (
     <div className="space-y-6">
+      {can('estimates.manage') && !!((estimateAttentionQuery.data?.quoteNeededVisits?.length || 0) + (estimateAttentionQuery.data?.estimates || []).filter(row => row.status === 'submitted-for-review').length) && <Link to="/estimates" className="block rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-950 hover:bg-amber-100">
+        <strong>Estimates need management attention</strong><span className="ml-2">{estimateAttentionQuery.data?.quoteNeededVisits?.length || 0} completed visits need quotes · {(estimateAttentionQuery.data?.estimates || []).filter(row => row.status === 'submitted-for-review').length} drafts await review</span>
+      </Link>}
       {[customersQuery,jobsQuery,templatesQuery].some(query=>query.error)&&<div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
         <p>{[customersQuery,jobsQuery,templatesQuery].find(query=>query.error)?.error?.message||'Dashboard information could not refresh.'} Saved information remains visible; unavailable counts show a dash.</p>
         <button type="button" className="mt-2 underline" onClick={()=>Promise.all([customersQuery.refetch(),jobsQuery.refetch(),templatesQuery.refetch()])}>Retry dashboard refresh</button>

@@ -1,9 +1,10 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, ActivityIndicator, ScrollView, BackHandler, Keyboard, KeyboardAvoidingView, Platform, AccessibilityInfo, findNodeHandle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeProvider';
 import { GlassCard, GlassButton, GlassInput, IconButton } from './Glass';
 import { isEstimateVisit, estimateOutcomeLabel } from '../services/estimateVisitPolicy';
+import { KeyboardScrollContext } from './KeyboardScrollContext';
 
 export const SPACING = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, section: 28 };
 export const PrimaryButton = props => <GlassButton {...props} />;
@@ -13,14 +14,30 @@ export const Card = props => <GlassCard {...props} />;
 const KeyboardContainer = KeyboardAvoidingView || View;
 
 export function KeyboardAwareScrollView({ children, contentContainerStyle, style, scrollRef, keyboardBottomPadding, ...props }) {
-  const bottomPadding = keyboardBottomPadding ?? (Platform?.OS === 'android' ? 280 : 140);
+  const ownRef = useRef(null), activeRef = scrollRef || ownRef, [keyboardHeight, setKeyboardHeight] = useState(0), focused = useRef(null);
+  useEffect(() => {
+    const show = Keyboard?.addListener?.(Platform?.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', event => {
+      setKeyboardHeight(event?.endCoordinates?.height || 0);
+      if (focused.current) setTimeout(() => activeRef.current?.scrollResponderScrollNativeHandleToKeyboard?.(findNodeHandle(focused.current), 28, true), 0);
+    });
+    const hide = Keyboard?.addListener?.(Platform?.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => setKeyboardHeight(0));
+    return () => { show?.remove?.(); hide?.remove?.(); };
+  }, [activeRef]);
+  const reveal = useCallback(node => {
+    focused.current = node;
+    const handle = node && findNodeHandle?.(node);
+    if (handle != null) setTimeout(() => activeRef.current?.scrollResponderScrollNativeHandleToKeyboard?.(handle, 28, true), 0);
+  }, [activeRef]);
+  // Android's adjustResize already resizes the root view. A second
+  // KeyboardAvoidingView with `height` caused the Samsung viewport to shrink
+  // twice and trapped multiline fields under the bottom actions.
+  const bottomPadding = keyboardBottomPadding ?? (keyboardHeight ? 36 : 24);
   const contentStyle = Array.isArray(contentContainerStyle)
     ? [...contentContainerStyle, { paddingBottom: bottomPadding }]
     : [contentContainerStyle, { paddingBottom: bottomPadding }];
-  return <KeyboardContainer style={{ flex: 1 }} behavior={Platform?.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={0}>
-    <ScrollView ref={scrollRef} style={[{ flex: 1 }, style]} contentContainerStyle={contentStyle} keyboardShouldPersistTaps="handled"
-      keyboardDismissMode={Platform?.OS === 'ios' ? 'interactive' : 'on-drag'} automaticallyAdjustKeyboardInsets {...props}>{children}</ScrollView>
-  </KeyboardContainer>;
+  const scroll = <KeyboardScrollContext.Provider value={reveal}><ScrollView ref={activeRef} style={[{ flex: 1 }, style]} contentContainerStyle={contentStyle} keyboardShouldPersistTaps="handled"
+    keyboardDismissMode={Platform?.OS === 'ios' ? 'interactive' : 'on-drag'} automaticallyAdjustKeyboardInsets={Platform?.OS === 'ios'} {...props}>{children}</ScrollView></KeyboardScrollContext.Provider>;
+  return Platform?.OS === 'ios' ? <KeyboardContainer style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={0}>{scroll}</KeyboardContainer> : scroll;
 }
 
 export function ScreenHeader({ title, subtitle, onBack, children }) {
@@ -126,17 +143,16 @@ export function ActionDialog({ title, message, tone = 'info', busy = false, onCl
   return <View testID={testID} accessibilityViewIsModal importantForAccessibility="yes" onAccessibilityEscape={close}
     style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 100, elevation: 30, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
     <Pressable testID={`${testID}-backdrop`} accessible={false} disabled={busy} onPress={close} style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(0,0,0,0.6)' }} />
-    <KeyboardContainer behavior={Platform?.OS === 'ios' ? 'padding' : 'height'} style={{ width: '100%', maxWidth: 520, maxHeight: '90%' }}>
-    <View style={{ width: '100%', maxHeight: '100%', borderRadius: 20, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, overflow: 'hidden' }}>
+    <View style={{ width: '100%', maxWidth: 520, maxHeight: '90%', borderRadius: 20, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, overflow: 'hidden' }}>
       <View style={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
         <Text ref={heading} accessibilityRole="header" style={{ flex: 1, color: palette.text, fontSize: 20, fontWeight: '700', lineHeight: 27 }}>{title}</Text>
         {!!onClose && <GlassButton secondary title="Close" accessibilityLabel="Close dialog" disabled={busy} onPress={close} />}
       </View>
-      <ScrollView keyboardShouldPersistTaps="handled" style={{ flexGrow: 0, flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20, gap: 12 }}>
+      <KeyboardAwareScrollView keyboardShouldPersistTaps="handled" style={{ flexGrow: 0, flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20, gap: 12 }} keyboardBottomPadding={20}>
         {!!message && <Text accessibilityRole={tone === 'error' ? 'alert' : 'text'} accessibilityLiveRegion="polite" style={{ color: tone === 'error' ? palette.danger : tone === 'success' ? palette.accent : palette.secondary, fontSize: 15, lineHeight: 23 }}>{message}</Text>}
         {busy && <ActivityIndicator accessibilityLabel="Saving changes" color={palette.accent} />}
         {children}
-      </ScrollView>
-    </View></KeyboardContainer>
+      </KeyboardAwareScrollView>
+    </View>
   </View>;
 }

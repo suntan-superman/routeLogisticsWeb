@@ -66,8 +66,8 @@ function fixture() {
     new Function('require','module','exports',code)(mockRequire, module, module.exports);
     return module.exports;
   }
-  const offline = load('services/offline.js'), completion = load('services/jobCompletion.js'), estimateVisits = load('services/estimateVisitOperations.js');
-  return { ...offline, ...completion, ...estimateVisits, job, claims, auth, copies, calls, operations, visitOperations, storage, restartOffline:()=>{modules.delete(path.resolve(root,'services/offline.js'));return load('services/offline.js');},
+  const offline = load('services/offline.js'), completion = load('services/jobCompletion.js'), estimateVisits = load('services/estimateVisitOperations.js'), timings = load('services/offlineTimings.js');
+  return { ...offline, ...completion, ...estimateVisits, ...timings, job, claims, auth, copies, calls, operations, visitOperations, storage, restartOffline:()=>{modules.delete(path.resolve(root,'services/offline.js'));return load('services/offline.js');},
     online: value => { online = value; }, failSync: value => { syncError = value; }, holdSync: value => { hold = value; }, failStorage: value => { storageError = value; }, holdStorageRead:value=>{storageReadHold=value;},serviceResult:value=>{serviceResult=value;} };
 }
 const draft = { actualWorkDone: 'Applied treatment', actualHours: '1.5', completionNotes: 'Work documented.' };
@@ -233,14 +233,20 @@ test('visit storage failure retains the unsaved event and cannot report or send 
 });
 
 test('arrival, work notes, photo, departure and completion inherit only their explicit acknowledged revision chain',async()=>{
- const f=fixture();f.online(false);await f.writeCache('job-bases',{job:{...f.job}});
+ const f=fixture();f.resetOfflineTimings();f.online(false);await f.writeCache('job-bases',{job:{...f.job}});
   await f.saveVisitOffline({...f.job},visit());await f.saveJobOffline('job',{notes:'Preserved offline observations'});await f.savePhotoOffline({...f.job},'file:///evidence.jpg');await f.saveVisitOffline({...f.job},visit('departed'));
   const result=await f.completeJob({...f.job},draft);assert.equal(result.status,'queued');const before=await f.queuedWork();assert.equal(before.length,5);
   f.online(true);await f.flushOffline();const after=await f.queuedWork();assert.ok(after.every(row=>row.state==='synced'),JSON.stringify(after));assert.equal(f.job.status,'completed');assert.equal(f.visitOperations.size,2);
  const revisionCalls=f.calls.filter(call=>['rlJobVisit','rlApplyJobOperation'].includes(call.name));
  assert.deepEqual(revisionCalls.map(call=>call.name),['rlJobVisit','rlApplyJobOperation','rlJobVisit','rlApplyJobOperation']);
   const revisions=after.filter(row=>['job','visit'].includes(row.kind));for(let index=1;index<revisions.length;index++)assert.equal(revisionCalls[index].expectedVersion,revisions[index-1].serverVersion);
-  assert.equal(f.calls.filter(call=>call.name==='rlJobPhoto').length,1);
+  assert.equal(f.calls.filter(call=>call.name==='rlJobPhoto').length,1);assert.equal(f.calls.at(-1).name,'rlJobPhoto','slow photo uploads must not block visit/completion synchronization');
+ const timingRows=f.readOfflineTimings();
+ for(const kind of ['arrival','notes','photo','departure','completion']){
+   assert.ok(timingRows.some(row=>row.kind===kind&&row.phase==='local-save'),`${kind} local save was not measured`);
+   assert.ok(timingRows.some(row=>row.kind===kind&&row.phase==='sync'),`${kind} synchronization was not measured`);
+ }
+ assert.ok(timingRows.every(row=>Object.keys(row).every(key=>['kind','phase','durationMs','result','at'].includes(key))),'timing records must not contain customer or operation data');
 });
 
 test('a completion rejected before departure is repaired automatically and synchronizes retained departure first',async()=>{

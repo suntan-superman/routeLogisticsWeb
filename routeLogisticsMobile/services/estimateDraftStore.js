@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { auth } from '../constants/firebase';
 import { getClaims } from './tenancy';
+import { recordOfflineTiming } from './offlineTimings';
 
 const PREFIX = 'rl-estimate-draft-v1';
 const safe = value => String(value || '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 180);
@@ -25,9 +26,11 @@ export async function loadEstimateDraft(identity) {
 }
 
 export async function saveEstimateDraft(identity, payload) {
+  const timing = Date.now();
   const key = scopedKey(identity), current = scope(), previous = JSON.parse(await AsyncStorage.getItem(key) || 'null');
   const value = { ...payload, identity, scope: current, draftRevision: (previous?.draftRevision || 0) + 1, localEditedAt: new Date().toISOString() };
   await AsyncStorage.setItem(key, JSON.stringify(value));
+  recordOfflineTiming('estimate', 'local-save', timing);
   return value;
 }
 

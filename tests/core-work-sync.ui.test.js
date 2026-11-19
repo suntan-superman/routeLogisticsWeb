@@ -29,6 +29,7 @@ function load(relative){
   if(name.endsWith('/services/jobManagementService'))return{__esModule:true,default:jobService};
   if(name.endsWith('/services/customerService'))return{__esModule:true,default:{getCustomers:async()=>({success:true,customers:env.customers}),getCustomerStats:async()=>env.statsFailure?{success:false,error:env.statsFailure}:{success:true,stats:{totalCustomers:7}}}};
   if(name.endsWith('/services/estimateTemplateService'))return{__esModule:true,default:{getTemplateStats:async()=>env.statsFailure?{success:false,error:env.statsFailure}:{success:true,stats:{totalTemplates:3}}}};
+  if(name.endsWith('/services/estimateService'))return{callEstimate:async()=>env.estimateAttention};
   if(name.endsWith('/components/JobFormModal'))return{__esModule:true,default:JobForm};
   if(name.endsWith('/components/ServiceChecklist'))return{__esModule:true,default:DraftChild};
   if(name.endsWith('/components/JobPhotos')||name.endsWith('/components/JobApplicationLog'))return{__esModule:true,default:()=>null};
@@ -58,7 +59,7 @@ async function change(label,value){await act(async()=>tree.root.findByProps({'ar
 beforeEach(()=>{
  const now=new Date(),day=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
  const auth={app:{options:{projectId:'demo-routelogistics'}},currentUser:{uid:'synthetic-owner',emailVerified:true}};
- env={auth,claims:{companyId:'synthetic-acme',role:'owner'},workspace:{status:'company'},calls:[],toasts:[],jobsFailure:null,detailError:null,statsFailure:null,formProps:null,formMounts:0,formUnmounts:0,scheduleProps:null,scheduleMounts:0,scheduleUnmounts:0,
+ env={auth,claims:{companyId:'synthetic-acme',role:'owner'},workspace:{status:'company'},calls:[],toasts:[],jobsFailure:null,detailError:null,statsFailure:null,estimateAttention:{estimates:[],quoteNeededVisits:[]},formProps:null,formMounts:0,formUnmounts:0,scheduleProps:null,scheduleMounts:0,scheduleUnmounts:0,
   jobs:[{id:'job-one',companyId:'synthetic-acme',customerId:'customer-one',customerName:'Synthetic customer',serviceType:'Inspection',date:day,time:'10:00',status:'scheduled',estimatedDuration:1,totalCost:100,updatedAt:'version-one',createdAt:day}],customers:[{id:'customer-one',name:'Synthetic customer'}]};
  modules=new Map();client=new QueryClient({defaultOptions:{queries:{gcTime:Infinity,retry:false,retryDelay:1}}});focusManager.setFocused(true);
 });
@@ -93,6 +94,13 @@ test('dashboard keeps unknown reads distinct from zero and follows the same refr
  env.statsFailure='Synthetic statistics unavailable';env.jobsFailure='Synthetic jobs unavailable';await render('pages/HomePage.jsx');assert.equal(labelStat('Total Customers'),'—');assert.equal(labelStat('Active Jobs'),'—');assert.equal(labelStat('Estimate Templates'),'—');assert.match(text(tree.root),/Synthetic statistics unavailable/);
  env.statsFailure=null;env.jobsFailure=null;await refresh(['jobs','customer-stats','template-stats']);assert.equal(labelStat('Total Customers'),'7');assert.equal(labelStat('Active Jobs'),'1');assert.equal(labelStat('Estimate Templates'),'3');
  env.jobs=[{...env.jobs[0],status:'completed'}];await refresh(['jobs']);assert.equal(labelStat('Active Jobs'),'0');assert.equal(labelStat('Monthly Revenue'),'$100');
+});
+
+test('dashboard derives one idempotent management alert from quote-needed visits and review drafts',async()=>{
+ env.estimateAttention={quoteNeededVisits:[{id:'visit-one'}],estimates:[{id:'estimate-one',status:'submitted-for-review'},{id:'estimate-two',status:'draft'}]};
+ await render('pages/HomePage.jsx');const page=text(tree.root);
+ assert.match(page,/Estimates need management attention/);assert.match(page,/1 completed visits need quotes · 1 drafts await review/);
+ assert.equal(tree.root.findAll(node=>node.type==='a'&&node.props.href==='/estimates'&&text(node).includes('Estimates need management attention')).length,1);
 });
 
 test('detail permission loss does not fall back to a previously selected private job snapshot',async()=>{

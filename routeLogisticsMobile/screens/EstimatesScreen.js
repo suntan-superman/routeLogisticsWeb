@@ -15,6 +15,13 @@ import { useJobResourceRefresh } from '../services/useJobResources';
 import NetInfo from '@react-native-community/netinfo';
 import { loadEstimateDraft, saveEstimateDraft, retainEstimatePhoto, discardEstimateDraft, estimateDraftStateLabel } from '../services/estimateDraftStore';
 import { estimateContextFromVisit } from '../services/estimateVisitPolicy';
+import { recordOfflineTiming } from '../services/offlineTimings';
+
+async function measuredSync(kind, work) {
+  const startedAt = Date.now();
+  try { const result = await work(); recordOfflineTiming(kind, 'sync', startedAt); return result; }
+  catch (error) { recordOfflineTiming(kind, 'sync', startedAt, ['aborted','failed-precondition','permission-denied'].includes(String(error?.code || '').split('/').pop()) ? 'conflict' : 'failed'); throw error; }
+}
 
 export default function EstimatesScreen({ onInteractionChange, active = true, initialVisit = null, onVisitConsumed, onReturnToVisit }) {
   const { user, permissions, accessStatus = 'ready' } = useAuth(), { palette } = useTheme();
@@ -115,7 +122,7 @@ export default function EstimatesScreen({ onInteractionChange, active = true, in
       if (!pendingSave.current?.operationId) pendingSave.current = { operationId: Crypto.randomUUID() };
       pendingSave.current = { ...pendingSave.current, ...(next ? { estimateId: next.id, expectedVersion: next.version } : {}), data };
       setUncertain(true);
-      const result = await callEstimate('save', pendingSave.current); if (!current(ticket)) return null;
+      const result = await measuredSync('estimate', () => callEstimate('save', pendingSave.current)); if (!current(ticket)) return null;
       next = result.estimate; pendingSave.current = null; contentSaved = true; setUncertain(false); setRecord(next); setEstimatePermissions(previous => ({ ...previous, canEdit: true, canSubmit: permissions.isTechnician === true })); return next;
     };
     if (!next || pendingSave.current || next.status !== 'draft' || !photoRef.current.some(photo => !photo.remoteId)) { if (!(await persist(values))) return; }
@@ -124,7 +131,7 @@ export default function EstimatesScreen({ onInteractionChange, active = true, in
       if (uploaded[index].remoteId) continue;
       let photo = uploaded[index];
       if (!photo.compressed) { const compressed = await prepareEstimatePhoto(photo.asset || { uri: photo.uri }); if (!current(ticket)) return; photo = { ...photo, compressed }; uploaded[index] = photo; setPhotos([...uploaded]); }
-      const result = await callEstimate('photo-upload', { estimateId: next.id, operationId: photo.id, base64: photo.compressed.base64, caption: photo.caption || '' }); if (!current(ticket)) return;
+      const result = await measuredSync('photo', () => callEstimate('photo-upload', { estimateId: next.id, operationId: photo.id, base64: photo.compressed.base64, caption: photo.caption || '' })); if (!current(ticket)) return;
       uploaded[index] = { ...photo, remoteId: result.id }; setPhotos([...uploaded]);
     }
     const photoIds = uploaded.map(photo => photo.remoteId).filter(Boolean);

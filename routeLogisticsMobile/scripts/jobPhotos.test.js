@@ -8,7 +8,7 @@ const babel = require('@babel/core');
 global.IS_REACT_ACT_ENVIRONMENT = true;
 const root = path.resolve(__dirname, '..');
 const modules = new Map(), listeners = new Set();
-let tree, rows, remote, pickerResult, picker, permission, saves, manipulations, calls, retries, busyEvents, draftEvents, interactions, save, compress, read;
+let tree, rows, remote, pickerResult, picker, permission, saves, manipulations, calls, retries, busyEvents, draftEvents, progressEvents, interactions, save, compress, read;
 const asset = { uri: 'file:///selected.HEIC', width: 6000, height: 4000, fileName: 'IMG_123.HEIC', mimeType: 'image/heic', assetId: 'asset-123' };
 const chosen = () => ({ canceled: false, assets: [{ ...asset }] });
 function load(relative) {
@@ -44,14 +44,14 @@ function load(relative) {
 }
 const Photos = load('components/JobPhotos.js').default;
 const job = id => ({ id, companyId: 'acme', customerId: 'customer', status: 'in-progress' });
-const props = id => ({ job: job(id), onBusyChange: value => busyEvents.push(value), onDraftChange: value => draftEvents.push(value) });
+const props = id => ({ job: job(id), onBusyChange: value => busyEvents.push(value), onDraftChange: value => draftEvents.push(value), onProgressChange: value => progressEvents.push(value) });
 const text = () => JSON.stringify(tree.toJSON());
 const button = title => tree.root.findAll(node => node.type === 'Button' && node.props.title === title)[0];
 async function settle() { for (let turn = 0; turn < 4; turn++) await act(async () => { await Promise.resolve(); }); }
 async function render(id = 'job-one') { await act(async () => { tree = create(React.createElement(Photos, props(id))); }); await settle(); }
 async function press(title) { const target = button(title); assert.ok(target, `Button ${title} exists`); await act(async () => target.props.onPress()); await settle(); }
 beforeEach(() => {
-  tree = null; rows = []; remote = []; pickerResult = chosen(); permission = { granted: true }; calls = []; saves = []; manipulations = []; retries = []; busyEvents = []; draftEvents = []; interactions = 0;
+  tree = null; rows = []; remote = []; pickerResult = chosen(); permission = { granted: true }; calls = []; saves = []; manipulations = []; retries = []; busyEvents = []; draftEvents = []; progressEvents = []; interactions = 0;
   picker = async () => pickerResult;
   compress = async () => ({ uri: 'file:///compressed.jpg', width: 1600, height: 1067 });
   read = async () => ({ photos: remote });
@@ -66,7 +66,11 @@ test('camera capture uses image-only SDK54 options and preserves metadata in the
   assert.deepEqual(manipulations[0][1], [{ resize: { width: 1600 } }]);
   assert.equal(saves.length, 1); assert.equal(saves[0][0].id, 'job-one'); assert.equal(saves[0][1], 'file:///compressed.jpg');
   assert.deepEqual(saves[0][2], { source: 'camera', fileName: asset.fileName, mimeType: 'image/jpeg', width: 1600, height: 1067 });
-  assert.match(text(), /Queued on this device/); assert.equal(draftEvents.at(-1), false); assert.equal(busyEvents.at(-1), false);
+  assert.match(text(), /Queued on this device/); assert.equal(draftEvents.at(-1), false); assert.equal(busyEvents.at(-1), false); assert.equal(progressEvents.at(-1).hasPhotos, true);
+});
+test('an existing retained or uploaded photo restores the completed evidence step after restart', async () => {
+  remote = [{ id: 'existing-photo', jobId: 'job-one' }]; await render();
+  assert.deepEqual(progressEvents.at(-1), { hasPhotos: true, count: 1 });
 });
 
 test('camera permission denial is actionable and never launches the native camera', async () => {

@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeProvider';
+import { useKeyboardScroll } from './KeyboardScrollContext';
 
 export function GlassScreen({ children, style, edges = ['top', 'left', 'right', 'bottom'] }) {
   const { palette } = useTheme();
@@ -31,10 +32,13 @@ export function IconButton({ icon, label, onPress, disabled = false }) {
 }
 export function GlassInput({ label, right, style, inputRef, error, ...props }) {
   const { palette, isDark } = useTheme();
+  const localRef = useRef(null), keyboardScroll = useKeyboardScroll();
+  const ref = inputRef || localRef;
+  const onFocus = event => { keyboardScroll?.(ref.current); props.onFocus?.(event); };
   return <View style={{ gap: 7 }}>
     {!!label && <Text style={{ color: palette.text, fontSize: 14, lineHeight: 21, fontWeight: '600' }}>{label}</Text>}
     <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: palette.input, borderWidth: 1, borderColor: error ? palette.danger : palette.border, borderRadius: 14 }}>
-      <TextInput ref={inputRef} accessibilityLabel={label} accessibilityInvalid={!!error} keyboardAppearance={isDark ? 'dark' : 'light'} placeholderTextColor={palette.secondary} selectionColor={palette.accent} style={[{ flex: 1, minHeight: props.multiline ? 112 : 50, padding: 14, color: palette.text, fontSize: 16, lineHeight: 23, textAlignVertical: props.multiline ? 'top' : 'center' }, style]} {...props} />
+      <TextInput ref={ref} accessibilityLabel={label} accessibilityInvalid={!!error} keyboardAppearance={isDark ? 'dark' : 'light'} placeholderTextColor={palette.secondary} selectionColor={palette.accent} style={[{ flex: 1, minHeight: props.multiline ? 112 : 50, padding: 14, color: palette.text, fontSize: 16, lineHeight: 23, textAlignVertical: props.multiline ? 'top' : 'center' }, style]} {...props} onFocus={onFocus} />
       {right}
     </View>
     {!!error && <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={{ color: palette.danger, fontSize: 13, lineHeight: 19 }}>{error}</Text>}

@@ -45,6 +45,18 @@ test('assigned technicians prepare one visit-linked estimate, submit immutable r
   const linkedVisits=await db.collection('jobs').where('estimateId','==',created.estimate.id).get();assert.equal(linkedVisits.size,1);assert.equal(linkedVisits.docs[0].id,visit.visitId);assert.equal((await db.collection('invoices').where('estimateId','==',created.estimate.id).get()).size,0);
   const managerRevision=await f.save({...data,scopeOfWork:'House and detached garage'},{estimateId:created.estimate.id,expectedVersion:2});assert.equal(managerRevision.estimate.version,3);await assert.rejects(f.approve(revised.estimate,token),{code:'permission-denied'});
 });
+test('management list distinguishes completed quote-needed visits from submitted estimate drafts without creating duplicates',async()=>{
+  const f=await fixture(),visit=await f.addVisit('quote-needed');
+  const first=await f.handlers.handle(f.request({action:'list'}));
+  assert.equal(first.quoteNeededVisits.length,1);assert.equal(first.quoteNeededVisits[0].id,visit.visitId);assert.equal(first.quoteNeededVisits[0].state,'quote-needed');
+  const context=await f.handlers.handle(f.request({action:'visit-context',visitId:visit.visitId}));
+  const data={...f.draft,...context.context,servicePropertyId:visit.propertyId,serviceProperty:{address:'100 Synthetic Customer Street, Example, CA 93312'}};
+  const created=await f.handlers.handle(f.request({action:'save',operationId:`handoff-estimate-${f.id}-0001`,data},f.tech));
+  await f.handlers.handle(f.request({action:'submit-review',estimateId:created.estimate.id,expectedVersion:1},f.tech));
+  const second=await f.handlers.handle(f.request({action:'list'}));
+  assert.equal(second.quoteNeededVisits.length,0);assert.equal(second.estimates.filter(row=>row.status==='submitted-for-review').length,1);
+  const reopened=await f.handlers.handle(f.request({action:'visit-context',visitId:visit.visitId}));assert.equal(reopened.existing,true);assert.equal(reopened.estimate.id,created.estimate.id);
+});
 test('technicians cannot generate formal PDFs or deliver estimates even when an obsolete company flag remains',async()=>{
   const f=await fixture(),visit=await f.addVisit(),data={...f.draft,sourceVisitId:visit.visitId,inquiryId:visit.inquiryId,servicePropertyId:visit.propertyId,serviceProperty:{address:'100 Synthetic Customer Street, Example, CA 93312'}};
   const created=await f.handlers.handle(f.request({action:'save',operationId:`direct-estimate-${f.id}-0001`,data},f.tech));

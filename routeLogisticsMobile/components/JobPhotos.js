@@ -14,15 +14,15 @@ const photoState = state => ({ pending: 'Queued on this device', syncing: 'Uploa
 
 // JobWorkflow keeps one instance mounted for its selected job. The native picker
 // is presented from that screen, never while swapping React Native modals.
-export default function JobPhotos({ job, onBusyChange, onDraftChange, active = true }) {
+export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSave, onProgressChange, active = true }) {
   const { palette } = useTheme();
   const [photos, setPhotos] = useState([]), [busy, setBusy] = useState(false), [draft, setDraft] = useState(null);
   const [actionError, setActionError] = useState(''), [loadError, setLoadError] = useState(''), [message, setMessage] = useState('');
   const [ready, setReady] = useState(null), refresh = useRef(null);
   const mounted = useRef(false), generation = useRef(0), loading = useRef(0), locked = useRef(false), selected = useRef(null), retrying = useRef(new Set());
   const deniedRead = useRef(null);
-  const target = useRef(job), callbacks = useRef({ onBusyChange, onDraftChange });
-  target.current = job; callbacks.current = { onBusyChange, onDraftChange };
+  const target = useRef(job), callbacks = useRef({ onBusyChange, onDraftChange, onLocalSave, onProgressChange });
+  target.current = job; callbacks.current = { onBusyChange, onDraftChange, onLocalSave, onProgressChange };
   const current = (ticket, id) => mounted.current && generation.current === ticket && target.current?.id === id;
   const activity = value => { locked.current = value; if (mounted.current) { setBusy(value); callbacks.current.onBusyChange?.(value); } };
   const remember = value => { selected.current = value; if (mounted.current) { setDraft(value); callbacks.current.onDraftChange?.(!!value); } };
@@ -42,6 +42,7 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, active = t
     const queued = local.status === 'fulfilled' ? local.value.filter(row => row.kind === 'photo' && row.jobId === id && !['synced', 'discarded'].includes(row.state)).map(row => ({ id: row.id, url: row.localUri, state: row.state, error: row.error, metadata: row.metadata })) : [];
     const merged = [...remote, ...queued.filter(row => !remote.some(photo => photo.id === row.id))];
     setPhotos(merged);
+    callbacks.current.onProgressChange?.({ hasPhotos: merged.length > 0, count: merged.length });
     setLoadError([saved.status === 'rejected' ? `Could not load uploaded photos: ${saved.reason.message}` : '', local.status === 'rejected' ? `Could not read saved photos: ${local.reason.message}` : ''].filter(Boolean).join('\n'));
     if (query && saved.status === 'rejected') throw saved.reason;
     if (query && local.status === 'rejected') throw local.reason;
@@ -51,7 +52,7 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, active = t
   useEffect(() => {
     mounted.current = true; generation.current++; locked.current = false; selected.current = null; deniedRead.current = null;
     setPhotos([]); setDraft(null); setBusy(false); setActionError(''); setLoadError(''); setMessage('');
-    callbacks.current.onBusyChange?.(false); callbacks.current.onDraftChange?.(false);
+    callbacks.current.onBusyChange?.(false); callbacks.current.onDraftChange?.(false); callbacks.current.onProgressChange?.({ hasPhotos: false, count: 0 });
     setReady(job?.id);
     const unsubscribe = subscribeOffline(() => refresh.current?.());
     return () => {
@@ -75,7 +76,7 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, active = t
       width: compressed.width || value.asset.width, height: compressed.height || value.asset.height,
     });
     if (!current(ticket, work.id)) return;
-    remember(null); setMessage('Photo saved on this device. Upload status is shown below.'); await load();
+    remember(null); setMessage('Photo saved on this device. Upload status is shown below.'); callbacks.current.onLocalSave?.({ state: 'pending' }); await load();
   };
   const capture = async camera => {
     if (locked.current || selected.current || !target.current?.id) return;

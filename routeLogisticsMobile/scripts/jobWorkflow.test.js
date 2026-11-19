@@ -63,7 +63,7 @@ const props = selected => ({ job: selected, onClose: () => { closes++; }, onChan
 async function render(selected = job(), overrides = {}) { await act(async () => { tree = create(React.createElement(Workflow, { ...props(selected), ...overrides })); }); }
 const text = () => JSON.stringify(tree.toJSON());
 const visible = node => { for (let parent = node; parent; parent = parent.parent) { if (parent.props.accessibilityElementsHidden) return false; const styles = Array.isArray(parent.props.style) ? parent.props.style.flat(Infinity) : [parent.props.style]; if (styles.some(style => style?.display === 'none')) return false; } return true; };
-const control = label => tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === label && visible(node))[0];
+const control = label => { const matches=tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === label);return matches.find(visible)||(['Complete','Resume completion','Prepare Estimate','View Estimate'].includes(label)?matches[0]:undefined); };
 async function press(label) { const node = control(label); assert.ok(node, `Expected ${label}`); assert.equal(!!node.props.disabled, false, `${label} should be enabled`); await act(async () => node.props.onPress()); }
 async function input(label, value) { const field = tree.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === label && visible(node))[0]; assert.ok(field, `Expected visible ${label}`); await act(async () => field.props.onChangeText(value)); }
 async function draft() { await press('Complete'); await input('Work completed', 'Inspected and treated the site'); await input('Actual hours worked', '1.5'); await input('Completion notes', 'Gate secured'); }
@@ -85,6 +85,16 @@ test('estimate details retain property access and dispatcher notes and completio
  assert.match(text(),/Estimate Visit/);assert.match(text(),/22 Rental Road/);assert.match(text(),/Gate 2468/);assert.match(text(),/Inspect exterior only/);assert.doesNotMatch(text(),/Old billing street/);assert.equal(outcomeProps.job.inquiryId,'inquiry-one');assert.equal(outcomeProps.readOnly,false);
  await press('Prepare Estimate');assert.equal(prepared.id,'assigned');
  await press('Complete');assert.match(text(),/Document estimate visit/);assert.ok(control('Completion outcome: Visit completed — quote needed'));await input('Work completed','Inspected for a quote');await press('Completion outcome: Customer declined');await press('Review completion');assert.match(text(),/Customer declined/);await press('Confirm completion');assert.equal(calls[0].draft.estimateOutcome,'customer_declined');assert.equal(calls[0].job.billable,false);assert.equal(photoMounts,1);
+});
+
+test('guided workflow shows one primary step, advances after durable local saves and reopens completed steps',async()=>{
+ await render();
+ assert.equal(workProps.section,'arrival');assert.ok(control('Arrival, current step'));
+ await act(async()=>workProps.onLocalSave('arrived',{state:'pending'}));assert.equal(workProps.section,'work');assert.ok(checklistProps);
+ await act(async()=>workProps.onLocalSave('work',{state:'pending'}));assert.ok(control('Photos and evidence, current step'));
+ await act(async()=>photoProps.onLocalSave({state:'pending'}));assert.equal(workProps.section,'departure');assert.ok(control('Departure, current step'));
+ await act(async()=>workProps.onLocalSave('departed',{state:'pending'}));assert.ok(control('Review and completion, current step'));assert.ok(control('Complete'));
+ await press('Arrival, completed');assert.equal(workProps.section,'arrival');assert.equal(photoMounts,1);assert.equal(photoUnmounts,0);
 });
 
 test('unfinished estimate outcome participates in close, completion and mode-switch guards without discarding other work',async()=>{
@@ -375,7 +385,7 @@ test('completion explains an optional product draft in an overlay and requires e
   assert.equal(tree.root.findAllByType('Modal').length, 0);
   assert.match(text(), /An optional product application is open and has not been saved/);
   assert.match(text(), /A new product application is optional/);
-  assert.deepEqual(discardedDraftCalls, []); assert.equal(control('Complete'), undefined);
+  assert.deepEqual(discardedDraftCalls, []); assert.equal(tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === 'Complete' && visible(node)).length, 0);
   assert.deepEqual(interactions.at(-1), { busy: false, hasDraft: true });
   await press('Keep editing'); assert.equal(workDrafts.application, true);
   await press('Complete'); await press('Discard unsaved drafts and continue');

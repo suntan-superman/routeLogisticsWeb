@@ -5,10 +5,10 @@ global.IS_REACT_ACT_ENVIRONMENT = true;
 const cache = new Map(), native = Object.fromEntries(['View', 'Text', 'Pressable', 'ActivityIndicator', 'TextInput', 'ScrollView', 'KeyboardAvoidingView'].map(name => [name, name]));
 native.StyleSheet = { create: value => value };
 native.Platform = { OS: 'android' };
-const backHandlers = new Set(), announcements = [], focusTargets = [];
+const backHandlers = new Set(), keyboardHandlers = new Map(), announcements = [], focusTargets = [];
 let keyboardDismissals = 0;
 native.BackHandler = { addEventListener: (_event, handler) => { backHandlers.add(handler); return { remove: () => backHandlers.delete(handler) }; } };
-native.Keyboard = { dismiss: () => { keyboardDismissals++; } };
+native.Keyboard = { dismiss: () => { keyboardDismissals++; }, addListener: (event, handler) => { const rows=keyboardHandlers.get(event)||new Set();rows.add(handler);keyboardHandlers.set(event,rows);return{remove:()=>{rows.delete(handler);if(!rows.size)keyboardHandlers.delete(event);}}; } };
 native.AccessibilityInfo = { announceForAccessibility: value => announcements.push(value), setAccessibilityFocus: value => focusTargets.push(value) };
 native.findNodeHandle = node => node.nativeTag;
 let dark = false, tree;
@@ -31,7 +31,7 @@ function load(relative) {
 }
 const UI=load('components/MobileUI.js'),Glass=load('components/Glass.js');
 async function render(Component,props,options){await act(async()=>{tree=create(React.createElement(Component,props),options)});return tree;}
-afterEach(async()=>{if(tree)await act(async()=>tree.unmount());tree=null;dark=false;assert.equal(backHandlers.size,0);announcements.length=0;focusTargets.length=0;keyboardDismissals=0;});
+afterEach(async()=>{if(tree)await act(async()=>tree.unmount());tree=null;dark=false;assert.equal(backHandlers.size,0);assert.equal(keyboardHandlers.size,0);announcements.length=0;focusTargets.length=0;keyboardDismissals=0;});
 
 test('job cards expose clear accessible actions and statuses without financial fields',async()=>{
  let opened=0;await render(UI.JobCard,{job:{id:'job',customerName:'Customer',serviceType:'Inspection',date:'2026-11-13',time:'15:00',status:'in-progress',estimatedCost:999,totalCost:999},onPress:()=>opened++});
@@ -59,15 +59,18 @@ test('buttons and fields provide accessible targets and solid readable surfaces 
 });
 
 test('keyboard-aware scrolling keeps multiline Android editors reachable above the keyboard',async()=>{
- const scrollRef=React.createRef(),scrollTo=()=>{};
- await render(UI.KeyboardAwareScrollView,{scrollRef,testID:'keyboard-form',children:React.createElement('TextInput',{multiline:true})},{createNodeMock:element=>element.type==='ScrollView'?{scrollTo}:null});
- const avoider=tree.root.findByType('KeyboardAvoidingView'),scroll=tree.root.findByType('ScrollView');
- assert.equal(avoider.props.behavior,'height');
+ const scrollRef=React.createRef(),scrollTo=()=>{},reveals=[];
+ await render(UI.KeyboardAwareScrollView,{scrollRef,testID:'keyboard-form',children:React.createElement(Glass.GlassInput,{label:'Android multiline notes',multiline:true,value:'Retained text',onChangeText(){}})},{createNodeMock:element=>element.type==='ScrollView'?{scrollTo,scrollResponderScrollNativeHandleToKeyboard:(...args)=>reveals.push(args)}:element.type==='TextInput'?{nativeTag:77}:null});
+ let scroll=tree.root.findByType('ScrollView');
+ assert.equal(tree.root.findAllByType('KeyboardAvoidingView').length,0);
  assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');
  assert.equal(scroll.props.keyboardDismissMode,'on-drag');
- assert.equal(scroll.props.automaticallyAdjustKeyboardInsets,true);
+ assert.equal(scroll.props.automaticallyAdjustKeyboardInsets,false);
  assert.equal(scrollRef.current.scrollTo,scrollTo);
- const styles=scroll.props.contentContainerStyle;assert.ok(Array.isArray(styles));assert.ok(styles.some(value=>value?.paddingBottom>=280));
+ const styles=scroll.props.contentContainerStyle;assert.ok(Array.isArray(styles));assert.ok(styles.some(value=>value?.paddingBottom===24));
+ await act(async()=>{tree.root.findByType('TextInput').props.onFocus({});for(const handler of keyboardHandlers.get('keyboardDidShow')||[])handler({endCoordinates:{height:312}});await new Promise(resolve=>setTimeout(resolve,5));});
+ scroll=tree.root.findByType('ScrollView');assert.ok(scroll.props.contentContainerStyle.some(value=>value?.paddingBottom===36));assert.ok(reveals.some(args=>args[0]===77&&args[1]===28&&args[2]===true));
+ assert.equal(tree.root.findByType('TextInput').props.value,'Retained text');
 });
 
 test('invalid glass inputs are visibly and accessibly identified beside the field',async()=>{

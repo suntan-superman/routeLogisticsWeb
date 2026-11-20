@@ -7,6 +7,7 @@ const { getMessaging } = require('firebase-admin/messaging');
 const { resolveClaims } = require('./claims');
 const { workspaceStatus } = require('./workspace');
 const { workDataHandlers } = require('./workData');
+const { companyOnboardingHandlers } = require('./companyOnboarding');
 const { schedulingHandlers } = require('./scheduling');
 const { scheduleMembershipHandlers } = require('./scheduleMembership');
 const { staffAvailabilityHandlers } = require('./staffAvailability');
@@ -152,6 +153,15 @@ exports.rlManageJob = onCall(workData.manageJob);
 exports.rlJobException = onCall(jobExceptionHandlers(db));
 exports.rlRecordApplication = onCall(workData.application);
 exports.rlCreateCompany = onCall(workData.createCompany);
+const companyOnboarding = companyOnboardingHandlers(db);
+exports.rlGetCompanyOnboardingDraft = onCall(companyOnboarding.getDraft);
+exports.rlSaveCompanyOnboardingDraft = onCall(companyOnboarding.saveDraft);
+exports.rlActivateCompanyOnboarding = onCall({ timeoutSeconds: 60 }, companyOnboarding.activate);
+exports.rlCleanupCompanyOnboardingDrafts = onSchedule({ schedule: 'every 24 hours', maxInstances: 1, timeoutSeconds: 120 }, async () => {
+  const expired = await db.collection('rlCompanyOnboardingDrafts').where('expiresAt', '<=', new Date().toISOString()).limit(400).get();
+  if (expired.empty) return;
+  const batch = db.batch(); expired.docs.forEach(row => batch.delete(row.ref)); await batch.commit();
+});
 exports.rlJobPhoto = onCall({ memory: '512MiB', timeoutSeconds: 60 }, jobPhotoHandler(db));
 
 const invites = invitationHandlers(db, applyClaims, () => appUrl.value(), emailEnabled);

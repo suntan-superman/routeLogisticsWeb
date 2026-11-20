@@ -3,8 +3,8 @@ import { httpsCallable } from 'firebase/functions';
 import { functions } from '../services/firebase';
 import { previewCustomers } from '../utils/customerCsv';
 
-export default function CustomerImport({ onComplete }) {
-  const [preview, setPreview] = useState(null);
+export default function CustomerImport({ onComplete = async () => {}, initialPreview = null, openInitially = false }) {
+  const [preview, setPreview] = useState(initialPreview);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -31,7 +31,7 @@ export default function CustomerImport({ onComplete }) {
     } catch (error) { setMessage(`Import interrupted: ${error.message} Completed rows are saved. Retrying safely skips existing records.`); }
     finally { setBusy(false); }
   };
-  return <details className="rounded-lg border bg-white p-4">
+  return <details className="rounded-lg border bg-white p-4" open={openInitially || undefined}>
     <summary className="cursor-pointer font-medium">Import customers from CSV</summary>
     <p className="my-3 text-sm text-gray-600">Headers: Name (required), Email, Phone, Address, City, State, ZIP, Notes. Up to 5,000 rows. Existing records are kept.</p>
     <input aria-label="Customer CSV file" type="file" accept=".csv,text/csv" disabled={busy} onChange={readFile} />

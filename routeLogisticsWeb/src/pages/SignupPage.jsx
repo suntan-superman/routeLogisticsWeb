@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import ThemeControl from '../components/ThemeControl';
 
 const SignupPage = () => {
-  const { signup, refreshSession } = useAuth();
+  const { signup } = useAuth();
   const location = useLocation();
   const next = returnPath(location.search);
   const navigate = useNavigate();
@@ -23,13 +23,10 @@ const SignupPage = () => {
       businessName: form.businessName
     });
     if (result.success) {
-      // Create the company shell right away so the new owner lands in
-      // Company Setup with a real company instead of a blank state.
       if (next) {
         navigate(next);
       } else {
-        await refreshSession();
-        navigate('/company-setup');
+        navigate('/onboarding');
       }
     }
     setIsLoading(false);

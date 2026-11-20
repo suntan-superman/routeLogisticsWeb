@@ -23,7 +23,11 @@ const ProtectedRoute = ({ children }) => {
   if (!currentUser.emailVerified || !['company', 'solo'].includes(workspace?.status)) return <WorkspaceGate />;
   if (!mayOpenRoute(pathname, can)) return <main className="p-8"><h1 className="text-2xl font-bold">Access unavailable</h1><p className="my-4">Your role does not allow this screen.</p><Link className="underline" to="/">Return to your workspace</Link></main>;
 
-  return <React.Fragment key={`${currentUser.uid}:${sessionVersion}`}>{children}</React.Fragment>;
+  // Activation refreshes the owner's tenancy claims. Keep the onboarding tree
+  // mounted through that one authorized transition so a locally validated CSV
+  // preview is not discarded before the owner can explicitly import it.
+  const contentKey = pathname === '/onboarding' ? `${currentUser.uid}:onboarding` : `${currentUser.uid}:${sessionVersion}`;
+  return <React.Fragment key={contentKey}>{children}</React.Fragment>;
 };
 
 export default ProtectedRoute;

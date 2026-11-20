@@ -19,6 +19,7 @@ const LoginPage = lazy(() => import('./pages/LoginPage'));
 const SignupPage = lazy(() => import('./pages/SignupPage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const CompanySetupPage = lazy(() => import('./pages/CompanySetupPage'));
+const CompanyOnboardingPage = lazy(() => import('./pages/CompanyOnboardingPage'));
 const CustomerManagementPage = lazy(() => import('./pages/CustomerManagementPage'));
 const EstimateTemplatesPage = lazy(() => import('./pages/EstimateTemplatesPage'));
 const EstimatesPage = lazy(() => import('./pages/EstimatesPage'));
@@ -98,6 +99,7 @@ function AppContent() {
                 <Route path="/my-work" element={<ProtectedRoute><Layout><MyWorkPage /></Layout></ProtectedRoute>} />
                 <Route path="/dispatch" element={<ProtectedRoute><Layout><DispatchPage /></Layout></ProtectedRoute>} />
                 <Route path="/signup" element={<SignupPage />} />
+                <Route path="/onboarding" element={<ProtectedRoute><CompanyOnboardingPage /></ProtectedRoute>} />
                 <Route path="/accept-invite" element={<AcceptInvitePage />} />
                 <Route path="/portal" element={<CustomerPortalPage />} />
                 <Route path="/review" element={<ReviewInvitationPage />} />

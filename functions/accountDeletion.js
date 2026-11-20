@@ -59,6 +59,7 @@ function accountDeletionHandlers(db, auth, { now = () => Date.now() } = {}) {
       ['deviceTokens', 'userId'], ['rlNotifications', 'userId'], ['rlLocations', 'userId'], ['rlLocationHistory', 'userId'], ['rlLocationHistoryEvents', 'userId'], ['rlWorkShifts', 'userId'],
       ['rlJobVisitStates', 'userId'], ['rlQbOAuthStates', 'userId'],
     ]) await deleteQuery(db.collection(collection).where(field, '==', uid));
+    await db.doc(`rlCompanyOnboardingDrafts/${uid}`).delete();
     // Authentication mail contains one-time credentials, not accounting/message history.
     while (true) {
       const challenges = await db.collection('rlStaffLoginChallenges').where('uid', '==', uid).limit(100).get();

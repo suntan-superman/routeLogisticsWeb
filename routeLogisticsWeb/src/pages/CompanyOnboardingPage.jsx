@@ -3,7 +3,7 @@ import { httpsCallable } from 'firebase/functions';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { functions } from '../services/firebase';
-import CompanyService from '../services/CompanyService';
+import CompanyService from '../services/companyService';
 import CustomerImport from '../components/CustomerImport';
 import SelectControl from '../components/SelectControl';
 import { previewCustomers, csvCell } from '../utils/customerCsv';

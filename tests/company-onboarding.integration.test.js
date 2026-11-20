@@ -22,8 +22,13 @@ test('verified owner drafts resume, isolate by uid, and activation retries never
   assert.equal((await handlers.getDraft(request({}, other))).draft, null);
   await assert.rejects(handlers.saveDraft(request({ draft, expectedRevision: 0 })), { code: 'aborted' });
   const activated = await handlers.activate(request({})); assert.ok(activated.companyId);
-  assert.equal((await db.doc(`companies/${activated.companyId}`).get()).get('ownerId'), uid);
-  assert.equal((await db.doc(`companies/${activated.companyId}`).get()).get('timeZone'), 'America/Los_Angeles');
+  const activatedCompany = await db.doc(`companies/${activated.companyId}`).get();
+  assert.equal(activatedCompany.get('ownerId'), uid);
+  assert.equal(activatedCompany.get('ownerName'), 'Owner');
+  assert.equal(activatedCompany.get('name'), 'New Field Co');
+  assert.equal(activatedCompany.get('businessName'), 'New Field Co');
+  assert.equal(activatedCompany.get('isActive'), true);
+  assert.equal(activatedCompany.get('timeZone'), 'America/Los_Angeles');
   const repeated = await handlers.activate(request({})); assert.equal(repeated.companyId, activated.companyId); assert.equal(repeated.alreadyActivated, true);
   assert.equal((await db.collection('companies').where('ownerId', '==', uid).get()).size, 1);
   const importer = customerHandlers(db).bulkImportCustomers;
@@ -56,4 +61,32 @@ test('pending invitations and existing companies cannot create a second company'
   await assert.rejects(handlers.activate({ auth, data: {} }), { code: 'permission-denied' });
   assert.equal((await db.collection('companies').where('ownerId', '==', ownerUid).get()).size, 1);
   assert.equal((await db.doc(`companies/${companyId}`).get()).get('marker'), 'unchanged');
+});
+
+test('owner and administrator review existing setup without replacing tenant records', async () => {
+  const suffix = `${Date.now()}-${++sequence}`, companyId = `review-company-${suffix}`, ownerUid = `review-owner-${suffix}`, adminUid = `review-admin-${suffix}`, managerUid = `review-manager-${suffix}`;
+  await Promise.all([
+    db.doc(`companies/${companyId}`).set({ ownerId: ownerUid, name: 'Legacy display', businessName: 'Review Co', phone: '555-0100', services: ['Pest control'], serviceCategories: ['Pest control'], marker: 'preserve', timeZone: 'America/Los_Angeles' }),
+    db.doc(`users/${ownerUid}`).set({ name: 'Owner Person', email: `${ownerUid}@example.com`, companyId }),
+    db.doc(`users/${adminUid}`).set({ name: 'Admin Person', email: `${adminUid}@example.com`, companyId }),
+    db.doc(`teamMembers/admin-${suffix}`).set({ uid: adminUid, companyId, email: `${adminUid}@example.com`, role: 'admin', status: 'active' }),
+    db.doc(`teamMembers/manager-${suffix}`).set({ uid: managerUid, companyId, email: `${managerUid}@example.com`, role: 'manager', status: 'active' }),
+    db.doc(`customers/preserved-${suffix}`).set({ companyId, name: 'Preserved customer' }),
+  ]);
+  const handlers = companyOnboardingHandlers(db);
+  const owner = { uid: ownerUid, token: { companyId, role: 'owner', email: `${ownerUid}@example.com`, email_verified: true } };
+  const admin = { uid: adminUid, token: { companyId, membershipId: `admin-${suffix}`, role: 'admin', email: `${adminUid}@example.com`, email_verified: true } };
+  const manager = { uid: managerUid, token: { companyId, membershipId: `manager-${suffix}`, role: 'manager', email: `${managerUid}@example.com`, email_verified: true } };
+  const loaded = await handlers.review({ auth: owner, data: { action: 'get' } });
+  assert.equal(loaded.companyId, companyId); assert.equal(loaded.profile.businessName, 'Review Co'); assert.equal(loaded.team.length, 3);
+  const saved = await handlers.review({ auth: admin, data: { action: 'save', section: 'profile', expectedRevision: 0, value: { businessName: 'Review Co Updated', phone: '555-0101', address: '', city: '', state: '', zipCode: '', description: '' } } });
+  assert.deepEqual(saved, { revision: 1, unchanged: false });
+  const company = await db.doc(`companies/${companyId}`).get();
+  assert.equal(company.get('businessName'), 'Review Co Updated'); assert.equal(company.get('name'), 'Review Co Updated'); assert.equal(company.get('marker'), 'preserve'); assert.equal(company.get('ownerId'), ownerUid);
+  assert.equal((await db.doc(`customers/preserved-${suffix}`).get()).get('name'), 'Preserved customer');
+  const unchanged = await handlers.review({ auth: owner, data: { action: 'save', section: 'profile', expectedRevision: 1, value: { businessName: 'Review Co Updated', phone: '555-0101', address: '', city: '', state: '', zipCode: '', description: '' } } });
+  assert.deepEqual(unchanged, { revision: 1, unchanged: true });
+  await assert.rejects(handlers.review({ auth: manager, data: { action: 'get' } }), { code: 'permission-denied' });
+  await assert.rejects(handlers.review({ auth: { ...admin, token: { ...admin.token, companyId: 'another-company' } }, data: { action: 'get' } }), { code: 'permission-denied' });
+  await assert.rejects(handlers.review({ auth: owner, data: { action: 'save', section: 'services', expectedRevision: 0, value: ['Termite'] } }), { code: 'aborted' });
 });

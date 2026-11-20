@@ -22,6 +22,7 @@ test('return routes preserve invite fragment and reject external or unknown dest
   const next = '/accept-invite?id=rl_123#code=' + 'a'.repeat(64);
   assert.equal(returnPath('?next=' + encodeURIComponent(next)), next);
   assert.equal(returnPath('?next=%2Fplatform-admin'), '/platform-admin');
+  assert.equal(returnPath('?next=%2Fonboarding'), '/onboarding');
   for (const path of ['/platform-admin.evil.test', '/platform-admin?next=https://evil.test', '/platform-admin//evil.test']) assert.equal(returnPath('?next='+encodeURIComponent(path)),null);
-  for (const next of ['//evil.com', 'https://evil.com', '/company-setup', '/accept-invite?id=bad']) assert.equal(returnPath('?next=' + encodeURIComponent(next)), null);
+  for (const next of ['//evil.com', 'https://evil.com', '/company-setup', '/onboarding?next=https://evil.test', '/accept-invite?id=bad']) assert.equal(returnPath('?next=' + encodeURIComponent(next)), null);
 });

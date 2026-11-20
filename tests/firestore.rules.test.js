@@ -42,6 +42,14 @@ const owner = () => as('owner1', { companyId: 'c1', role: 'owner' });
 const tech = () => as('tech1', { companyId: 'c1', role: 'technician', membershipId: 't1' });
 const manager = () => as('mgr1', { companyId: 'c1', role: 'manager', membershipId: 'm1' });
 
+test('company onboarding drafts remain server-only for solo and company accounts', async () => {
+  await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), 'rlCompanyOnboardingDrafts/solo1'), { ownerId: 'solo1', revision: 1 }));
+  for (const client of [as('solo1'), owner(), manager(), tech()]) {
+    await assertFails(getDoc(doc(client, 'rlCompanyOnboardingDrafts/solo1')));
+    await assertFails(setDoc(doc(client, 'rlCompanyOnboardingDrafts/solo1'), { ownerId: 'solo1', revision: 2 }));
+  }
+});
+
 test('account deletion markers deny stale owner, staff and solo tokens, profile recreation and marker tampering', async () => {
   await env.withSecurityRulesDisabled(async ctx => {
     for (const uid of ['owner1', 'tech1', 'solo1']) await setDoc(doc(ctx.firestore(), `rlAccountDeletions/${uid}`), { status: 'pending' });

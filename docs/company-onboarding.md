@@ -1,6 +1,8 @@
 # Company onboarding wizard
 
-New self-serve signups proceed through `/onboarding` after email verification. Existing company members and invitation recipients retain their current signup and acceptance paths. The existing `/company-setup` page remains available for active companies.
+The public homepage presents **Log In** and **Add Your Company**. New self-serve owners create a login, verify their email, and proceed through `/onboarding`; a protected-route return path brings an interrupted owner back to the saved draft after sign-in. Existing company members retain their normal login experience, while invitation recipients retain the token-bound invitation signup and acceptance path. A verified account with a pending invitation is never treated as a new-company owner.
+
+Active Owner and Admin users can open **Review Company Setup** from `/company-setup`. That route renders the same seven-step structure in review mode at `/company-setup/review`; it never calls company activation. Manager and Technician users cannot open review mode. Review reads current tenant-scoped company and team data through `rlCompanySetupReview`, and profile, service, and business-hour changes are saved as explicit sections with revision checks and audit records. Unchanged sections are not written, and company ownership, memberships, customers, existing work, and unrelated company fields are not replaced.
 
 ## Draft and activation model
 
@@ -17,7 +19,9 @@ The setup wizard uses the current browser CSV parser for local preview and valid
 ## Operational checks
 
 - New callable names: `rlGetCompanyOnboardingDraft`, `rlSaveCompanyOnboardingDraft`, `rlActivateCompanyOnboarding`.
+- Existing-company review callable: `rlCompanySetupReview` (`get` plus revision-checked `save` for profile, services, or hours).
 - Draft collection access is server-only; Firestore client rules do not grant direct access.
 - Draft saves are bounded by Firebase callable request size and are rate limited. Expiry cleanup processes up to 400 drafts per daily run.
 - Owner email verification is required before draft access or activation. New unverified signups see the existing verification gate.
 - Acceptance coverage: clean/invalid draft validation, resume and revision conflicts, cross-user isolation, verified activation, and duplicate activation in the Firestore emulator.
+- Review acceptance coverage: Owner/Admin access, Manager/Technician denial, tenant isolation, no-op saves, stale revision rejection, preservation of unrelated company/customer records, and optional idempotent customer import.

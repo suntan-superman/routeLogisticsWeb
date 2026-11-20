@@ -38,11 +38,12 @@ test('unconfigured coverage verifies supplied addresses while public service req
   assert.equal((await f.check('999 Unresolved Street, Example, CA 93312')).eligible, false);
   const status = await f.service.handle(f.request({ action: 'status' })); assert.equal(status.settings.configured, false); assert.equal(status.settings.publishCoverage, false); assert.equal(f.calls(), 2);
 });
-test('owners and managers manage private settings; admins may inspect/check but cannot save, technicians and other tenants are denied', async () => {
+test('owners, administrators and managers manage private settings; technicians and other tenants are denied', async () => {
   const f = await fixture(), other = await fixture();
-  await f.save(settings(), f.manager); assert.equal((await f.service.handle(f.request({ action: 'status' }, f.admin))).canManageSettings, false);
+  await f.save(settings(), f.manager); assert.equal((await f.service.handle(f.request({ action: 'status' }, f.admin))).canManageSettings, true);
   assert.equal((await f.service.handle(f.request({ action: 'check', propertyAddress: INSIDE }, f.admin))).result.eligible, true);
-  for (const actor of [f.admin, f.tech]) await assert.rejects(f.save(settings(), actor), { code: 'permission-denied' });
+  await f.save({ ...settings(), zipCodes: ['93313'] }, f.admin);
+  await assert.rejects(f.save(settings(), f.tech), { code: 'permission-denied' });
   await assert.rejects(f.service.handle(f.request({ action: 'status' }, f.tech)), { code: 'permission-denied' });
   await assert.rejects(f.service.handle(f.request({ action: 'status', companyId: other.companyId })), { code: 'permission-denied' });
 });

@@ -596,7 +596,7 @@ const CompanySetupForm = () => {
 
   if (companyId && !company && loadError) return <section className="rounded border bg-white p-6"><p role="alert">{loadError}</p><button type="button" className="btn-secondary mt-3" onClick={loadCompanyData}>Retry company settings</button></section>;
 
-  if (company && !isOwner) return <div className="space-y-6"><div className="rounded-lg border bg-white p-6"><h1 className="text-2xl font-bold">{company.name}</h1><p className="mt-3">Company settings and invitations are managed by the owner.</p></div>{role === 'manager' && <ServiceAreasSettings company={company} />}</div>;
+  if (company && !isOwner) return <div className="space-y-6"><div className="rounded-lg border bg-white p-6"><h1 className="text-2xl font-bold">{company.businessName || company.name}</h1><p className="mt-3">{role === 'admin' ? 'Administrators can review validated company setup sections. Team invitations and ownership remain owner-managed.' : 'Company settings and invitations are managed by the owner.'}</p>{role === 'admin' && <a className="btn-primary mt-4 inline-flex" href="/company-setup/review">Review Company Setup</a>}</div>{['admin', 'manager'].includes(role) && <ServiceAreasSettings company={company} />}</div>;
 
   return (
     <Motion.div
@@ -609,7 +609,8 @@ const CompanySetupForm = () => {
       {/* Header */}
       {inviteLink && <div className="rounded-lg border border-green-200 bg-green-50 p-4"><p className="mb-2">{inviteDelivery === 'queued' ? 'Invitation email queued. You can also share this link directly:' : 'Email delivery is disabled. Copy this invitation link to share it directly:'}</p><input aria-label="Invitation link" readOnly value={inviteLink} onFocus={(e) => e.target.select()} className="w-full rounded border-gray-300" /><button type="button" className="mt-2 underline" onClick={async () => { try { await navigator.clipboard.writeText(inviteLink); toast.success('Link copied'); } catch { toast.error('Select and copy the link above.'); } }}>Copy invitation link</button></div>}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <div className="flex items-center">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center">
           <BuildingOfficeIcon className="h-8 w-8 text-primary-500 mr-3" />
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Company Setup</h1>
@@ -617,6 +618,8 @@ const CompanySetupForm = () => {
               {company ? 'Manage your company settings' : 'Set up your company profile'}
             </p>
           </div>
+          </div>
+          {company && isOwner && <a className="btn-primary" href="/company-setup/review">Review Company Setup</a>}
         </div>
       </div>
 

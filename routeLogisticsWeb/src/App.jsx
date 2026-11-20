@@ -62,7 +62,7 @@ const queryClient = createWorkspaceQueryClient();
 // Shows the marketing landing page to signed-out visitors, and the dashboard
 // to signed-in users, without changing either route's own loading/redirect logic.
 const HomeOrLanding = () => {
-  const { currentUser, loading, role } = useAuth();
+  const { currentUser, loading, role, workspace } = useAuth();
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -71,6 +71,7 @@ const HomeOrLanding = () => {
     );
   }
   if (!currentUser) return <LandingPage />;
+  if (currentUser.emailVerified && workspace?.status === 'solo') return <Navigate to="/onboarding" replace />;
   return (
     <ProtectedRoute><Layout>
       {role === 'technician' ? <MyWorkPage /> : <HomePage />}
@@ -125,6 +126,13 @@ function AppContent() {
                   <ProtectedRoute>
                     <Layout>
                       <CompanySetupPage />
+                    </Layout>
+                  </ProtectedRoute>
+                } />
+                <Route path="/company-setup/review" element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <CompanyOnboardingPage mode="review" />
                     </Layout>
                   </ProtectedRoute>
                 } />

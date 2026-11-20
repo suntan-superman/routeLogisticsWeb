@@ -199,17 +199,17 @@ function serviceAreaHandlers(db, config = {}) {
     if (data.companyId !== undefined && data.companyId !== scope.companyId) fail('permission-denied', 'Service-area settings belong to another company.');
     await rateLimit(db, 'service-area', scope.uid, 30, 60000, now());
     const target = policyRef(scope.companyId), company = scope.company, categories = companyCategories(company.data());
-    if (data.action === 'status') return { settings: snapshot(await target.get()), availableCategories: categories, canManageSettings: ['owner', 'manager'].includes(scope.role), canApproveExceptions: company.get('ownerId') === scope.uid };
+    if (data.action === 'status') return { settings: snapshot(await target.get()), availableCategories: categories, canManageSettings: ['owner', 'admin', 'manager'].includes(scope.role), canApproveExceptions: company.get('ownerId') === scope.uid };
     if (data.action === 'save') {
-      if (!['owner', 'manager'].includes(scope.role)) fail('permission-denied', 'Only an authorized company owner or manager can change service areas.');
+      if (!['owner', 'admin', 'manager'].includes(scope.role)) fail('permission-denied', 'Only an authorized company owner, administrator, or manager can change service areas.');
       if (!Number.isInteger(data.expectedRevision) || data.expectedRevision < 0) fail('invalid-argument', 'Refresh the current service-area settings before saving.');
       const clean = cleanSettings(data.settings, categories), before = await target.get();
       if ((before.get('revision') || 0) !== data.expectedRevision) fail('aborted', 'Service areas changed in another session. Refresh before saving.');
       const oldLocation = before.get('operatingLocation');
       const operatingLocation = addressKey(before.get('operatingAddress')) === addressKey(clean.operatingAddress) && finitePoint(oldLocation) ? trustedProperty(oldLocation, time(oldLocation.validatedAt) || now()) : await resolve(scope.companyId, clean.operatingAddress);
       const settings = await db.runTransaction(async tx => {
-        const [current, liveCompany, liveMember] = await Promise.all([tx.get(target), tx.get(db.doc(`companies/${scope.companyId}`)), scope.role === 'manager' && scope.memberId ? tx.get(db.doc(`teamMembers/${scope.memberId}`)) : Promise.resolve(null)]);
-        if (!liveCompany.exists || (scope.role === 'owner' ? liveCompany.get('ownerId') !== scope.uid : !liveMember?.exists || liveMember.get('uid') !== scope.uid || liveMember.get('companyId') !== scope.companyId || liveMember.get('status') !== 'active' || liveMember.get('role') !== 'manager')) fail('permission-denied', 'Current company owner or manager authorization is required.');
+        const [current, liveCompany, liveMember] = await Promise.all([tx.get(target), tx.get(db.doc(`companies/${scope.companyId}`)), scope.role !== 'owner' && scope.memberId ? tx.get(db.doc(`teamMembers/${scope.memberId}`)) : Promise.resolve(null)]);
+        if (!liveCompany.exists || (scope.role === 'owner' ? liveCompany.get('ownerId') !== scope.uid : !liveMember?.exists || liveMember.get('uid') !== scope.uid || liveMember.get('companyId') !== scope.companyId || liveMember.get('status') !== 'active' || liveMember.get('role') !== scope.role || !['admin', 'manager'].includes(liveMember.get('role')))) fail('permission-denied', 'Current company owner, administrator, or manager authorization is required.');
         cleanSettings(clean, companyCategories(liveCompany.data()));
         if ((current.get('revision') || 0) !== data.expectedRevision) fail('aborted', 'Service areas changed in another session. Refresh before saving.');
         const next = { ...clean, operatingLocation, configured: true, revision: data.expectedRevision + 1, createdAt: current.get('createdAt') || new Date(now()), updatedAt: new Date(now()), updatedBy: scope.uid };

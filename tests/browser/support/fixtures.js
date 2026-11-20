@@ -82,6 +82,11 @@ async function seed(info) {
     functionUrl: name => `http://127.0.0.1:5001/${PROJECT}/us-central1/${name}`,
     readDoc, read: (collection, key) => readDoc(`${collection}/${key}`),
     list: async collection => (await db.collection(collection).get()).docs.map(row => ({ id: row.id, ...row.data() })),
+    verifyAccount: async email => {
+      const account = await auth.getUserByEmail(email);
+      await auth.updateUser(account.uid, { emailVerified: true });
+      return account.uid;
+    },
     setSchedulingIdentity: async (accountKey, { name } = {}) => {
       localAdmin();
       if (!['manager', 'technician'].includes(accountKey) || !Object.hasOwn(accounts, accountKey)

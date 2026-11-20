@@ -44,8 +44,8 @@ afterEach(async()=>{if(tree)await act(async()=>tree.unmount());tree=null;role='o
 test('technicians cannot load or edit private service-area settings',async()=>{
  role='technician';uid='tech';await mountSettings();assert.equal(calls.length,0);assert.match(text(),/Technicians cannot change coverage/);assert.equal(tree.root.findAllByType('input').length,0);
 });
-test('ordinary team admins do not gain owner or manager service-area settings access',async()=>{
- role='admin';uid='admin';await mountSettings();assert.equal(calls.length,0);assert.equal(tree.root.findAllByType('input').length,0);
+test('company administrators can manage coverage without owner exception authority',async()=>{
+ role='admin';uid='admin';await mountSettings();assert.equal(calls[0].data.action,'status');assert.equal(button('Save service areas').props.disabled,true);assert.equal(tree.root.findAllByType('input').filter(n=>n.props.type==='checkbox')[1].props.checked,false);
 });
 test('managers can manage private coverage without owner exception authority',async()=>{
  role='manager';uid='manager';policy=baseline();await mountSettings();assert.equal(calls[0].data.action,'status');assert.equal(button('Save service areas').props.disabled,true);assert.equal(tree.root.findAllByType('input').filter(n=>n.props.type==='checkbox')[1].props.checked,false);

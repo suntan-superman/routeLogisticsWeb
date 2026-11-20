@@ -133,7 +133,7 @@ export default function LoginPage() {
           {resetMode && <button type="button" disabled={busy} onClick={() => changeMode('password')} className="block w-full text-center text-sm font-medium text-primary-600">Back to sign in</button>}
         </form>
       </div>
-      <p className="mt-6 text-center text-sm text-gray-600">New to Route Logistics?{' '}<Link to={returnPath(location.search) ? `/signup?next=${encodeURIComponent(returnPath(location.search))}` : '/signup'} className="font-semibold text-primary-600 hover:text-primary-700">Create an account</Link></p>
+      <p className="mt-6 text-center text-sm text-gray-600">New to Route Logistics?{' '}<Link to={returnPath(location.search) ? `/signup?next=${encodeURIComponent(returnPath(location.search))}` : '/signup?intent=company'} className="font-semibold text-primary-600 hover:text-primary-700">{returnPath(location.search)?.startsWith('/accept-invite') ? 'Create an account' : 'Add Your Company'}</Link></p>
     </Motion.div>
   </main>;
 }

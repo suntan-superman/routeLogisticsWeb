@@ -6,7 +6,7 @@ import WorkspaceGate from './WorkspaceGate';
 
 const ProtectedRoute = ({ children }) => {
   const { currentUser, loading, workspace, can, sessionVersion } = useAuth();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
 
   if (loading) {
     return (
@@ -17,10 +17,13 @@ const ProtectedRoute = ({ children }) => {
   }
 
   if (!currentUser) {
-    return <Navigate to="/login" replace />;
+    const next = pathname === '/onboarding' ? `?next=${encodeURIComponent(pathname + search)}` : '';
+    return <Navigate to={`/login${next}`} replace />;
   }
 
-  if (!currentUser.emailVerified || !['company', 'solo'].includes(workspace?.status)) return <WorkspaceGate />;
+  if (!currentUser.emailVerified) return <WorkspaceGate />;
+  if (pathname === '/onboarding' && workspace?.status === 'solo') return <React.Fragment key={`${currentUser.uid}:onboarding`}>{children}</React.Fragment>;
+  if (!['company', 'solo'].includes(workspace?.status)) return <WorkspaceGate />;
   if (!mayOpenRoute(pathname, can)) return <main className="p-8"><h1 className="text-2xl font-bold">Access unavailable</h1><p className="my-4">Your role does not allow this screen.</p><Link className="underline" to="/">Return to your workspace</Link></main>;
 
   // Activation refreshes the owner's tenancy claims. Keep the onboarding tree

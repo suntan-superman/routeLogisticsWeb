@@ -87,10 +87,10 @@ const LandingPage = () => {
               Log in
             </Link>
             <Link
-              to="/signup"
+              to="/signup?intent=company"
               className="text-sm font-semibold text-white bg-primary-600 hover:bg-primary-700 rounded-md px-4 py-2 transition-colors"
             >
-              Sign up free
+              Add Your Company
             </Link>
           </nav>
         </div>
@@ -105,10 +105,10 @@ const LandingPage = () => {
         <p className="mt-6 text-lg text-gray-600 max-w-2xl mx-auto">{v.sub}</p>
         <div className="mt-8 flex items-center justify-center gap-4">
           <Link
-            to="/signup"
+            to="/signup?intent=company"
             className="text-base font-semibold text-white bg-primary-600 hover:bg-primary-700 rounded-md px-6 py-3 transition-colors"
           >
-            Get started free
+            Add Your Company
           </Link>
           <Link to="/login" className="text-base font-semibold text-gray-700 hover:text-gray-900 px-6 py-3">
             Log in &rarr;
@@ -139,10 +139,10 @@ const LandingPage = () => {
         <h2 className="text-2xl font-bold text-gray-900">Built for pest control. Works for any field service business.</h2>
         <p className="mt-3 text-gray-600">Create your company account in minutes &mdash; no credit card required.</p>
         <Link
-          to="/signup"
+          to="/signup?intent=company"
           className="mt-6 inline-block text-base font-semibold text-white bg-primary-600 hover:bg-primary-700 rounded-md px-6 py-3 transition-colors"
         >
-          Create your account
+          Add Your Company
         </Link>
       </section>
 

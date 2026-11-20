@@ -41,7 +41,7 @@ export default function ServiceAreasSettings({ company: suppliedCompany }) {
   const { company: sessionCompany, currentUser, role } = useAuth();
   const company = suppliedCompany || sessionCompany;
   const owner = !!company && company.ownerId === currentUser?.uid;
-  const allowed = !!company?.id && (owner || role === 'manager');
+  const allowed = !!company?.id && (owner || ['admin', 'manager'].includes(role));
   return <ServiceAreasForm key={`${currentUser?.uid || ''}:${company?.id || ''}:${role || ''}`} company={company} allowed={allowed} />;
 }
 
@@ -89,7 +89,7 @@ function ServiceAreasForm({ company, allowed }) {
     // erase the address the dispatcher is currently checking.
   }, [settingsQuery.data, busy]);
   useEffect(() => { if (workspaceAccessError(settingsQuery.error)) { setForm(null); setData(null); setPreview(false); } }, [settingsQuery.error]);
-  if (!allowed) return <section className="rounded-xl border border-gray-200 bg-white p-6"><h2 className="text-xl font-semibold">Service Areas</h2><p className="mt-2">Company owners and managers manage service territories. Technicians cannot change coverage or approve exceptions.</p></section>;
+  if (!allowed) return <section className="rounded-xl border border-gray-200 bg-white p-6"><h2 className="text-xl font-semibold">Service Areas</h2><p className="mt-2">Company owners, administrators, and managers manage service territories. Technicians cannot change coverage or approve exceptions.</p></section>;
   const categories = (company.serviceCategories || []).filter(value => typeof value === 'string' && value.trim());
   const validationError = form ? validation(form) : '';
   const patch = change => { setForm(previous => ({ ...previous, ...change })); setMessage(''); if (Object.hasOwn(change, 'operatingAddress')) setAddressValidation(null); };

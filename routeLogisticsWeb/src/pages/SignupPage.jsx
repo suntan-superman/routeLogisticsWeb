@@ -1,17 +1,21 @@
 import React, { useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { returnPath } from '../utils/returnPath';
 import { motion as Motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import ThemeControl from '../components/ThemeControl';
+import { isInvitationReturn } from '../utils/companySetupAccess';
 
 const SignupPage = () => {
-  const { signup } = useAuth();
+  const { signup, currentUser } = useAuth();
   const location = useLocation();
   const next = returnPath(location.search);
+  const invitation = isInvitationReturn(next);
   const navigate = useNavigate();
   const [form, setForm] = useState({ name: '', businessName: '', email: '', password: '' });
   const [isLoading, setIsLoading] = useState(false);
+
+  if (currentUser) return <Navigate to={next || '/onboarding'} replace />;
 
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
@@ -46,7 +50,7 @@ const SignupPage = () => {
             <span className="text-white font-bold text-xl">RL</span>
           </Link>
           <h2 className="mt-6 text-center text-3xl font-bold text-gray-900">Create your account</h2>
-          <p className="mt-2 text-center text-sm text-gray-600">{next ? 'Create your personal login to accept your company invitation. Your company and role are already selected.' : 'Set up your company in Route Logistics'}</p>
+          <p className="mt-2 text-center text-sm text-gray-600">{invitation ? 'Create your personal login to accept your company invitation. Your company and role are already selected.' : 'Create your owner login, verify your email, then continue the existing company setup wizard.'}</p>
         </div>
 
         <form className="mt-8 space-y-4" onSubmit={handleSubmit}>
@@ -61,12 +65,12 @@ const SignupPage = () => {
               placeholder="Jane Smith"
             />
           </div>
-          {!next && <div>
+          {!invitation && <div>
             <label htmlFor="businessName" className="block text-sm font-medium text-gray-700">Company name</label>
             <input
               id="businessName"
-              required={!next}
-              disabled={!!next}
+              required={!invitation}
+              disabled={invitation}
               value={form.businessName}
               onChange={set('businessName')}
               className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"

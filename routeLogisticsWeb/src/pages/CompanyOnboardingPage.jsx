@@ -3,7 +3,6 @@ import { httpsCallable } from 'firebase/functions';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { functions } from '../services/firebase';
-import CompanyService from '../services/companyService';
 import CustomerImport from '../components/CustomerImport';
 import SelectControl from '../components/SelectControl';
 import TimeSelect from '../components/TimeSelect';
@@ -139,13 +138,13 @@ export default function CompanyOnboardingPage({ mode = 'new' }) {
       const { data } = await callable('rlActivateCompanyOnboarding')();
       setActiveCompany(data.companyId); await refreshSession();
       const issues = [], area = draft.serviceArea;
+      const invitationSummary = `${data.invitationCount || 0} team invitation(s) created${data.invitationEmailStatus === 'queued' ? ' and queued for email' : ''}.`;
       if (draft.profile.address && draft.profile.city && draft.profile.state && draft.profile.zipCode && (area.method === 'radius' || area.zipCodes.length)) {
         try { await callable('rlServiceAreas')({ action: 'save', expectedRevision: 0, settings: { operatingAddress: `${draft.profile.address}, ${draft.profile.city}, ${draft.profile.state} ${draft.profile.zipCode}`, method: area.method, radiusMiles: area.radiusMiles, zipCodes: area.zipCodes, categoryOverrides: [], acceptingNewCustomers: false, publishCoverage: false, allowOutOfAreaRequests: false } }); }
         catch (error) { issues.push(`Service-area setup needs a retry in Company Settings: ${error.message}`); }
       }
-      for (const invite of draft.invites) { const result = await CompanyService.addTeamMember(data.companyId, invite.email, invite.role); if (!result.success) issues.push(`${invite.email}: ${result.error}`); }
-      if (issues.length) setMessage(`Company activated. ${issues.join('; ')}`);
-      else if (csv) setMessage('Company activated. Review the retained CSV preview below, then choose Import customers.');
+      if (issues.length) setMessage(`Company activated. ${invitationSummary} ${issues.join('; ')}`);
+      else if (csv) setMessage(`Company activated. ${invitationSummary} Review the retained CSV preview below, then choose Import customers.`);
       else { setMessage('Company activated. Opening your dashboard…'); navigate('/', { replace: true }); }
     } catch (error) { setMessage(error.message || 'Activation failed. Your saved setup is still available to retry.'); }
     finally { setBusy(false); }

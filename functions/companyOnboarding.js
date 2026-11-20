@@ -1,6 +1,7 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { randomUUID } = require('node:crypto');
 const { requireAuth, requireStaff, normalizeEmail, rateLimit } = require('./security');
+const { createOnboardingInvitation } = require('./invitations');
 
 const clean = (value, max = 500) => String(value || '').trim().slice(0, max);
 const validZone = value => {
@@ -18,6 +19,18 @@ function cleanBusinessHours(input) {
     return [day, { closed: value.closed === true, open, close }];
   }));
 }
+function cleanInvites(input) {
+  if (!Array.isArray(input)) return [];
+  const byEmail = new Map();
+  for (const row of input.slice(0, 50)) {
+    const email = normalizeEmail(clean(row?.email, 254));
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) continue;
+    const role = row?.role === 'manager' ? 'manager' : 'technician';
+    if (byEmail.has(email) && byEmail.get(email).role !== role) throw new HttpsError('invalid-argument', 'Choose one role for each invited email address.');
+    byEmail.set(email, { email, role });
+  }
+  return [...byEmail.values()];
+}
 function cleanDraft(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpsError('invalid-argument', 'Invalid onboarding draft.');
   const profile = input.profile && typeof input.profile === 'object' ? input.profile : {};
@@ -30,7 +43,7 @@ function cleanDraft(input) {
     profile: { name: clean(profile.name, 200), businessName: clean(profile.businessName, 200), phone: clean(profile.phone, 40), address: clean(profile.address, 278), city: clean(profile.city, 100), state: clean(profile.state, 50), zipCode: clean(profile.zipCode, 20), description: clean(profile.description, 2000) },
     services: [...new Set(services)], timeZone, businessHours: hours,
     serviceArea: input.serviceArea && typeof input.serviceArea === 'object' ? { method: input.serviceArea.method === 'radius' ? 'radius' : 'zip', radiusMiles: Math.min(300, Math.max(0.1, Number(input.serviceArea.radiusMiles) || 25)), zipCodes: Array.isArray(input.serviceArea.zipCodes) ? [...new Set(input.serviceArea.zipCodes.map(v => clean(v, 10).slice(0, 10)))].filter(v => /^\d{5}$/.test(v)).slice(0, 500) : [] } : { method: 'zip', radiusMiles: 25, zipCodes: [] },
-    invites: Array.isArray(input.invites) ? input.invites.slice(0, 50).map(row => ({ email: normalizeEmail(clean(row?.email, 254)), role: row?.role === 'manager' ? 'manager' : 'technician' })).filter(row => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email)) : [],
+    invites: cleanInvites(input.invites),
   };
 }
 const projectProfile = data => ({
@@ -63,7 +76,7 @@ function reviewSection(section, input) {
   throw new HttpsError('invalid-argument', 'Choose a supported company setup section.');
 }
 const comparable = value => JSON.stringify(value);
-function companyOnboardingHandlers(db) {
+function companyOnboardingHandlers(db, { appUrl = () => 'https://route-logistics.com', emailEnabled = () => false } = {}) {
   const draftRef = uid => db.doc(`rlCompanyOnboardingDrafts/${uid}`);
   async function assertEligible(uid, token) {
     if (token.email_verified !== true) throw new HttpsError('failed-precondition', 'Verify your email before continuing company setup.');
@@ -118,11 +131,13 @@ function companyOnboardingHandlers(db) {
         if (profile.get('companyId') || profile.get('rlCompanyId') || !owned.empty || !memberships.empty || !invites.empty) throw new HttpsError('permission-denied', 'This account already belongs to a company or invitation.');
         const draft = draftSnap.exists ? cleanDraft(draftSnap.get('draft')) : null;
         if (!draft || !draft.profile.name || !draft.profile.businessName || !draft.services.length) throw new HttpsError('failed-precondition', 'Complete your company profile and add at least one service before activation.');
+        if (draft.invites.some(row => row.email === normalizeEmail(request.auth.token.email || ''))) throw new HttpsError('invalid-argument', 'The company owner is already a member and cannot be invited again.');
         const now = new Date().toISOString();
         tx.create(companyRef, { ownerId: uid, ownerName: draft.profile.name, name: draft.profile.businessName, businessName: draft.profile.businessName, phone: draft.profile.phone, address: draft.profile.address, city: draft.profile.city, state: draft.profile.state, zipCode: draft.profile.zipCode, description: draft.profile.description, services: draft.services, serviceCategories: draft.services, businessHours: draft.businessHours, timeZone: draft.timeZone, onboardingServiceArea: draft.serviceArea, isActive: true, status: 'active', createdAt: now, updatedAt: now });
         tx.set(profileRef, { companyId: companyRef.id, rlCompanyId: companyRef.id, businessName: draft.profile.businessName, updatedAt: now }, { merge: true });
         tx.set(ref, { ownerId: uid, revision: (draftSnap.get('revision') || 0) + 1, draft, activatedCompanyId: companyRef.id, activatedAt: now, updatedAt: now }, { merge: true });
-        return { companyId: companyRef.id, alreadyActivated: false };
+        for (const invite of draft.invites) createOnboardingInvitation(tx, db, { companyId: companyRef.id, email: invite.email, role: invite.role, invitedBy: uid, companyName: draft.profile.businessName, appUrl: appUrl(), queueEmail: emailEnabled() });
+        return { companyId: companyRef.id, alreadyActivated: false, invitationCount: draft.invites.length, invitationEmailStatus: emailEnabled() ? 'queued' : 'disabled' };
       });
     },
     review: async request => {

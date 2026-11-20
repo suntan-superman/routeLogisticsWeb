@@ -4,6 +4,25 @@ const { MEMBER_ROLES } = require('./claims');
 const { hash, normalizeEmail, validEmail, documentId, requireAuth, requireCompanyOwner, rateLimit } = require('./security');
 const INVITE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 const memberIdFor = (companyId, email) => `rl_${hash(`${companyId}:${normalizeEmail(email)}`)}`;
+function createOnboardingInvitation(tx, db, { companyId, email: input, role, invitedBy, companyName, appUrl, queueEmail }, now = Date.now()) {
+  const email = normalizeEmail(input);
+  if (!validEmail(email) || !MEMBER_ROLES.includes(role)) throw new HttpsError('invalid-argument', 'Enter a valid email and select a team role.');
+  const id = memberIdFor(companyId, email), code = randomBytes(32).toString('hex');
+  const createdAt = new Date(now).toISOString(), expiresAt = now + INVITE_LIFETIME_MS;
+  tx.create(db.collection('teamMembers').doc(id), { companyId, email, role, invitedBy, status: 'pending', schemaVersion: 2, uid: null, activatedAt: null, expiresAt, createdAt, updatedAt: createdAt });
+  tx.create(db.collection('rlMembershipIdentities').doc(id), { companyId, email, memberId: id, updatedAt: new Date(now) });
+  tx.create(db.collection('rlInviteSecrets').doc(id), { codeHash: hash(code) });
+  tx.create(db.collection('rlMembershipAudit').doc(), { companyId, actorId: invitedBy, action: 'invite-create-onboarding', memberId: id, createdAt: new Date(now) });
+  if (queueEmail) {
+    const inviteUrl = `${appUrl.replace(/\/$/, '')}/accept-invite?id=${id}#code=${code}`;
+    tx.create(db.collection('rlMail').doc(), {
+      invitationId: id, invitationHash: hash(code), to: email, subject: `Join ${companyName || 'your team'} on Route Logistics`,
+      text: `You have been invited as ${role}. Sign in or create an account using ${email}, verify your email, and accept your invitation:\n\n${inviteUrl}\n\nThis link expires in 7 days.`,
+      status: 'queued', availableAt: now, createdAt: new Date(now), expiresAt: new Date(expiresAt),
+    });
+  }
+  return id;
+}
 function checkInvitation(invite, caller, code, now = Date.now()) {
   if (!invite || !MEMBER_ROLES.includes(invite.role) || !invite.companyId) throw new HttpsError('not-found', 'Invitation is unavailable. Ask the owner for a new link.');
   if (!caller.emailVerified || normalizeEmail(caller.email) !== invite.email) throw new HttpsError('permission-denied', 'Sign in with the invited email address and verify it first.');
@@ -109,4 +128,4 @@ function invitationHandlers(db, applyClaims, appUrl, emailEnabled = () => true) 
     },
   };
 }
-module.exports = { invitationHandlers, createInvitation, memberIdFor, checkInvitation, INVITE_LIFETIME_MS };
+module.exports = { invitationHandlers, createInvitation, createOnboardingInvitation, memberIdFor, checkInvitation, INVITE_LIFETIME_MS };

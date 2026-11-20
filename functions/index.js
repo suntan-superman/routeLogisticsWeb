@@ -154,7 +154,7 @@ exports.rlManageJob = onCall(workData.manageJob);
 exports.rlJobException = onCall(jobExceptionHandlers(db));
 exports.rlRecordApplication = onCall(workData.application);
 exports.rlCreateCompany = onCall(workData.createCompany);
-const companyOnboarding = companyOnboardingHandlers(db);
+const companyOnboarding = companyOnboardingHandlers(db, { appUrl: () => appUrl.value(), emailEnabled });
 exports.rlGetCompanyOnboardingDraft = onCall(companyOnboarding.getDraft);
 exports.rlSaveCompanyOnboardingDraft = onCall(companyOnboarding.saveDraft);
 exports.rlActivateCompanyOnboarding = onCall({ timeoutSeconds: 60 }, companyOnboarding.activate);

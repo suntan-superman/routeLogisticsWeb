@@ -65,6 +65,7 @@ const mock = name => {
   }};
   if(name.endsWith('/utils/serviceForms'))return utilities('serviceForms');
   if(name.endsWith('/utils/estimateDraft'))return utilities('estimateDraft');
+  if(name.endsWith('/utils/format'))return utilities('format');
   if(name.endsWith('/AddressValidationNotice'))return compile('components/AddressValidationNotice.jsx',mock);
   if(name.endsWith('/components/ServicePropertyEligibility'))return env.kind==='estimates-geography'?compile('components/ServicePropertyEligibility.jsx',mock):{__esModule:true,default:()=>null};
   if(name.endsWith('/services/customerService'))return{__esModule:true,default:{getCustomers:async()=>({success:true,customers:[{id:'customer-1',name:'Customer',address:'Customer billing address must not become the service property'}],hasMore:false})}};

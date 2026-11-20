@@ -6,12 +6,22 @@ import { functions } from '../services/firebase';
 import CompanyService from '../services/companyService';
 import CustomerImport from '../components/CustomerImport';
 import SelectControl from '../components/SelectControl';
+import TimeSelect from '../components/TimeSelect';
 import ServiceAreasSettings from '../components/ServiceAreasSettings';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { previewCustomers, csvCell } from '../utils/customerCsv';
 import { mayReviewCompanySetup } from '../utils/companySetupAccess';
+import { formatPhone, displayPhone } from '../utils/format';
 
 const days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+const usStates = [
+  ['AL','Alabama'],['AK','Alaska'],['AZ','Arizona'],['AR','Arkansas'],['CA','California'],['CO','Colorado'],['CT','Connecticut'],['DE','Delaware'],['DC','District of Columbia'],['FL','Florida'],
+  ['GA','Georgia'],['HI','Hawaii'],['ID','Idaho'],['IL','Illinois'],['IN','Indiana'],['IA','Iowa'],['KS','Kansas'],['KY','Kentucky'],['LA','Louisiana'],['ME','Maine'],
+  ['MD','Maryland'],['MA','Massachusetts'],['MI','Michigan'],['MN','Minnesota'],['MS','Mississippi'],['MO','Missouri'],['MT','Montana'],['NE','Nebraska'],['NV','Nevada'],['NH','New Hampshire'],
+  ['NJ','New Jersey'],['NM','New Mexico'],['NY','New York'],['NC','North Carolina'],['ND','North Dakota'],['OH','Ohio'],['OK','Oklahoma'],['OR','Oregon'],['PA','Pennsylvania'],['RI','Rhode Island'],
+  ['SC','South Carolina'],['SD','South Dakota'],['TN','Tennessee'],['TX','Texas'],['UT','Utah'],['VT','Vermont'],['VA','Virginia'],['WA','Washington'],['WV','West Virginia'],['WI','Wisconsin'],['WY','Wyoming'],
+  ['AS','American Samoa'],['GU','Guam'],['MP','Northern Mariana Islands'],['PR','Puerto Rico'],['VI','U.S. Virgin Islands'],
+];
 const blankHours = Object.fromEntries(days.map(day => [day, { closed: ['saturday','sunday'].includes(day), open: '09:00', close: '17:00' }]));
 const freshDraft = user => ({ currentStep: 1, profile: { name: user?.displayName || '', businessName: '', phone: '', address: '', city: '', state: '', zipCode: '', description: '' }, services: [], timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Los_Angeles', businessHours: blankHours, serviceArea: { method: 'zip', radiusMiles: 25, zipCodes: [] }, invites: [] });
 const onboardingSteps = ['Company information', 'Owner & verification', 'Team invitations', 'Services provided', 'Hours & service areas', 'Customer import', 'Review & activate'];
@@ -86,7 +96,7 @@ export default function CompanyOnboardingPage({ mode = 'new' }) {
       return next;
     });
   };
-  const setProfile = (key, value) => change(old => ({ ...old, profile: { ...old.profile, [key]: value } }));
+  const setProfile = (key, value) => change(old => ({ ...old, profile: { ...old.profile, [key]: key === 'phone' ? formatPhone(value) : value } }));
   const sectionDirty = section => !!savedSections && currentSections[section] !== savedSections[section];
   const saveReviewSection = async section => {
     if (!reviewMode || busy || !sectionDirty(section)) return;
@@ -173,7 +183,7 @@ export default function CompanyOnboardingPage({ mode = 'new' }) {
 }
 
 function ProfileStep({ reviewMode, draft, setProfile, busy, dirty, save }) {
-  return <section className="space-y-4 rounded-lg bg-white p-5 shadow"><h2 className="text-xl font-semibold">Company information</h2>{reviewMode && <label className="block text-sm">Owner account name<input className="input-field mt-1 block w-full" value={draft.profile.name || ''} disabled readOnly /></label>}{[['businessName','Company name'],['phone','Company phone'],['address','Operating street address'],['city','City'],['state','State'],['zipCode','ZIP code']].map(([key,label]) => <label key={key} className="block text-sm">{label}{key === 'businessName' && ' *'}<input className="input-field mt-1 block w-full" value={draft.profile[key] || ''} onChange={e => setProfile(key,e.target.value)} /></label>)}{!reviewMode && <label className="block text-sm">Owner name *<input className="input-field mt-1 block w-full" value={draft.profile.name || ''} onChange={e => setProfile('name',e.target.value)} /></label>}<label className="block text-sm">Company description<textarea className="input-field mt-1 block w-full" value={draft.profile.description} onChange={e => setProfile('description',e.target.value)} /></label>{reviewMode && <button type="button" className="btn-primary disabled:opacity-50" disabled={busy || !dirty} onClick={save}>Save company information</button>}</section>;
+  return <section className="space-y-4 rounded-lg bg-white p-5 shadow"><h2 className="text-xl font-semibold">Company information</h2>{reviewMode && <label className="block text-sm">Owner account name<input className="input-field mt-1 block w-full" value={draft.profile.name || ''} disabled readOnly /></label>}{[['businessName','Company name'],['phone','Company phone'],['address','Operating street address'],['city','City'],['state','State'],['zipCode','ZIP code']].map(([key,label]) => <label key={key} className="block text-sm">{label}{key === 'businessName' && ' *'}{key === 'state' ? <SelectControl aria-label="State" className="input-field mt-1 block w-full" value={draft.profile.state || ''} onChange={e => setProfile('state',e.target.value)}><option value="">Select a state</option>{draft.profile.state && !usStates.some(([code]) => code === draft.profile.state) && <option value={draft.profile.state}>{draft.profile.state} (saved value)</option>}{usStates.map(([code,name]) => <option key={code} value={code}>{name} ({code})</option>)}</SelectControl> : <input className="input-field mt-1 block w-full" type={key === 'phone' ? 'tel' : 'text'} autoComplete={key === 'phone' ? 'tel' : undefined} value={key === 'phone' ? displayPhone(draft.profile[key]) : draft.profile[key] || ''} onChange={e => setProfile(key,e.target.value)} />}</label>)}{!reviewMode && <label className="block text-sm">Owner name *<input className="input-field mt-1 block w-full" value={draft.profile.name || ''} onChange={e => setProfile('name',e.target.value)} /></label>}<label className="block text-sm">Company description<textarea className="input-field mt-1 block w-full" value={draft.profile.description} onChange={e => setProfile('description',e.target.value)} /></label>{reviewMode && <button type="button" className="btn-primary disabled:opacity-50" disabled={busy || !dirty} onClick={save}>Save company information</button>}</section>;
 }
 
 function TeamStep({ reviewMode, team, draft, newInvite, setNewInvite, inviteRole, setInviteRole, addInvite, change }) {
@@ -181,11 +191,62 @@ function TeamStep({ reviewMode, team, draft, newInvite, setNewInvite, inviteRole
 }
 
 function ServicesStep({ reviewMode, draft, newService, setNewService, addService, change, busy, dirty, save }) {
-  return <section className="space-y-4 rounded-lg bg-white p-5 shadow"><h2 className="text-xl font-semibold">Services provided</h2><p>{reviewMode ? 'Changes update the company service catalog only. Existing jobs, estimates, and customer history are preserved.' : 'Add standard or custom service names. You can refine the service catalog later.'}</p><div className="flex gap-2"><input aria-label="Service name" className="input-field flex-1" value={newService} onChange={e => setNewService(e.target.value)} onKeyDown={e => e.key === 'Enter' && (e.preventDefault(),addService())} placeholder="e.g. Pest control"/><button className="btn-secondary" onClick={addService}>Add service</button></div><ul className="list-disc pl-5">{draft.services.map(service => <li key={service}>{service} <button className="underline" onClick={() => change(old => ({ ...old, services: old.services.filter(v => v !== service) }), true)}>Remove</button></li>)}</ul>{reviewMode && <button type="button" className="btn-primary disabled:opacity-50" disabled={busy || !dirty} onClick={save}>Save services</button>}</section>;
+  const inputRef = useRef(null);
+  const addAndFocus = () => { addService(); inputRef.current?.focus(); };
+  return <section className="space-y-4 rounded-lg bg-white p-5 shadow"><h2 className="text-xl font-semibold">Services provided</h2><p>{reviewMode ? 'Changes update the company service catalog only. Existing jobs, estimates, and customer history are preserved.' : 'Add standard or custom service names. You can refine the service catalog later.'}</p><div className="flex gap-2"><input ref={inputRef} aria-label="Service name" className="input-field flex-1" value={newService} onChange={e => setNewService(e.target.value)} onKeyDown={e => e.key === 'Enter' && (e.preventDefault(),addAndFocus())} placeholder="e.g. Pest control"/><button type="button" className="btn-secondary" onClick={addAndFocus}>Add service</button></div><ul className="list-disc pl-5">{draft.services.map(service => <li key={service}>{service} <button className="underline" onClick={() => change(old => ({ ...old, services: old.services.filter(v => v !== service) }), true)}>Remove</button></li>)}</ul>{reviewMode && <button type="button" className="btn-primary disabled:opacity-50" disabled={busy || !dirty} onClick={save}>Save services</button>}</section>;
 }
 
 function HoursStep({ reviewMode, draft, change, busy, dirty, save, company }) {
-  return <div className="space-y-6"><section className="space-y-4 rounded-lg bg-white p-5 shadow"><h2 className="text-xl font-semibold">Business hours</h2><label className="block">Company time zone<SelectControl className="input-field mt-1 block w-full" value={draft.timeZone} onChange={e => change(old => ({ ...old, timeZone: e.target.value }))}>{[draft.timeZone,'America/Los_Angeles','America/Denver','America/Chicago','America/New_York','Pacific/Honolulu','America/Anchorage'].filter((v,i,a) => a.indexOf(v)===i).map(zone => <option key={zone}>{zone}</option>)}</SelectControl></label><p className="text-sm text-gray-600">These hours describe the business. Existing scheduling continues to use technician availability.</p><div className="space-y-2">{days.map(day => <div key={day} className="flex flex-wrap items-center gap-3"><span className="w-24 capitalize">{day}</span><label><input type="checkbox" checked={draft.businessHours[day]?.closed || false} onChange={e => change(old => ({ ...old, businessHours: { ...old.businessHours, [day]: { ...old.businessHours[day], closed: e.target.checked } } }))}/> Closed</label>{!draft.businessHours[day]?.closed && <><input aria-label={`${day} opens`} type="time" value={draft.businessHours[day]?.open || '09:00'} onChange={e => change(old => ({ ...old, businessHours: { ...old.businessHours, [day]: { ...old.businessHours[day], open: e.target.value } } }))}/><span>to</span><input aria-label={`${day} closes`} type="time" value={draft.businessHours[day]?.close || '17:00'} onChange={e => change(old => ({ ...old, businessHours: { ...old.businessHours, [day]: { ...old.businessHours[day], close: e.target.value } } }))}/></>}</div>)}</div>{reviewMode && <button type="button" className="btn-primary disabled:opacity-50" disabled={busy || !dirty} onClick={save}>Save business hours</button>}{!reviewMode && <fieldset className="space-y-3 border-t pt-4"><legend className="font-medium">Service area (optional)</legend><SelectControl className="input-field" value={draft.serviceArea.method} onChange={e => change(old => ({ ...old, serviceArea: { ...old.serviceArea, method: e.target.value } }))}><option value="zip">ZIP codes</option><option value="radius">Radius</option></SelectControl>{draft.serviceArea.method === 'zip' ? <label className="block">ZIP codes, comma separated<input className="input-field mt-1 block w-full" value={draft.serviceArea.zipCodes.join(', ')} onChange={e => change(old => ({ ...old, serviceArea: { ...old.serviceArea, zipCodes: [...new Set(e.target.value.split(',').map(v => v.trim()).filter(v => /^\d{5}$/.test(v)))] } }))}/></label> : <label className="block">Radius in miles<input className="input-field mt-1 block w-full" type="number" min="0.1" max="300" value={draft.serviceArea.radiusMiles} onChange={e => change(old => ({ ...old, serviceArea: { ...old.serviceArea, radiusMiles: Number(e.target.value) } }))}/></label>}<p className="text-sm text-gray-600">Coverage is saved after activation and does not change existing scheduling eligibility. Address verification may be required.</p></fieldset>}</section>{reviewMode && company && <ServiceAreasSettings company={company} />}</div>;
+  const updateDay = (day, field, value) => change(old => ({
+    ...old,
+    businessHours: {
+      ...old.businessHours,
+      [day]: { ...old.businessHours[day], [field]: value },
+    },
+  }));
+  const copyMonday = () => change(old => {
+    const monday = old.businessHours.monday || blankHours.monday;
+    return {
+      ...old,
+      businessHours: {
+        ...old.businessHours,
+        ...Object.fromEntries(days.slice(1, 5).map(day => [day, { ...old.businessHours[day], closed: !!monday.closed, open: monday.open, close: monday.close }])),
+      },
+    };
+  }, true);
+  return <div className="space-y-6">
+    <section className="space-y-4 rounded-lg bg-white p-5 shadow">
+      <h2 className="text-xl font-semibold">Business hours</h2>
+      <label className="block">Company time zone
+        <SelectControl className="input-field mt-1 block w-full" value={draft.timeZone} onChange={e => change(old => ({ ...old, timeZone: e.target.value }))}>
+          {[draft.timeZone,'America/Los_Angeles','America/Denver','America/Chicago','America/New_York','Pacific/Honolulu','America/Anchorage'].filter((v,i,a) => a.indexOf(v)===i).map(zone => <option key={zone}>{zone}</option>)}
+        </SelectControl>
+      </label>
+      <p className="text-sm text-gray-600">These hours describe the business. Existing scheduling continues to use technician availability.</p>
+      <button type="button" className="btn-secondary" disabled={busy} onClick={copyMonday}>Copy Monday to weekdays</button>
+      <div className="space-y-2">{days.map(day => <div key={day} className="flex flex-wrap items-center gap-3">
+        <span className="w-24 capitalize">{day}</span>
+        <label><input type="checkbox" checked={draft.businessHours[day]?.closed || false} onChange={e => updateDay(day, 'closed', e.target.checked)}/> Closed</label>
+        {!draft.businessHours[day]?.closed && <>
+          <TimeSelect label={day + ' opens'} hideLabel className="w-36" value={draft.businessHours[day]?.open || '09:00'} onChange={time => updateDay(day, 'open', time)} />
+          <span>to</span>
+          <TimeSelect label={day + ' closes'} hideLabel className="w-36" value={draft.businessHours[day]?.close || '17:00'} onChange={time => updateDay(day, 'close', time)} />
+        </>}
+      </div>)}</div>
+      {reviewMode && <button type="button" className="btn-primary disabled:opacity-50" disabled={busy || !dirty} onClick={save}>Save business hours</button>}
+      {!reviewMode && <fieldset className="space-y-3 border-t pt-4">
+        <legend className="font-medium">Service area (optional)</legend>
+        <SelectControl className="input-field" value={draft.serviceArea.method} onChange={e => change(old => ({ ...old, serviceArea: { ...old.serviceArea, method: e.target.value } }))}>
+          <option value="zip">ZIP codes</option><option value="radius">Radius</option>
+        </SelectControl>
+        {draft.serviceArea.method === 'zip'
+          ? <label className="block">ZIP codes, comma separated<input className="input-field mt-1 block w-full" value={draft.serviceArea.zipCodes.join(', ')} onChange={e => change(old => ({ ...old, serviceArea: { ...old.serviceArea, zipCodes: [...new Set(e.target.value.split(',').map(v => v.trim()).filter(v => /^\d{5}$/.test(v)))] } }))}/></label>
+          : <label className="block">Radius in miles<input className="input-field mt-1 block w-full" type="number" min="0.1" max="300" value={draft.serviceArea.radiusMiles} onChange={e => change(old => ({ ...old, serviceArea: { ...old.serviceArea, radiusMiles: Number(e.target.value) } }))}/></label>}
+        <p className="text-sm text-gray-600">Coverage is saved after activation and does not change existing scheduling eligibility. Address verification may be required.</p>
+      </fieldset>}
+    </section>
+    {reviewMode && company && <ServiceAreasSettings company={company} />}
+  </div>;
 }
 
 function ImportStep({ reviewMode, csv, readCsv, downloadTemplate, completed }) {

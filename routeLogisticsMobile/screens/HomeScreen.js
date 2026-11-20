@@ -32,6 +32,7 @@ import { AuthContext } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { CustomerService, JobService, EstimateService } from '../services/firebase';
 import { useJobResourceRefresh } from '../services/useJobResources';
+import { formatPhone, displayPhone } from '../services/phoneFormat';
 import { FONT_SIZES, SPACING, BUTTON_SIZES, BORDER_RADIUS, ICON_SIZES, CARD_SIZES, WIDTHS, HEIGHTS, hp, wp, rf } from '../constants/responsiveSizes';
 
 // A job workspace is an ordinary view; native camera/gallery owns presentation.
@@ -254,7 +255,7 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
     if (customerSaving.current) return;
     const address = formatSavedAddress(customer);
     customerBase.current = { address, version: recordVersion(customer.updatedAt) };
-    setEditingCustomer(customer.id); setCustomerName(customer.name || ''); setCustomerPhone(customer.phone || '');
+    setEditingCustomer(customer.id); setCustomerName(customer.name || ''); setCustomerPhone(displayPhone(customer.phone));
     setCustomerAddress(address); setCustomerEmail(customer.email || ''); setCustomerError(''); setCustomerValidation(null);
   };
 
@@ -914,7 +915,7 @@ const HomeScreen = ({ navigation, embedded = false, active = true, onInteraction
                   accessibilityLabel="Customer phone" editable={!isSavingCustomer}
                   keyboardType="phone-pad"
                   value={customerPhone}
-                  onChangeText={setCustomerPhone}
+                  onChangeText={value => setCustomerPhone(formatPhone(value))}
                 />
               </View>
 

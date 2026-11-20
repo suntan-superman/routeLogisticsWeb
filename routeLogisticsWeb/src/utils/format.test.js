@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatPhone } from './format.js';
+import { formatPhone, displayPhone } from './format.js';
 
 test('formats progressively', () => {
   assert.equal(formatPhone(''), '');
@@ -18,4 +18,11 @@ test('strips country code, junk and extra digits', () => {
 test('is idempotent and leaves international numbers alone', () => {
   assert.equal(formatPhone('(661) 602-5407'), '(661) 602-5407');
   assert.equal(formatPhone('+44 20 7946 0958'), '+44 20 7946 0958');
+});
+
+test('existing phone values display consistently without truncating international numbers', () => {
+  assert.equal(displayPhone('6616025407'), '(661) 602-5407');
+  assert.equal(displayPhone('16616025407'), '(661) 602-5407');
+  assert.equal(displayPhone('+44 20 7946 0958'), '+44 20 7946 0958');
+  assert.equal(displayPhone('442079460958'), '442079460958');
 });

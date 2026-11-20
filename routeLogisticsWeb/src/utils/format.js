@@ -10,3 +10,9 @@ export function formatPhone(value) {
   if (digits.length < 7) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
+
+export function displayPhone(value) {
+  const raw = String(value ?? '').trim();
+  const digits = raw.replace(/\D/g, '');
+  return digits.length === 10 || (digits.length === 11 && digits.startsWith('1')) ? formatPhone(raw) : raw;
+}

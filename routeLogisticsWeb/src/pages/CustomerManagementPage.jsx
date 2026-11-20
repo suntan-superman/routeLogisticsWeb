@@ -4,7 +4,7 @@ import { formatCustomerDate, legacyDate, customerView } from '../utils/legacyCus
 import { motion as Motion } from 'framer-motion';
 import CustomerService from '../services/customerService';
 import { useConfirm } from '../components/ConfirmProvider';
-import { formatPhone } from '../utils/format';
+import { formatPhone, displayPhone } from '../utils/format';
 import { 
   UsersIcon, 
   PlusIcon,
@@ -30,7 +30,7 @@ import { lifecycleLabel } from '../services/inquiryService';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../services/firebase';
 
-const customerForm = (customer = {}) => ({name:customer.name || '',email:customer.email || '',phone:formatPhone(customer.phone || ''),address:customer.address || '',city:customer.city || '',state:customer.state || '',zipCode:customer.zipCode || '',notes:customer.notes || '',isActive:customer.isActive !== false,emailConsent:customer.emailConsent === true});
+const customerForm = (customer = {}) => ({name:customer.name || '',email:customer.email || '',phone:displayPhone(customer.phone),address:customer.address || '',city:customer.city || '',state:customer.state || '',zipCode:customer.zipCode || '',notes:customer.notes || '',isActive:customer.isActive !== false,emailConsent:customer.emailConsent === true});
 const customerSnapshot = data => JSON.stringify(customerForm(data));
 const EMPTY_CUSTOMERS = [];
 

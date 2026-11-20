@@ -20,10 +20,11 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import ServiceAreasSettings from '../components/ServiceAreasSettings';
 import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
 import { workspaceAccessError } from '../services/workspaceQueryPolicy';
+import { formatPhone, displayPhone } from '../utils/format';
 
 const companyForm = (company = {}) => ({
   name: company.name || '', description: company.description || '', address: company.address || '', city: company.city || '', state: company.state || '', zipCode: company.zipCode || '',
-  phone: company.phone || '', email: company.email || '', website: company.website || '', logo: company.logo || '', primaryColor: company.primaryColor || '#10b981', secondaryColor: company.secondaryColor || '#6b7280', invoiceRemindersEnabled: company.invoiceRemindersEnabled === true
+  phone: displayPhone(company.phone), email: company.email || '', website: company.website || '', logo: company.logo || '', primaryColor: company.primaryColor || '#10b981', secondaryColor: company.secondaryColor || '#6b7280', invoiceRemindersEnabled: company.invoiceRemindersEnabled === true
 });
 const companySnapshot = (data, categories) => JSON.stringify({ ...data, serviceCategories: categories });
 
@@ -88,7 +89,7 @@ const CompanySetupForm = () => {
   const handleInputChange = (field, value) => {
     setCompanyData(prev => ({
       ...prev,
-      [field]: value
+      [field]: field === 'phone' ? formatPhone(value) : value
     }));
   };
 

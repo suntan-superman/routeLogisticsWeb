@@ -12,12 +12,13 @@ const { transformSync } = webRequire('esbuild');
 const {createWorkspaceQueryMock,selectControlMock}=require('./support/workspaceQueryMock.cjs');
 const workspaceHooks=createWorkspaceQueryMock(React,{scopeId:()=>role||'owner'});
 global.IS_REACT_ACT_ENVIRONMENT = true;
-let role, customers, writes, dirty=false,discard=true,discardCalls=0,saveFailure=false,addressFailure=null,updateRequests=[];
+let role, customers, writes, dirty=false,discard=true,discardCalls=0,saveFailure=false,addressFailure=null,updateRequests=[],remoteCustomers=[],searchCalls=[];
 const keyListeners=new Set();
 global.window={addEventListener:(name,callback)=>{if(name==='keydown')keyListeners.add(callback);},removeEventListener:(name,callback)=>{if(name==='keydown')keyListeners.delete(callback);}};
 const user = { uid: 'test-user', emailVerified: true, getIdToken: async () => 'test-token', getIdTokenResult: async () => ({ claims: { companyId: 'test-company', role, membershipId: 'test-member' } }) };
 const service = {
   getCustomers: async () => ({ success: true, customers, hasMore: false }),
+  searchCustomers: async term => { searchCalls.push(term); return { success: true, customers: remoteCustomers, hasMore: false }; },
   getCustomerStats: async () => ({ success: true, stats: { totalCustomers: customers.length } }),
   createCustomer: async data => { writes.push(data); return addressFailure ? { success: false, error: addressFailure.message, addressValidation: addressFailure } : { success: true, customer: { id: 'new', ...data } }; },
   updateCustomer:async(id,data,expectedVersion)=>{writes.push(data);updateRequests.push({id,data,expectedVersion});return addressFailure?{success:false,error:addressFailure.message,addressValidation:addressFailure}:saveFailure?{success:false,error:'Customer save unavailable.'}:{success:true,customer:{id,...data}};},
@@ -60,7 +61,7 @@ const Page = load('pages/CustomerManagementPage.jsx').default;
 const tenancy = load('services/tenancy.js');
 async function setRole(value) { role = value; await tenancy.syncTenancy(); }
 async function render(value, records = [{ id: 'active', name: 'Active customer', isActive: true }, { id: 'inactive', name: 'Inactive customer', isActive: false }]) {
-  await setRole(value); customers = records; writes = [];dirty=false;discard=true;discardCalls=0;saveFailure=false;addressFailure=null;updateRequests=[];
+  await setRole(value); customers = records; writes = [];dirty=false;discard=true;discardCalls=0;saveFailure=false;addressFailure=null;updateRequests=[];remoteCustomers=[];searchCalls=[];
   let tree;
   await act(async () => { tree = create(React.createElement(Page)); });
   return tree;
@@ -68,6 +69,22 @@ async function render(value, records = [{ id: 'active', name: 'Active customer',
 const text = node => typeof node === 'string' ? node : (node.children || []).map(text).join('');
 const buttons = (tree, label) => tree.root.findAll(node => node.type === 'button' && text(node).trim() === label);
 const icons = (tree, name) => tree.root.findAllByType(name);
+
+test('customer search finds a backend match outside the loaded list page by name or email', async () => {
+  const tree = await render('manager', [{ id: 'first-page', name: 'Alex Example', isActive: true }]);
+  remoteCustomers = [{ id: 'later-page', name: 'Stan Roy', email: 'sroy@prologixsa.com', isActive: true }];
+  const input = tree.root.findByProps({ placeholder: 'Search customers by name, email, phone, or address...' });
+  await act(async () => input.props.onChange({ target: { value: 'Stan Roy' } }));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+  assert.deepEqual(searchCalls, ['Stan Roy']);
+  assert.match(JSON.stringify(tree.toJSON()), /Stan Roy/);
+  assert.doesNotMatch(JSON.stringify(tree.toJSON()), /Alex Example/);
+  await act(async () => input.props.onChange({ target: { value: 'sroy@prologixsa.com' } }));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+  assert.deepEqual(searchCalls, ['Stan Roy', 'sroy@prologixsa.com']);
+  assert.match(JSON.stringify(tree.toJSON()), /Stan Roy/);
+  await act(async () => tree.unmount());
+});
 
 test('customer component has no technician mutation controls even if mounted outside the route guard', async () => {
   const tree = await render('technician');

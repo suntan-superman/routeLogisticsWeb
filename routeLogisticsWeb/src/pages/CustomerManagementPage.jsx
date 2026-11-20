@@ -72,6 +72,17 @@ const CustomerManagementPage = () => {
   const isLoading = mutating || customerQuery.isPending;
   const setCustomers = updater => customerQuery.setData(previous => ({ ...previous, customers: typeof updater === 'function' ? updater(previous?.customers || []) : updater }));
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  useEffect(() => {
+    const term = searchTerm.trim();
+    if (term.length < 2) { setSearchQuery(''); return undefined; }
+    const timer = setTimeout(() => setSearchQuery(term), 400);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+  const directorySearch = useWorkspaceQuery(['customer-search', searchQuery.toLowerCase()], () => CustomerService.searchCustomers(searchQuery), { enabled: can('customers.manage') && searchQuery.length >= 2, intervalMs: 0 });
+  const searchingDirectory = can('customers.manage') && searchTerm.trim().length >= 2;
+  const searchCurrent = searchingDirectory && searchQuery === searchTerm.trim();
+  const searchLoading = searchingDirectory && (!searchCurrent || directorySearch.isPending && !directorySearch.error);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
@@ -120,10 +131,10 @@ const CustomerManagementPage = () => {
   }, [customerQuery.error, detailQuery.error]);
 
   const filteredCustomers = useMemo(() => {
-    let filtered = [...customers];
+    let filtered = [...(searchingDirectory ? searchCurrent ? directorySearch.data?.customers || [] : [] : customers)];
 
     // Apply search filter
-    if (searchTerm) {
+    if (searchTerm && !searchingDirectory) {
       filtered = filtered.filter(customer => {
         const searchLower = searchTerm.toLowerCase();
         return (
@@ -157,7 +168,7 @@ const CustomerManagementPage = () => {
     });
 
     return filtered;
-  },[customers,searchTerm,activeFilter,sortBy]);
+  },[customers,searchTerm,searchingDirectory,searchCurrent,directorySearch.data,activeFilter,sortBy]);
 
   const handleInputChange = (field, value) => {
     if (saving.current) return;
@@ -197,7 +208,7 @@ const CustomerManagementPage = () => {
         setCustomers(prev => [result.customer, ...prev]);
         setShowAddModal(false);
         resetForm();
-        invalidate(['customers', 'customer', 'customer-stats']);
+        invalidate(['customers', 'customer', 'customer-stats', 'customer-search']);
         toast.success('Customer added successfully!');
       } else {
         setAddressValidation(result.addressValidation || null);
@@ -229,7 +240,7 @@ const CustomerManagementPage = () => {
         setShowEditModal(false);
         setSelectedCustomer(null);
         resetForm();
-        invalidate(['customers', 'customer', 'customer-stats']);
+        invalidate(['customers', 'customer', 'customer-stats', 'customer-search']);
         toast.success('Customer updated successfully!');
       } else {
         setAddressValidation(result.addressValidation || null);
@@ -256,7 +267,7 @@ const CustomerManagementPage = () => {
         setCustomers(prev => prev.map(customer => 
           customer.id === customerId ? { ...customer, isActive: false } : customer
         ));
-        invalidate(['customers', 'customer', 'customer-stats']);
+        invalidate(['customers', 'customer', 'customer-stats', 'customer-search']);
         toast.success('Customer deleted successfully!');
       } else {
         toast.error(result.error);
@@ -277,7 +288,7 @@ const CustomerManagementPage = () => {
         setCustomers(prev => prev.map(customer => 
           customer.id === customerId ? { ...customer, isActive: true } : customer
         ));
-        invalidate(['customers', 'customer', 'customer-stats']);
+        invalidate(['customers', 'customer', 'customer-stats', 'customer-search']);
         toast.success('Customer restored successfully!');
       } else {
         toast.error(result.error);
@@ -345,7 +356,7 @@ const CustomerManagementPage = () => {
       className="space-y-6"
     >
       {/* Header */}
-      {can('customers.export') && <CustomerImport onComplete={() => invalidate(['customers', 'customer', 'customer-stats'])} />}
+      {can('customers.export') && <CustomerImport onComplete={() => invalidate(['customers', 'customer', 'customer-stats', 'customer-search'])} />}
       {(customerQuery.error || statsQuery.error) && <p role="alert" className="rounded border border-red-200 bg-red-50 p-3 text-red-800">{(customerQuery.error || statsQuery.error).message} <button className="underline" onClick={() => { customerQuery.refetch(); statsQuery.refetch(); }}>Retry customer refresh</button></p>}
       {hasMoreCustomers && <div className="flex flex-wrap items-center gap-3 rounded border bg-white p-4"><p>Showing {customers.length} customers. Search and filters apply to loaded customers.</p><button disabled={isLoading} className="text-primary-700 underline" onClick={() => loadCustomers(true, lastCustomer)}>Load more customers</button></div>}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
@@ -488,18 +499,21 @@ const CustomerManagementPage = () => {
       </div>
 
       {/* Customers Table */}
+      {searchingDirectory && <p className="text-sm text-gray-600">Searching all company customers{searchCurrent && directorySearch.data?.hasMore ? ' · More than 30 matches; refine your search.' : ''}</p>}
+      {searchTerm.trim().length === 1 && can('customers.manage') && <p className="text-sm text-gray-600">Enter at least two characters to search beyond the loaded customers.</p>}
+      {searchCurrent && directorySearch.error && <p role="alert" className="rounded border border-red-200 bg-red-50 p-3 text-red-800">Customer search could not be completed: {directorySearch.error.message} <button type="button" className="underline" onClick={() => directorySearch.refetch()}>Retry search</button></p>}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200">
         <div className="px-6 py-4 border-b border-gray-200">
           <h3 className="text-lg font-medium text-gray-900">
-            Customers ({filteredCustomers.length})
+            {searchLoading ? 'Searching customers…' : `Customers (${filteredCustomers.length})`}
           </h3>
         </div>
         
-        {customerQuery.isPending && !customerQuery.data ? (
+        {searchLoading || !searchingDirectory && customerQuery.isPending && !customerQuery.data ? (
           <div className="flex items-center justify-center h-64">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
+            <div role="status" aria-label={searchLoading ? 'Searching customers' : 'Loading customers'} className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
           </div>
-        ) : filteredCustomers.length === 0 ? (
+        ) : searchingDirectory && directorySearch.error ? null : filteredCustomers.length === 0 ? (
           <div className="text-center py-12">
             <UsersIcon className="mx-auto h-12 w-12 text-gray-400" />
             <h3 className="mt-2 text-sm font-medium text-gray-900">No customers found</h3>

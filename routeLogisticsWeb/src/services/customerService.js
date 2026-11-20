@@ -83,32 +83,19 @@ class CustomerService {
     }
   }
 
-  // Search customers by name, email, or phone
-  static async searchCustomers(searchTerm, limitCount = 20) {
+  // Search the authorized tenant directory, including customers outside loaded list pages.
+  static async searchCustomers(searchTerm, limitCount = 30) {
     try {
+      requireCapability('customers.manage');
       this.getCurrentUserId();
-      
-      // Get all customers and filter client-side for now
-      // In production, you might want to use Algolia or similar for better search
-      const result = await this.getCustomers(1000); // Get more for search
-      
-      if (!result.success) {
-        return result;
-      }
-
-      const filteredCustomers = result.customers.filter(customer => {
-        const searchLower = searchTerm.toLowerCase();
-        return (
-          customer.name?.toLowerCase().includes(searchLower) ||
-          customer.email?.toLowerCase().includes(searchLower) ||
-          customer.phone?.includes(searchTerm) ||
-          customer.address?.toLowerCase().includes(searchLower)
-        );
-      });
-
+      const query = String(searchTerm || '').trim();
+      if (query.length < 2) return { success: true, customers: [], hasMore: false };
+      const result = await callWorkspace('rlManageInquiry', { action: 'matches', query });
+      const matches = result.matches || [];
       return {
         success: true,
-        customers: filteredCustomers.slice(0, limitCount)
+        customers: matches.slice(0, limitCount).map(match => customerView(match.customer.id, match.customer)),
+        hasMore: result.hasMore || matches.length > limitCount
       };
     } catch (error) {
       console.error('Error searching customers:', error);

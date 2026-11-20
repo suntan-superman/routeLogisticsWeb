@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), { createRequire } = require('node:module');
 const web = createRequire(path.resolve(__dirname, '../routeLogisticsWeb/package.json'));
 const { transformSync } = web('esbuild');
-let calls, failure, authenticated, companyId, permitted;
+let calls, failure, authenticated, companyId, permitted, matchResult;
 const firebaseFunctions = new Set(['collection','doc','getDoc','updateDoc','getDocs','query','deleteDoc','orderBy','limit','startAfter','documentId']);
 const trap = name => () => { throw Error(`Customer mutation must not use client Firestore ${name}.`); };
 const cache = new Map();
@@ -14,6 +14,7 @@ function load(relative) {
     if (name === 'firebase/firestore') return Object.fromEntries([...firebaseFunctions].map(key => [key, trap(key)]));
     if (name === './workspaceApi') return { readWorkspace: trap('readWorkspace'), callWorkspace: async (endpoint, data) => {
       calls.push({ endpoint, data }); if (failure) throw failure;
+      if (endpoint === 'rlManageInquiry') return matchResult;
       return { id: data.id || 'server-customer', updatedAt: '2026-11-15T18:00:00.000Z', customer: { id: data.id || 'server-customer', ...data.customer, updatedAt: '2026-11-15T18:00:00.000Z' } };
     } };
     if (name === './firebase') return { db: {}, auth: { get currentUser() { return authenticated ? { uid: 'actor' } : null; } } };
@@ -28,7 +29,18 @@ function load(relative) {
   cache.set(relative,module.exports); return module.exports;
 }
 const Service = load('services/customerService.js').default;
-beforeEach(() => { calls=[];failure=null;authenticated=true;companyId='company';permitted=true; });
+beforeEach(() => { calls=[];failure=null;authenticated=true;companyId='company';permitted=true;matchResult={matches:[],hasMore:false}; });
+
+test('customer directory search uses the tenant-authorized backend instead of the first list page', async () => {
+  matchResult = { matches: [{ customer: { id: 'outside-first-page', name: 'Stan Roy', email: 'sroy@prologixsa.com', isActive: true }, matchReasons: ['name', 'email'] }], hasMore: false };
+  const result = await Service.searchCustomers('  Stan Roy  ');
+  assert.equal(result.success, true);
+  assert.equal(result.customers[0].id, 'outside-first-page');
+  assert.deepEqual(calls, [{ endpoint: 'rlManageInquiry', data: { action: 'matches', query: 'Stan Roy' } }]);
+  permitted = false;
+  assert.equal((await Service.searchCustomers('Stan Roy')).success, false);
+  assert.equal(calls.length, 1, 'An unauthorized search must not reach the backend');
+});
 
 for (const workspace of ['company',null]) test(`customer create uses server validation in ${workspace || 'solo'} workspace and omits untrusted fields`, async () => {
   companyId=workspace;

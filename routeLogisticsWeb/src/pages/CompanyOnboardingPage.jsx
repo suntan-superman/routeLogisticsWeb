@@ -250,5 +250,13 @@ function HoursStep({ reviewMode, draft, change, busy, dirty, save, company }) {
 }
 
 function ImportStep({ reviewMode, csv, readCsv, downloadTemplate, completed }) {
-  return <section className="space-y-4 rounded-lg bg-white p-5 shadow"><h2 className="text-xl font-semibold">Import customers <span className="text-sm font-normal">(optional)</span></h2><p>Download a template, then preview and validate a CSV with Name, Email, Phone, Address, City, State, ZIP, and Notes. Select the file once. Existing customers are never overwritten, and retry safely skips rows already saved.</p><button className="btn-secondary" onClick={downloadTemplate}>Download sample CSV</button><input aria-label="Customer CSV file" type="file" accept=".csv,text/csv" onChange={readCsv}/>{csv && <div className="space-y-3"><p>{csv.customers.length} rows validated; {csv.duplicates} duplicate rows removed.</p><ul className="list-disc pl-5">{csv.customers.slice(0,5).map((row,i)=><li key={i}>{row.name} {row.email && `· ${row.email}`}</li>)}</ul>{reviewMode && <CustomerImport initialPreview={csv} openInitially onComplete={completed}/>}</div>}</section>;
+  return <section className="space-y-4 rounded-lg bg-white p-5 shadow">
+    <h2 className="text-xl font-semibold">Import customers <span className="text-sm font-normal">(optional)</span></h2>
+    <p>Download a template, then preview and validate a CSV with Name, Email, Phone, Address, City, State, ZIP, and Notes. Select the file once. Existing customers are never overwritten, and retry safely skips rows already saved.</p>
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+      <button type="button" className="btn-secondary" onClick={downloadTemplate}>Download sample CSV</button>
+      <input aria-label="Customer CSV file" className="max-w-full text-sm file:mr-3" type="file" accept=".csv,text/csv" onChange={readCsv}/>
+    </div>
+    {csv && <div className="space-y-3"><p>{csv.customers.length} rows validated; {csv.duplicates} duplicate rows removed.</p><ul className="list-disc pl-5">{csv.customers.slice(0,5).map((row,i)=><li key={i}>{row.name} {row.email && `· ${row.email}`}</li>)}</ul>{reviewMode && <CustomerImport initialPreview={csv} openInitially onComplete={completed}/>}</div>}
+  </section>;
 }

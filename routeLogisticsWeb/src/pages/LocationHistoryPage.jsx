@@ -41,7 +41,10 @@ export default function LocationHistoryPage() {
   const [loadedRange, setLoadedRange] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [mapRequested, setMapRequested] = useState(false);
+  const [mapBusy, setMapBusy] = useState(false);
   const [mapReady, setMapReady] = useState(false);
+  const [mapRevision, setMapRevision] = useState(0);
   const [addressBusy, setAddressBusy] = useState(false);
   const [addresses, setAddresses] = useState({});
   const mapElement = useRef(null), map = useRef(null), overlays = useRef([]), requestSequence = useRef(0);
@@ -57,7 +60,27 @@ export default function LocationHistoryPage() {
   }, [timeZone, today]);
 
   useEffect(() => {
-    if (!mapReady || !analysis.points.length) return undefined;
+    if (!mapRequested || !analysis.points.length || map.current) return undefined;
+    let active = true;
+    setMapBusy(true);
+    setError('');
+    (async () => {
+      const maps = await loadMaps(), { Map: GoogleMap } = await maps.importLibrary('maps');
+      if (!active) return;
+      if (!mapElement.current) throw new Error('The route map container is not available.');
+      map.current = new GoogleMap(mapElement.current, { center: { lat: analysis.points[0].lat, lng: analysis.points[0].lng }, zoom: 12, mapId: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || 'DEMO_MAP_ID' });
+      setMapReady(true);
+    })().catch(failure => {
+      if (!active) return;
+      map.current = null;
+      setMapRequested(false);
+      setError(failure.message || 'Maps could not be loaded.');
+    }).finally(() => { if (active) setMapBusy(false); });
+    return () => { active = false; };
+  }, [mapRequested, analysis.points]);
+
+  useEffect(() => {
+    if (!mapReady || !map.current || !analysis.points.length) return undefined;
     let active = true;
     const created = [];
     (async () => {
@@ -88,7 +111,7 @@ export default function LocationHistoryPage() {
       if (!bounds.isEmpty()) map.current.fitBounds(bounds, 40);
     })().catch(failure => { if (active) setError(failure.message || 'The route map could not be drawn.'); });
     return () => { active = false; created.forEach(overlay => { if (overlay.setMap) overlay.setMap(null); else overlay.map = null; }); };
-  }, [mapReady, analysis]);
+  }, [mapReady, mapRevision, analysis]);
 
   const requestPage = async ({ cursor = null, append = false } = {}) => {
     if (!memberId) { setError('Choose a technician.'); return; }
@@ -112,20 +135,20 @@ export default function LocationHistoryPage() {
       setIntervalMinutes(result.intervalMinutes);
       setLoadedRange({ startAt: new Date(startUtc).toISOString(), endAt: new Date(endUtc).toISOString(), timeZone });
       setAddresses({});
+      overlays.current.forEach(overlay => { if (overlay.setMap) overlay.setMap(null); else overlay.map = null; });
+      overlays.current = [];
+      map.current = null;
+      setMapRequested(false);
       setMapReady(false);
     } catch (failure) {
       if (sequence === requestSequence.current) setError(failure.message || 'Location history could not be loaded.');
     } finally { if (sequence === requestSequence.current) setBusy(false); }
   };
 
-  const showMap = async () => {
-    setBusy(true); setError('');
-    try {
-      const maps = await loadMaps(), { Map: GoogleMap } = await maps.importLibrary('maps');
-      map.current ||= new GoogleMap(mapElement.current, { center: { lat: analysis.points[0].lat, lng: analysis.points[0].lng }, zoom: 12, mapId: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || 'DEMO_MAP_ID' });
-      setMapReady(true);
-    } catch (failure) { setError(failure.message || 'Maps could not be loaded.'); }
-    finally { setBusy(false); }
+  const showMap = () => {
+    setError('');
+    if (map.current) setMapRevision(value => value + 1);
+    else setMapRequested(true);
   };
 
   const resolveAddresses = async () => {
@@ -172,8 +195,8 @@ export default function LocationHistoryPage() {
     {membersQuery.data && !membersQuery.data.technicians.length && <p className="rounded border bg-white p-4">No current or former technicians were found for this company.</p>}
     {loadedRange && <section className="space-y-4">
       <div className="rounded border bg-white p-4"><h2 className="font-semibold">{selectedTechnician?.name || 'Technician'} · recorded activity</h2><p className="mt-1 text-sm text-gray-600">{points.length} fixes loaded · {analysis.stops.length} recorded stop{analysis.stops.length === 1 ? '' : 's'} · sample interval target {intervalMinutes} min · times shown in {timeZone}</p><p className="text-sm text-gray-600">Stop bounds are estimated from the first and last GPS fixes that meet the dwell rule. Fixes with accuracy worse than 50 m are omitted from stops and the map.</p>
-        <div className="mt-3 flex flex-wrap gap-3">{points.length > 0 && <button type="button" onClick={showMap} disabled={busy} className="underline">{mapReady ? 'Refresh map' : 'Show observed route on map'}</button>}{mapReady && analysis.stops.length > 0 && <button type="button" onClick={resolveAddresses} disabled={addressBusy} className="underline">{addressBusy ? 'Resolving…' : 'Resolve approximate stop addresses'}</button>}{hasMore && <button type="button" onClick={() => requestPage({ cursor: nextCursor, append: true })} disabled={busy} className="underline">Load next 200 fixes</button>}</div>
-        {mapReady && <div ref={mapElement} className="mt-4 h-96 rounded border bg-slate-100" aria-label="Observed technician GPS route map" />}
+        <div className="mt-3 flex flex-wrap gap-3">{points.length > 0 && <button type="button" onClick={showMap} disabled={mapBusy} className="underline">{mapBusy ? 'Loading map…' : mapReady ? 'Refresh map' : 'Show observed route on map'}</button>}{mapReady && analysis.stops.length > 0 && <button type="button" onClick={resolveAddresses} disabled={addressBusy} className="underline">{addressBusy ? 'Resolving…' : 'Resolve approximate stop addresses'}</button>}{hasMore && <button type="button" onClick={() => requestPage({ cursor: nextCursor, append: true })} disabled={busy} className="underline">Load next 200 fixes</button>}</div>
+        {mapRequested && <div ref={mapElement} className="mt-4 h-96 rounded border bg-slate-100" aria-label="Observed technician GPS route map" aria-busy={!mapReady} />}
       </div>
       {hasMore && <p role="status" className="text-sm text-gray-600">More history is available. The map and stop analysis include the fixes loaded so far.</p>}
       {!points.length && <p className="rounded border bg-white p-4">No GPS fixes are recorded for this technician and date range. History is not available for dates before the feature was deployed.</p>}

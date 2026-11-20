@@ -28,13 +28,15 @@ export default function AcceptInvitePage() {
     <div className="flex flex-wrap items-center justify-between gap-3"><Link to="/" className="text-primary-700">Route Logistics</Link><ThemeControl /></div>
     <h1 className="my-6 text-3xl font-bold">Join your company</h1>
     <p className="mb-6">Use the email address your company owner invited. Your owner has already selected your role and permissions.</p>
-    {!currentUser && <>
-      <p className="mb-4 text-sm text-gray-600">Already have an account? Sign in with your existing password, or use “Forgot password?” on the sign-in page.</p>
-      <p className="mb-6 text-sm text-gray-600">New to Route Logistics? Create your personal login, verify your email, then accept this invitation. This joins the existing company; it does not create a company or let you choose a role.</p>
-    </>}
-    {!inviteId || !code ? <p role="alert">This invitation link is incomplete. Ask the owner to send a new invitation.</p> : !currentUser ? <div className="flex gap-5">
-      <Link className="text-primary-700 underline" to={`/login?next=${returnTo}`}>Sign in</Link>
-      <Link className="text-primary-700 underline" to={`/signup?next=${returnTo}`}>Create your login</Link>
+    {!inviteId || !code ? <p role="alert">This invitation link is incomplete. Ask the owner to send a new invitation.</p> : !currentUser ? <div className="space-y-6">
+      <div>
+        <p className="mb-3 text-sm text-gray-600">New to Route Logistics? Create your personal login with the invited email address, verify your email, then accept this invitation. This joins the existing company; it does not create a company or let you choose a role.</p>
+        <Link className="inline-flex rounded bg-primary-600 px-5 py-2 font-medium text-white hover:bg-primary-700" to={`/signup?next=${returnTo}`}>Create your login</Link>
+      </div>
+      <div>
+        <p className="mb-2 text-sm text-gray-600">Already have an account? Sign in with your existing password, or use “Forgot password?” on the sign-in page.</p>
+        <Link className="text-primary-700 underline" to={`/login?next=${returnTo}`}>Sign in</Link>
+      </div>
     </div> : <>
       <EmailVerificationBanner />
       <p className="mb-4">Signed in as {currentUser.email}</p>

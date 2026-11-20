@@ -2,7 +2,7 @@ const { test, before, after } = require('node:test'), assert = require('node:ass
 const req = require('node:module').createRequire(require('node:path').resolve(__dirname, '../functions/package.json'));
 const { initializeApp, deleteApp } = req('firebase-admin/app'), { getFirestore } = req('firebase-admin/firestore');
 const { reviewHandlers, reviewIdFor, completionKeyFor } = require('../functions/reviews');
-const { portalHandlers, customerUid } = require('../functions/portal');
+const { portalHandlers, customerUid, linkId } = require('../functions/portal');
 const { hash } = require('../functions/security');
 let app, db, sequence = 0;
 before(() => { if (!process.env.FIRESTORE_EMULATOR_HOST) throw Error('Local Firestore emulator required; production reviews must never be changed by tests.'); app = initializeApp({ projectId: 'demo-routelogistics' }, 'review-core-tests'); db = getFirestore(app); });
@@ -12,6 +12,7 @@ async function fixture() {
   let clock = Date.parse('2026-11-14T21:00:00Z');
   for (const [companyId, owner] of [[companyA, ownerId], [companyB, id + '-owner-b']]) await db.doc('companies/' + companyId).set({ ownerId: owner, name: 'Synthetic provider', isActive: true });
   for (const [customerId, companyId] of [[customerA, companyA], [customerB, companyB]]) await db.doc('customers/' + customerId).set({ companyId, name: 'Synthetic customer', email, emailNormalized: email, isActive: true, address: 'PRIVATE BILLING ADDRESS' });
+  for (const [customerId, companyId] of [[customerA, companyA], [customerB, companyB]]) await db.doc(`rlPortalLinks/${linkId(customerId,email)}`).set({ customerId, scopeId: `company:${companyId}`, email, status: 'active', portalUid: customerUid(email) });
   await db.doc('teamMembers/' + memberId).set({ uid: id + '-manager-user', companyId: companyA, role: 'manager', status: 'active' });
   const jobs = { a: id + '-job-a', b: id + '-job-b' };
   for (const [jobId, companyId, customerId] of [[jobs.a, companyA, customerA], [jobs.b, companyB, customerB]]) await db.doc('jobs/' + jobId).set({ companyId, userId: companyId === companyA ? ownerId : id + '-owner-b', customerId, serviceType: 'Inspection', date: '2026-11-14', time: '10:00', status: 'completed', completedAt: new Date(clock).toISOString(), updatedAt: new Date(clock).toISOString(), internalNotes: 'PRIVATE JOB NOTE' });
@@ -69,6 +70,7 @@ test('concurrent duplicate submissions create one immutable review and count one
 
 test('duplicate customer identities remain independently linked to their actual service visits', async () => {
   const f = await fixture(), duplicate = f.id + '-duplicate'; await db.doc('customers/' + duplicate).set({ companyId: f.companyA, email: f.email, isActive: true });
+  await db.doc(`rlPortalLinks/${linkId(duplicate,f.email)}`).set({ customerId: duplicate, scopeId: `company:${f.companyA}`, email: f.email, status: 'active', portalUid: customerUid(f.email) });
   const jobId = f.id + '-duplicate-job'; await db.doc('jobs/' + jobId).set({ companyId: f.companyA, userId: f.ownerId, customerId: duplicate, status: 'completed', date: '2026-11-13', completedAt: new Date(f.now()).toISOString() });
   assert.equal((await f.customer('list')).eligibleVisits.length, 2); await f.submit({}, jobId); assert.equal((await f.customer('list')).reviews.length, 1);
 });
@@ -136,7 +138,7 @@ test('review history and publication permissions do not move to a different emai
   const nextEmail = 'new-' + f.email; await db.doc('customers/' + f.customerA).update({ email: nextEmail, emailNormalized: nextEmail });
   await assert.rejects(f.customer('consent', { reviewId: review.id, publicConsent: false }), { code: 'permission-denied' });
   const nextIdentity = { uid: customerUid(nextEmail), token: { portal: true, portalEmail: nextEmail } };
-  assert.equal((await f.customer('list', {}, nextIdentity)).reviews.length, 0); await assert.rejects(f.customer('consent', { reviewId: review.id, publicConsent: true }, nextIdentity), { code: 'permission-denied' });
+  await assert.rejects(f.customer('list', {}, nextIdentity), { code: 'permission-denied' }); await assert.rejects(f.customer('consent', { reviewId: review.id, publicConsent: true }, nextIdentity), { code: 'permission-denied' });
   assert.equal((await f.provider('list')).reviews[0].publicEligible, false);
 });
 

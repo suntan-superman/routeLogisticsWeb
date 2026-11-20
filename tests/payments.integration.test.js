@@ -4,6 +4,7 @@ const req = require('node:module').createRequire(require('node:path').resolve(__
 const { initializeApp, deleteApp } = req('firebase-admin/app');
 const { getFirestore } = req('firebase-admin/firestore');
 const { paymentHandlers, reconcilePayment, amountInCents } = require('../functions/payments');
+const { customerUid, linkId } = require('../functions/portal');
 let app, db, provider, handlers, intent, creates = 0;
 const auth = { uid: 'payment-owner', token: { companyId: 'payment-co', role: 'owner', email_verified: true } };
 const request = { auth, data: { invoiceId: 'payment-invoice', total: 1, currency: 'eur' } };
@@ -12,6 +13,7 @@ before(async () => {
   app = initializeApp({ projectId: 'demo-routelogistics' }, 'payment-tests'); db = getFirestore(app);
   await db.doc('companies/payment-co').set({ ownerId: auth.uid });
   await db.doc('customers/payment-customer').set({ companyId: 'payment-co', email: 'payer@payments.test' });
+  await db.doc(`rlPortalLinks/${linkId('payment-customer','payer@payments.test')}`).set({customerId:'payment-customer',scopeId:'company:payment-co',email:'payer@payments.test',status:'active',portalUid:customerUid('payer@payments.test')});
   await db.doc('invoices/payment-invoice').set({ companyId: 'payment-co', userId: auth.uid, customerId: 'payment-customer', status: 'sent', total: 20 });
   provider = { paymentIntents: { create: async (data) => { if (!intent) { creates++; intent = { ...data, id: 'pi_test', livemode: false, status: 'requires_payment_method', client_secret: 'test-client-secret' }; } return { ...intent }; }, retrieve: async () => ({ ...intent }) }, charges: { retrieve: async () => ({ amount_refunded: 500, disputed: false }) } };
   handlers = paymentHandlers(db, () => provider, { enabled: () => true });
@@ -28,7 +30,7 @@ test('concurrent intent creation uses server totals, preserves durable identity 
   assert.equal(results[0].intentId, results[1].intentId);
   await assert.rejects(handlers.create({ auth: { uid: 'other', token: { companyId: 'other' } }, data: request.data }));
   await assert.rejects(handlers.create({ auth: { uid: 'portal', token: { portal: true, portalEmail: 'wrong@payments.test' } }, data: request.data }));
-  assert.equal((await handlers.status({ auth: { uid: 'portal', token: { portal: true, portalEmail: 'payer@payments.test' } }, data: request.data })).amount, 2000);
+  assert.equal((await handlers.status({ auth: { uid: customerUid('payer@payments.test'), token: { portal: true, portalEmail: 'payer@payments.test' } }, data: request.data })).amount, 2000);
 });
 test('test settlement is idempotent and cannot mark a production invoice paid', async () => {
   intent.status = 'succeeded'; intent.amount_received = 2000;
@@ -63,6 +65,7 @@ async function fixture(name) {
   const invoiceRef = db.doc(`invoices/${invoiceId}`);
   await db.doc(`companies/${companyId}`).set({ ownerId: userId });
   await db.doc(`customers/${customerId}`).set({ companyId, email: 'payer@payments.test' });
+  await db.doc(`rlPortalLinks/${linkId(customerId,'payer@payments.test')}`).set({customerId,scopeId:`company:${companyId}`,email:'payer@payments.test',status:'active',portalUid:customerUid('payer@payments.test')});
   await invoiceRef.set({ companyId, userId, customerId, status: 'sent', total: 20, currency: 'usd' });
   let current;
   const charge = { id: `ch_${name}`, amount_refunded: 0, disputed: false };
@@ -179,7 +182,7 @@ test('manager cancellation reconciles and unlocks the invoice while portal cance
 test('matching portal email cannot bypass customer tenancy and claimed staff roles require current membership', async () => {
   const f = await fixture('authorization');
   const invoice = (await f.invoiceRef.get()).data();
-  const portalRequest = { ...f.request, auth: { uid: 'portal-payer', token: { portal: true, portalEmail: 'payer@payments.test' } } };
+  const portalRequest = { ...f.request, auth: { uid: customerUid('payer@payments.test'), token: { portal: true, portalEmail: 'payer@payments.test' } } };
   assert.equal((await f.handlers.status(portalRequest)).amount, 2000);
   await db.doc(`customers/${invoice.customerId}`).update({ companyId: 'foreign-company' });
   await assert.rejects(f.handlers.create(portalRequest), { code: 'permission-denied' });

@@ -20,6 +20,8 @@ const call = async (name, data, functionClient) => {
   if (name === 'rlRequestCustomerOTP') return { challengeId: `synthetic-challenge-${++requestNumber}`, message: 'If your provider has registered this email, a code will arrive shortly.' };
   if (name === 'rlVerifyCustomerOTP') { if (otpError) throw otpError; return { token: 'synthetic-local-custom-token' }; }
   if (name === 'rlGetCustomerPortalFile') { if (pendingFile) return pendingFile; if (fileError) throw fileError; return data.kind === 'photo' ? { dataUri: 'data:image/png;base64,cGhvdG8=', contentType: 'image/png', name: 'Shared service photo' } : { dataUri: 'data:application/pdf;base64,cGRm', contentType: 'application/pdf', name: 'Service report.pdf' }; }
+  if (name === 'rlClaimPortalLink') return { status: 'connected' };
+  if (name === 'rlDisconnectPortalLink') return { status: 'disconnected' };
   if (name === 'rlGetInvoicePaymentHistory') return { history: [], truncated: false };
   throw Error('Unexpected portal API: ' + name);
 };
@@ -176,9 +178,28 @@ test('payment history is lazy per opened invoice and uses the isolated portal Fu
 });
 
 test('empty and load-failure states expose a useful recovery action without stale records', async () => {
-  accounts = []; await mount(); assert.match(text(), /No service records are available/);
+  accounts = []; await mount(); assert.match(text(), /No providers are connected yet/);
   accounts = [a]; portalError = Error('Your customer association is no longer available.');
   await act(async () => button('Refresh visits and invoices').props.onClick());
   assert.match(text(), /Your customer association is no longer available/); assert.doesNotMatch(text(), /Provider A service visit/);
   portalError = null; await act(async () => button('Refresh visits and invoices').props.onClick()); assert.match(text(), /Provider A service visit/);
+});
+
+test('property selection filters visits within the selected provider and connecting uses the isolated portal client', async () => {
+  accounts = [{ ...a, properties: [
+    { customerId: 'customer-a', id: 'home', label: 'Home', address: '100 Example Lane' },
+    { customerId: 'customer-a', id: 'rental', label: 'Rental', address: '200 Example Lane' },
+  ], jobs: [
+    { ...a.jobs[0], propertyKey: 'customer-a:home' },
+    { id: 'visit-rental', serviceType: 'Rental inspection', date: '2026-11-15', time: '10:00', status: 'scheduled', propertyKey: 'customer-a:rental' },
+  ] }, b];
+  await mount();
+  await act(async () => button('Rental · 200 Example Lane').props.onClick());
+  assert.match(text(), /Rental inspection/); assert.doesNotMatch(text(), /Provider A service visit|Provider B service visit/);
+  await act(async () => button('All properties').props.onClick()); assert.match(text(), /Provider A service visit/);
+  const input = tree.root.findByProps({ placeholder: 'Paste your invitation link' });
+  await act(async () => input.props.onChange({ target: { value: `https://route-logistics.com/portal#link=${'a'.repeat(64)}` } }));
+  await act(async () => button('Connect provider').props.onClick());
+  assert.equal(calls.find(row => row.name === 'rlClaimPortalLink')?.client, client);
+  assert.deepEqual(calls.find(row => row.name === 'rlClaimPortalLink')?.data, { token: 'a'.repeat(64) });
 });

@@ -347,6 +347,8 @@ test('authoritative quote invoice remains compatible with Stripe signed test rec
   const stored = await f.stored(created); assert.equal(stored.total, 108.25); assert.equal(stored.status, 'sent'); assert.equal(stored.testPaymentStatus, 'succeeded'); assert.equal(stored.paymentLock, null);
   assert.equal((await db.collection('rlPaymentEvents').where('invoiceId', '==', created.id).get()).size, 1);
   const portalAuth = { uid: `rl_customer_${hash(customerEmail)}`, token: { portal: true, portalEmail: customerEmail } };
+  const { linkId } = require('../functions/portal');
+  await db.doc(`rlPortalLinks/${linkId(f.customerId,customerEmail)}`).set({customerId:f.customerId,scopeId:`company:${f.id}`,email:customerEmail,status:'active',portalUid:portalAuth.uid});
   const portal = portalHandlers(db, { createCustomToken: async () => { throw Error('No OTP delivery/token mint occurs in invoice compatibility.'); } });
   const portalResult = await portal.getCustomerPortal({ auth: portalAuth, data: { accountId: `company:${f.id}` } });
   const visible = portalResult.accounts[0].invoices.find(invoice => invoice.id === created.id); assert.equal(visible.total, 108.25); assert.equal(visible.lineItems.length, 2);

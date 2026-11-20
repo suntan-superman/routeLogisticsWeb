@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { customerUid, otpHash, publicJob, publicInvoice, portalHandlers } = require('./portal');
+const { customerUid, otpHash, publicJob, publicInvoice, portalHandlers, portalEmailFor, PORTAL_SESSION_LIFETIME } = require('./portal');
 
 test('portal identities are normalized, deterministic and isolated from team account UIDs', () => {
   assert.equal(customerUid(' Customer@Example.test '), customerUid('customer@example.test'));
@@ -26,6 +26,12 @@ test('portal-only operations reject team users, missing sessions and mismatched 
     await assert.rejects(handlers.getCustomerPortal({auth}), {code:'unauthenticated'});
     await assert.rejects(handlers.getCustomerPortalFile({auth}), {code:'unauthenticated'});
   }
+});
+
+test('a real portal token requires a fresh email-code sign-in after 24 hours', () => {
+  const email='customer@example.test',uid=customerUid(email),now=Math.floor(Date.now()/1000);
+  assert.equal(portalEmailFor({auth:{uid,token:{portal:true,portalEmail:email,auth_time:now}}}),email);
+  assert.throws(()=>portalEmailFor({auth:{uid,token:{portal:true,portalEmail:email,auth_time:Math.floor((Date.now()-PORTAL_SESSION_LIFETIME-1000)/1000)}}}),{code:'unauthenticated'});
 });
 
 test('email-disabled portal cannot issue or verify OTPs', async () => {

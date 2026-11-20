@@ -27,10 +27,26 @@ import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 import InquiryWorkspace from '../components/InquiryWorkspace';
 import CustomerLifecycleControl from '../components/CustomerLifecycleControl';
 import { lifecycleLabel } from '../services/inquiryService';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../services/firebase';
 
 const customerForm = (customer = {}) => ({name:customer.name || '',email:customer.email || '',phone:formatPhone(customer.phone || ''),address:customer.address || '',city:customer.city || '',state:customer.state || '',zipCode:customer.zipCode || '',notes:customer.notes || '',isActive:customer.isActive !== false,emailConsent:customer.emailConsent === true});
 const customerSnapshot = data => JSON.stringify(customerForm(data));
 const EMPTY_CUSTOMERS = [];
+
+function CustomerPortalAccess({ customer }) {
+  const [status, setStatus] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const invoke = useCallback((action) => httpsCallable(functions, 'rlManagePortalLink')({ action, customerId: customer.id }).then(result => result.data), [customer.id]);
+  useEffect(() => { let current = true; invoke('status').then(result => { if (current) setStatus(result.status); }).catch(() => { if (current) setError('Portal status is unavailable.'); }); return () => { current = false; }; }, [invoke]);
+  const perform = async action => {
+    if (busy || action === 'revoke' && !window.confirm('Revoke this customer’s portal access? Their service records will be preserved.')) return;
+    setBusy(true); setError('');
+    try { const result = await invoke(action); setStatus(result.status); toast.success(action === 'invite' ? 'Portal invitation queued for the customer email.' : 'Customer portal access revoked.'); }
+    catch (failure) { setError(failure.message || 'Portal access could not be updated.'); }
+    finally { setBusy(false); }
+  };
+  return <section className="mt-4 rounded border p-3" aria-label="Customer portal access"><h4 className="font-semibold">Customer portal access</h4><p className="text-sm">{status === 'active' ? 'Connected' : status === 'invited' ? 'Invitation queued' : status === 'revoked' ? 'Revoked' : 'Not connected'}</p><div className="mt-2 flex flex-wrap gap-3"><button type="button" className="text-primary-700 underline disabled:opacity-50" disabled={busy || !customer.email} onClick={() => perform('invite')}>Email portal invitation</button>{status === 'active' && <button type="button" className="text-red-700 underline disabled:opacity-50" disabled={busy} onClick={() => perform('revoke')}>Revoke portal access</button>}</div>{error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}</section>;
+}
 
 const CustomerManagementPage = () => {
   const confirm = useConfirm();
@@ -953,6 +969,7 @@ const CustomerManagementPage = () => {
                 </div>
               </div>
               {canManage() && <CustomerSmsConsent key={selectedCustomer.id} customer={selectedCustomer} />}
+              {canManage() && <CustomerPortalAccess key={`portal-${selectedCustomer.id}`} customer={selectedCustomer} />}
               {can('customers.manage') && <CustomerLifecycleControl key={selectedCustomer.id} customer={selectedCustomer} onSaved={retainCustomer} />}
               
               <div className="flex justify-end space-x-3 mt-6">

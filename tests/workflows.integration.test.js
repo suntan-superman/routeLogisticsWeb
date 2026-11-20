@@ -8,7 +8,7 @@ const { getFirestore, Timestamp } = req('firebase-admin/firestore');
 const { invitationHandlers, memberIdFor } = require('../functions/invitations');
 const { recurringHandlers } = require('../functions/recurring');
 const { customerHandlers } = require('../functions/customers');
-const { portalHandlers, otpHash, customerUid } = require('../functions/portal');
+const { portalHandlers, otpHash, customerUid, linkId } = require('../functions/portal');
 const { deliverMail } = require('../functions/mail');
 const { rateLimit } = require('../functions/security');
 const { queueInvoiceEmail, invoiceEmailHandlers } = require('../functions/invoiceEmail');
@@ -102,6 +102,31 @@ test('CSV retries and concurrent imports create only one customer per identity',
   // A token minted before the member joined must not bypass tenancy by importing solo records.
   await assert.rejects(handler({ auth: member, data: request.data }), { code: 'permission-denied' });
 });
+test('BLS import gives all fifty rows new tenant-owned IDs without changing shared Acme source rows', async () => {
+  const blsOwner = { uid: 'workflow-bls-owner', token: { email: 'bls-owner@workflows.test', email_verified: true, companyId: 'workflow-bls', role: 'owner' } };
+  await db.doc('companies/workflow-bls').set({ ownerId: blsOwner.uid, name: 'Synthetic BLS', isActive: true });
+  await db.doc(`users/${blsOwner.uid}`).set({ companyId: 'workflow-bls' });
+  const shared = Array.from({ length: 10 }, (_, index) => ({ name: `Approved Test Contact ${index + 1}`, email: `bls-shared-${index + 1}@example.com`, phone: '' }));
+  const before = [];
+  for (const [index, row] of shared.entries()) {
+    const ref = db.doc(`customers/workflow-acme-shared-${index + 1}`);
+    await ref.set({ ...row, companyId: 'workflow-co', userId: owner.uid, isActive: true, marker: 'preserve' });
+    before.push((await ref.get()).data());
+  }
+  const synthetic = Array.from({ length: 40 }, (_, index) => {
+    const number = String(index + 1).padStart(2, '0');
+    return { name: `BLS Test Customer ${number}`, email: `bls-test-${number}@example.com`, phone: '', address: `${index + 101} Example Lane (Synthetic)`, city: 'Bakersfield', state: 'CA', zipCode: '', notes: '' };
+  });
+  const request = { auth: blsOwner, data: { customers: [...shared, ...synthetic].map((row, index) => ({ ...row, companyId: 'workflow-co', customerId: `workflow-acme-shared-${index + 1}` })) } };
+  const handler = customerHandlers(db).bulkImportCustomers;
+  assert.deepEqual(await handler(request), { created: 50, skipped: 0 });
+  assert.deepEqual(await handler(request), { created: 0, skipped: 50 });
+  const imported = await db.collection('customers').where('companyId', '==', 'workflow-bls').get();
+  assert.equal(imported.size, 50);
+  assert.ok(imported.docs.every(row => row.id.startsWith('rl_import_') && row.get('companyId') === 'workflow-bls' && !row.get('customerId')));
+  assert.equal(imported.docs.filter(row => row.get('syntheticTestData') === true).length, 40);
+  for (const [index, original] of before.entries()) assert.deepEqual((await db.doc(`customers/workflow-acme-shared-${index + 1}`).get()).data(), original);
+});
 test('manual/scheduled recurrence retries create one visit and advance exactly once', async () => {
   await db.doc('customers/recurring-customer').set({ companyId: 'workflow-co', userId: owner.uid, name: 'Recurring Customer' });
   await db.doc('servicePlans/workflow-plan').set({ active: true, companyId: 'workflow-co', userId: owner.uid, customerId: 'recurring-customer', nextServiceDate: '2026-11-12', frequencyDays: 30, price: 95 });
@@ -129,6 +154,7 @@ test('OTP attempts persist, codes expire, replay fails, and tokens use isolated 
 });
 test('portal shows only the matching customer and public fields, never internal notes or drafts', async () => {
   await db.doc('customers/portal-customer').set({ emailNormalized: 'portal@workflows.test', companyId: 'workflow-co', userId: owner.uid, isActive: true });
+  await db.doc(`rlPortalLinks/${linkId('portal-customer', 'portal@workflows.test')}`).set({ customerId: 'portal-customer', scopeId: 'company:workflow-co', email: 'portal@workflows.test', status: 'active', portalUid: customerUid('portal@workflows.test') });
   await db.doc('jobs/portal-job').set({ companyId: 'workflow-co', customerId: 'portal-customer', date: '2026-11-12', notes: 'private', status: 'scheduled' });
   await db.doc('jobs/other-customer-job').set({ companyId: 'workflow-co', customerId: 'someone-else', date: '2026-11-12' });
   await db.doc('invoices/portal-draft').set({ companyId: 'workflow-co', customerId: 'portal-customer', status: 'draft', total: 100, createdAt: new Date() });

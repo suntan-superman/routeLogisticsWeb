@@ -22,6 +22,15 @@ export default function CustomerPortalPage() {
   const [email, setEmail] = useState(''), [code, setCode] = useState(''), [challenge, setChallenge] = useState(null);
   const [busy, setBusy] = useState(true), [message, setMessage] = useState(''), [error, setError] = useState('');
   const [hasMore, setHasMore] = useState(false);
+  const [propertyKey, setPropertyKey] = useState(''), [inviteLink, setInviteLink] = useState('');
+  const [pendingInvite, setPendingInvite] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    const match = window.location.hash.match(/^#link=([a-f0-9]{64})$/);
+    return match?.[1] || '';
+  });
+  useEffect(() => {
+    if (pendingInvite) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
+  }, [pendingInvite]);
   const [paymentInvoice, setPaymentInvoice] = useState(null);
   const [selectedId, setSelectedId] = useState(''), [openInvoice, setOpenInvoice] = useState(null), [fileView, setFileView] = useState(null), [logoutFailed, setLogoutFailed] = useState(false);
   const alive = useRef(false), identity = useRef(null), selection = useRef(''), requestVersion = useRef(0), fileVersion = useRef(0), authVersion = useRef(0), submitting = useRef(false);
@@ -34,7 +43,7 @@ export default function CustomerPortalPage() {
     if (!user || !portalQuery.data) return;
     const available = Array.isArray(portalQuery.data.accounts) ? portalQuery.data.accounts : [];
     const previous = selection.current, next = available.some(account => account.id === previous) ? previous : available[0]?.id || '';
-    if (next !== previous) clearDetails();
+    if (next !== previous) { clearDetails(); setPropertyKey(''); }
     selection.current = next; setSelectedId(next); setAccounts(available); setHasMore(portalQuery.data.hasMoreAccounts === true); setBusy(false);
   }, [portalQuery.data, user]);
   useEffect(() => {
@@ -46,18 +55,35 @@ export default function CustomerPortalPage() {
     alive.current = true;
     const unsubscribe = onAuthStateChanged(portalAuth, current => {
       identity.current = current; selection.current = ''; requestVersion.current++; fileVersion.current++; authVersion.current++;
-      setUser(current); setAccounts([]); setSelectedId(''); setPaymentInvoice(null); setOpenInvoice(null); setFileView(null); setHasMore(false);
+      setUser(current); setAccounts([]); setSelectedId(''); setPropertyKey(''); setPaymentInvoice(null); setOpenInvoice(null); setFileView(null); setHasMore(false);
       setCode(''); setChallenge(null); setMessage(''); setError(''); setLogoutFailed(false);
       setBusy(!!current);
     });
     return () => { alive.current = false; unsubscribe(); };
   }, []);
   const selectedAccount = user && portalQuery.data ? accounts.find(account => account.id === selectedId) : null;
+  const selectedProperty = selectedAccount?.properties?.find(property => `${property.customerId}:${property.id}` === propertyKey);
+  const displayedJobs = selectedAccount?.jobs?.filter(job => !selectedProperty || job.propertyKey === propertyKey) || [];
   const selectedAccounts = selectedAccount ? [selectedAccount] : [];
   const chooseProvider = async event => {
     const next = event.target.value;
     if (!accounts.some(account => account.id === next) || !await confirmDiscard()) return;
-    selection.current = next; setSelectedId(next); clearDetails(); setError(''); setMessage('');
+    selection.current = next; setSelectedId(next); setPropertyKey(''); clearDetails(); setError(''); setMessage('');
+  };
+  const connectProvider = async () => {
+    const token = pendingInvite || inviteLink.trim().match(/(?:#link=)?([a-f0-9]{64})$/)?.[1];
+    if (!token || !user) { setError('Enter the invitation link sent by your provider.'); return; }
+    setBusy(true); setError('');
+    try { await call('rlClaimPortalLink', { token }); setPendingInvite(''); setInviteLink(''); setMessage('Provider connected.'); await load(); }
+    catch (failure) { setError(failure.message || 'This invitation could not be connected. Ask your provider for a new link.'); }
+    finally { setBusy(false); }
+  };
+  const disconnectProvider = async () => {
+    if (!selectedAccount || !await confirmDiscard() || !window.confirm(`Disconnect ${selectedAccount.companyName} from this portal? Your provider's customer records will remain intact.`)) return;
+    setBusy(true); setError('');
+    try { await call('rlDisconnectPortalLink', { accountId: selectedAccount.id }); clearDetails(); setMessage('Provider disconnected. Your service records remain with the provider.'); await load(); }
+    catch (failure) { setError(failure.message || 'Could not disconnect this provider. Please try again.'); }
+    finally { setBusy(false); }
   };
   const logout = async () => {
     if (submitting.current) return;
@@ -105,21 +131,25 @@ export default function CustomerPortalPage() {
     <div className="mb-8 flex flex-wrap items-center justify-between gap-3"><Link className="font-bold text-primary-700" to="/">Route Logistics</Link><div className="flex items-center gap-4"><ThemeControl />{(user || logoutFailed) && <button type="button" disabled={busy && !user} className="text-primary-700 underline" onClick={logout}>{logoutFailed ? 'Retry sign out' : 'Sign out'}</button>}</div></div>
     <h1 className="mb-6 text-3xl font-bold">Customer portal</h1>
     {!user ? <form onSubmit={submit} aria-label="Customer email sign-in" className="max-w-md space-y-4 rounded-xl border bg-white p-6">
-      <p>View your service visits and invoices using the email you gave your service provider.</p>
+      <p>Use the email your provider invited. Sign in, then connect the provider with its invitation link.</p>
       <label className="block">Email address<input className="mt-1 block w-full rounded border-gray-300" type="email" autoComplete="email" required disabled={!!challenge || busy || logoutFailed} value={email} onChange={(e) => setEmail(e.target.value)} /></label>
       {challenge && <><label className="block">Six-digit code<input className="mt-1 block w-full rounded border-gray-300" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required disabled={busy || logoutFailed} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} /></label><p className="text-sm text-gray-500">Codes expire after 10 minutes and can be used once.</p></>}
       <button disabled={busy || logoutFailed} className="rounded bg-primary-700 px-4 py-2 text-white hover:bg-primary-800 disabled:opacity-50">{busy ? 'Please wait…' : challenge ? 'Sign in' : 'Email a sign-in code'}</button>
       {challenge && <button type="button" disabled={busy || logoutFailed} className="block underline" onClick={() => { authVersion.current++; setChallenge(null); setCode(''); setMessage(''); setError(''); }}>Request a new code or change email</button>}
     </form> : <>
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4 rounded-xl border bg-white p-5"><label className="min-w-0 flex-1 font-semibold sm:max-w-lg">Service provider<SelectControl className="mt-2 block w-full rounded border-gray-300 font-normal" value={selectedId} disabled={busy || !accounts.length} onChange={chooseProvider} aria-describedby="portal-provider-help">{!accounts.length && <option value="">{busy ? 'Loading providers…' : 'No available providers'}</option>}{accounts.map(account => <option key={account.id} value={account.id}>{account.companyName}{account.contactEmail ? ` · ${account.contactEmail}` : ''}</option>)}</SelectControl></label><button type="button" className="text-primary-700 underline" disabled={busy} onClick={async () => { if (await confirmDiscard()) load(); }}>{busy ? 'Refreshing…' : 'Refresh visits and invoices'}</button><p id="portal-provider-help" className="w-full text-sm text-gray-500">Only the selected provider's records are shown. Switching providers closes open files, review drafts, and payment details.</p></div>
+      <section className="mb-5 rounded-xl border bg-white p-5"><h2 className="font-semibold">Connect provider</h2><p className="mb-3 text-sm text-gray-600">Ask your service provider to email you an invitation. The link can be used once and expires after seven days.</p>{pendingInvite ? <p>Invitation link ready. Connect it while signed in with the invited email.</p> : <label className="block text-sm">Invitation link<input className="mt-1 block w-full rounded border-gray-300" value={inviteLink} onChange={event => setInviteLink(event.target.value)} placeholder="Paste your invitation link" autoComplete="off" /></label>}<button type="button" className="mt-3 rounded bg-primary-700 px-4 py-2 text-white disabled:opacity-50" disabled={busy || (!pendingInvite && !inviteLink.trim())} onClick={connectProvider}>Connect provider</button></section>
       {busy && <p role="status" className="py-4 text-gray-600">Loading your authorized providers and service records…</p>}
-      {!busy && !accounts.length && !error && <p>No service records are available. Contact your provider to check your email address.</p>}
+      {!busy && !accounts.length && !error && <p>No providers are connected yet. Ask your provider for an invitation link.</p>}
       {selectedAccounts.map((account) => <section key={`${user.uid}:${account.id}`} aria-label="Selected provider records" className="mb-6 rounded-xl border bg-white p-5 sm:p-7">
         <h2 className="text-xl font-bold">{account.companyName}</h2>
         {account.contactEmail && <p className="mt-2 break-all text-sm text-gray-600">Provider contact: {account.contactEmail}</p>}
+        <button type="button" className="mt-2 text-sm text-primary-700 underline" onClick={disconnectProvider}>Disconnect provider</button>
         {account.duplicateCustomerCount > 0 && <p className="mt-2 text-sm text-gray-500">Matching customer records have been combined for this provider.</p>}
+        <h3 className="mb-3 mt-5 font-semibold">Service properties</h3>
+        {account.properties?.length ? <div className="flex flex-wrap gap-2"><button type="button" className={`rounded border px-3 py-2 ${!selectedProperty ? 'bg-primary-700 text-white' : ''}`} onClick={() => setPropertyKey('')}>All properties</button>{account.properties.map(property => <button type="button" key={`${property.customerId}:${property.id}`} className={`rounded border px-3 py-2 ${propertyKey === `${property.customerId}:${property.id}` ? 'bg-primary-700 text-white' : ''}`} onClick={() => setPropertyKey(`${property.customerId}:${property.id}`)}>{property.label} · {property.address}</button>)}</div> : <p>No service property is recorded yet.</p>}
         <h3 className="mb-3 mt-5 font-semibold">Service visits</h3>
-        {account.jobs.length ? <ul className="divide-y">{account.jobs.map((job) => <li key={job.id} className="flex flex-wrap justify-between gap-2 py-3"><span>{job.serviceType} · {job.date} {job.time}</span><span className="capitalize">{job.status.replace('-', ' ')}</span></li>)}</ul> : <p>No visits yet.</p>}
+        {displayedJobs.length ? <ul className="divide-y">{displayedJobs.map((job) => <li key={job.id} className="flex flex-wrap justify-between gap-2 py-3"><span>{job.serviceType} · {job.date} {job.time}</span><span className="capitalize">{job.status.replace('-', ' ')}</span></li>)}</ul> : <p>No visits for this property yet.</p>}
         <CustomerReviews accountId={account.id} userId={user.uid} />
         <h3 className="mb-3 mt-6 font-semibold">Photos and documents</h3>
         {account.photos?.length || account.documents?.length ? <ul className="grid gap-3 sm:grid-cols-2">{[...(account.photos || []), ...(account.documents || [])].map(item => <li key={`${item.kind}:${item.id}`} className="min-w-0 rounded-lg border p-4"><p className="break-words text-sm">{item.caption || item.name || (item.kind === 'photo' ? 'Service photo' : 'Service document')}</p><button type="button" className="mt-3 text-sm font-semibold text-primary-700 underline" disabled={currentFile?.loading && currentFile.item.id === item.id} onClick={() => readFile(item)}>{item.kind === 'photo' ? 'View photo' : 'Open document'}</button></li>)}</ul> : <p className="text-gray-600">No photos or documents have been shared by this provider yet.</p>}

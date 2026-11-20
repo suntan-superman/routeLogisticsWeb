@@ -42,6 +42,7 @@ async function seed(info) {
   const insideAddress = '1600 Amphitheatre Parkway, Mountain View, CA 94043', outsideAddress = '1 Infinite Loop, Cupertino, CA 95014';
   for (const [customerId, companyId, uid] of [[ids.customerId, ids.companyId, accounts.owner.uid],[ids.duplicateCustomerId, ids.companyId, accounts.owner.uid],[ids.otherCustomerId, ids.otherCompanyId, accounts.foreignOwner.uid]]) {
     await db.doc(`customers/${customerId}`).set({ companyId, userId: uid, name: customerId === ids.duplicateCustomerId ? `${customerName} duplicate` : customerName, email: customerEmail, emailNormalized: customerEmail, phone: '+12025550102', address: insideAddress, city: 'Mountain View', state: 'CA', zipCode: '94043', isActive: true, createdAt: new Date().toISOString(), totalSpent: 0 });
+    await db.doc(`rlPortalLinks/${hash(`${customerId}:${customerEmail}`)}`).set({ customerId, scopeId: `company:${companyId}`, email: customerEmail, portalUid: `rl_customer_${hash(customerEmail)}`, status: 'active' });
   }
   const now = new Date(), jobDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   const serviceType = `${prefix} Scheduled inspection`, completedServiceType = `${prefix} Completed inspection`, otherServiceType = `${prefix} Pool visit`;

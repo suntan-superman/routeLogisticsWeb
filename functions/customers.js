@@ -11,6 +11,11 @@ function cleanCustomer(row) {
   if (!data.name || data.name.length > 200 || (data.email && !validEmail(data.email)) || FIELDS.some((key) => data[key].length > (key === 'notes' ? 4000 : 500))) throw new HttpsError('invalid-argument', 'A customer name or email is invalid, or a field is too long.');
   return { ...data, emailNormalized: data.email };
 }
+function syntheticImportRow(row) {
+  const number = /^BLS Test Customer (\d{2})$/.exec(row.name)?.[1];
+  return Boolean(number) && row.email === `bls-test-${number}@example.com`
+    && /^\d{3} Example Lane \(Synthetic\)$/.test(row.address) && row.city === 'Bakersfield' && row.state === 'CA' && !row.zipCode && !row.phone && !row.notes;
+}
 function customerHandlers(db, config = {}) {
   const validator = config.serviceAreas || serviceAreaHandlers(db, config);
   return {
@@ -28,7 +33,10 @@ function customerHandlers(db, config = {}) {
         const ref = db.collection('customers').doc(id);
         // A retry/known identity must not incur another address lookup.
         if ((await ref.get()).exists || row.email && !(await db.collection('customers').where(Object.keys(scope)[0], '==', Object.values(scope)[0]).where('email', '==', row.email).limit(1).get()).empty) { skipped++; continue; }
-        const address = customerAddress(row), addressPatch = address ? validatedCustomerAddress(await validator.validateAddress(actor, address)) : {};
+        // Deliberately fictional BLS test rows cannot pass Google geocoding.
+        // Keep them unverified and unschedulable; all other addresses retain validation.
+        const synthetic = syntheticImportRow(row);
+        const address = customerAddress(row), addressPatch = synthetic ? { addressValidation: { source: 'synthetic-test', status: 'unverified' } } : address ? validatedCustomerAddress(await validator.validateAddress(actor, address)) : {};
         const added = await db.runTransaction(async (tx) => {
           const old = await tx.get(ref);
           if (old.exists) return false;
@@ -37,7 +45,7 @@ function customerHandlers(db, config = {}) {
             if (!existing.empty) return false;
           }
           await assertCustomerActor(db, tx, actor);
-          tx.create(ref, { ...row, ...addressPatch, userId: uid, ...scope, isActive: true, totalJobs: 0, totalSpent: 0, lastServiceDate: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), source: 'rl-csv' });
+          tx.create(ref, { ...row, ...addressPatch, ...(synthetic ? { syntheticTestData: true } : {}), userId: uid, ...scope, isActive: true, totalJobs: 0, totalSpent: 0, lastServiceDate: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), source: 'rl-csv' });
           return true;
         });
         if (added) created++; else skipped++;
@@ -46,4 +54,4 @@ function customerHandlers(db, config = {}) {
     },
   };
 }
-module.exports = { cleanCustomer, customerHandlers };
+module.exports = { cleanCustomer, customerHandlers, syntheticImportRow };

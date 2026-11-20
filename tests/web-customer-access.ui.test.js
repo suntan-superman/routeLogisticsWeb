@@ -43,6 +43,7 @@ function load(relative) {
     if (specifier.endsWith('/CustomerSmsConsent')) return () => React.createElement('aside', null, 'SMS consent controls');
     if (specifier === 'firebase/firestore') return { where() {} };
     if (specifier === 'firebase/functions') return { httpsCallable: () => async () => ({ data: { workspace: { status: 'company' } } }) };
+    if (specifier.endsWith('/services/firebase')) return { auth: { currentUser: user }, functions: {} };
     if (specifier === './firebase') return { auth: { currentUser: user }, functions: {} };
     if (specifier.startsWith('.')) {
       const resolved = path.resolve(path.dirname(filename), specifier);

@@ -2,6 +2,7 @@ const { requireCapability } = require('./access');
 const requireFinance = (db, request, data) => requireCapability(db, request, 'invoices.manage', data);
 const { HttpsError } = require('firebase-functions/v2/https');
 const { hash, normalizeEmail, validEmail, documentId, rateLimit } = require('./security');
+const { portalEmailFor, linkId, providerScope } = require('./portal');
 
 function stripeKeyMatchesMode(key, mode) {
   return typeof key === 'string' && key === key.trim() && ['test', 'live'].includes(mode)
@@ -23,11 +24,12 @@ function amountInCents(invoice) {
 }
 async function authorizeInvoice(db, request, invoice) {
   if (request.auth?.token.portal === true) {
-    if (!validEmail(request.auth.token.portalEmail)) throw new HttpsError('permission-denied', 'Customer invoice access required.');
+    const email = portalEmailFor(request);
     if (!invoice.customerId) throw new HttpsError('permission-denied', 'Customer invoice access required.');
     const customer = await db.collection('customers').doc(documentId(invoice.customerId)).get();
     const scopeMatches = invoice.companyId ? customer.get('companyId') === invoice.companyId : customer.get('userId') === invoice.userId && !customer.get('companyId');
-    if (!customer.exists || !scopeMatches || customer.get('isActive') === false || customer.get('deletedAt') || normalizeEmail(customer.get('email')) !== normalizeEmail(request.auth.token.portalEmail)) throw new HttpsError('permission-denied', 'Customer invoice access required.');
+    const link = await db.doc(`rlPortalLinks/${linkId(customer.id, email)}`).get();
+    if (!customer.exists || !scopeMatches || customer.get('isActive') === false || customer.get('deletedAt') || normalizeEmail(customer.get('email')) !== email || link.get('status') !== 'active' || link.get('portalUid') !== request.auth.uid || link.get('scopeId') !== providerScope(customer)) throw new HttpsError('permission-denied', 'Customer invoice access required.');
   } else await requireFinance(db, request, invoice);
 }
 function paymentHandlers(db, getStripe, { enabled = () => false, mode = () => 'test', liveApproved = () => false } = {}) {

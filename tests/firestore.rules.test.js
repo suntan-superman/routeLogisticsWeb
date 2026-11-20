@@ -410,6 +410,18 @@ test('portal sessions cannot access staff data or create companies', async () =>
   await assertFails(setDoc(doc(portal, 'companies/new'), { ownerId: 'customer' }));
 });
 
+test('provider links, invitations and audit records are server-only even for the linked portal identity', async () => {
+  await env.withSecurityRulesDisabled(async ctx => {
+    for (const name of ['rlPortalLinks', 'rlPortalLinkInvites', 'rlPortalLinkAudit']) await setDoc(doc(ctx.firestore(), `${name}/synthetic-link`), { email: 'customer@example.test', companyId: 'c1' });
+  });
+  for (const client of [owner(), manager(), tech(), as('portal-customer', { portal: true, portalEmail: 'customer@example.test' }), env.unauthenticatedContext().firestore()]) {
+    for (const name of ['rlPortalLinks', 'rlPortalLinkInvites', 'rlPortalLinkAudit']) {
+      await assertFails(getDoc(doc(client, `${name}/synthetic-link`)));
+      await assertFails(setDoc(doc(client, `${name}/forged`), { email: 'customer@example.test', status: 'active' }));
+    }
+  }
+});
+
 test('work shifts, raw locations and immutable visit evidence require authorized server callables', async () => {
   for (const name of ['rlLocations','rlWorkShifts','rlWorkShiftEvents','rlJobVisits','rlJobVisitStates']) {
     await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), `${name}/server-record`), { companyId:'c1',userId:'tech1',memberId:'t1' }));

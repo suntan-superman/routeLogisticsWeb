@@ -484,22 +484,28 @@ function workTrackingHandlers(db, legacy, {
       const member = await db.collection('teamMembers').doc(memberId).get();
       if (!member.exists || member.get('companyId') !== staff.company.id || member.get('role') !== 'technician' || !member.get('uid') || !['active', 'inactive', 'removed'].includes(member.get('status'))) throw new HttpsError('permission-denied', 'This technician is not available in your company history.');
       const startAt = Date.parse(request.data?.startAt), endAt = Date.parse(request.data?.endAt), limit = request.data?.limit ?? 200;
-      if (!Number.isFinite(startAt) || !Number.isFinite(endAt) || endAt <= startAt || endAt - startAt > 8 * 86400000 || endAt > currentTime + 120000 || !Number.isInteger(limit) || limit < 1 || limit > 200) throw new HttpsError('invalid-argument', 'Choose a valid history range of seven days or less and a page size up to 200.');
+      // The browser sends an inclusive calendar end date as the next local
+      // midnight. That boundary is normally in the future when the selected
+      // end date is today, so validate the requested window but query only
+      // through the latest permissible capture time.
+      if (!Number.isFinite(startAt) || !Number.isFinite(endAt) || endAt <= startAt || endAt - startAt > 8 * 86400000 || endAt > currentTime + 36 * 3600000 || !Number.isInteger(limit) || limit < 1 || limit > 200) throw new HttpsError('invalid-argument', 'Choose a valid history range of seven days or less and a page size up to 200.');
       const policy = policyFor(staff.company);
-      if (startAt < currentTime - policy.retentionHours * 3600000) throw new HttpsError('failed-precondition', 'The selected start is outside this company’s location retention window.');
+      const effectiveStartAt = Math.max(startAt, currentTime - policy.retentionHours * 3600000);
+      const effectiveEndAt = Math.min(endAt, currentTime + 120000);
+      if (effectiveEndAt <= effectiveStartAt) throw new HttpsError('failed-precondition', 'No retained location history is available in the selected range.');
       let cursor = null;
       if (request.data?.cursor) {
         const cursorId = documentId(request.data.cursor, 'history cursor');
         cursor = await db.collection('rlLocationHistory').doc(cursorId).get();
-        if (!cursor.exists || cursor.get('companyId') !== staff.company.id || cursor.get('memberId') !== memberId || ms(cursor.get('capturedAt')) < startAt || ms(cursor.get('capturedAt')) >= endAt) throw new HttpsError('invalid-argument', 'The history page cursor is invalid. Restart the query.');
+        if (!cursor.exists || cursor.get('companyId') !== staff.company.id || cursor.get('memberId') !== memberId || ms(cursor.get('capturedAt')) < effectiveStartAt || ms(cursor.get('capturedAt')) >= effectiveEndAt) throw new HttpsError('invalid-argument', 'The history page cursor is invalid. Restart the query.');
       }
       let query = db.collection('rlLocationHistory').where('companyId', '==', staff.company.id).where('memberId', '==', memberId)
-        .where('capturedAt', '>=', new Date(startAt)).where('capturedAt', '<', new Date(endAt)).orderBy('capturedAt', 'asc').limit(limit + 1);
+        .where('capturedAt', '>=', new Date(effectiveStartAt)).where('capturedAt', '<', new Date(effectiveEndAt)).orderBy('capturedAt', 'asc').limit(limit + 1);
       if (cursor) query = query.startAfter(cursor);
       const [rows, events] = await Promise.all([
         query.get(),
         db.collection('rlLocationHistoryEvents').where('companyId', '==', staff.company.id).where('memberId', '==', memberId)
-          .where('occurredAt', '>=', new Date(startAt)).where('occurredAt', '<', new Date(endAt)).orderBy('occurredAt', 'asc').limit(201).get()
+          .where('occurredAt', '>=', new Date(effectiveStartAt)).where('occurredAt', '<', new Date(effectiveEndAt)).orderBy('occurredAt', 'asc').limit(201).get()
       ]);
       const documents = rows.docs.slice(0, limit), last = documents.at(-1);
       return {
@@ -508,6 +514,9 @@ function workTrackingHandlers(db, legacy, {
         nextCursor: rows.size > limit && last ? last.id : null,
         hasMore: rows.size > limit,
         eventsTruncated: events.size > 200,
+        effectiveStartAt: new Date(effectiveStartAt).toISOString(),
+        effectiveEndAt: new Date(effectiveEndAt).toISOString(),
+        retentionClipped: effectiveStartAt !== startAt || effectiveEndAt !== endAt,
         retentionHours: policy.retentionHours,
         intervalMinutes: policy.intervalMinutes,
         timeZone: staff.company.get('timeZone') || 'UTC',

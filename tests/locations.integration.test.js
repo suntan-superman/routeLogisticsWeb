@@ -180,6 +180,17 @@ test('GPS history is append-only, keeps original offline times and returns only 
   const other = await fixture();
   await assert.rejects(f.handlers.history(f.request({ memberId: other.memberId, startAt, endAt }, f.owner)), { code: 'permission-denied' });
 });
+test('history accepts today as an inclusive calendar end date and clips the query to retention and current time', async () => {
+  const f = await fixture(), { shift } = await f.start(), session = await f.handlers.update(f.request({ action: 'start', shiftId: shift.id }));
+  await f.fix(session.sessionId);
+  const startAt = new Date(f.time() - 36 * 3600000).toISOString();
+  const endAt = new Date(f.time() + 14 * 3600000).toISOString(); // next local midnight for a daytime request
+  const result = await f.handlers.history(f.request({ memberId: f.memberId, startAt, endAt }, f.owner));
+  assert.equal(result.points.length, 1);
+  assert.equal(result.effectiveStartAt, new Date(f.time() - 24 * 3600000).toISOString());
+  assert.equal(result.effectiveEndAt, new Date(f.time() + 120000).toISOString());
+  assert.equal(result.retentionClipped, true);
+});
 test('sharing-disabled and shift-ended states are retained as explicit history events', async () => {
   const f = await fixture(), { shift } = await f.start(), session = await f.handlers.update(f.request({ action: 'start', shiftId: shift.id }));
   f.advance(60000);

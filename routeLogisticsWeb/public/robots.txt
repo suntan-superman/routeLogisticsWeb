@@ -1,0 +1,27 @@
+User-agent: *
+Allow: /
+Disallow: /my-work
+Disallow: /dispatch
+Disallow: /onboarding
+Disallow: /accept-invite
+Disallow: /portal
+Disallow: /review
+Disallow: /platform-admin
+Disallow: /estimate-approval
+Disallow: /estimates
+Disallow: /notifications
+Disallow: /routes
+Disallow: /location-history
+Disallow: /team-locations
+Disallow: /integrations
+Disallow: /company-setup
+Disallow: /customers
+Disallow: /estimate-templates
+Disallow: /jobs
+Disallow: /reports
+Disallow: /calendar
+Disallow: /invoices
+Disallow: /service-plans
+Disallow: /reviews
+
+Sitemap: https://route-logistics.com/sitemap.xml

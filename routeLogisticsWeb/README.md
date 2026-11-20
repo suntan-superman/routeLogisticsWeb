@@ -84,6 +84,10 @@ yarn preview
 firebase deploy --only hosting
 ```
 
+# Admin access
+https://route-logistics.com/platform-admin
+sroy@worksidesoftware.com
+
 ## Syncfusion Integration
 
 The web app uses Syncfusion components for advanced UI features:

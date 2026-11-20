@@ -1,5 +1,5 @@
 import { test, expect, signIn } from './support/fixtures.js';
-import { selectValue, expectSelectValue } from './support/select.js';
+import { selectValue } from './support/select.js';
 
 test('PW-INTAKE-01 @smoke prospect inquiry schedules one nonbillable estimate without creating an invoice', async ({ page, scenario }) => {
   test.info().annotations.push({ type: 'acceptance', description: 'Batch A: duplicate review, prospect intake, stable service property, estimate scheduling and billing isolation' });
@@ -20,7 +20,9 @@ test('PW-INTAKE-01 @smoke prospect inquiry schedules one nonbillable estimate wi
   await inquiry.getByLabel('Inquiry service requested', { exact: true }).fill(title);
   await selectValue(inquiry.getByRole('combobox', { name: 'Inquiry service category', exact: true }), 'Pest Control');
   await inquiry.getByLabel('Inquiry notes', { exact: true }).fill('Synthetic inquiry only; no actual service or messages.');
-  await expect(inquiry.getByRole('button', { name: 'Save inquiry', exact: true })).toBeDisabled();
+  await inquiry.getByRole('button', { name: 'Save inquiry', exact: true }).click();
+  await expect(inquiry.getByRole('alert')).toContainText(/Possible matching customers (?:were found|exist)/);
+  await expect(inquiry.getByText('Matched on: Same service address', { exact: true }).first()).toBeVisible();
   await inquiry.getByLabel('Create separate prospect despite matches', { exact: true }).check();
   await inquiry.getByLabel('Separate customer reason', { exact: true }).fill('Authorized synthetic prospect at a shared test service location.');
   await inquiry.getByRole('button', { name: 'Save inquiry', exact: true }).click();
@@ -31,16 +33,16 @@ test('PW-INTAKE-01 @smoke prospect inquiry schedules one nonbillable estimate wi
   expect(prospect).toMatchObject({ name, lifecycle: 'prospect', isActive: true });
   expect(prospect.serviceProperties).toHaveLength(1); expect(prospect.serviceProperties[0].id).toBe(savedInquiry.servicePropertyId);
   await inquiry.getByRole('button', { name: 'Schedule Estimate', exact: true }).click();
-  const form = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Schedule New Job', exact: true }) });
-  await expect(form).toBeVisible(); await expect(form.getByText(/Free estimate visit — nonbillable/)).toBeVisible();
-  const kind = form.getByRole('combobox', { name: 'Appointment kind', exact: true }); await expectSelectValue(kind, 'estimate_visit'); await expect(kind).toBeDisabled();
-  await expect(form.getByRole('combobox', { name: 'Customer', exact: true })).toBeDisabled();
-  await expect(form.getByRole('combobox', { name: 'Saved service property', exact: true })).toBeDisabled();
+  const form = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Schedule Estimate Visit', exact: true }) });
+  await expect(form).toBeVisible(); await expect(form.getByRole('region', { name: 'Saved inquiry details', exact: true })).toContainText(name); await expect(form.getByRole('region', { name: 'Saved inquiry details', exact: true })).toContainText(title);
+  await expect(form.getByRole('combobox', { name: 'Appointment kind', exact: true })).toHaveCount(0);
+  await expect(form.getByRole('combobox', { name: 'Customer', exact: true })).toHaveCount(0);
+  await expect(form.getByRole('combobox', { name: 'Saved service property', exact: true })).toHaveCount(0);
   const date = new Date(); date.setDate(date.getDate() + 7); const dateValue = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   await form.locator('input[type="date"]').fill(dateValue);
   await selectValue(form.getByRole('combobox', { name: 'Assigned technician', exact: true }), scenario.accounts.technician.membershipId);
   await expect(form.getByText('Available for this appointment', { exact: true })).toBeVisible();
-  await form.getByRole('button', { name: 'Schedule Job', exact: true }).click(); await expect(form).toHaveCount(0);
+  await form.getByRole('button', { name: 'Schedule Estimate Visit', exact: true }).click(); await expect(form).toHaveCount(0);
   const appointments = (await scenario.list('jobs')).filter(row => row.companyId === scenario.ids.companyId && row.inquiryId === savedInquiry.id);
   expect(appointments).toHaveLength(1); const visit = appointments[0];
   expect(visit).toMatchObject({ appointmentKind: 'estimate_visit', billable: false, totalCost: 0, estimateOutcome: 'estimate_pending', customerId: savedInquiry.customerId, servicePropertyId: savedInquiry.servicePropertyId, assignedTo: scenario.accounts.technician.membershipId });

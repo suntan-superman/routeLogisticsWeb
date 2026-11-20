@@ -95,8 +95,9 @@ test('estimate visits retain availability checks but cannot create billable or r
 
 test('inquiry scheduling locks the approved identity and property and uses its stable operation ID', async () => {
   const operationId = '5cab7804-e260-44af-9647-e3f489a61658';
-  await render({ defaults: { customerId: customer.id, serviceType: 'Initial estimate', date: '2030-01-10', appointmentKind: 'estimate_visit', inquiryId: 'inquiry-one', servicePropertyId: 'property-one', serviceProperty: { address: '200 Inquiry Service Road' }, operationId } });
-  assert.equal(input('Customer').props.disabled, true); assert.equal(select('Appointment kind').props.disabled, true); assert.equal(input('Service property address').props.disabled, true); assert.equal(button('Schedule Job').props.disabled, false);
+  await render({ defaults: { customerId: customer.id, serviceType: 'Initial estimate', serviceCategory: 'Pest Control', notes: 'Use side entrance.', date: '2030-01-10', appointmentKind: 'estimate_visit', inquiryId: 'inquiry-one', servicePropertyId: 'property-one', serviceProperty: { address: '200 Inquiry Service Road' }, operationId } });
+  assert.match(text(), /Schedule Estimate Visit/); assert.match(text(), /Saved inquiry details/); assert.match(text(), /Synthetic customer.*Initial estimate.*200 Inquiry Service Road.*Pest Control.*Use side entrance/s);
+  assert.equal(input('Customer'), undefined); assert.equal(select('Appointment kind'), undefined); assert.equal(input('Service property address'), undefined); assert.equal(button('Schedule Estimate Visit').props.disabled, false);
   await submit(); const request = writes()[0].data; assert.equal(request.operationId, operationId); assert.equal(request.job.inquiryId, 'inquiry-one'); assert.equal(request.job.servicePropertyId, 'property-one'); assert.equal(request.job.serviceProperty.address, '200 Inquiry Service Road'); assert.equal(request.job.billable, false);
 });
 

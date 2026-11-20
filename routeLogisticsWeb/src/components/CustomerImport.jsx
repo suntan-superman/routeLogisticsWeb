@@ -33,7 +33,7 @@ export default function CustomerImport({ onComplete = async () => {}, initialPre
   };
   return <details className="rounded-lg border bg-white p-4" open={openInitially || undefined}>
     <summary className="cursor-pointer font-medium">Import customers from CSV</summary>
-    <p className="my-3 text-sm text-gray-600">Headers: Name (required), Email, Phone, Address, City, State, ZIP, Notes. Up to 5,000 rows. Existing records are kept.</p>
+    <p className="my-3 text-sm text-gray-600">Headers: Name (required), Email, Phone, Address, City, State, ZIP, Notes. Up to 5,000 rows. Existing records are kept. Imported addresses are saved as entered and checked when scheduling work.</p>
     <input aria-label="Customer CSV file" type="file" accept=".csv,text/csv" disabled={busy} onChange={readFile} />
     {preview && <div className="mt-4">
       <p>{preview.customers.length} customers ready, {preview.duplicates} duplicates in file.</p>

@@ -1,8 +1,7 @@
 const { requireCapability } = require('./access');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { requireAuth, rateLimit, hash, normalizeEmail, validEmail } = require('./security');
-const { customerAddress, validatedCustomerAddress, assertCustomerActor } = require('./customerAddresses');
-const { serviceAreaHandlers } = require('./serviceAreas');
+const { assertCustomerActor } = require('./customerAddresses');
 const FIELDS = ['name', 'email', 'phone', 'address', 'city', 'state', 'zipCode', 'notes'];
 function cleanCustomer(row) {
   if (!row || typeof row !== 'object') throw new HttpsError('invalid-argument', 'Invalid customer row.');
@@ -16,8 +15,7 @@ function syntheticImportRow(row) {
   return Boolean(number) && row.email === `bls-test-${number}@example.com`
     && /^\d{3} Example Lane \(Synthetic\)$/.test(row.address) && row.city === 'Bakersfield' && row.state === 'CA' && !row.zipCode && !row.phone && !row.notes;
 }
-function customerHandlers(db, config = {}) {
-  const validator = config.serviceAreas || serviceAreaHandlers(db, config);
+function customerHandlers(db) {
   return {
     bulkImportCustomers: async (request) => {
       const { uid, token } = requireAuth(request);
@@ -31,12 +29,12 @@ function customerHandlers(db, config = {}) {
         const identity = row.email || [row.name, row.phone, row.address].join('|').toLowerCase();
         const id = `rl_import_${hash(`${Object.values(scope)[0]}:${identity}`)}`;
         const ref = db.collection('customers').doc(id);
-        // A retry/known identity must not incur another address lookup.
+        // Preserve previously imported rows when a batch is retried.
         if ((await ref.get()).exists || row.email && !(await db.collection('customers').where(Object.keys(scope)[0], '==', Object.values(scope)[0]).where('email', '==', row.email).limit(1).get()).empty) { skipped++; continue; }
-        // Deliberately fictional BLS test rows cannot pass Google geocoding.
-        // Keep them unverified and unschedulable; all other addresses retain validation.
+        // CSV addresses are contact data, not verified service properties. Google
+        // validation belongs to the scheduling workflow, when a property is used.
         const synthetic = syntheticImportRow(row);
-        const address = customerAddress(row), addressPatch = synthetic ? { addressValidation: { source: 'synthetic-test', status: 'unverified' } } : address ? validatedCustomerAddress(await validator.validateAddress(actor, address)) : {};
+        const addressPatch = row.address ? { addressValidation: { source: synthetic ? 'synthetic-test' : 'csv-import', status: 'unverified' } } : {};
         const added = await db.runTransaction(async (tx) => {
           const old = await tx.get(ref);
           if (old.exists) return false;

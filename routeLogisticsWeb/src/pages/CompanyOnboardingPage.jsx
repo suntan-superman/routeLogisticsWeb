@@ -251,7 +251,7 @@ function HoursStep({ reviewMode, draft, change, busy, dirty, save, company }) {
 function ImportStep({ reviewMode, csv, readCsv, downloadTemplate, completed }) {
   return <section className="space-y-4 rounded-lg bg-white p-5 shadow">
     <h2 className="text-xl font-semibold">Import customers <span className="text-sm font-normal">(optional)</span></h2>
-    <p>Download a template, then preview and validate a CSV with Name, Email, Phone, Address, City, State, ZIP, and Notes. Select the file once. Existing customers are never overwritten, and retry safely skips rows already saved.</p>
+    <p>Download a template, then preview a CSV with Name, Email, Phone, Address, City, State, ZIP, and Notes. Select the file once. Addresses are saved as entered and checked when scheduling work. Existing customers are never overwritten, and retry safely skips rows already saved.</p>
     <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
       <button type="button" className="btn-secondary" onClick={downloadTemplate}>Download sample CSV</button>
       <input aria-label="Customer CSV file" className="max-w-full text-sm file:mr-3" type="file" accept=".csv,text/csv" onChange={readCsv}/>

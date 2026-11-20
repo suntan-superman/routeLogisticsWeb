@@ -168,8 +168,16 @@ test('one job Save accepts a Google-confirmed property with inferred ZIP details
     const jobs = await db.collection('jobs').where(solo ? 'userId' : 'companyId', '==', solo ? f.uid : f.id).get(); assert.equal(jobs.size, 2);
   }
 });
-test('CSV creation uses the same verifier while replay and duplicate identities skip another paid lookup', async () => {
+test('CSV import preserves entered addresses without Google lookup and retries without duplicates', async () => {
   const f = await fixture(), importer = customerHandlers(db, { serviceAreas: f.areas }).bulkImportCustomers;
-  const request = f.request({ customers: [{ name: 'Imported synthetic', email: `${f.id}@example.test`, address: VALID }] });
-  assert.equal((await importer(request)).created, 1); assert.equal((await importer(request)).skipped, 1); assert.equal(f.calls(), 1);
+  const entered = '111 Unverified Street';
+  const email = `${f.id}@example.test`;
+  const request = f.request({ customers: [{ name: 'Imported synthetic', email, address: entered, city: 'Bakersfield', state: 'CA', zipCode: '93304' }] });
+  assert.equal((await importer(request)).created, 1); assert.equal((await importer(request)).skipped, 1); assert.equal(f.calls(), 0);
+  const saved = await db.collection('customers').where('companyId', '==', f.id).where('email', '==', email).get();
+  assert.equal(saved.size, 1);
+  assert.equal(saved.docs[0].get('address'), entered);
+  assert.equal(saved.docs[0].get('zipCode'), '93304');
+  assert.deepEqual(saved.docs[0].get('addressValidation'), { source: 'csv-import', status: 'unverified' });
+  assert.equal(saved.docs[0].get('latitude'), undefined);
 });

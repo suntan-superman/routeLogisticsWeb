@@ -9,12 +9,12 @@ const { createWorkspaceQueryMock, selectControlMock } = require('./support/works
 const workspaceHooks = createWorkspaceQueryMock(React, { scopeId: 'location-history-workspace' });
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
-let tree, calls, mapContainers, mapNode, markers = [], infoWindows = [], geocodeCalls = 0;
+let tree, calls, mapContainers, mapNode, markers = [], infoWindows = [], geocodeCalls = 0, geocodeFailure = null;
 global.document = {
   visibilityState: 'visible',
   createElement: () => ({ style: {}, textContent: '', children: [], append(...children) { this.children.push(...children); } })
 };
-global.window = { google: { maps: { Geocoder: class { async geocode() { geocodeCalls++; return { results: [{ formatted_address: '123 Synthetic Street, Bakersfield, CA' }] }; } } } } };
+global.window = { google: { maps: { Geocoder: class { async geocode() { geocodeCalls++; if (geocodeFailure) { const failure = geocodeFailure; geocodeFailure = null; throw failure; } return { results: [{ formatted_address: '123 Synthetic Street, Bakersfield, CA' }] }; } } } } };
 
 class Bounds {
   constructor() { this.points = []; }
@@ -91,7 +91,7 @@ const button = label => tree.root.findAll(node => node.type === 'button' && node
 
 afterEach(async () => {
   if (tree) await act(async () => tree.unmount());
-  tree = null; calls = []; mapContainers = []; markers = []; infoWindows = []; geocodeCalls = 0;
+  tree = null; calls = []; mapContainers = []; markers = []; infoWindows = []; geocodeCalls = 0; geocodeFailure = null;
 });
 
 test('the observed-route map initializes only after its container is mounted', async () => {
@@ -128,4 +128,40 @@ test('selecting a history marker shows its recorded time and lazily resolves one
   const start = markers.find(marker => marker.content.textContent === 'S');
   await act(async () => { start.listeners.click(); await new Promise(resolve => setImmediate(resolve)); });
   assert.match(infoWindows.at(-1).content.children.map(node => node.textContent).join(' '), /Start.*Recorded:/);
+});
+
+test('a denied address lookup reports the configuration error and retries when the marker is selected again', async () => {
+  calls = []; mapContainers = []; markers = []; infoWindows = []; geocodeCalls = 0;
+  mapNode = { nodeType: 1, label: 'route-map' };
+  await act(async () => { tree = create(React.createElement(Page), { createNodeMock: element => element.props['aria-label'] === 'Observed technician GPS route map' ? mapNode : {} }); });
+  await act(async () => tree.root.findByType('select').props.onChange({ target: { value: 'tech-3' } }));
+  await act(async () => button('Load history').props.onClick());
+  await act(async () => button('Show observed route on map').props.onClick());
+  const stop = markers.find(marker => marker.content.textContent === '1');
+  geocodeFailure = { code: 'REQUEST_DENIED' };
+  await act(async () => { stop.listeners.click(); await new Promise(resolve => setImmediate(resolve)); });
+  assert.equal(geocodeCalls, 1);
+  assert.match(infoWindows.at(-1).content.children.map(node => node.textContent).join(' '), /Google denied the address lookup/);
+  assert.match(tree.root.findByProps({ role: 'alert' }).children.join(''), /Geocoding API/);
+  await act(async () => { stop.listeners.click(); await new Promise(resolve => setImmediate(resolve)); });
+  assert.equal(geocodeCalls, 2, 'A failed lookup must not be cached');
+  assert.match(infoWindows.at(-1).content.children.map(node => node.textContent).join(' '), /Approximate address: 123 Synthetic Street/);
+  assert.equal(tree.root.findAllByProps({ role: 'alert' }).length, 0);
+});
+
+test('the stop-address action can retry after a Google lookup failure', async () => {
+  calls = []; mapContainers = []; markers = []; infoWindows = []; geocodeCalls = 0;
+  mapNode = { nodeType: 1, label: 'route-map' };
+  await act(async () => { tree = create(React.createElement(Page), { createNodeMock: element => element.props['aria-label'] === 'Observed technician GPS route map' ? mapNode : {} }); });
+  await act(async () => tree.root.findByType('select').props.onChange({ target: { value: 'tech-3' } }));
+  await act(async () => button('Load history').props.onClick());
+  await act(async () => button('Show observed route on map').props.onClick());
+  geocodeFailure = { code: 'REQUEST_DENIED' };
+  await act(async () => button('Resolve approximate stop addresses').props.onClick());
+  assert.equal(geocodeCalls, 1);
+  assert.match(tree.root.findByProps({ role: 'alert' }).children.join(''), /Geocoding API/);
+  await act(async () => button('Resolve approximate stop addresses').props.onClick());
+  assert.equal(geocodeCalls, 2);
+  assert.equal(tree.root.findAllByProps({ role: 'alert' }).length, 0);
+  assert.match(tree.root.findAll(node => node.type === 'p' && node.children.join('').includes('123 Synthetic Street'))[0].children.join(''), /Approximate address:/);
 });

@@ -9,6 +9,24 @@ import { addCalendarDays, analyzeLocationHistory, localMidnightUtc, todayInTimeZ
 const isoDay = (value, timeZone) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', ...(timeZone ? { timeZone } : {}) });
 const durationText = value => `${Math.floor(value / 60000)} min`;
 const locationKey = point => `${point.lat.toFixed(5)},${point.lng.toFixed(5)}`;
+const addressLookupError = failure => {
+  const status = String(failure?.code || failure?.status || '');
+  if (status === 'REQUEST_DENIED') return new Error('Google denied the address lookup. Check that the browser key permits the Geocoding API, then try again.');
+  return new Error('Google could not resolve this location. Select the marker again to retry.');
+};
+async function approximateAddress(point, cache, lookups) {
+  const key = locationKey(point);
+  if (cache.current[key]) return cache.current[key];
+  if (!lookups.current.has(key)) {
+    const lookup = new window.google.maps.Geocoder().geocode({ location: { lat: point.lat, lng: point.lng } })
+      .then(result => result.results?.[0]?.formatted_address || 'No nearby street address found.')
+      .catch(failure => { throw addressLookupError(failure); })
+      .then(address => { cache.current[key] = address; return address; })
+      .finally(() => { lookups.current.delete(key); });
+    lookups.current.set(key, lookup);
+  }
+  return lookups.current.get(key);
+}
 const eventText = event => ({
   'shift-started': 'Shift started; technician had consented to location sharing.',
   'shift-ended': 'Shift ended; location sharing was stopped.',
@@ -108,16 +126,17 @@ export default function LocationHistoryPage() {
         const windowForMarker = new maps.InfoWindow({ content, ariaLabel: `${title} location details` });
         detailWindow.current = windowForMarker;
         windowForMarker.open({ map: map.current, anchor: marker, shouldFocus: true });
-        const key = locationKey(point);
-        if (addressCache.current[key]) return;
-        if (!addressLookups.current.has(key)) {
-          addressLookups.current.set(key, new window.google.maps.Geocoder().geocode({ location: { lat: point.lat, lng: point.lng } })
-            .then(result => result.results?.[0]?.formatted_address || 'Address unavailable')
-            .catch(() => 'Address unavailable'));
+        if (addressCache.current[locationKey(point)]) return;
+        try {
+          const address = await approximateAddress(point, addressCache, addressLookups);
+          if (detailWindow.current === windowForMarker && active) {
+            addressLine.textContent = `Approximate address: ${address}`;
+            setError('');
+          }
+        } catch (failure) {
+          if (detailWindow.current === windowForMarker && active) addressLine.textContent = failure.message;
+          if (active) setError(failure.message);
         }
-        const address = await addressLookups.current.get(key);
-        addressCache.current[key] = address;
-        if (detailWindow.current === windowForMarker && active) addressLine.textContent = `Approximate address: ${address}`;
       };
       for (const [label, color, point] of [['S', '#047857', first], ['E', '#b91c1c', last]]) {
         const position = { lat: point.lat, lng: point.lng };
@@ -185,13 +204,11 @@ export default function LocationHistoryPage() {
     if (!mapReady || !analysis.stops.length) return;
     setAddressBusy(true); setError('');
     try {
-      const geocoder = new window.google.maps.Geocoder(), next = { ...addresses };
+      const next = { ...addresses };
       for (const stop of analysis.stops.slice(0, 30)) {
         const key = locationKey(stop);
         if (next[key]) continue;
-        if (!addressLookups.current.has(key)) addressLookups.current.set(key, geocoder.geocode({ location: { lat: stop.lat, lng: stop.lng } }).then(result => result.results?.[0]?.formatted_address || 'Address unavailable').catch(() => 'Address unavailable'));
-        next[key] = await addressLookups.current.get(key);
-        addressCache.current[key] = next[key];
+        next[key] = await approximateAddress(stop, addressCache, addressLookups);
         setAddresses({ ...next });
       }
       if (analysis.stops.length > 30) setError('Approximate address lookup is limited to the first 30 stops per request.');

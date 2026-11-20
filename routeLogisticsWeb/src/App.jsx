@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from 'react';
-import { createBrowserRouter, RouterProvider, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider, Routes, Route, Navigate, useLocation, useRouteError } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { createWorkspaceQueryClient } from './services/workspaceQueryClient';
 import { WorkspaceQueryBoundary } from './hooks/useWorkspaceQuery';
@@ -50,6 +50,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import { ConfirmProvider } from './components/ConfirmProvider';
 import { UnsavedChangesProvider } from './components/UnsavedChangesProvider';
 import KeyboardFocusVisibility from './components/KeyboardFocusVisibility';
+import { isChunkLoadError } from './services/chunkRecovery';
 
 // Create a client
 // Register Syncfusion license
@@ -225,7 +226,19 @@ function AppContent() {
 }
 
 // Keep the existing route tree while enabling supported SPA/history blockers.
-const router = createBrowserRouter([{ path: '*', element: <AppContent /> }]);
+function RouteError() {
+  const error = useRouteError();
+  const missingChunk = isChunkLoadError(error);
+  return <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center p-6 text-gray-900">
+    <h1 className="text-2xl font-semibold">{missingChunk ? 'A newer app version is available' : 'This page could not open'}</h1>
+    <p className="mt-3">{missingChunk
+      ? 'The app was updated while this browser tab was open. Reload to continue with the latest version. Your saved company setup can be resumed.'
+      : 'Please reload and try again. If the problem continues, contact support.'}</p>
+    <button type="button" className="mt-5 w-fit rounded bg-primary-700 px-4 py-2 font-semibold text-white" onClick={() => window.location.reload()}>Reload app</button>
+  </main>;
+}
+
+const router = createBrowserRouter([{ path: '*', element: <AppContent />, errorElement: <RouteError /> }]);
 
 function App() {
   return (

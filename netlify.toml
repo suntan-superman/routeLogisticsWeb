@@ -69,6 +69,11 @@
     X-Robots-Tag = "noindex, nofollow"
 
 [[redirects]]
+  from = "/assets/*"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

@@ -5,6 +5,7 @@ import './theme.css'
 import App from './App.jsx'
 import * as Sentry from '@sentry/react'
 import { initializeMonitoring, scrubErrorEvent } from './services/monitoring'
+import { recoverFailedChunk } from './services/chunkRecovery'
 
 if (import.meta.env.VITE_SENTRY_DSN) {
   Sentry.init({
@@ -16,6 +17,10 @@ if (import.meta.env.VITE_SENTRY_DSN) {
   });
 }
 initializeMonitoring();
+
+window.addEventListener('vite:preloadError', event => {
+  recoverFailedChunk(event, { storage: window.sessionStorage, reload: () => window.location.reload() });
+});
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

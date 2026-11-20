@@ -25,11 +25,15 @@ Only explicitly shared files are visible:
 
 The authorized account must finish normal Firebase email verification. The administration screen provides explicit send-verification and check-verification actions; it does not mark accounts verified or bypass MFA/email policy. Sign-in returns to `/platform-admin` using a strictly allowlisted internal return path.
 
+Sign-in from the administrator portal opens the existing staff **Email code** option by default. It sends a single-use code on request. If the account is new, provision it using its exact confirmed email, have the operator sign in with their password and verify the email, then grant platform access to that verified Firebase UID. An operator can add the grant in Firestore at `rlPlatformAdmins/<uid>` with `status: active` and `role: admin`.
+
 The CMS provides a dashboard, FAQ/testimonial/success-story lists, drafts, publication/archive controls, private preview, revision history, optimistic conflict checks, save feedback and unsaved-change protection. Images upload through an authorized server endpoint into private token-free Storage. Allowed image formats are JPEG, PNG and WebP, up to 2 MB, with required alternative text. A public image proxy rechecks the current published record; archiving/unpublishing removes public access.
 
 Content uses plain text, paragraph breaks and dedicated SEO fields. HTML supplied as text is escaped, not executed. Testimonial/story publication requires an explicit genuine-source and publication-permission reference. Synthetic acceptance content cannot be published. No fictional testimonials or success stories were seeded.
 
 Private collections are `rlPlatformContent`, `rlPlatformContentImages`, `rlContentSlugs` and `rlContentAudit`. Each save creates an immutable audit revision. Published pages have a sanitized server-managed `rlPublicContent` projection; private source evidence and administrator identities are not included. Archive/draft transitions remove the public projection atomically.
+
+In **Company subscriptions**, platform administrators can record a plan name, status and optional end date for an existing company. Each change requires a reason and records the administrator, previous values, new values and timestamp. Existing companies show **Unassigned** until an administrator creates a record. A revision check prevents conflicting edits. `rlPlatformSubscriptions` is the only UI API for these private records and audits. They serve as an administrative register, independent of payment collection and company access.
 
 ## Public routes and search rendering
 

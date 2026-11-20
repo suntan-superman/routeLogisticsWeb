@@ -5,7 +5,7 @@ const {doc,setDoc,getDoc,updateDoc,deleteDoc,collection,getDocs,writeBatch,setLo
 const {ref,uploadBytes,getMetadata,deleteObject}=require('firebase/storage');
 let env;
 const companyId='cms-rules-company',ownerId='cms-rules-owner',adminId='cms-rules-platform-admin',techId='cms-rules-tech';
-const privateCollections=['rlPlatformAdmins','rlPlatformContent','rlPlatformContentImages','rlContentAudit','rlContentSlugs','rlPublicContent','rlPortalChallenges','rlPortalDocuments'];
+const privateCollections=['rlPlatformAdmins','rlPlatformContent','rlPlatformContentImages','rlContentAudit','rlContentSlugs','rlPublicContent','rlPortalChallenges','rlPortalDocuments','rlCompanySubscriptions','rlCompanySubscriptions/cms-rules-record/history'];
 const record='cms-rules-record',privateData={companyId,userId:ownerId,status:'draft',title:'Private draft',body:'Synthetic draft body',role:'admin',codeHash:'synthetic-never-a-real-code'};
 function contexts(){return [
   ['anonymous',env.unauthenticatedContext()],

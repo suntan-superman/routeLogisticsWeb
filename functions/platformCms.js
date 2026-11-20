@@ -84,10 +84,16 @@ function platformCmsHandlers(db, config = {}) {
   const now = config.now || (() => Date.now());
   const bucket = () => typeof config.bucket === 'function' ? config.bucket() : config.bucket || getStorage().bucket();
   const contentRef = id => db.doc(`rlPlatformContent/${identifier(id)}`);
-  async function adminIdentity(request) {
+  async function adminIdentity(request, transaction) {
     const auth = requireAuth(request, true);
-    await requireAccountActive(db, auth.uid);
-    const record = await db.doc(`rlPlatformAdmins/${identifier(auth.uid, 'administrator UID')}`).get();
+    const ref = db.doc(`rlPlatformAdmins/${identifier(auth.uid, 'administrator UID')}`);
+    if (transaction) {
+      const deletion = await transaction.get(db.doc(`rlAccountDeletions/${auth.uid}`));
+      if (deletion.exists) throw new HttpsError('permission-denied', 'This Route Logistics account has been deleted. Sign out.');
+    } else {
+      await requireAccountActive(db, auth.uid);
+    }
+    const record = await (transaction ? transaction.get(ref) : ref.get());
     if (record.get('status') !== 'active' || record.get('role') !== 'admin') throw new HttpsError('permission-denied', 'Explicit Route Logistics platform administrator access is required.');
     return auth;
   }

@@ -10,6 +10,44 @@ const records = page => page.getByRole('region', { name: 'Selected provider reco
 const feedback = page => page.getByRole('region', { name: 'Service feedback', exact: true });
 const editor = page => page.getByRole('form', { name: 'Platform content editor' });
 
+test('platform admin signs in with an email code and saves a subscription without changing the company', async ({ page, scenario }) => {
+  const companyPath = `companies/${scenario.ids.companyId}`;
+  const original = await scenario.readDoc(companyPath);
+  await page.goto('/platform-admin');
+  await page.getByRole('link', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Email code', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('textbox', { name: 'Email address' }).fill(scenario.accounts.platformAdmin.email);
+  await page.getByRole('button', { name: 'Email a sign-in code' }).click();
+  await page.getByRole('textbox', { name: 'Six-digit staff sign-in code' }).fill(await scenario.getStaffCode(scenario.accounts.platformAdmin));
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page).toHaveURL(/\/platform-admin$/);
+  await expect(page.getByRole('button', { name: 'Testimonials', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Success stories', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Company subscriptions', exact: true }).click();
+  const company = page.getByRole('button', { name: new RegExp(scenario.ids.companyId) });
+  const next = page.getByRole('button', { name: 'Next', exact: true });
+  const companies = page.getByRole('complementary', { name: 'Companies' });
+  await expect(companies.getByRole('list')).toBeVisible();
+  while (!(await company.isVisible()) && await next.isEnabled()) {
+    await next.click();
+    await expect(companies.getByRole('list')).toBeVisible();
+  }
+  await company.click();
+  const form = page.getByRole('form', { name: 'Company subscription editor' });
+  await expect(form).toContainText('Current status: Unassigned');
+  await expect(form.getByRole('button', { name: 'Save subscription' })).toBeDisabled();
+  await form.getByLabel('Plan name').fill('Field pilot');
+  await selectValue(form.getByRole('combobox', { name: 'Subscription status' }), 'trial');
+  await form.getByLabel('End date (optional)').fill('2027-01-01');
+  await form.getByLabel('Reason for change').fill('Approved for an emulator-only pilot');
+  await form.getByRole('button', { name: 'Save subscription' }).click();
+  await expect(form.getByRole('status')).toHaveText('Subscription saved.');
+  await expect(page.getByRole('region', { name: 'Recent changes' })).toContainText('Approved for an emulator-only pilot');
+  expect(await scenario.readDoc(companyPath)).toEqual(original);
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
+});
+
 async function selectProvider(page, companyId) {
   await selectValue(page.getByRole('combobox', { name: 'Service provider' }), `company:${companyId}`);
   await expect(records(page)).toBeVisible();

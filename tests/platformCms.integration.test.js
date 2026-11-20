@@ -3,6 +3,7 @@ const assert=require('node:assert/strict');
 const req=require('node:module').createRequire(require('node:path').resolve(__dirname,'../functions/package.json'));
 const {initializeApp,deleteApp}=req('firebase-admin/app'),{getFirestore}=req('firebase-admin/firestore');
 const {platformCmsHandlers}=require('../functions/platformCms');
+const {platformSubscriptionHandler}=require('../functions/platformSubscriptions');
 let app,db,cms,sequence=0,clock=Date.parse('2026-11-14T20:00:00Z');
 const uid='cms-verified-admin',auth={uid,token:{email_verified:true,email:'admin@example.invalid'}};
 const request=(data,identity=auth)=>({data,auth:identity});
@@ -15,6 +16,70 @@ beforeEach(async()=>db.doc(`rlPlatformAdmins/${uid}`).set({status:'active',role:
 const save=async(content,expectedRevision=0,identity=auth)=>cms.admin(request({action:'save',content,expectedRevision},identity));
 const publicGet=async item=>cms.publicRead({data:{action:'get',type:item.type,slug:item.slug}});
 const response=()=>({code:200,headers:{},set(k,v){this.headers[k]=v;return this;},status(code){this.code=code;return this;},send(body){this.body=body;return this;}});
+
+test('subscription actions require an active verified platform grant independent of company roles', async () => {
+  const subscriptions = platformSubscriptionHandler(db, cms.requireAdmin);
+  const companyId = 'subscription-authorized-company';
+  await db.doc(`companies/${companyId}`).set({ ownerId: 'ordinary-owner', name: 'Subscription company' });
+  for (const identity of [
+    { uid: 'ordinary-owner', token: { role: 'owner', companyId, email_verified: true } },
+    { uid: 'ordinary-admin', token: { role: 'admin', companyId, email_verified: true } },
+    { uid: 'ordinary-manager', token: { role: 'manager', companyId, email_verified: true } },
+    { uid: 'ordinary-tech', token: { role: 'technician', companyId, email_verified: true } },
+  ]) {
+    for (const action of ['list', 'get', 'save']) {
+      await assert.rejects(subscriptions(request({ action, companyId }, identity)), { code: 'permission-denied' });
+    }
+  }
+  await assert.rejects(subscriptions(request({ action: 'list' }, null)), { code: 'unauthenticated' });
+  await assert.rejects(subscriptions(request({ action: 'list' }, { uid, token: { portal: true, email_verified: true } })), { code: 'unauthenticated' });
+  await assert.rejects(subscriptions(request({ action: 'list' }, { uid, token: { email_verified: false } })), { code: 'failed-precondition' });
+  assert.equal((await subscriptions(request({ action: 'get', companyId }))).item.subscription.status, 'unassigned');
+  await db.doc(`rlPlatformAdmins/${uid}`).update({ status: 'revoked' });
+  await assert.rejects(subscriptions(request({ action: 'get', companyId })), { code: 'permission-denied' });
+});
+
+test('subscription pages are bounded and project only company name, ID and subscription', async () => {
+  const subscriptions = platformSubscriptionHandler(db, cms.requireAdmin);
+  const companies = Array.from({ length: 26 }, (_, index) => `subscription-page-${String(index).padStart(2, '0')}`);
+  const batch = db.batch();
+  for (const id of companies) batch.set(db.doc(`companies/${id}`), { businessName: id, ownerId: 'private-owner', bankReference: 'private' });
+  await batch.commit();
+  const first = await subscriptions(request({ action: 'list', cursor: 'subscription-page-' }));
+  assert.deepEqual(first.items.map(item => item.id), companies.slice(0, 25));
+  for (const item of first.items) assert.deepEqual(Object.keys(item), ['id', 'name', 'subscription']);
+  const second = await subscriptions(request({ action: 'list', cursor: first.nextCursor }));
+  assert.equal(second.items[0].id, companies[25]);
+  assert.equal(second.nextCursor, null);
+});
+
+test('subscription changes are validated, revision-checked and audited without modifying company data', async () => {
+  const subscriptions = platformSubscriptionHandler(db, cms.requireAdmin);
+  const companyId = 'subscription-save-company';
+  const companyRef = db.doc(`companies/${companyId}`);
+  const company = { name: 'Subscription company', isActive: true, status: 'active', ownerId: 'ordinary-owner' };
+  await companyRef.set(company);
+  const save = changes => subscriptions(request({
+    action: 'save', companyId, plan: 'Pilot', status: 'trial', endDate: '2027-01-01', reason: 'Pilot approved',
+    expectedRevision: 0, ...changes,
+  }));
+  for (const changes of [{ plan: '' }, { status: 'unassigned' }, { endDate: '2027-02-29' }, { reason: '  ' }, { expectedRevision: -1 }]) {
+    await assert.rejects(save(changes), { code: 'invalid-argument' });
+  }
+  await assert.rejects(save({ companyId: 'subscription-missing-company' }), { code: 'not-found' });
+  const results = await Promise.allSettled([save({ isActive: false, actorId: 'forged' }), save({ isActive: false })]);
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(results.find(result => result.status === 'rejected').reason.code, 'aborted');
+  assert.equal((await save({ expectedRevision: 1 })).unchanged, true);
+  await save({ expectedRevision: 1, status: 'paused', reason: 'Pilot paused' });
+  const { item, history } = await subscriptions(request({ action: 'get', companyId }));
+  assert.equal(item.subscription.status, 'paused');
+  assert.deepEqual(history.map(entry => entry.revision), [2, 1]);
+  assert.equal(history[0].before.status, 'trial');
+  assert.equal(history[0].reason, 'Pilot paused');
+  assert.equal(history[1].actorId, uid);
+  assert.deepEqual((await companyRef.get()).data(), company);
+});
 
 test('platform privilege is explicit and independent of company owner/admin/technician claims',async()=>{
   await db.doc('companies/cms-company').set({ownerId:'company-owner'});

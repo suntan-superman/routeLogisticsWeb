@@ -11,11 +11,13 @@ import { requestStaffCode, signInWithStaffCode } from '../services/staffLogin';
 import ThemeControl from '../components/ThemeControl';
 
 export default function LoginPage() {
+  const location = useLocation();
+  const adminSignIn = returnPath(location.search) === '/platform-admin';
   const [email, setEmail] = useState(rememberedEmail);
   const [remember, setRemember] = useState(() => Boolean(email));
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [mode, setMode] = useState('password');
+  const [mode, setMode] = useState(() => adminSignIn ? 'otp' : 'password');
   const [code, setCode] = useState('');
   const [challenge, setChallenge] = useState(null);
   const [resendAt, setResendAt] = useState(0);
@@ -24,7 +26,6 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const { signin, currentUser } = useAuth();
-  const location = useLocation();
   useEffect(() => {
     if (!challenge || clock >= resendAt) return;
     const timer = setTimeout(() => setClock(Date.now()), 1000);

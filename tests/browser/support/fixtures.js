@@ -114,6 +114,16 @@ async function seed(info) {
       }).toBe(true);
       return code;
     },
+    getStaffCode: async account => {
+      let code;
+      await expect.poll(async () => {
+        const rows = await db.collection('rlMail').where('to', '==', account.email.toLowerCase()).get();
+        const latest = rows.docs.filter(row => row.get('staffLoginChallengeId')).sort((a, b) => b.get('createdAt').toMillis() - a.get('createdAt').toMillis())[0];
+        code = latest?.get('text')?.match(/code is (\d{6})/)?.[1];
+        return !!code;
+      }).toBe(true);
+      return code;
+    },
     readReview: jobId => readDoc(`rlReviews/${hash(`review:${jobId}`)}`),
     countReviews: async jobId => (await db.collection('rlReviews').where('jobId','==',jobId).get()).size,
     revokeAssociation: async companyId => {

@@ -28,7 +28,10 @@ function load(relative) {
     if (name === 'firebase/auth') return { sendEmailVerification: async current => { assert.equal(current.uid, user.uid); verificationEmails++; } };
     if (name.endsWith('/AuthContext')) return { useAuth: () => ({ currentUser: user, loading: false, role: 'owner', company: { ownerId: user?.uid }, refreshSession: async () => {} }) };
     if (name.endsWith('/services/firebase')) return { auth: { get currentUser() { return user; } } };
-    if (name.endsWith('/useUnsavedChanges')) return { useUnsavedChanges: value => { dirty = value; return { confirmDiscard: async () => discard }; } };
+    if (name.endsWith('/useUnsavedChanges')) return {
+      useUnsavedChanges: value => { dirty = value; return { confirmDiscard: async () => discard }; },
+      useConfirmUnsavedChanges: () => async () => discard,
+    };
     if (name.endsWith('/workspaceApi')) return { callWorkspace: async (name, data) => {
       calls.push({ name, data });
       if (name === 'rlReadPublicContent') { if (publicError) throw publicError; return data.action === 'get' ? { item: publicItems.find(item => item.slug === data.slug) || null } : { items: publicItems }; }

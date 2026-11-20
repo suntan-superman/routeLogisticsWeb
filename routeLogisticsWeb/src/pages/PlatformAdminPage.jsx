@@ -10,9 +10,10 @@ import { callWorkspace } from '../services/workspaceApi';
 import { auth } from '../services/firebase';
 import { usePrincipalQuery } from '../hooks/usePrincipalQuery';
 import { workspaceAccessError } from '../services/workspaceQueryPolicy';
-import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useConfirmUnsavedChanges, useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { CONTENT_TYPES, CONTENT_STATUSES, contentPath, contentSlug, contentSnapshot, normaliseContent, readableDate } from '../utils/platformContent';
 import { PlatformContentArticle } from '../components/PlatformContentView';
+import PlatformSubscriptions from '../components/PlatformSubscriptions';
 
 const emptyDashboard = { counts: {}, recentAudit: [] };
 const inputClass = 'mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200';
@@ -28,7 +29,7 @@ export default function PlatformAdminPage() {
     <Helmet><title>Platform administration | Route Logistics</title><meta name="robots" content="noindex,nofollow" /></Helmet>
     <header className="border-b border-gray-200 bg-white"><div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-5 sm:px-8"><Link to="/" className="text-lg font-bold text-primary-700">Route Logistics</Link><div className="flex flex-wrap items-center gap-4"><span className="text-sm text-gray-600">Platform administration</span><ThemeControl /></div></div></header>
     <main className="mx-auto max-w-7xl px-5 py-8 sm:px-8">
-      {checking ? <p role="status" className="py-12">Checking platform access…</p> : !uid ? <section className="mx-auto max-w-xl space-y-5 rounded-2xl border border-gray-200 bg-white p-7"><h1 className="text-2xl font-bold">Platform administration</h1><p>Sign in with an account explicitly authorized to manage Route Logistics platform content.</p><Link className={primaryActionClass + ' inline-block'} to="/login?next=%2Fplatform-admin">Sign in</Link></section> : !verified ? <PlatformEmailVerification key={uid} user={currentUser} refreshSession={refreshSession} /> : access.authorized && access.uid === uid ? <PlatformAdminWorkspace key={uid} accountEmail={currentUser.email} /> : <section className="mx-auto max-w-xl space-y-5 rounded-2xl border border-gray-200 bg-white p-7"><h1 className="text-2xl font-bold">Platform access required</h1><p role="alert">{access.error}</p><p className="text-sm text-gray-600">Signed in as {currentUser.email || 'your account'}. Contact the platform operator if this account should be authorized.</p><button type="button" className="btn-secondary" onClick={() => accessQuery.refetch()}>Check access again</button><Link to="/" className="ml-4 text-primary-700 underline">Return to Route Logistics</Link></section>}
+      {checking ? <p role="status" className="py-12">Checking platform access…</p> : !uid ? <section className="mx-auto max-w-xl space-y-5 rounded-2xl border border-gray-200 bg-white p-7"><h1 className="text-2xl font-bold">Platform administration</h1><p>Authorized administrators can manage public content and company subscriptions.</p><Link className={primaryActionClass + ' inline-block'} to="/login?next=%2Fplatform-admin">Sign in</Link></section> : !verified ? <PlatformEmailVerification key={uid} user={currentUser} refreshSession={refreshSession} /> : access.authorized && access.uid === uid ? <PlatformAdminSections key={uid} uid={uid} accountEmail={currentUser.email} /> : <section className="mx-auto max-w-xl space-y-5 rounded-2xl border border-gray-200 bg-white p-7"><h1 className="text-2xl font-bold">Platform access required</h1><p role="alert">{access.error}</p><p className="text-sm text-gray-600">Signed in as {currentUser.email || 'your account'}. Contact the platform operator if this account should be authorized.</p><button type="button" className="btn-secondary" onClick={() => accessQuery.refetch()}>Check access again</button><Link to="/" className="ml-4 text-primary-700 underline">Return to Route Logistics</Link></section>}
     </main>
   </div>;
 }
@@ -53,7 +54,30 @@ function PlatformEmailVerification({ user, refreshSession }) {
   return <section className="mx-auto max-w-xl space-y-5 rounded-2xl border border-gray-200 bg-white p-7"><h1 className="text-2xl font-bold">Verify your email first</h1><p>Verify {user.email || 'your sign-in email'} before platform access can be checked. Verification does not grant platform administration.</p>{error && <p role="alert" className="text-red-700">{error}</p>}{message && <p role="status">{message}</p>}<div className="flex flex-wrap gap-3"><button type="button" className={primaryActionClass} disabled={busy} onClick={() => verify('send')}>Send verification email</button><button type="button" className="btn-secondary" disabled={busy} onClick={() => verify('check')}>Check verification</button></div></section>;
 }
 
-function PlatformAdminWorkspace({ accountEmail }) {
+function PlatformAdminSections({ uid, accountEmail }) {
+  const [section, setSection] = useState('content');
+  const { logout } = useAuth();
+  const confirmDiscard = useConfirmUnsavedChanges();
+  const choose = async next => {
+    if (next !== section && await confirmDiscard()) setSection(next);
+  };
+
+  return <div className="space-y-6">
+    <div className="flex flex-wrap items-center justify-between gap-4">
+      <nav aria-label="Platform administration sections" className="flex flex-wrap gap-2">
+        <button type="button" aria-pressed={section === 'content'} className={section === 'content' ? primaryActionClass : 'btn-secondary'} onClick={() => choose('content')}>Website content</button>
+        <button type="button" aria-pressed={section === 'subscriptions'} className={section === 'subscriptions' ? primaryActionClass : 'btn-secondary'} onClick={() => choose('subscriptions')}>Company subscriptions</button>
+      </nav>
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="break-all text-sm text-gray-600">{accountEmail}</p>
+        <button type="button" className="btn-secondary" onClick={async () => { if (await confirmDiscard()) await logout(); }}>Sign out</button>
+      </div>
+    </div>
+    {section === 'content' ? <PlatformAdminWorkspace /> : <PlatformSubscriptions uid={uid} />}
+  </div>;
+}
+
+function PlatformAdminWorkspace() {
   const uid = auth.currentUser?.uid || '';
   const [dashboard, setDashboard] = useState(emptyDashboard), [items, setItems] = useState([]), [type, setType] = useState('faq'), [filterStatus, setFilterStatus] = useState('');
   const [draft, setDraft] = useState(() => normaliseContent()), [saved, setSaved] = useState(() => contentSnapshot(normaliseContent())), [record, setRecord] = useState(null), [history, setHistory] = useState([]);
@@ -138,7 +162,7 @@ function PlatformAdminWorkspace({ accountEmail }) {
   const canSave = dirty && !busy && draft.title.trim() && draft.slug.trim().length >= 2 && (draft.status !== 'published' || !!draft.body.trim()) && (!draft.imageId || !!draft.imageAlt.trim()) && !missingPublicationEvidence && !(draft.isSynthetic && draft.status === 'published');
   if (workspaceAccessError(contentQuery.error)) return <p role="alert">Platform access could not be confirmed. Recheck your platform access before continuing.</p>;
   return <div className="space-y-7">
-    <header className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-3xl font-bold">Platform content</h1><p className="mt-2 text-gray-600">Manage published website content. Platform access is independent of company roles.</p></div><p className="break-all text-sm text-gray-600">{accountEmail}</p></header>
+    <header><h1 className="text-3xl font-bold">Platform content</h1><p className="mt-2 text-gray-600">Manage FAQs, testimonials and success stories for the public website.</p></header>
     <section aria-label="Content dashboard" className="grid gap-4 sm:grid-cols-3">{Object.entries(CONTENT_TYPES).map(([key, category]) => <div key={key} className="rounded-xl border border-gray-200 bg-white p-5"><h2 className="font-semibold">{category.label}</h2><dl className="mt-3 flex flex-wrap gap-4 text-sm">{CONTENT_STATUSES.map(status => <div key={status}><dt className="capitalize text-gray-500">{status}</dt><dd className="mt-1 text-xl font-semibold">{dashboard.counts?.[key]?.[status] || 0}</dd></div>)}</dl></div>)}</section>
     {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">{error}</p>}{message && <p role="status" className="rounded-lg border border-green-200 bg-green-50 p-4 text-green-900">{message}</p>}
     <nav aria-label="Content type" className="flex flex-wrap gap-2">{Object.entries(CONTENT_TYPES).map(([key, category]) => <button type="button" key={key} aria-pressed={key === type} disabled={busy} className={key === type ? primaryActionClass : 'btn-secondary'} onClick={() => chooseType(key)}>{category.label}</button>)}</nav>

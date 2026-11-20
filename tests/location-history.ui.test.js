@@ -9,11 +9,12 @@ const { createWorkspaceQueryMock, selectControlMock } = require('./support/works
 const workspaceHooks = createWorkspaceQueryMock(React, { scopeId: 'location-history-workspace' });
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
-let tree, calls, mapContainers, mapNode;
+let tree, calls, mapContainers, mapNode, markers = [], infoWindows = [], geocodeCalls = 0;
 global.document = {
   visibilityState: 'visible',
-  createElement: () => ({ style: {}, textContent: '' })
+  createElement: () => ({ style: {}, textContent: '', children: [], append(...children) { this.children.push(...children); } })
 };
+global.window = { google: { maps: { Geocoder: class { async geocode() { geocodeCalls++; return { results: [{ formatted_address: '123 Synthetic Street, Bakersfield, CA' }] }; } } } } };
 
 class Bounds {
   constructor() { this.points = []; }
@@ -32,10 +33,17 @@ class PolylineMock {
   setMap(value) { this.map = value; }
 }
 class MarkerMock {
-  constructor(options) { Object.assign(this, options); }
+  constructor(options) { Object.assign(this, options); markers.push(this); this.listeners = {}; }
+  addListener(name, callback) { this.listeners[name] = callback; }
+}
+class InfoWindowMock {
+  constructor(options) { Object.assign(this, options); infoWindows.push(this); }
+  open() { this.opened = true; }
+  close() { this.closed = true; }
 }
 const mapsApi = {
   LatLngBounds: Bounds,
+  InfoWindow: InfoWindowMock,
   importLibrary: async name => name === 'marker'
     ? { AdvancedMarkerElement: MarkerMock }
     : { Map: MapMock, Polyline: PolylineMock }
@@ -55,10 +63,7 @@ function load(relative) {
       calls.push({ name, data });
       if (name === 'rlGetLocationHistoryMembers') return { technicians: [{ memberId: 'tech-3', name: 'Luis Gonzales', status: 'active' }], truncated: false };
       if (name === 'rlGetLocationHistory') return {
-        points: [
-          { id: 'fix-1', lat: 35.37, lng: -119.02, accuracy: 10, capturedAt: '2026-11-20T16:00:00.000Z' },
-          { id: 'fix-2', lat: 35.38, lng: -119.01, accuracy: 10, capturedAt: '2026-11-20T16:03:00.000Z' }
-        ],
+        points: Array.from({ length: 6 }, (_, index) => ({ id: `fix-${index + 1}`, lat: 35.38, lng: -119.01, accuracy: 10, capturedAt: new Date(Date.parse('2026-11-20T16:00:00.000Z') + index * 180000).toISOString() })),
         events: [], nextCursor: null, hasMore: false, eventsTruncated: false, retentionHours: 24, intervalMinutes: 3
       };
       throw Error(`Unexpected callable ${name}`);
@@ -86,7 +91,7 @@ const button = label => tree.root.findAll(node => node.type === 'button' && node
 
 afterEach(async () => {
   if (tree) await act(async () => tree.unmount());
-  tree = null; calls = []; mapContainers = [];
+  tree = null; calls = []; mapContainers = []; markers = []; infoWindows = []; geocodeCalls = 0;
 });
 
 test('the observed-route map initializes only after its container is mounted', async () => {
@@ -103,4 +108,24 @@ test('the observed-route map initializes only after its container is mounted', a
   assert.deepEqual(mapContainers, [mapNode]);
   assert.equal(tree.root.findByProps({ 'aria-label': 'Observed technician GPS route map' }).props['aria-busy'], false);
   assert.equal(tree.root.findAllByProps({ role: 'alert' }).length, 0);
+});
+
+test('selecting a history marker shows its recorded time and lazily resolves one approximate address', async () => {
+  calls = []; mapContainers = []; markers = []; infoWindows = []; geocodeCalls = 0;
+  mapNode = { nodeType: 1, label: 'route-map' };
+  await act(async () => { tree = create(React.createElement(Page), { createNodeMock: element => element.props['aria-label'] === 'Observed technician GPS route map' ? mapNode : {} }); });
+  await act(async () => tree.root.findByType('select').props.onChange({ target: { value: 'tech-3' } }));
+  await act(async () => button('Load history').props.onClick());
+  await act(async () => button('Show observed route on map').props.onClick());
+  assert.equal(geocodeCalls, 0, 'Map display must not geocode every marker');
+  const stop = markers.find(marker => marker.content.textContent === '1');
+  assert.ok(stop, 'A recorded stop marker should be present');
+  await act(async () => { stop.listeners.click(); await new Promise(resolve => setImmediate(resolve)); });
+  assert.equal(geocodeCalls, 1);
+  assert.match(infoWindows.at(-1).content.children.map(node => node.textContent).join(' '), /Stop 1.*Approximate address: 123 Synthetic Street.*Observed:/);
+  await act(async () => { stop.listeners.click(); await new Promise(resolve => setImmediate(resolve)); });
+  assert.equal(geocodeCalls, 1, 'Reopening the same marker should reuse its address');
+  const start = markers.find(marker => marker.content.textContent === 'S');
+  await act(async () => { start.listeners.click(); await new Promise(resolve => setImmediate(resolve)); });
+  assert.match(infoWindows.at(-1).content.children.map(node => node.textContent).join(' '), /Start.*Recorded:/);
 });

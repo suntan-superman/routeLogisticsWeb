@@ -6,8 +6,9 @@ import { loadMaps } from '../services/maps';
 import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
 import { addCalendarDays, analyzeLocationHistory, localMidnightUtc, todayInTimeZone } from '../utils/locationHistory';
 
-const isoDay = value => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+const isoDay = (value, timeZone) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', ...(timeZone ? { timeZone } : {}) });
 const durationText = value => `${Math.floor(value / 60000)} min`;
+const locationKey = point => `${point.lat.toFixed(5)},${point.lng.toFixed(5)}`;
 const eventText = event => ({
   'shift-started': 'Shift started; technician had consented to location sharing.',
   'shift-ended': 'Shift ended; location sharing was stopped.',
@@ -47,7 +48,7 @@ export default function LocationHistoryPage() {
   const [mapRevision, setMapRevision] = useState(0);
   const [addressBusy, setAddressBusy] = useState(false);
   const [addresses, setAddresses] = useState({});
-  const mapElement = useRef(null), map = useRef(null), overlays = useRef([]), requestSequence = useRef(0);
+  const mapElement = useRef(null), map = useRef(null), overlays = useRef([]), detailWindow = useRef(null), addressCache = useRef({}), addressLookups = useRef(new Map()), requestSequence = useRef(0);
   const membersQuery = useWorkspaceQuery(['location-history-members'], () => callWorkspace('rlGetLocationHistoryMembers'), { enabled: allowed });
   const analysis = useMemo(() => analyzeLocationHistory(points, { minDwellMinutes: minimumDwell, radiusMeters: radius, intervalMinutes }), [points, minimumDwell, radius, intervalMinutes]);
   const selectedTechnician = membersQuery.data?.technicians?.find(person => person.memberId === memberId);
@@ -97,21 +98,47 @@ export default function LocationHistoryPage() {
         created.push(new Polyline({ map: map.current, path, geodesic: true, strokeColor: '#0f766e', strokeOpacity: 0.85, strokeWeight: 4 }));
       }
       const first = analysis.points[0], last = analysis.points.at(-1);
+      const openDetails = async (marker, point, title, timeText) => {
+        detailWindow.current?.close();
+        const content = document.createElement('div'), heading = document.createElement('strong'), addressLine = document.createElement('p'), timeLine = document.createElement('p');
+        heading.textContent = title;
+        addressLine.textContent = `Approximate address: ${addressCache.current[locationKey(point)] || 'Looking up address…'}`;
+        timeLine.textContent = timeText;
+        content.append(heading, addressLine, timeLine);
+        const windowForMarker = new maps.InfoWindow({ content, ariaLabel: `${title} location details` });
+        detailWindow.current = windowForMarker;
+        windowForMarker.open({ map: map.current, anchor: marker, shouldFocus: true });
+        const key = locationKey(point);
+        if (addressCache.current[key]) return;
+        if (!addressLookups.current.has(key)) {
+          addressLookups.current.set(key, new window.google.maps.Geocoder().geocode({ location: { lat: point.lat, lng: point.lng } })
+            .then(result => result.results?.[0]?.formatted_address || 'Address unavailable')
+            .catch(() => 'Address unavailable'));
+        }
+        const address = await addressLookups.current.get(key);
+        addressCache.current[key] = address;
+        if (detailWindow.current === windowForMarker && active) addressLine.textContent = `Approximate address: ${address}`;
+      };
       for (const [label, color, point] of [['S', '#047857', first], ['E', '#b91c1c', last]]) {
         const position = { lat: point.lat, lng: point.lng };
         bounds.extend(position);
-        created.push(new AdvancedMarkerElement({ map: map.current, position, content: markerElement(label, color), title: `${label === 'S' ? 'Start' : 'End'} · ${isoDay(point.capturedAt)}` }));
+        const title = label === 'S' ? 'Start' : 'End';
+        const marker = new AdvancedMarkerElement({ map: map.current, position, content: markerElement(label, color), title: `${title} · ${isoDay(point.capturedAt, timeZone)}` });
+        marker.addListener('click', () => { void openDetails(marker, point, title, `Recorded: ${isoDay(point.capturedAt, timeZone)}`); });
+        created.push(marker);
       }
       analysis.stops.forEach((stop, index) => {
         const position = { lat: stop.lat, lng: stop.lng };
         bounds.extend(position);
-        created.push(new AdvancedMarkerElement({ map: map.current, position, content: markerElement(String(index + 1), '#1d4ed8'), title: `Stop ${index + 1} · ${durationText(stop.durationMs)}` }));
+        const marker = new AdvancedMarkerElement({ map: map.current, position, content: markerElement(String(index + 1), '#1d4ed8'), title: `Stop ${index + 1} · ${durationText(stop.durationMs)}` });
+        marker.addListener('click', () => { void openDetails(marker, stop, `Stop ${index + 1}`, `Observed: ${isoDay(stop.arrivalAt, timeZone)} to ${isoDay(stop.departureAt, timeZone)}`); });
+        created.push(marker);
       });
       overlays.current = created;
       if (!bounds.isEmpty()) map.current.fitBounds(bounds, 40);
     })().catch(failure => { if (active) setError(failure.message || 'The route map could not be drawn.'); });
-    return () => { active = false; created.forEach(overlay => { if (overlay.setMap) overlay.setMap(null); else overlay.map = null; }); };
-  }, [mapReady, mapRevision, analysis]);
+    return () => { active = false; detailWindow.current?.close(); detailWindow.current = null; created.forEach(overlay => { if (overlay.setMap) overlay.setMap(null); else overlay.map = null; }); };
+  }, [mapReady, mapRevision, analysis, timeZone]);
 
   const requestPage = async ({ cursor = null, append = false } = {}) => {
     if (!memberId) { setError('Choose a technician.'); return; }
@@ -135,6 +162,9 @@ export default function LocationHistoryPage() {
       setIntervalMinutes(result.intervalMinutes);
       setLoadedRange({ startAt: new Date(startUtc).toISOString(), endAt: new Date(endUtc).toISOString(), timeZone });
       setAddresses({});
+      addressCache.current = {};
+      addressLookups.current.clear();
+      detailWindow.current?.close(); detailWindow.current = null;
       overlays.current.forEach(overlay => { if (overlay.setMap) overlay.setMap(null); else overlay.map = null; });
       overlays.current = [];
       map.current = null;
@@ -156,10 +186,12 @@ export default function LocationHistoryPage() {
     setAddressBusy(true); setError('');
     try {
       const geocoder = new window.google.maps.Geocoder(), next = { ...addresses };
-      for (const [index, stop] of analysis.stops.slice(0, 30).entries()) {
-        if (next[index]) continue;
-        const result = await geocoder.geocode({ location: { lat: stop.lat, lng: stop.lng } });
-        next[index] = result.results?.[0]?.formatted_address || 'Approximate address unavailable';
+      for (const stop of analysis.stops.slice(0, 30)) {
+        const key = locationKey(stop);
+        if (next[key]) continue;
+        if (!addressLookups.current.has(key)) addressLookups.current.set(key, geocoder.geocode({ location: { lat: stop.lat, lng: stop.lng } }).then(result => result.results?.[0]?.formatted_address || 'Address unavailable').catch(() => 'Address unavailable'));
+        next[key] = await addressLookups.current.get(key);
+        addressCache.current[key] = next[key];
         setAddresses({ ...next });
       }
       if (analysis.stops.length > 30) setError('Approximate address lookup is limited to the first 30 stops per request.');
@@ -202,7 +234,7 @@ export default function LocationHistoryPage() {
       {!points.length && <p className="rounded border bg-white p-4">No GPS fixes are recorded for this technician and date range. History is not available for dates before the feature was deployed.</p>}
       {analysis.gaps.length > 0 && <section className="rounded border bg-white p-4"><h2 className="font-semibold">GPS gaps</h2><ul className="mt-2 list-disc space-y-1 pl-5 text-sm">{analysis.gaps.map(gap => <li key={`${gap.from}:${gap.to}`}>No fixes recorded between {isoDay(gap.from)} and {isoDay(gap.to)}.</li>)}</ul></section>}
       {disabledPeriods.length > 0 && <section className="rounded border bg-white p-4"><h2 className="font-semibold">Recorded tracking-disabled periods</h2><ul className="mt-2 list-disc space-y-1 pl-5 text-sm">{disabledPeriods.map(period => <li key={`${period.from}:${period.to}`}>Sharing disabled from {isoDay(period.from)} to {isoDay(period.to)}{period.reason ? ` (${period.reason.replaceAll('-', ' ')})` : ''}.</li>)}</ul></section>}
-      {analysis.stops.length > 0 && <section className="rounded border bg-white p-4"><h2 className="font-semibold">Recorded stops</h2><ol className="mt-3 divide-y">{analysis.stops.map((stop, index) => <li key={`${stop.arrivalAt}:${stop.departureAt}`} className="py-3"><strong>Stop {index + 1}</strong><p className="text-sm">Arrival estimate: {isoDay(stop.arrivalAt)} · departure estimate: {isoDay(stop.departureAt)} · observed dwell: {durationText(stop.durationMs)} ({stop.samples} fixes)</p>{addresses[index] && <p className="text-sm text-gray-600">Approximate address: {addresses[index]}. Confirm on the map; this may identify a nearby street or parcel.</p>}</li>)}</ol></section>}
+      {analysis.stops.length > 0 && <section className="rounded border bg-white p-4"><h2 className="font-semibold">Recorded stops</h2><ol className="mt-3 divide-y">{analysis.stops.map((stop, index) => <li key={`${stop.arrivalAt}:${stop.departureAt}`} className="py-3"><strong>Stop {index + 1}</strong><p className="text-sm">Arrival estimate: {isoDay(stop.arrivalAt)} · departure estimate: {isoDay(stop.departureAt)} · observed dwell: {durationText(stop.durationMs)} ({stop.samples} fixes)</p>{addresses[locationKey(stop)] && <p className="text-sm text-gray-600">Approximate address: {addresses[locationKey(stop)]}. Confirm on the map; this may identify a nearby street or parcel.</p>}</li>)}</ol></section>}
       {points.length > 0 && <section className="rounded border bg-white p-4"><h2 className="font-semibold">History timeline</h2><ol className="mt-3 space-y-2 text-sm">{events.map(event => <li key={event.id} className="border-l-2 border-amber-400 pl-3">{isoDay(event.occurredAt)} · {eventText(event)}</li>)}{analysis.gaps.map(gap => <li key={`gap:${gap.from}`} className="border-l-2 border-slate-400 pl-3">{isoDay(gap.from)}–{isoDay(gap.to)} · No recorded GPS fix; the cause is unknown.</li>)}{analysis.stops.map((stop, index) => <li key={`stop:${stop.arrivalAt}`} className="border-l-2 border-blue-500 pl-3">{isoDay(stop.arrivalAt)} · Stop {index + 1}, {durationText(stop.durationMs)} observed dwell.</li>)}</ol></section>}
     </section>}
   </div>;

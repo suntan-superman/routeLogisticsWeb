@@ -59,6 +59,28 @@ test('roster separates duty from GPS, stationary/background gaps do not expire s
   assert.equal((await f.row.get()).get('capturedAt').toDate().toISOString(), late);
 });
 
+test('team and history labels use tenant-bound saved names, with email as a safe fallback', async () => {
+  const f = await fixture();
+  await db.doc(`teamMembers/${f.memberId}`).update({ name: null, email: 'tech3@example.test' });
+  await db.doc(`users/${f.uid}`).set({ name: 'Luis Gonzales', email: 'tech3@example.test', rlCompanyId: f.companyId });
+  await db.doc(`users/${f.owner.uid}`).set({ name: 'Steve Roy', email: 'owner@example.test', rlCompanyId: f.companyId });
+  let listing = await f.handlers.list(f.request({}, f.owner));
+  assert.equal(listing.roster.find(row => row.memberId === f.memberId).name, 'Luis Gonzales');
+  assert.equal(listing.roster.find(row => row.memberId === f.owner.uid).name, 'Steve Roy');
+  assert.equal((await f.handlers.historyMembers(f.request({}, f.owner))).technicians[0].name, 'Luis Gonzales');
+  const { shift } = await f.start();
+  const session = await f.handlers.update(f.request({ action: 'start', shiftId: shift.id }));
+  await f.fix(session.sessionId);
+  listing = await f.handlers.list(f.request({}, f.owner));
+  assert.equal(listing.locations[0].name, 'Luis Gonzales');
+  const history = await f.handlers.history(f.request({ memberId: f.memberId, startAt: new Date(f.time() - 3600000).toISOString(), endAt: new Date(f.time() + 3600000).toISOString() }, f.owner));
+  assert.equal(history.technician.name, 'Luis Gonzales');
+  await db.doc(`users/${f.uid}`).update({ name: 'FOREIGN PRIVATE', rlCompanyId: 'another-company' });
+  listing = await f.handlers.list(f.request({}, f.owner));
+  assert.equal(listing.roster.find(row => row.memberId === f.memberId).name, 'tech3@example.test');
+  assert.equal(JSON.stringify(listing).includes('FOREIGN PRIVATE'), false);
+});
+
 test('shift expiry, timestamps, superseded sessions, membership and tenant checks remain authoritative', async () => {
   const f = await fixture(), other = await fixture(), { shift } = await f.start();
   await assert.rejects(other.handlers.update(other.request({ action: 'start', shiftId: shift.id })), { code: 'failed-precondition' });

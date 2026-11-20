@@ -18,6 +18,7 @@ const {
 const { FieldValue } = require('firebase-admin/firestore');
 const { availabilityRef, availabilityView, assertAvailable } = require('./staffAvailability');
 const { servicePropertySite } = require('./serviceAreaWorkflows');
+const { staffIdentity } = require('./scheduling');
 const ms = value => value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : typeof value === 'string' ? Date.parse(value) : NaN;
 const iso = value => Number.isFinite(ms(value)) ? new Date(ms(value)).toISOString() : null;
 const compatibleJobState = job => {
@@ -470,8 +471,11 @@ function workTrackingHandlers(db, legacy, {
       if (!['owner', 'admin', 'manager'].includes(staff.role)) throw new HttpsError('permission-denied', 'Management access is required to view technician location history.');
       await rateLimit(db, 'location-history-members', staff.uid, 20);
       const members = await db.collection('teamMembers').where('companyId', '==', staff.company.id).limit(501).get();
-      const technicians = members.docs.filter(row => row.get('role') === 'technician' && row.get('uid') && ['active', 'inactive', 'removed'].includes(row.get('status')))
-        .map(row => ({ memberId: row.id, name: row.get('name') || row.get('email') || 'Technician', status: row.get('status') }))
+      const technicianRows = members.docs.filter(row => row.get('role') === 'technician' && row.get('uid') && ['active', 'inactive', 'removed'].includes(row.get('status')));
+      const profiles = technicianRows.length ? await db.getAll(...technicianRows.map(row => db.doc(`users/${documentId(row.get('uid'))}`))) : [];
+      const profileByUid = new Map(profiles.filter(row => row.exists).map(row => [row.id, row.data()]));
+      const technicians = technicianRows
+        .map(row => ({ memberId: row.id, name: staffIdentity(row.data(), profileByUid.get(row.get('uid')), 'Technician', staff.company.id).name, status: row.get('status') }))
         .sort((a, b) => a.name.localeCompare(b.name));
       return { technicians, truncated: members.size > 500 };
     },
@@ -483,6 +487,7 @@ function workTrackingHandlers(db, legacy, {
       const memberId = documentId(request.data?.memberId, 'technician');
       const member = await db.collection('teamMembers').doc(memberId).get();
       if (!member.exists || member.get('companyId') !== staff.company.id || member.get('role') !== 'technician' || !member.get('uid') || !['active', 'inactive', 'removed'].includes(member.get('status'))) throw new HttpsError('permission-denied', 'This technician is not available in your company history.');
+      const profile = await db.doc(`users/${documentId(member.get('uid'))}`).get();
       const startAt = Date.parse(request.data?.startAt), endAt = Date.parse(request.data?.endAt), limit = request.data?.limit ?? 200;
       // The browser sends an inclusive calendar end date as the next local
       // midnight. That boundary is normally in the future when the selected
@@ -520,7 +525,7 @@ function workTrackingHandlers(db, legacy, {
         retentionHours: policy.retentionHours,
         intervalMinutes: policy.intervalMinutes,
         timeZone: staff.company.get('timeZone') || 'UTC',
-        technician: { memberId, name: member.get('name') || member.get('email') || 'Technician', status: member.get('status') }
+        technician: { memberId, name: staffIdentity(member.data(), profile.data(), 'Technician', staff.company.id).name, status: member.get('status') }
       };
     },
     list: async request => {
@@ -535,16 +540,22 @@ function workTrackingHandlers(db, legacy, {
       const team = [{
         memberId: ownerId,
         userId: ownerId,
-        name: 'Company owner',
+        identity: {},
         role: 'owner'
       }, ...members.docs.slice(0, 500).filter(row => row.get('status') === 'active' && row.get('uid') && ['admin', 'manager', 'technician'].includes(row.get('role')) && row.get('uid') !== ownerId).map(row => ({
         memberId: row.id,
         userId: row.get('uid'),
-        name: row.get('name') || row.get('email') || 'Team member',
+        identity: row.data(),
         role: row.get('role')
       }))];
-      const deleted = new Set((await db.getAll(...team.map(member => db.doc(`rlAccountDeletions/${documentId(member.userId)}`)))).filter(row => row.exists).map(row => row.id));
-      const roster = team.filter(member => !deleted.has(member.userId)).map(member => {
+      const [deletions, profiles] = await Promise.all([
+        db.getAll(...team.map(member => db.doc(`rlAccountDeletions/${documentId(member.userId)}`))),
+        db.getAll(...team.map(member => db.doc(`users/${documentId(member.userId)}`)))
+      ]);
+      const deleted = new Set(deletions.filter(row => row.exists).map(row => row.id));
+      const profileByUid = new Map(profiles.filter(row => row.exists).map(row => [row.id, row.data()]));
+      const roster = team.filter(member => !deleted.has(member.userId)).map(({ identity, ...member }) => {
+        member.name = staffIdentity(identity, profileByUid.get(member.userId), member.role === 'owner' ? 'Company owner' : 'Team member', staff.company.id).name;
         const availability = availabilityView(availabilityRows.docs.find(row => row.get('userId') === member.userId)?.data(), time);
         const shift = shifts.docs.find(row => row.get('userId') === member.userId && row.get('memberId') === member.memberId)?.data(),
           onDuty = active(shift, time) && availability.state !== 'unavailable';

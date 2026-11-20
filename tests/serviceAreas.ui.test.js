@@ -73,6 +73,10 @@ test('unsaved onboarding radius and address are restored and owner override is e
  assert.match(text(),/coverage remains pending until the operating location is verified/);
  assert.match(text(),/operating location must be verified before radius checks can run/);
  assert.equal(button('Show coverage map').props.disabled,true);
+ await act(async()=>button('Retry Google verification').props.onClick());
+ assert.equal(calls.filter(row=>row.data.action==='save').at(-1).data.allowUnverifiedOperatingAddress,undefined);
+ assert.equal(button('Show coverage map').props.disabled,false);
+ assert.match(text(),/Operating address verified/);
 });
 test('invalid ZIP codes and radius values cannot be saved',async()=>{
  await mountSettings();await act(async()=>field('Default company coverage ZIP codes').props.onChange({target:{value:'93312, invalid'}}));assert.equal(button('Save service areas').props.disabled,true);assert.match(text(),/valid US ZIP codes/);

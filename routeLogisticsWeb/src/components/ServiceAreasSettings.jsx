@@ -104,6 +104,14 @@ function ServiceAreasForm({ company, allowed }) {
       toast.success(unverified ? 'Service areas saved; operating location remains unverified.' : 'Service areas saved.');
     });
   };
+  const retryVerification = () => {
+    if (dirty || !form || data?.settings?.addressVerification !== 'owner-overridden') return;
+    invoke('verify', () => callWorkspace('rlServiceAreas', { action: 'save', companyId: company.id, expectedRevision: data.settings.revision, settings: payloadFor(form) }), response => {
+      settingsQuery.setData(response); accept(response);
+      setMessage('Operating address verified. Saved coverage is now active.');
+      toast.success('Operating address verified.');
+    });
+  };
   const reload = async () => { if (dirty && !await confirmDiscard()) return; invoke('load', async () => { const result = await settingsQuery.refetch(); if (result.error) throw result.error; return result.data; }, accept); };
   const previewRule = data?.settings?.categoryOverrides?.find(row => row.serviceCategory === previewCategory) || data?.settings;
   return <section aria-label="Service area settings" className="space-y-6 rounded-xl border border-gray-200 bg-white p-5 sm:p-6">
@@ -134,6 +142,7 @@ function ServiceAreasForm({ company, allowed }) {
         <label className="flex items-start gap-3 text-sm"><input type="checkbox" checked={form.allowOutOfAreaRequests} onChange={event => patch({ allowOutOfAreaRequests: event.target.checked })} className="mt-1" /><span><strong className="block">Allow owner-approved out-of-area exceptions</strong>Only the company owner can approve a specific property; an exception does not change the territory.</span></label>
         {dirty && validationError && <p role="alert" className="text-sm text-red-800">{validationError}</p>}
         <button type="button" className={actionClass} disabled={!dirty || !!validationError || !!busy} onClick={save}>{busy === 'save' ? 'Saving and validating…' : 'Save service areas'}</button>
+        {!dirty && data.settings?.addressVerification === 'owner-overridden' && <button type="button" className="ml-3 rounded-lg border border-primary-700 px-4 py-2 font-medium text-primary-700 disabled:opacity-50" disabled={!!busy} onClick={retryVerification}>{busy === 'verify' ? 'Verifying…' : 'Retry Google verification'}</button>}
       </fieldset>
       <section aria-label="Saved coverage preview" className="space-y-3 border-t border-gray-200 pt-5">
         <h3 className="font-semibold">Saved coverage preview</h3>

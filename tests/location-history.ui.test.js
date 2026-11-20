@@ -35,9 +35,10 @@ class MarkerMock {
   constructor(options) { Object.assign(this, options); }
 }
 const mapsApi = {
+  LatLngBounds: Bounds,
   importLibrary: async name => name === 'marker'
     ? { AdvancedMarkerElement: MarkerMock }
-    : { Map: MapMock, Polyline: PolylineMock, LatLngBounds: Bounds }
+    : { Map: MapMock, Polyline: PolylineMock }
 };
 
 const modules = new Map();

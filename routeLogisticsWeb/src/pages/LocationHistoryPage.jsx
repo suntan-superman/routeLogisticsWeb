@@ -85,11 +85,11 @@ export default function LocationHistoryPage() {
     const created = [];
     (async () => {
       const maps = await loadMaps();
-      const [{ Polyline, LatLngBounds }, { AdvancedMarkerElement }] = await Promise.all([maps.importLibrary('maps'), maps.importLibrary('marker')]);
+      const [{ Polyline }, { AdvancedMarkerElement }] = await Promise.all([maps.importLibrary('maps'), maps.importLibrary('marker')]);
       if (!active) return;
       overlays.current.forEach(overlay => { if (overlay.setMap) overlay.setMap(null); else overlay.map = null; });
       overlays.current = [];
-      const bounds = new LatLngBounds();
+      const bounds = new maps.LatLngBounds();
       for (const segment of analysis.segments) {
         if (segment.length < 2) continue;
         const path = segment.map(point => ({ lat: point.lat, lng: point.lng }));

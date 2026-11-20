@@ -7,7 +7,7 @@ const workspaceHooks=createWorkspaceQueryMock(React,{scopeId:()=>companyId+':'+r
 global.IS_REACT_ACT_ENVIRONMENT=true;
 let tree,role='owner',uid='owner',companyId='co',calls=[],dirty=false,toasts=[],policy,saveFailure=null,statusFailure=null,checkFailure=null,approvalFailure=null,pendingSave=null,pendingCheck=null,allowDiscard=true,latestValue=null,mapsLoads=0,circles=[];
 const clone=x=>JSON.parse(JSON.stringify(x));
-const baseline=()=>({settings:{configured:true,revision:4,operatingAddress:'100 Synthetic Street, Bakersfield, CA 93312',operatingLocation:{latitude:35.38,longitude:-119.1,formattedAddress:'100 Synthetic Street, Bakersfield, CA 93312',postalCode:'93312'},method:'zip',zipCodes:['93312'],radiusMiles:25,categoryOverrides:[],acceptingNewCustomers:true,publishCoverage:false,allowOutOfAreaRequests:false},canApproveExceptions:role==='owner'});
+const baseline=()=>({settings:{configured:true,revision:4,operatingAddress:'100 Synthetic Street, Bakersfield, CA 93312',operatingLocation:{latitude:35.38,longitude:-119.1,formattedAddress:'100 Synthetic Street, Bakersfield, CA 93312',postalCode:'93312'},method:'zip',zipCodes:['93312'],radiusMiles:25,categoryOverrides:[],acceptingNewCustomers:true,publishCoverage:false,allowOutOfAreaRequests:false},canApproveExceptions:role==='owner',canOverrideOperatingAddress:role==='owner'});
 policy=baseline();
 const modules=new Map();
 function load(relative){
@@ -23,7 +23,7 @@ function load(relative){
   if(name.endsWith('/workspaceApi'))return{callWorkspace:async(name,data)=>{
    calls.push({name,data:clone(data)});assert.equal(name,'rlServiceAreas');
    if(data.action==='status'){if(statusFailure)throw statusFailure;return clone(policy);}
-   if(data.action==='save'){if(pendingSave)await pendingSave;if(saveFailure)throw saveFailure;policy={settings:{...data.settings,configured:true,revision:data.expectedRevision+1,operatingLocation:baseline().settings.operatingLocation},canApproveExceptions:role==='owner'};return clone(policy);}
+   if(data.action==='save'){if(pendingSave)await pendingSave;if(saveFailure)throw saveFailure;policy={settings:{...data.settings,configured:!(data.allowUnverifiedOperatingAddress&&data.settings.method==='radius'),revision:data.expectedRevision+1,operatingLocation:data.allowUnverifiedOperatingAddress?null:baseline().settings.operatingLocation,addressVerification:data.allowUnverifiedOperatingAddress?'owner-overridden':'verified'},canApproveExceptions:role==='owner',canOverrideOperatingAddress:role==='owner'};return clone(policy);}
    if(data.action==='check'){if(pendingCheck)return pendingCheck;if(checkFailure)throw checkFailure;return{eligible:false,status:'outside',message:'The service property is outside saved coverage.',settingsRevision:4,property:{formattedAddress:data.propertyAddress,postalCode:'90001'},distanceMiles:112};}
    if(data.action==='approveException'){if(approvalFailure)throw approvalFailure;return{exceptionId:'approved-property',expiresAt:'2026-11-15T12:00:00Z',result:{eligible:true,status:'exception-approved',message:'The owner approved this specific property.',property:{formattedAddress:data.propertyAddress},settingsRevision:4}};}
    throw Error('Unexpected action '+data.action);
@@ -54,6 +54,25 @@ test('saving requires an actual change and sends no client coordinates or eligib
  await mountSettings();assert.equal(dirty,false);assert.equal(button('Save service areas').props.disabled,true);
  await act(async()=>field('Default company coverage ZIP codes').props.onChange({target:{value:'93312, 93311'}}));assert.equal(dirty,true);assert.equal(button('Save service areas').props.disabled,false);
  await act(async()=>button('Save service areas').props.onClick());const saved=calls.find(c=>c.data.action==='save').data;assert.equal(saved.expectedRevision,4);assert.deepEqual(saved.settings.zipCodes,['93312','93311']);assert.equal(saved.settings.publishCoverage,false);assert.equal(saved.settings.operatingLocation,undefined);assert.equal(saved.settings.eligible,undefined);assert.equal(dirty,false);assert.equal(button('Save service areas').props.disabled,true);assert.equal(toasts.at(-1).type,'success');
+});
+
+test('unsaved onboarding radius and address are restored and owner override is explicit',async()=>{
+ policy={...baseline(),settings:{...baseline().settings,configured:false,revision:0,operatingAddress:'',operatingLocation:null,method:'zip',zipCodes:[]},onboardingSettings:{operatingAddress:'111 Oak Street, Bakersfield, CA 93304',method:'radius',radiusMiles:30,zipCodes:[]}};
+ await mountSettings();
+ assert.equal(field('Business operating address').props.value,'111 Oak Street, Bakersfield, CA 93304');
+ assert.equal(field('Default company coverage method').props.value,'radius');
+ assert.equal(field('Default company coverage radius in miles').props.value,'30');
+ assert.equal(button('Save service areas').props.disabled,false);
+ saveFailure=Object.assign(Error('Google could not verify this street address.'),{details:{addressValidation:{status:'invalid',message:'Google could not verify this street address.'}}});
+ await act(async()=>button('Save service areas').props.onClick());
+ assert.match(text(),/Save this operating address without Google verification/);
+ await act(async()=>tree.root.findAllByType('input').find(node=>node.props.type==='checkbox').props.onChange({target:{checked:true}}));
+ saveFailure=null;
+ await act(async()=>button('Save service areas').props.onClick());
+ assert.equal(calls.filter(row=>row.data.action==='save').at(-1).data.allowUnverifiedOperatingAddress,true);
+ assert.match(text(),/coverage remains pending until the operating location is verified/);
+ assert.match(text(),/operating location must be verified before radius checks can run/);
+ assert.equal(button('Show coverage map').props.disabled,true);
 });
 test('invalid ZIP codes and radius values cannot be saved',async()=>{
  await mountSettings();await act(async()=>field('Default company coverage ZIP codes').props.onChange({target:{value:'93312, invalid'}}));assert.equal(button('Save service areas').props.disabled,true);assert.match(text(),/valid US ZIP codes/);

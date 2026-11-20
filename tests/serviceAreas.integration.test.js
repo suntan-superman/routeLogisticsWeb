@@ -5,6 +5,7 @@ const path = require('node:path');
 const req = createRequire(path.resolve(__dirname, '../functions/package.json'));
 const { initializeApp, deleteApp } = req('firebase-admin/app'), { getFirestore } = req('firebase-admin/firestore');
 const { serviceAreaHandlers } = require('../functions/serviceAreas');
+const { HttpsError } = req('firebase-functions/v2/https');
 let app, db, sequence = 0;
 before(() => { if (!process.env.FIRESTORE_EMULATOR_HOST) throw Error('Only the local demo Firestore emulator is authorized.'); app = initializeApp({ projectId: 'demo-routelogistics' }, 'service-area-tests'); db = getFirestore(app); });
 after(() => deleteApp(app));
@@ -52,6 +53,43 @@ test('business location is server validated and reused for ordinary settings cha
   assert.equal(one.settings.operatingLocation.latitude, 35.4); assert.equal(one.settings.operatingLocation.source, 'google-address-validation'); assert.equal(f.calls(), 1);
   await f.save(settings({ radiusMiles: 10, method: 'radius' })); assert.equal(f.calls(), 1);
   assert.equal((await f.check()).eligible, true); assert.equal((await f.check()).eligible, true); assert.equal(f.calls(), 2);
+});
+
+test('onboarding choices remain available when the initial service-area save failed', async () => {
+  const f = await fixture();
+  await db.doc(`companies/${f.companyId}`).update({ address: '111 Oak Street', city: 'Bakersfield', state: 'CA', zipCode: '93304', onboardingServiceArea: { method: 'radius', radiusMiles: 30, zipCodes: [] } });
+  const status = await f.service.handle(f.request({ action: 'status' }));
+  assert.equal(status.settings.configured, false);
+  assert.equal(status.onboardingSettings.operatingAddress, '111 Oak Street, Bakersfield, CA 93304');
+  assert.equal(status.onboardingSettings.method, 'radius');
+  assert.equal(status.onboardingSettings.radiusMiles, 30);
+  assert.equal(status.canOverrideOperatingAddress, true);
+});
+
+test('owner can explicitly save an unverified operating address without activating radius eligibility', async () => {
+  const f = await fixture();
+  const entered = settings({ operatingAddress: '111 Oak Street, Bakersfield, CA 93304', method: 'radius', radiusMiles: 30, acceptingNewCustomers: true });
+  const request = (auth, override) => f.service.handle(f.request({ action: 'save', expectedRevision: 0, settings: entered, ...(override ? { allowUnverifiedOperatingAddress: true } : {}) }, auth));
+  await assert.rejects(request(f.owner, false));
+  await assert.rejects(request(f.manager, true), { code: 'permission-denied' });
+  // The injected geocoder reports a provider validation failure like Google would.
+  const service = serviceAreaHandlers(db, { geocode: async address => {
+    if (address === entered.operatingAddress) throw new HttpsError('failed-precondition', 'Address unverified');
+    return { ...GEO[address], countryCode: 'US', locationType: 'PREMISE', streetAddressVerified: true, formattedAddress: address };
+  } });
+  const saved = await service.handle(f.request({ action: 'save', expectedRevision: 0, settings: entered, allowUnverifiedOperatingAddress: true }));
+  assert.equal(saved.settings.operatingLocation, null);
+  assert.equal(saved.settings.addressVerification, 'owner-overridden');
+  assert.equal(saved.settings.radiusMiles, 30);
+  assert.equal(saved.settings.configured, false);
+  const result = await service.checkForWorkflow({ companyId: f.companyId, propertyAddress: INSIDE, serviceCategory: 'Pest Control', purpose: 'public-request' });
+  assert.equal(result.eligible, false);
+  assert.equal(result.reason, 'service-area-not-configured');
+  const internal = await service.checkForWorkflow({ companyId: f.companyId, propertyAddress: INSIDE, serviceCategory: 'Pest Control', purpose: 'scheduling' });
+  assert.equal(internal.eligible, true);
+  assert.equal(internal.status, 'unconfigured');
+  const audit = await db.collection('rlServiceAreaAudit').where('companyId', '==', f.companyId).get();
+  assert.equal(audit.size, 1);
 });
 test('ZIP and radius eligibility use only the explicit service property, never billing addresses or client flags', async () => {
   const f = await fixture(); await f.save();

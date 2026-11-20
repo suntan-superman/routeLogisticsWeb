@@ -128,6 +128,12 @@ function serviceAreaHandlers(db, config = {}) {
   const policyRef = companyId => db.doc(`rlServiceAreas/${documentId(companyId, 'company')}`);
   const exceptionRef = id => db.doc(`rlServiceAreaExceptions/${documentId(id, 'exception')}`);
   const snapshot = snap => ({ ...DEFAULT_SETTINGS, ...(snap.exists ? snap.data() : {}), configured: snap.get('configured') === true, revision: snap.get('revision') || 0 });
+  const onboardingSettings = company => {
+    const area = company.get('onboardingServiceArea');
+    if (!area || typeof area !== 'object') return null;
+    const address = [company.get('address'), company.get('city'), [company.get('state'), company.get('zipCode')].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+    return { ...DEFAULT_SETTINGS, operatingAddress: address, method: area.method === 'radius' ? 'radius' : 'zip', radiusMiles: area.radiusMiles ?? 25, zipCodes: Array.isArray(area.zipCodes) ? area.zipCodes : [] };
+  };
   const providerFingerprint = company => hash(JSON.stringify({ ownerId: company.get('ownerId') || null, active: company.exists && company.get('isActive') !== false, deleted: !!company.get('deletedAt'), categories: companyCategories(company.data()).map(categoryKey).sort() }));
   async function resolve(companyId, input) {
     const address = propertyAddress(input), key = hash(`${companyId}:${addressKey(address)}`), ref = db.doc(`rlServiceAreaGeocodes/${key}`), cached = await ref.get();
@@ -199,23 +205,36 @@ function serviceAreaHandlers(db, config = {}) {
     if (data.companyId !== undefined && data.companyId !== scope.companyId) fail('permission-denied', 'Service-area settings belong to another company.');
     await rateLimit(db, 'service-area', scope.uid, 30, 60000, now());
     const target = policyRef(scope.companyId), company = scope.company, categories = companyCategories(company.data());
-    if (data.action === 'status') return { settings: snapshot(await target.get()), availableCategories: categories, canManageSettings: ['owner', 'admin', 'manager'].includes(scope.role), canApproveExceptions: company.get('ownerId') === scope.uid };
+    if (data.action === 'status') {
+      const stored = await target.get();
+      return { settings: snapshot(stored), onboardingSettings: stored.exists ? null : onboardingSettings(company), availableCategories: categories, canManageSettings: ['owner', 'admin', 'manager'].includes(scope.role), canApproveExceptions: company.get('ownerId') === scope.uid, canOverrideOperatingAddress: company.get('ownerId') === scope.uid };
+    }
     if (data.action === 'save') {
       if (!['owner', 'admin', 'manager'].includes(scope.role)) fail('permission-denied', 'Only an authorized company owner, administrator, or manager can change service areas.');
       if (!Number.isInteger(data.expectedRevision) || data.expectedRevision < 0) fail('invalid-argument', 'Refresh the current service-area settings before saving.');
       const clean = cleanSettings(data.settings, categories), before = await target.get();
       if ((before.get('revision') || 0) !== data.expectedRevision) fail('aborted', 'Service areas changed in another session. Refresh before saving.');
       const oldLocation = before.get('operatingLocation');
-      const operatingLocation = addressKey(before.get('operatingAddress')) === addressKey(clean.operatingAddress) && finitePoint(oldLocation) ? trustedProperty(oldLocation, time(oldLocation.validatedAt) || now()) : await resolve(scope.companyId, clean.operatingAddress);
+      const override = data.allowUnverifiedOperatingAddress === true;
+      if (override && company.get('ownerId') !== scope.uid) fail('permission-denied', 'Only the company owner can save an unverified operating address.');
+      let operatingLocation;
+      try {
+        operatingLocation = addressKey(before.get('operatingAddress')) === addressKey(clean.operatingAddress) && finitePoint(oldLocation) ? trustedProperty(oldLocation, time(oldLocation.validatedAt) || now()) : await resolve(scope.companyId, clean.operatingAddress);
+      } catch (error) {
+        if (!override || !['failed-precondition', 'unavailable'].includes(error?.code)) throw error;
+        operatingLocation = null;
+      }
       const settings = await db.runTransaction(async tx => {
         const [current, liveCompany, liveMember] = await Promise.all([tx.get(target), tx.get(db.doc(`companies/${scope.companyId}`)), scope.role !== 'owner' && scope.memberId ? tx.get(db.doc(`teamMembers/${scope.memberId}`)) : Promise.resolve(null)]);
         if (!liveCompany.exists || (scope.role === 'owner' ? liveCompany.get('ownerId') !== scope.uid : !liveMember?.exists || liveMember.get('uid') !== scope.uid || liveMember.get('companyId') !== scope.companyId || liveMember.get('status') !== 'active' || liveMember.get('role') !== scope.role || !['admin', 'manager'].includes(liveMember.get('role')))) fail('permission-denied', 'Current company owner, administrator, or manager authorization is required.');
         cleanSettings(clean, companyCategories(liveCompany.data()));
         if ((current.get('revision') || 0) !== data.expectedRevision) fail('aborted', 'Service areas changed in another session. Refresh before saving.');
-        const next = { ...clean, operatingLocation, configured: true, revision: data.expectedRevision + 1, createdAt: current.get('createdAt') || new Date(now()), updatedAt: new Date(now()), updatedBy: scope.uid };
+        if (!operatingLocation && liveCompany.get('ownerId') !== scope.uid) fail('permission-denied', 'Only the company owner can save an unverified operating address.');
+        const requiresCenter = clean.method === 'radius' || clean.categoryOverrides.some(row => row.method === 'radius');
+        const next = { ...clean, operatingLocation, addressVerification: operatingLocation ? 'verified' : 'owner-overridden', configured: !!operatingLocation || !requiresCenter, revision: data.expectedRevision + 1, createdAt: current.get('createdAt') || new Date(now()), updatedAt: new Date(now()), updatedBy: scope.uid };
         tx.set(target, next); tx.create(db.doc(`rlServiceAreaAudit/${randomUUID()}`), { companyId: scope.companyId, action: 'settings.save', revision: next.revision, actorId: scope.uid, createdAt: new Date(now()), settings: next }); return next;
       });
-      return { settings, availableCategories: categories, canManageSettings: true, canApproveExceptions: company.get('ownerId') === scope.uid };
+      return { settings, onboardingSettings: null, availableCategories: categories, canManageSettings: true, canApproveExceptions: company.get('ownerId') === scope.uid, canOverrideOperatingAddress: company.get('ownerId') === scope.uid };
     }
     if (data.action === 'check' || data.action === 'approveException') {
       const input = { companyId: scope.companyId, propertyAddress: data.propertyAddress, serviceCategory: data.serviceCategory, purpose: data.purpose || 'scheduling', exceptionId: data.exceptionId, ...(data.action === 'check' && (!data.purpose || data.purpose === 'scheduling') ? { allowUnverifiedAddress: true } : {}) }, result = await checkForWorkflow(input);

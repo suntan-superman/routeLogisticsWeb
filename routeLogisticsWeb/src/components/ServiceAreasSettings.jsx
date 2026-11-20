@@ -49,6 +49,7 @@ function ServiceAreasForm({ company, allowed }) {
   const [data, setData] = useState(null), [form, setForm] = useState(null), [saved, setSaved] = useState('');
   const [busy, setBusy] = useState(''), [error, setError] = useState(''), [message, setMessage] = useState('');
   const [addressValidation, setAddressValidation] = useState(null);
+  const [overrideUnverified, setOverrideUnverified] = useState(false);
   const [preview, setPreview] = useState(false), [previewCategory, setPreviewCategory] = useState(''), [property, setProperty] = useState({ address: '', serviceCategory: '' });
   const runtime = useRef({ mounted: false, sequence: 0, busy: false });
   const dirty = allowed && !!form && JSON.stringify(form) !== saved;
@@ -73,8 +74,8 @@ function ServiceAreasForm({ company, allowed }) {
     } finally { state.busy = false; if (state.mounted && sequence === state.sequence) setBusy(''); }
   }, []);
   const accept = useCallback(response => {
-    const next = formFor(response.settings);
-    setData(response); setForm(next); setSaved(JSON.stringify(next)); setProperty({ address: '', serviceCategory: '' });
+    const next = formFor(response.onboardingSettings || response.settings);
+    setData(response); setForm(next); setSaved(JSON.stringify(formFor(response.settings))); setProperty({ address: '', serviceCategory: '' }); setOverrideUnverified(false);
   }, []);
   useEffect(() => {
     const state = runtime.current;
@@ -83,8 +84,8 @@ function ServiceAreasForm({ company, allowed }) {
   }, [allowed, company?.id]);
   useEffect(() => {
     if (!settingsQuery.data || dirtyRef.current || runtime.current.busy) return;
-    const next = formFor(settingsQuery.data.settings);
-    setData(settingsQuery.data); setForm(next); setSaved(JSON.stringify(next));
+    const next = formFor(settingsQuery.data.onboardingSettings || settingsQuery.data.settings);
+    setData(settingsQuery.data); setForm(next); setSaved(JSON.stringify(formFor(settingsQuery.data.settings)));
     // Property-check input is an independent draft; polling settings must not
     // erase the address the dispatcher is currently checking.
   }, [settingsQuery.data, busy]);
@@ -92,12 +93,15 @@ function ServiceAreasForm({ company, allowed }) {
   if (!allowed) return <section className="rounded-xl border border-gray-200 bg-white p-6"><h2 className="text-xl font-semibold">Service Areas</h2><p className="mt-2">Company owners, administrators, and managers manage service territories. Technicians cannot change coverage or approve exceptions.</p></section>;
   const categories = (company.serviceCategories || []).filter(value => typeof value === 'string' && value.trim());
   const validationError = form ? validation(form) : '';
-  const patch = change => { setForm(previous => ({ ...previous, ...change })); setMessage(''); if (Object.hasOwn(change, 'operatingAddress')) setAddressValidation(null); };
+  const patch = change => { setForm(previous => ({ ...previous, ...change })); setMessage(''); if (Object.hasOwn(change, 'operatingAddress')) { setAddressValidation(null); setOverrideUnverified(false); } };
   const updateOverride = (index, changes) => setForm(previous => ({ ...previous, categoryOverrides: previous.categoryOverrides.map((row, position) => position === index ? { ...row, ...changes } : row) }));
   const save = () => {
     if (!dirty || validationError) return;
-    invoke('save', () => callWorkspace('rlServiceAreas', { action: 'save', companyId: company.id, expectedRevision: data.settings?.revision || 0, settings: payloadFor(form) }), response => {
-      settingsQuery.setData(response); accept(response); setMessage('Service areas saved. Existing appointments and history are unchanged.'); toast.success('Service areas saved.');
+    invoke('save', () => callWorkspace('rlServiceAreas', { action: 'save', companyId: company.id, expectedRevision: data.settings?.revision || 0, settings: payloadFor(form), ...(overrideUnverified ? { allowUnverifiedOperatingAddress: true } : {}) }), response => {
+      settingsQuery.setData(response); accept(response);
+      const unverified = !response.settings?.operatingLocation;
+      setMessage(unverified ? 'Service-area choices saved with an unverified operating address. Radius coverage is pending verification; existing internal scheduling is preserved and public radius checks remain unavailable.' : 'Service areas saved. Existing appointments and history are unchanged.');
+      toast.success(unverified ? 'Service areas saved; operating location remains unverified.' : 'Service areas saved.');
     });
   };
   const reload = async () => { if (dirty && !await confirmDiscard()) return; invoke('load', async () => { const result = await settingsQuery.refetch(); if (result.error) throw result.error; return result.data; }, accept); };
@@ -106,10 +110,12 @@ function ServiceAreasForm({ company, allowed }) {
     <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-xl font-semibold">Service Areas</h2><p className="mt-1 max-w-3xl text-sm text-gray-600">Define coverage around the service property. Changes apply to future checks and do not rewrite existing appointments, customer locations or service history.</p></div><button type="button" className="text-sm font-medium text-primary-700 underline disabled:opacity-50" disabled={!!busy} onClick={reload}>Reload service areas</button></div>
     {(error || settingsQuery.error) && !addressValidation && <p role="alert" className="rounded-lg bg-red-50 p-3 text-red-800">{error || settingsQuery.error.message}</p>}
     <AddressValidationNotice validation={addressValidation} onAccept={operatingAddress => patch({ operatingAddress })} disabled={!!busy || !allowed || !form} />
+    {addressValidation && data?.canOverrideOperatingAddress && <label className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"><input type="checkbox" className="mt-1" checked={overrideUnverified} onChange={event => setOverrideUnverified(event.target.checked)} /><span><strong className="block">Save this operating address without Google verification</strong>The company owner can keep the entered address and coverage settings. Radius eligibility and its map remain unavailable until the operating location is verified. ZIP coverage uses the saved ZIP list.</span></label>}
     {message && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-emerald-900">{message}</p>}
     {!form && !error && <p role="status">Loading service areas…</p>}
     {form && <>
-      {data.settings?.configured === false && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">No service area is configured yet. Existing work is preserved. Save valid coverage before accepting future public service requests.</p>}
+      {data.settings?.configured === false && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{data.onboardingSettings ? 'Your onboarding address and coverage choices are ready below, but service areas are not yet active. Review and save them.' : data.settings?.addressVerification === 'owner-overridden' ? 'Your radius settings are saved, but coverage remains pending until the operating location is verified. Existing internal scheduling is preserved; public radius checks remain unavailable.' : 'No service area is configured yet. Existing work is preserved. Save valid coverage before accepting future public service requests.'}</p>}
+      {data.settings?.configured && !data.settings?.operatingLocation && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">The saved operating address is unverified. Radius eligibility and its map are unavailable until Google verifies it.</p>}
       <fieldset disabled={!!busy} className="space-y-5">
         <label className="block text-sm font-medium">Business operating address<input aria-label="Business operating address" className={inputClass} maxLength={278} autoComplete="street-address" placeholder="Street, city, state and ZIP code" value={form.operatingAddress} onChange={event => patch({ operatingAddress: event.target.value })} /><span className="mt-1 block text-sm font-normal text-gray-600">Radius coverage is measured from this validated location. Saving requests address validation; typing does not look up addresses.</span></label>
         <CoverageFields rule={form} label="Default company coverage" onChange={patch} />
@@ -131,9 +137,9 @@ function ServiceAreasForm({ company, allowed }) {
       </fieldset>
       <section aria-label="Saved coverage preview" className="space-y-3 border-t border-gray-200 pt-5">
         <h3 className="font-semibold">Saved coverage preview</h3>
-        <p className="text-sm text-gray-600">{dirty ? 'Save your changes to update this preview and property checks.' : 'Preview uses the last saved, server-validated coverage.'}</p>
+        <p className="text-sm text-gray-600">{dirty ? 'Save your changes to update this preview and property checks.' : 'Preview uses the last saved coverage.'}</p>
         {!!data.settings?.categoryOverrides?.length && <label className="block text-sm font-medium">Preview service category<SelectControl aria-label="Preview service category" className={inputClass} value={previewCategory} onChange={event => setPreviewCategory(event.target.value)}><option value="">Default company coverage</option>{data.settings.categoryOverrides.map(row => <option key={row.serviceCategory} value={row.serviceCategory}>{row.serviceCategory}</option>)}</SelectControl></label>}
-        {previewRule?.method === 'zip' ? <div className="flex flex-wrap gap-2" aria-label="Saved ZIP-code coverage">{previewRule.zipCodes?.length ? previewRule.zipCodes.map(zip => <span className="rounded bg-emerald-50 px-3 py-1 text-sm text-emerald-900" key={zip}>{zip}</span>) : <p className="text-sm text-gray-600">No ZIP codes saved.</p>}</div> : <p>{previewRule?.radiusMiles} mile radius from the validated operating location.</p>}
+        {previewRule?.method === 'zip' ? <div className="flex flex-wrap gap-2" aria-label="Saved ZIP-code coverage">{previewRule.zipCodes?.length ? previewRule.zipCodes.map(zip => <span className="rounded bg-emerald-50 px-3 py-1 text-sm text-emerald-900" key={zip}>{zip}</span>) : <p className="text-sm text-gray-600">No ZIP codes saved.</p>}</div> : <p>{previewRule?.radiusMiles} mile radius{data.settings?.operatingLocation ? ' from the validated operating location.' : ' saved; the operating location must be verified before radius checks can run.'}</p>}
         {data.settings?.operatingLocation?.formattedAddress && <p className="text-sm">Operating location: {data.settings.operatingLocation.formattedAddress}</p>}
         <button type="button" className="text-sm font-medium text-primary-700 underline disabled:opacity-50" disabled={dirty || !data.settings?.configured || !data.settings?.operatingLocation} onClick={() => setPreview(value => !value)}>{preview ? 'Hide coverage map' : 'Show coverage map'}</button>
         {preview && <CoverageMap settings={data.settings} rule={previewRule} />}

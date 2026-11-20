@@ -6,6 +6,7 @@ import {
   containsSensitiveQuestion,
   deterministicHelp,
   pageKnowledge,
+  portalGuidanceProcedure,
   validateRegistry,
 } from './knowledgeRegistry.js';
 
@@ -27,6 +28,29 @@ test('new inquiry guidance points authorized managers to Customers', () => {
   assert.match(result.text, /remains a prospect until conversion is appropriate/);
   assert.doesNotMatch(result.text, /Open Estimates or the assigned estimate visit/);
   assert.deepEqual(result.actions.map(action => action.id), ['customers']);
+});
+
+test('customer portal guidance follows Customer Details and invitation-only linking', () => {
+  capabilities.clear(); capabilities.add('customers.manage');
+  const question = 'Where do I find customer portal access and email a customer invitation?';
+  assert.equal(portalGuidanceProcedure(question), 'PORTAL-01');
+  const staff = deterministicHelp(question, context('manager'));
+  assert.equal(staff.verifiedProcedureId, 'PORTAL-01');
+  assert.match(staff.text, /eye icon.*Customer Details/i);
+  assert.match(staff.text, /Email portal invitation/);
+  assert.deepEqual(staff.actions.map(action => action.id), ['customers']);
+  const customer = deterministicHelp('How does a customer accept a provider invitation and connect in the customer portal?', context('manager'));
+  assert.equal(customer.verifiedProcedureId, 'PORTAL-02');
+  assert.match(customer.text, /email code/);
+  assert.match(customer.text, /Matching an email or phone number alone does not grant provider access/);
+});
+
+test('technicians receive a portal invitation permission boundary', () => {
+  capabilities.clear(); capabilities.add('customers.read');
+  const result = deterministicHelp('How can I invite a customer to the portal?', context('technician'));
+  assert.equal(result.verifiedProcedureId, 'PORTAL-01');
+  assert.match(result.text, /cannot email customer portal invitations/);
+  assert.deepEqual(result.actions, []);
 });
 
 test('estimate guidance covers visit, management review, approval and approved work', () => {

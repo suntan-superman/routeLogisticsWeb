@@ -922,5 +922,31 @@ export default Object.freeze([
     ],
     "deniedRoles": [],
     "denialReply": null
+  },
+  {
+    "id": "PORTAL-01",
+    "question": "Where do I find customer portal access and email a customer invitation?",
+    "reply": "Open Customers, find the customer, and select the eye icon to open Customer Details. Scroll to Customer portal access and select Email portal invitation. The customer must have a valid email address. The pencil icon opens Edit Customer; portal access is in Customer Details. The invitation is single-use and expires after seven days. You can see Connected, Invitation queued, Revoked, or Not connected in that section. The assistant cannot send an invitation for you.",
+    "intent": "customer_portal_invitation",
+    "status": "implemented",
+    "routes": [
+      "/customers"
+    ],
+    "deniedRoles": [
+      "technician"
+    ],
+    "denialReply": "Your role cannot email customer portal invitations. Ask an authorized owner, administrator, or manager to open Customers, then Customer Details, and use Customer portal access."
+  },
+  {
+    "id": "PORTAL-02",
+    "question": "How does a customer accept a provider invitation and connect in the customer portal?",
+    "reply": "Open the single-use provider invitation email, then sign in at the Customer Portal using an email code sent to the invited address. Use the invitation link or paste it under Connect provider and select Connect provider. The invitation expires after seven days; the email code expires after ten minutes and can be used once. After connection, choose the provider from Service provider to view that provider’s records. If a link is expired or used, ask the provider for a new invitation. Matching an email or phone number alone does not grant provider access.",
+    "intent": "customer_portal_connection",
+    "status": "implemented",
+    "routes": [
+      "/portal"
+    ],
+    "deniedRoles": [],
+    "denialReply": null
   }
 ]);

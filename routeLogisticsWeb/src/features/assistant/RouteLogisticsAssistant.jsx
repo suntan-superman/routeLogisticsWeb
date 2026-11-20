@@ -8,6 +8,7 @@ import {
   containsSensitiveQuestion,
   deterministicHelp,
   pageKnowledge,
+  portalGuidanceProcedure,
   suggestedQuestions,
 } from './knowledgeRegistry';
 import {
@@ -204,6 +205,14 @@ export default function RouteLogisticsAssistant() {
       : reconcileAssistantMessages(value, [optimisticVisitorMessage(attempt.clientMessageId, question)]));
     const local = deterministicHelp(question, context);
     try {
+      // This newly verified workflow is answered locally until the shared
+      // Merxus resolver can be released from its separate deployment checkout.
+      if (portalGuidanceProcedure(question)) {
+        setMessages(value => markAssistantAttempt(value, attempt.clientMessageId, 'local'));
+        addDeterministicHelp(question, '', attempt.clientMessageId);
+        setLastAttempt(null);
+        return;
+      }
       const result = await sendAssistantMessage({ sessionId, message: question, route: location.pathname, clientMessageId: attempt.clientMessageId });
       if (result.disabled || result.fallback) {
         setMessages(value => markAssistantAttempt(value, attempt.clientMessageId, 'local'));

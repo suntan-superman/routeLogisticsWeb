@@ -925,6 +925,32 @@ const PROCEDURES = Object.freeze([
     ],
     "deniedRoles": [],
     "denialReply": null
+  },
+  {
+    "id": "PORTAL-01",
+    "question": "Where do I find customer portal access and email a customer invitation?",
+    "reply": "Open Customers, find the customer, and select the eye icon to open Customer Details. Scroll to Customer portal access and select Email portal invitation. The customer must have a valid email address. The pencil icon opens Edit Customer; portal access is in Customer Details. The invitation is single-use and expires after seven days. You can see Connected, Invitation queued, Revoked, or Not connected in that section. The assistant cannot send an invitation for you.",
+    "intent": "customer_portal_invitation",
+    "status": "implemented",
+    "routes": [
+      "/customers"
+    ],
+    "deniedRoles": [
+      "technician"
+    ],
+    "denialReply": "Your role cannot email customer portal invitations. Ask an authorized owner, administrator, or manager to open Customers, then Customer Details, and use Customer portal access."
+  },
+  {
+    "id": "PORTAL-02",
+    "question": "How does a customer accept a provider invitation and connect in the customer portal?",
+    "reply": "Open the single-use provider invitation email, then sign in at the Customer Portal using an email code sent to the invited address. Use the invitation link or paste it under Connect provider and select Connect provider. The invitation expires after seven days; the email code expires after ten minutes and can be used once. After connection, choose the provider from Service provider to view that provider’s records. If a link is expired or used, ask the provider for a new invitation. Matching an email or phone number alone does not grant provider access.",
+    "intent": "customer_portal_connection",
+    "status": "implemented",
+    "routes": [
+      "/portal"
+    ],
+    "deniedRoles": [],
+    "denialReply": null
   }
 ]);
 
@@ -1073,6 +1099,25 @@ export function resolveRouteLogisticsSupport(question, context = {}) {
     return resolution('Use the existing support workflow: choose Support or Report a Problem in the assistant. Review the disclosure, describe the issue without customer or financial data, and submit it to Workside Support. An ordinary question does not automatically create a handoff.', 'human_support', { humanRequired: true });
   }
   if (/help with (?:this )?page|what can i do (?:here|on this page)/.test(text)) return resolution(pageHelp(context), 'page_help');
+
+  // Portal invitations are a staff action; customer connection is a separate
+  // single-use flow. Resolve these before broad customer-intake guidance.
+  if (/\b(portal|provider|invitation)\b/.test(text)) {
+    const staffAccess = /\b(customer|portal)\b/.test(text) && /\b(invite|invitation|access|email|send|grant)\b/.test(text)
+      && /\b(where|find|invite|email|send|grant|give|provide|manage)\b/.test(text);
+    const customerConnection = /\b(connect|link|accept|paste|join|sign[ -]?in)\b/.test(text)
+      && /\b(provider|invitation|portal)\b/.test(text);
+    if (staffAccess && !/\b(accept|paste|sign[ -]?in)\b/.test(text)) {
+      const procedure = PROCEDURES.find(row => row.id === 'PORTAL-01');
+      return allowed.has('customers.manage')
+        ? resolution(procedure.reply, procedure.intent, { knowledgeId: procedure.id })
+        : resolution(procedure.denialReply, procedure.intent + '_permission', { knowledgeId: procedure.id });
+    }
+    if (customerConnection) {
+      const procedure = PROCEDURES.find(row => row.id === 'PORTAL-02');
+      return resolution(procedure.reply, procedure.intent, { knowledgeId: procedure.id });
+    }
+  }
 
   const matched = matchProcedure(question, context);
   if (matched) return responseForProcedure(matched, context);

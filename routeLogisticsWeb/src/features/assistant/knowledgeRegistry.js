@@ -1,7 +1,7 @@
 import { routeCapabilities } from '../../utils/routeAccess.js';
 import verifiedProcedures from './verifiedProcedures.generated.js';
 
-export const ROUTE_LOGISTICS_KNOWLEDGE_VERSION = '2026-11-18.2';
+export const ROUTE_LOGISTICS_KNOWLEDGE_VERSION = '2026-11-20.1';
 
 export const assistantActions = Object.freeze({
   dashboard: { id: 'dashboard', label: 'Go to Dashboard', route: '/', capability: 'jobs.read' },
@@ -161,7 +161,20 @@ const verifiedActionIds = Object.freeze({
   'APT-01': ['company'], 'APT-02': [], 'APT-03': ['myWork'], 'APT-04': ['company'],
   'APT-05': [], 'APT-06': [], 'APT-07': [], 'APT-08': [], 'APT-09': [], 'APT-10': [],
   'APT-11': [], 'APT-12': [], 'APT-13': [], 'APT-14': [], 'APT-15': [],
+  'PORTAL-01': ['customers'], 'PORTAL-02': [],
 });
+
+export function portalGuidanceProcedure(question) {
+  const text = String(question || '').toLowerCase();
+  if (!/\b(portal|provider|invitation)\b/.test(text)) return null;
+  const staffAccess = /\b(customer|portal)\b/.test(text) && /\b(invite|invitation|access|email|send|grant)\b/.test(text)
+    && /\b(where|find|invite|email|send|grant|give|provide|manage)\b/.test(text);
+  const customerConnection = /\b(connect|link|accept|paste|join|sign[ -]?in)\b/.test(text)
+    && /\b(provider|invitation|portal)\b/.test(text);
+  if (staffAccess && !/\b(accept|paste|sign[ -]?in)\b/.test(text)) return 'PORTAL-01';
+  if (customerConnection) return 'PORTAL-02';
+  return null;
+}
 
 const fallbackStopWords = new Set(['a','an','and','are','can','do','does','for','from','how','i','in','is','it','me','my','of','on','or','the','this','to','what','when','where','which','why','will','with','you']);
 const normalizeVerifiedQuestion = value => String(value || '').toLowerCase().replace(/[’']/g, '').replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
@@ -188,10 +201,13 @@ function resolveVerifiedProcedure(question, context) {
 }
 
 export function deterministicHelp(question, context) {
-  const verified = resolveVerifiedProcedure(question, context);
+  const portalProcedureId = portalGuidanceProcedure(question);
+  const verified = portalProcedureId
+    ? verifiedProcedures.find(procedure => procedure.id === portalProcedureId)
+    : resolveVerifiedProcedure(question, context);
   if (verified && !['CPE-01', 'CPE-20'].includes(verified.id)) {
     const role = context.role === 'technician-assigned' ? 'technician' : context.role;
-    const denied = verified.deniedRoles.includes(role);
+    const denied = verified.deniedRoles.includes(role) || verified.id === 'PORTAL-01' && !context.can('customers.manage');
     const text = denied ? verified.denialReply || 'Your current role cannot perform this action. Ask an authorized owner or administrator.' : verified.reply;
     return {
       text,
@@ -217,7 +233,7 @@ export function deterministicHelp(question, context) {
 export function suggestedQuestions(pathname, context) {
   const entry = pageKnowledge(pathname, context);
   const defaults = {
-    customers: ['How do I create an inquiry for a new prospect?', 'How do I schedule an estimate visit?'],
+    customers: ['How do I create an inquiry for a new prospect?', 'Where do I find customer portal access and email a customer invitation?'],
     scheduling: ['How do I assign or reassign a technician?', 'Where do I review late appointments?'],
     dispatch: ['How do I review overdue work?', 'How do I find available field staff?'],
     estimates: ['How does management review an estimate?', 'How do I schedule approved work?'],

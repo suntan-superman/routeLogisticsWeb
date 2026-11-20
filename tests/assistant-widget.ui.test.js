@@ -32,6 +32,12 @@ test('widget uses correlation ids and a synchronous submission guard for optimis
   assert.doesNotMatch(widget, /message\.role.*message\.text.*dedup|consecutive identical/i);
 });
 
+test('verified portal guidance is answered locally and retained with widget conversation state', () => {
+  assert.match(widget, /portalGuidanceProcedure\(question\)/);
+  assert.match(widget, /addDeterministicHelp\(question, '', attempt\.clientMessageId\)/);
+  assert.match(widget, /sessionStorage\.setItem\(key, JSON\.stringify\(\{ sessionId, messages:/);
+});
+
 test('support form captures the required sanitized problem fields', () => {
   for (const field of ['taskAttempted', 'expectedResult', 'actualResult', 'errorMessage']) assert.match(widget, new RegExp(`name="${field}"`));
   assert.match(widget, /Do not include customer details, passwords, payment information, private notes, or photos/);

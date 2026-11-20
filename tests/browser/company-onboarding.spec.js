@@ -6,7 +6,7 @@ test('PW-ONBOARD-01 @onboarding public owner registration verifies, resumes and 
   const companyName = `${scenario.prefix} New Company`;
 
   await page.goto('/');
-  await expect(page.getByRole('link', { name: 'Log in', exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: /Log in/i, exact: true }).first()).toBeVisible();
   await page.getByRole('link', { name: 'Add Your Company', exact: true }).first().click();
   await expect(page).toHaveURL(/\/signup\?intent=company$/);
   await page.getByLabel('Your name').fill('Synthetic New Owner');

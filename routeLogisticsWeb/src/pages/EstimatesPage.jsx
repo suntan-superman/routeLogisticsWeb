@@ -149,7 +149,7 @@ export default function EstimatesPage() {
   const save = () => run(async ticket => {
     let next = record, values = { ...estimateInput(draft), photoIds: photoRef.current.filter(photo => photo.includeInVersion !== false).map(photo => photo.remoteId).filter(Boolean) }, contentSaved = false;
     const persist = async data => { if (!pendingSave.current) pendingSave.current = { operationId: crypto.randomUUID(), ...(next ? { estimateId: next.id, expectedVersion: next.version } : {}), data }; setUncertain(true);
-      const result = await callEstimate('save', pendingSave.current); if (!current(ticket)) return null; next = result.estimate; pendingSave.current = null; contentSaved = true; setUncertain(false); setRecord(next); setDeliveryEmail(next.recipient?.email || ''); return next; };
+      const result = await callEstimate('save', pendingSave.current); if (!current(ticket)) return null; next = result.estimate; pendingSave.current = null; contentSaved = true; setUncertain(false); setRecord(next); if (!record && next.status === 'draft') setEstimatePermissions(previous => ({ ...previous, canEdit: true })); setDeliveryEmail(next.recipient?.email || ''); return next; };
     if (!next || pendingSave.current || next.status !== 'draft' || !photoRef.current.some(photo => !photo.remoteId)) { if (!(await persist(values))) return; }
     const uploaded = photoRef.current.filter(photo => photo.includeInVersion !== false);
     for (let index = 0; index < uploaded.length; index++) { let photo = uploaded[index]; if (photo.remoteId) continue;

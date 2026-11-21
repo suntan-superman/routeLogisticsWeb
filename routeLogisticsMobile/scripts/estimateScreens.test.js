@@ -181,13 +181,18 @@ test('web management retains a selected photo through preparation failure and re
   const env = fixture(), Component = env.load(path.join(web, 'src/pages/EstimatesPage.jsx')).default; let tree;
   const button = title => tree.root.findAll(node => node.type === 'button' && node.children.filter(child => typeof child === 'string').join('') === title)[0];
   const click = async title => { const action = button(title); assert.ok(action, title); await act(async () => action.props.onClick()); await act(settle); };
+  const tab = async title => { const action = tree.root.findAll(node => node.props.role === 'tab' && node.children[0] === title)[0]; assert.ok(action, title); await act(async () => action.props.onClick()); await act(settle); };
   const field = async (label, value) => { const wrapper = tree.root.findAll(node => node.type === 'label' && node.children.filter(child => typeof child === 'string').join('') === label)[0]; assert.ok(wrapper, label); const input = wrapper.findAll(node => ['input', 'textarea'].includes(node.type))[0]; await act(async () => input.props.onChange({ target: { value } })); };
   await act(async () => { tree = create(React.createElement(Component)); }); await act(settle); await click('New photo estimate');
+  await tab('Photos');
   const picker = tree.root.findAll(node => node.type === 'input' && node.props.type === 'file' && node.props.multiple)[0]; await act(async () => picker.props.onChange({ target: { files: [{ name: 'work.jpg', type: 'image/jpeg', size: 1000 }], value: 'selected' } })); await act(settle);
   assert.match(json(tree), /blob:photo/);
-  for (const [label, value] of [['Prospect name', 'Prospect'], ['Prospect email', 'prospect@example.com'], ['Estimate title', 'Photo estimate'], ['Service type', 'Pest Control'], ['Scope of work', 'Requested work'], ['Description', 'Labor'], ['Quantity', '2'], ['Unit price ($)', '50']]) await field(label, value);
-  env.compressionFailure = true; await click('Save estimate version'); assert.match(json(tree), /preparation failed/); assert.match(json(tree), /blob:photo/); assert.equal(env.calls.filter(call => call.action === 'photo-upload').length, 0);
-  env.compressionFailure = false; await click('Save estimate version'); assert.equal(env.record.photoIds.length, 1); assert.match(json(tree), /Server total/); assert.match(json(tree), /100\.23/); assert.equal(env.calls.filter(call => call.action === 'deliver').length, 0);
+  await tab('Details');
+  for (const [label, value] of [['Prospect name', 'Prospect'], ['Prospect email', 'prospect@example.com'], ['Estimate title', 'Photo estimate'], ['Service type', 'Pest Control']]) await field(label, value);
+  await tab('Scope & Pricing');
+  for (const [label, value] of [['Scope of work', 'Requested work'], ['Description', 'Labor'], ['Quantity', '2'], ['Unit price ($)', '50']]) await field(label, value);
+  env.compressionFailure = true; await click('Save estimate version'); assert.match(json(tree), /preparation failed/); await tab('Photos'); assert.match(json(tree), /blob:photo/); assert.equal(env.calls.filter(call => call.action === 'photo-upload').length, 0);
+  env.compressionFailure = false; await click(button('Retry saved request') ? 'Retry saved request' : 'Save estimate version'); assert.equal(env.record.photoIds.length, 1); assert.match(json(tree), /100\.23/); assert.equal(env.calls.filter(call => call.action === 'deliver').length, 0);
   await act(async () => tree.unmount()); assert.equal(env.revoked.length, 1);
 });
 test('web management sees completed quote-needed visits separately and opens their deterministic estimate context', async () => {
@@ -205,11 +210,12 @@ test('web management finalizes a submitted version, previews the PDF and sends t
   const env = fixture(), originalCustomer = structuredClone(env.customers[0]); env.record = { ...savedEstimate('submitted-for-review'), preparedByName: 'Field Technician', submittedVersion: 2 }; const Component = env.load(path.join(web, 'src/pages/EstimatesPage.jsx')).default; let tree;
   const button = title => tree.root.findAll(node => node.type === 'button' && node.children.filter(child => typeof child === 'string').join('') === title)[0];
   const click = async title => { const action = button(title); assert.ok(action, title); assert.notEqual(action.props.disabled, true, `${title} disabled`); await act(async () => action.props.onClick()); await act(settle); };
+  const tab = async title => { const action = tree.root.findAll(node => node.props.role === 'tab' && node.children[0] === title)[0]; assert.ok(action, title); await act(async () => action.props.onClick()); await act(settle); };
   await act(async () => { tree = create(React.createElement(Component)); }); await act(settle);
   assert.match(json(tree), /awaiting review/i); assert.match(json(tree), /Prepared by.*Field Technician/); await click('Review estimate');
-  assert.match(json(tree), /Saving management changes creates a new version/);
+  assert.match(json(tree), /Estimate details/);
   const title = tree.root.findAll(node => node.type === 'label' && node.children[0] === 'Estimate title')[0].findByType('input'); await act(async () => title.props.onChange({ target: { value: 'Management finalized proposal' } })); await click('Save estimate version');
-  assert.equal(env.record.version, 3); assert.equal(env.record.status, 'draft'); await click('Preview customer PDF'); assert.equal(env.previewed, true); await click('Approve for delivery');
+  assert.equal(env.record.version, 3); assert.equal(env.record.status, 'draft'); await tab('Review & Send'); await click('Preview customer PDF'); assert.equal(env.previewed, true); await click('Approve for delivery');
   const recipient = tree.root.findByProps({ 'aria-label': 'Estimate delivery email' }); assert.equal(recipient.props.value, 'prospect@example.com'); await act(async () => recipient.props.onChange({ target: { value: 'alternate@example.com' } })); await click('Email approved version'); assert.match(json(tree), /alternate@example\.com/); await click('Confirm estimate email');
   const delivery = env.calls.find(call => call.action === 'deliver'); assert.equal(delivery.recipientEmail, 'alternate@example.com'); assert.deepEqual(env.customers[0], originalCustomer); assert.match(json(tree), /PDF email queued/); await act(async () => tree.unmount());
 });

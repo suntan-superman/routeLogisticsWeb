@@ -42,6 +42,13 @@ test('invoice email requires recipient review and shows the actual queued delive
  await click('Email PDF');assert.match(text(),/customer@example.invalid/);assert.equal(invoiceCalls.filter(call=>call.data.action!=='status').length,0);
  await click('Send invoice PDF');assert.equal(invoiceCalls.filter(call=>call.data.action!=='status').length,1);assert.match(text(),/Delivery is in progress/);
 });
+test('SMTP acceptance is not presented as confirmed inbox delivery',async()=>{
+ record.financialVersion=2;record.status='issued';record.issuedSnapshot={fingerprint:'synthetic'};record.revision=3;
+ invoiceCall=async()=>({recipient:'customer@example.invalid',delivery:{status:'sent',sentAt:'2026-11-20T18:00:00.000Z'}});
+ await render();await act(async()=>tree.root.findAll(node=>node.type==='button'&&node.children.join('')==='Email PDF')[0].props.onClick());
+ assert.match(text(),/Accepted by the email provider/);assert.match(text(),/Inbox delivery is not confirmed/);
+ assert.equal(tree.root.findAll(node=>node.type==='button'&&node.children.join('')==='Send invoice PDF')[0].props.disabled,true);
+});
 
 test('invoice list requires a tenant-scoped server snapshot and retains its service response contract',async()=>{
  const result=await service.listInvoices();assert.deepEqual(result,{success:true,invoices:[record]});

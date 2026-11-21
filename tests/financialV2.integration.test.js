@@ -11,6 +11,7 @@ const { invoiceLedgerHandlers } = require('../functions/invoiceLedger');
 const { createBillingScheduler } = require('../functions/billingScheduler');
 const { publicInvoice } = require('../functions/portal');
 const { deliverMail } = require('../functions/mail');
+const { invoiceEmailHandlers, invoiceMailId } = require('../functions/invoiceEmail');
 let app, db, sequence = 0;
 before(() => {
   if (!/^(127\.0\.0\.1|localhost):\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST || '')) throw Error('A local Firestore emulator is required. Production access is forbidden.');
@@ -97,7 +98,7 @@ test('issued invoice email includes its approved PDF and records one accepted de
   const invoice = await f.stored(created.invoiceId), ref = db.doc(`rlMail/${f.id}-invoice-mail`);
   await ref.set({ status: 'queued', availableAt: Date.now() - 1000, attempts: 0,
     invoiceId: created.invoiceId, invoiceSnapshotFingerprint: invoice.issuedSnapshot.fingerprint,
-    to: 'test@example.com', subject: `Invoice ${invoice.invoiceNumber}`, text: 'Approved invoice attached.' });
+    to: `${f.customerId}@example.invalid`, subject: `Invoice ${invoice.invoiceNumber}`, text: 'Approved invoice attached.' });
   const sends = [];
   const transport = { sendMail: async message => { sends.push(message); return { accepted: [message.to] }; } };
   await deliverMail(db, ref, transport, 'notifications@example.com');
@@ -108,4 +109,35 @@ test('issued invoice email includes its approved PDF and records one accepted de
   assert.equal((await ref.get()).get('status'), 'sent');
   await deliverMail(db, ref, transport, 'notifications@example.com');
   assert.equal(sends.length, 1);
+});
+
+test('invoice email reports delivery and cancels stale customer addresses before SMTP', async () => {
+  const f = await fixture(), created = await f.fromJob(); await f.issue(created.invoiceId);
+  const handlers = invoiceEmailHandlers(db, () => 'https://route-logistics.com', () => true);
+  const request = { auth: f.auth('manager'), data: { invoiceId: created.invoiceId, expectedRevision: (await f.stored(created.invoiceId)).revision, expectedRecipient: `${f.customerId}@example.invalid` } };
+  const first = await handlers.emailInvoice(request);
+  assert.equal(first.queued, true);
+  const before = await handlers.emailInvoice({ ...request, data: { action: 'status', invoiceId: created.invoiceId } });
+  assert.equal(before.recipient, `${f.customerId}@example.invalid`);
+  assert.equal(before.delivery.status, 'queued');
+  await db.doc(`customers/${f.customerId}`).update({ email: `${f.customerId}-corrected@example.invalid` });
+  await assert.rejects(handlers.emailInvoice(request), { code: 'aborted' });
+  const oldId = invoiceMailId(created.invoiceId, Math.floor(Date.now() / 86400_000), before.recipient);
+  const sends = [];
+  const transport = { sendMail: async message => { sends.push(message); return { accepted: [message.to] }; } };
+  await deliverMail(db, db.doc(`rlMail/${oldId}`), transport, 'notifications@example.invalid');
+  assert.equal(sends.length, 0);
+  assert.equal((await db.doc(`rlMail/${oldId}`).get()).get('status'), 'cancelled');
+  const correctedRequest = { ...request, data: { ...request.data, expectedRecipient: `${f.customerId}-corrected@example.invalid` } };
+  const corrected = await handlers.emailInvoice(correctedRequest);
+  assert.equal(corrected.queued, true);
+  assert.equal(corrected.recipient, `${f.customerId}-corrected@example.invalid`);
+  const correctedId = invoiceMailId(created.invoiceId, Math.floor(Date.now() / 86400_000), corrected.recipient);
+  await deliverMail(db, db.doc(`rlMail/${correctedId}`), transport, 'notifications@example.invalid');
+  assert.equal(sends.length, 1);
+  assert.equal(sends[0].to, corrected.recipient);
+  const after = await handlers.emailInvoice({ ...request, data: { action: 'status', invoiceId: created.invoiceId } });
+  assert.equal(after.delivery.status, 'sent');
+  assert.equal((await handlers.emailInvoice(correctedRequest)).status, 'sent');
+  await assert.rejects(handlers.emailInvoice({ ...request, auth: f.auth('technician'), data: { action: 'status', invoiceId: created.invoiceId } }), { code: 'permission-denied' });
 });

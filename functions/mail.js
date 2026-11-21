@@ -22,8 +22,12 @@ async function deliverMail(db, ref, transport, from, now = Date.now(), options =
     if (data.invoiceId) {
       const invoice = await tx.get(db.collection('invoices').doc(data.invoiceId));
       const issued = invoice.exists && invoice.get('financialVersion') === 2 && invoice.get('issuedSnapshot')?.fingerprint === data.invoiceSnapshotFingerprint;
-      if (!issued || !['issued', 'partially_paid', 'paid'].includes(invoice.get('status')) || data.subject?.startsWith('Payment reminder:') && (invoice.get('balanceCents') || 0) <= 0) {
-        tx.update(ref, { status: 'cancelled' }); return null;
+      const customer = issued && invoice.get('customerId') ? await tx.get(db.collection('customers').doc(invoice.get('customerId'))) : null;
+      const currentRecipient = String(customer?.get('email') || '').trim().toLowerCase();
+      const sameTenant = customer?.exists && (invoice.get('companyId') ? customer.get('companyId') === invoice.get('companyId') : !customer.get('companyId') && customer.get('userId') === invoice.get('userId'));
+      if (!issued || !['issued', 'partially_paid'].includes(invoice.get('status')) || (invoice.get('balanceCents') || 0) <= 0
+        || !sameTenant || customer.get('isActive') === false || customer.get('deletedAt') || currentRecipient !== data.to) {
+        tx.update(ref, { status: 'cancelled', failureCode: 'invoice-or-recipient-changed' }); return null;
       }
     }
     if (data.reportRunId) {

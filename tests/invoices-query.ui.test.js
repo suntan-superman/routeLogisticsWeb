@@ -4,7 +4,7 @@ const mobile=createRequire(path.resolve(__dirname,'../routeLogisticsMobile/packa
 const React=mobile('react'),{create,act}=mobile('react-test-renderer'),{transformSync}=web('esbuild');
 const {createWorkspaceQueryMock}=require('./support/workspaceQueryMock.cjs');const workspaceHooks=createWorkspaceQueryMock(React);
 global.IS_REACT_ACT_ENVIRONMENT=true;
-let tree,failure=null,pending=null,queries=[];
+let tree,failure=null,pending=null,queries=[],invoiceCalls=[],invoiceCall=async()=>{throw Error('No invoice mutation is authorized in this suite.');};
 const record={id:'synthetic-invoice',invoiceNumber:'INV-SYNTHETIC',customerName:'Synthetic customer',dueDate:'2030-01-02',status:'sent',total:100};
 const importer=name=>{
  if(name==='react')return React;
@@ -16,7 +16,7 @@ const importer=name=>{
  if(name.endsWith('/services/invoiceMath')||name==='./invoiceMath')return{isOverdue:()=>false};
  if(name.endsWith('/ConfirmProvider'))return{useConfirm:()=>async()=>true};
  if(name.endsWith('/AuthContext'))return{useAuth:()=>({userProfile:{businessName:'Synthetic provider'}})};
- if(name.endsWith('/services/workspaceApi')||name==='./workspaceApi')return{callWorkspace:async()=>{throw Error('No invoice mutation is authorized in this suite.');}};
+ if(name.endsWith('/services/workspaceApi')||name==='./workspaceApi')return{callWorkspace:(...args)=>invoiceCall(...args)};
  if(name.endsWith('/paymentConfig'))return{paymentsConfigured:false,paymentMode:'test'};
  if(name.endsWith('/InvoicePayment')||name.endsWith('/PaymentHistory')||name.endsWith('/InvoiceCreationDialog')||name.endsWith('/InvoiceLedgerDialog')||name.endsWith('/InvoiceEditorDialog'))return{__esModule:true,default:()=>null};
  if(name==='./firebase')return{db:{}};
@@ -32,7 +32,16 @@ const service=compile('services/invoiceService.js'),Page=compile('pages/Invoices
 const text=()=>JSON.stringify(tree.toJSON());
 async function render(){await act(async()=>{tree=create(React.createElement(Page));});}
 async function refresh(){await act(async()=>workspaceHooks.useInvalidateWorkspace()(['invoices']));}
-afterEach(async()=>{if(tree)await act(async()=>tree.unmount());tree=null;failure=null;pending=null;queries=[];});
+afterEach(async()=>{if(tree)await act(async()=>tree.unmount());tree=null;failure=null;pending=null;queries=[];invoiceCalls=[];invoiceCall=async()=>{throw Error('No invoice mutation is authorized in this suite.');};delete record.financialVersion;delete record.issuedSnapshot;delete record.revision;record.status='sent';});
+
+test('invoice email requires recipient review and shows the actual queued delivery state',async()=>{
+ record.financialVersion=2;record.status='issued';record.issuedSnapshot={fingerprint:'synthetic'};record.revision=3;
+ invoiceCall=async(name,data)=>{invoiceCalls.push({name,data});return data.action==='status'?{recipient:'customer@example.invalid',delivery:invoiceCalls.length>1?{status:'queued'}:null}:{queued:true,status:'queued',recipient:'customer@example.invalid'};};
+ await render();
+ const click=async label=>act(async()=>tree.root.findAll(node=>node.type==='button'&&node.children.join('')===label)[0].props.onClick());
+ await click('Email PDF');assert.match(text(),/customer@example.invalid/);assert.equal(invoiceCalls.filter(call=>call.data.action!=='status').length,0);
+ await click('Send invoice PDF');assert.equal(invoiceCalls.filter(call=>call.data.action!=='status').length,1);assert.match(text(),/Delivery is in progress/);
+});
 
 test('invoice list requires a tenant-scoped server snapshot and retains its service response contract',async()=>{
  const result=await service.listInvoices();assert.deepEqual(result,{success:true,invoices:[record]});

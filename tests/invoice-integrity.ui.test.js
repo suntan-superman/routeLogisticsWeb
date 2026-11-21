@@ -41,7 +41,7 @@ function compile(relative) {
     if (name.endsWith('/tenancy')) return { can: () => env.finance };
     if (name.endsWith('/ConfirmProvider')) return { useConfirm: () => async () => true };
     if (name.endsWith('/AuthContext')) return { useAuth: () => ({ userProfile: { businessName: 'Synthetic provider' } }) };
-    if (name.endsWith('/workspaceApi')) return { callWorkspace: async (name, data) => { env.email.push({ name, data }); return { queued: true }; } };
+    if (name.endsWith('/workspaceApi')) return { callWorkspace: async (name, data) => { env.email.push({ name, data }); return data.action === 'status' ? { recipient: 'customer@example.invalid', delivery: env.email.length > 1 ? { status: 'queued' } : null } : { queued: true }; } };
     if (name.endsWith('/InvoicePayment') || name.endsWith('/PaymentHistory')) return { __esModule: true, default: () => null };
     if (name.endsWith('/paymentConfig')) return { paymentsConfigured: false, paymentMode: 'test' };
     if (name === 'react-hot-toast') return { __esModule: true, default: { success: message => env.toasts.push({ kind: 'success', message }), error: message => env.toasts.push({ kind: 'error', message }) } };
@@ -132,9 +132,12 @@ test('historical test invoice amount is displayed unchanged and cannot enter new
   env.invoices = [invoice({ total: 17.31, subtotal: undefined, tax: undefined, billingSource: undefined, revision: undefined })];
   await mount(Page, {}); assert.ok(content().includes('$17.31')); assert.match(content(), /Legacy test record/); assert.equal(button('Delete'), undefined); assert.equal(button('Payments & credits'), undefined); assert.equal(env.mutations.length, 0);
 });
-test('invoice email includes current expected revision and does not mark success before its backend response', async () => {
+test('invoice email reviews the recipient and includes current revision and recipient when sent', async () => {
   env.invoices = [invoice({ financialVersion: 2, status: 'issued', issuedSnapshot: { invoiceNumber: 'INV-ONE' } })];
-  await mount(Page, {}); await click('Email PDF'); assert.deepEqual(env.email, [{ name: 'emailInvoice', data: { invoiceId: 'invoice-one', expectedRevision: 1 } }]); assert.ok(env.toasts.some(value => value.message === 'Invoice email queued'));
+  await mount(Page, {}); await click('Email PDF'); assert.deepEqual(env.email, [{ name: 'emailInvoice', data: { action: 'status', invoiceId: 'invoice-one' } }]);
+  assert.match(content(), /customer@example.invalid/); assert.equal(env.toasts.length, 0);
+  await click('Send invoice PDF'); assert.deepEqual(env.email[1], { name: 'emailInvoice', data: { invoiceId: 'invoice-one', expectedRevision: 1, expectedRecipient: 'customer@example.invalid' } });
+  assert.match(content(), /Delivery is in progress/);
 });
 
 function realService(callWorkspace) {

@@ -56,8 +56,13 @@ test('PW-INVOICE-01 @smoke owner reviews approved 108.25 terms, creates once and
   await expect(preview.getByRole('button', { name: 'Create draft invoice', exact: true })).toHaveCount(0);
   await preview.getByRole('button', { name: 'Open existing invoice', exact: true }).click();
   await expect(invoiceRow).toBeVisible(); expect(await createdForJob()).toHaveLength(1);
-  await invoiceRow.getByRole('button', { name: 'Mark sent', exact: true }).click();
-  await expect(invoiceRow.getByText('sent', { exact: true })).toBeVisible();
+  await invoiceRow.getByRole('button', { name: 'Submit for approval', exact: true }).click();
+  await expect(invoiceRow.getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
+  await invoiceRow.getByRole('button', { name: 'Approve', exact: true }).click();
+  await expect(invoiceRow.getByRole('button', { name: 'Issue', exact: true })).toBeVisible();
+  await invoiceRow.getByRole('button', { name: 'Issue', exact: true }).click();
+  await expect(invoiceRow.getByText('issued', { exact: true })).toBeVisible();
+  await expect(invoiceRow.getByRole('button', { name: 'View PDF', exact: true })).toBeVisible();
   await invoiceRow.getByRole('button', { name: 'Void', exact: true }).click();
   await page.getByRole('dialog', { name: 'Void this invoice?', exact: true }).getByRole('button', { name: 'Void invoice', exact: true }).click();
   await expect(invoiceRow.getByText('void', { exact: true })).toBeVisible();
@@ -67,7 +72,7 @@ test('PW-INVOICE-01 @smoke owner reviews approved 108.25 terms, creates once and
   await replacement.getByRole('button', { name: 'Create replacement draft', exact: true }).click();
   await expect(page.getByText('Replacement draft created', { exact: true })).toBeVisible();
   const final = await createdForJob(); expect(final).toHaveLength(2); expect(final.filter(row => row.status !== 'void')).toHaveLength(1);
-  expect(final.find(row => row.id === result.id)).toMatchObject({ status: 'void', revision: 3 });
+  expect(final.find(row => row.id === result.id)).toMatchObject({ status: 'void', revision: 5, approvedBy: scenario.accounts.owner.uid });
   expect(final.find(row => row.id !== result.id)).toMatchObject({ replacementOf: result.id, total: 108.25, revision: 1 });
   expect((await scenario.list('rlInvoiceAudit')).filter(row => row.invoiceId === result.id && row.action === 'invoice.create')).toHaveLength(1);
   expect((await scenario.list('rlMail')).filter(row => final.some(invoice => invoice.id === row.invoiceId))).toHaveLength(0);

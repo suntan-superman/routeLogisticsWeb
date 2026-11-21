@@ -256,18 +256,20 @@ test('PW-OPS-02 @smoke company owner sees operational data without inheriting pl
   await expect(page.getByRole('button', { name: /Create FAQ|New FAQ|Publish/i })).toHaveCount(0);
 });
 
-test('PW-OPS-03 @smoke manager can dispatch but cannot access financial invoices', async ({ page, scenario }) => {
+test('PW-OPS-03 @smoke manager can dispatch and manage invoices within the company', async ({ page, scenario }) => {
   annotate('SEC-002', 'DSP-003');
   await signIn(page, scenario.accounts.manager);
   await page.goto('/dispatch');
   await expect(page.getByRole('heading', { name: 'Dispatch Board', exact: true })).toBeVisible();
   await page.getByLabel('Service date', { exact: true }).fill(scenario.jobDate);
   await expect(page.getByRole('button', { name: `${scenario.customerName} · ${scenario.jobTitle}`, exact: true })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Invoices', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Invoices', exact: true })).toBeVisible();
   await page.goto('/invoices');
-  await expect(page.getByRole('heading', { name: 'Access unavailable', exact: true })).toBeVisible();
-  await expect(page.getByText('Your role does not allow this screen.', { exact: true })).toBeVisible();
-  await expect(page.getByRole('cell', { name: scenario.invoiceNumber, exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Invoices', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'New manual invoice', exact: true })).toBeVisible();
+  const companyInvoice = page.getByRole('row').filter({ hasText: scenario.invoiceNumber });
+  await expect(companyInvoice).toBeVisible();
+  await expect(companyInvoice).toContainText(scenario.customerName);
 });
 
 test('PW-OPS-04 @smoke technician sees only assigned work and cannot open customer administration', async ({ page, scenario }) => {

@@ -50,6 +50,7 @@ const Page = compile('pages/EstimatesPage.jsx').default;
 const text = () => JSON.stringify(tree.toJSON());
 const button = label => tree.root.findAll(node => node.type === 'button' && node.children.join('') === label)[0];
 const click = async label => { assert.ok(button(label), label); await act(async () => button(label).props.onClick()); await act(settle); };
+const tab = async label => { const target = tree.root.findAll(node => node.props.role === 'tab' && node.children[0] === label)[0]; assert.ok(target, label); await act(async () => target.props.onClick()); await act(settle); };
 const property = () => tree.root.findAll(node => node.type === 'input' && node.props['aria-label'] === 'Service property address')[0];
 const changeProperty = async value => act(async () => property().props.onChange({ target: { value } }));
 const open = async () => { await act(async () => { tree = create(React.createElement(Page)); }); await act(settle); await click('Open estimate'); };
@@ -57,7 +58,7 @@ afterEach(async () => { if (tree) await act(async () => tree.unmount()); tree = 
 
 for (const company of [true, false]) test(`a ${company ? 'company' : 'solo'} estimate correction is editable after definite rejection and saves only after explicit retry`, async () => {
   reset({ company }); await open(); await changeProperty('Unconfirmed service property'); env.failures.save = rejection(suggestion);
-  await click('Save estimate version'); assert.ok(button('Use suggested address')); assert.equal(property().props.disabled, false); assert.match(text(), /Estimate work photo 1/);
+  await click('Save estimate version'); assert.ok(button('Use suggested address')); assert.equal(property().props.disabled, false); await tab('Photos'); assert.match(text(), /Estimate work photo 1/); await tab('Details');
   const first = env.calls.find(call => call.action === 'save').data;
   await click('Use suggested address'); assert.equal(property().props.value, suggestion.suggestedAddress); assert.equal(env.calls.filter(call => call.action === 'save').length, 1); assert.equal(button('Use suggested address'), undefined);
   delete env.failures.save; await click('Save estimate version'); const saves = env.calls.filter(call => call.action === 'save');
@@ -71,17 +72,30 @@ test('an uncertain estimate network outcome retains its exact request and blocks
   delete env.failures.save; await click('Retry saved request'); const saves = env.calls.filter(call => call.action === 'save'); assert.deepEqual(saves[1].data, first);
 });
 
+test('management can exclude an attached photo from the next customer-facing estimate version', async () => {
+  reset(); await open(); await tab('Photos');
+  const include = tree.root.findAll(node => node.type === 'input' && node.props.type === 'checkbox')[0];
+  assert.ok(include); assert.equal(include.props.checked, true);
+  await act(async () => include.props.onChange({ target: { checked: false } }));
+  assert.equal(env.dirty, true);
+  await click('Save estimate version');
+  const saves = env.calls.filter(call => call.action === 'save');
+  assert.equal(saves.length, 1);
+  assert.deepEqual(saves[0].data.data.photoIds, []);
+  assert.deepEqual(env.record.photoIds, []);
+});
+
 test('a definite service-area rejection keeps the estimate editable without reusing its rejected operation', async () => {
   reset(); await open(); await changeProperty('Property outside configured coverage');
   env.failures.save = Object.assign(new Error('The service property is outside the configured service area.'), { code: 'functions/failed-precondition', details: { serviceArea: { status: 'outside', reason: 'outside-radius' } } });
   await click('Save estimate version'); const first = env.calls.find(call => call.action === 'save').data;
-  assert.equal(property().props.disabled, false); assert.ok(button('Save estimate version')); assert.equal(button('Retry saved request'), undefined); assert.equal(button('Use suggested address'), undefined); assert.match(text(), /outside the configured service area/); assert.match(text(), /Estimate work photo 1/);
+  assert.equal(property().props.disabled, false); assert.ok(button('Save estimate version')); assert.equal(button('Retry saved request'), undefined); assert.equal(button('Use suggested address'), undefined); assert.match(text(), /outside the configured service area/); await tab('Photos'); assert.match(text(), /Estimate work photo 1/); await tab('Details');
   await changeProperty('Corrected property inside configured coverage'); delete env.failures.save; await click('Save estimate version');
   const saves = env.calls.filter(call => call.action === 'save'); assert.equal(saves.length, 2); assert.notEqual(saves[1].data.operationId, first.operationId); assert.deepEqual(saves[1].data.data.serviceProperty, { address: 'Corrected property inside configured coverage' }); assert.equal(env.record.photoIds[0], 'photo-1');
 });
 
 for (const company of [true, false]) test(`a corrected ${company ? 'company' : 'solo'} conversion cannot rewrite the approved service property`, async () => {
-  reset({ company, status: 'approved' }); await open(); const original = JSON.stringify(env.record.serviceProperty);
+  reset({ company, status: 'approved' }); await open(); await tab('Review & Send'); const original = JSON.stringify(env.record.serviceProperty);
   const date = tree.root.findAll(node => node.type === 'input' && node.props.type === 'date')[0]; await act(async () => date.props.onChange({ target: { value: '2030-01-02' } }));
   env.failures.convert = rejection(suggestion); await click('Convert approved estimate to job'); await click('Confirm job conversion');
   assert.equal(property().props.disabled, true); assert.equal(property().props.value, 'Original recorded property'); assert.match(text(), /correct the address, and obtain approval before converting/);

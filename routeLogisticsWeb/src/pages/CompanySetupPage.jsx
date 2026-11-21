@@ -6,10 +6,8 @@ import CompanyService from '../services/companyService';
 import { getClaims } from '../services/tenancy';
 import { 
   BuildingOfficeIcon, 
-  CheckCircleIcon,
   UserGroupIcon,
   CogIcon,
-  DocumentTextIcon,
   PhotoIcon
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
@@ -37,7 +35,10 @@ const CompanySetupPage = () => {
 const CompanySetupForm = () => {
   const { currentUser, updateUserProfile, refreshSession, role } = useAuth();
   const confirm = useConfirm();
-  const [currentStep, setCurrentStep] = useState(1);
+  const [currentStep, setCurrentStep] = useState(() => {
+    const tab = typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('settings');
+    return ({ company: 1, services: 2, team: 3, branding: 4, 'service-areas': 5, billing: 6 })[tab] || 1;
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [company, setCompany] = useState(null);
   const [teamMembers, setTeamMembers] = useState([]);
@@ -46,7 +47,7 @@ const CompanySetupForm = () => {
   const [newOwnerId, setNewOwnerId] = useState('');
   const [loadError, setLoadError] = useState('');
   const [savedCompany, setSavedCompany] = useState(() => companySnapshot(companyForm(), []));
-  const alive = useRef(false), saving = useRef(false), dirtyRef = useRef(false);
+  const alive = useRef(false), saving = useRef(false), dirtyRef = useRef(false), sectionRef = useRef(null), stickyHeaderRef = useRef(null), sectionFocusPending = useRef(false);
 
   // Form states
   const [companyData, setCompanyData] = useState(companyForm);
@@ -57,11 +58,12 @@ const CompanySetupForm = () => {
   const [newMemberRole, setNewMemberRole] = useState('technician');
 
   const steps = [
-    { id: 1, name: 'Basic Info', icon: BuildingOfficeIcon },
-    { id: 2, name: 'Services', icon: CogIcon },
-    { id: 3, name: 'Team', icon: UserGroupIcon },
-    { id: 4, name: 'Branding', icon: PhotoIcon },
-    { id: 5, name: 'Templates', icon: DocumentTextIcon }
+    { id: 1, name: 'Company', key: 'company', icon: BuildingOfficeIcon },
+    { id: 2, name: 'Services', key: 'services', icon: CogIcon },
+    { id: 3, name: 'Team', key: 'team', icon: UserGroupIcon },
+    { id: 4, name: 'Branding', key: 'branding', icon: PhotoIcon },
+    { id: 5, name: 'Service Areas', key: 'service-areas', icon: BuildingOfficeIcon },
+    { id: 6, name: 'Billing & Reports', key: 'billing', icon: CogIcon }
   ];
 
   const companyId = getClaims()?.companyId;
@@ -210,16 +212,57 @@ const CompanySetupForm = () => {
     finally { setIsLoading(false); }
   };
 
-  const nextStep = () => {
-    if (currentStep < steps.length) {
-      setCurrentStep(currentStep + 1);
+  const selectStep = step => {
+    if (step < 1 || step > steps.length || step === currentStep) return;
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('settings', steps[step - 1].key);
+      window.history.pushState({ ...window.history.state, companySettingsTab: step }, '', url);
     }
+    setCurrentStep(step);
   };
-
-  const prevStep = () => {
-    if (currentStep > 1) {
-      setCurrentStep(currentStep - 1);
-    }
+  const nextStep = () => { sectionFocusPending.current = true; selectStep(currentStep + 1); };
+  const prevStep = () => { sectionFocusPending.current = true; selectStep(currentStep - 1); };
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onHistory = () => {
+      const tab = new URLSearchParams(window.location.search).get('settings');
+      sectionFocusPending.current = true;
+      setCurrentStep(steps.find(step => step.key === tab)?.id || 1);
+    };
+    window.addEventListener('popstate', onHistory);
+    return () => window.removeEventListener('popstate', onHistory);
+  // Tab names are static for the lifetime of the page.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (typeof requestAnimationFrame !== 'function') return;
+    const frame = requestAnimationFrame(() => {
+      const section = sectionRef.current;
+      if (!section) return;
+      section.scrollIntoView?.({ block: 'start', behavior: 'instant' });
+      const headerBottom = stickyHeaderRef.current?.getBoundingClientRect?.().bottom;
+      const sectionTop = section.getBoundingClientRect?.().top;
+      if (Number.isFinite(headerBottom) && Number.isFinite(sectionTop) && typeof window !== 'undefined' && typeof window.scrollBy === 'function') {
+        window.scrollBy({ top: sectionTop - headerBottom - 12, behavior: 'instant' });
+      }
+      if (sectionFocusPending.current) section.focus?.({ preventScroll: true });
+      sectionFocusPending.current = false;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [currentStep]);
+  const stepStatus = step => {
+    const saved = JSON.parse(savedCompany);
+    const changed = fields => fields.some(field => JSON.stringify(companyData[field]) !== JSON.stringify(saved[field]));
+    if (step.id === 1 && changed(['name', 'description', 'address', 'city', 'state', 'zipCode', 'phone', 'email', 'website'])) return 'Unsaved changes';
+    if (step.id === 2 && (newCategory.trim() || JSON.stringify(serviceCategories) !== JSON.stringify(saved.serviceCategories || []))) return 'Unsaved changes';
+    if (step.id === 4 && changed(['primaryColor', 'secondaryColor'])) return 'Unsaved changes';
+    if (step.id === 6 && changed(['invoiceRemindersEnabled'])) return 'Unsaved changes';
+    if (step.id === 1) return companyData.name.trim() ? 'Complete' : 'Needs attention';
+    if (step.id === 2) return serviceCategories.length ? 'Complete' : 'Needs attention';
+    if (step.id === 3) return teamMembers.length ? `${teamMembers.length} members` : 'Optional';
+    if (step.id === 4) return companyData.logo || company?.logo ? 'Complete' : 'Optional';
+    return 'Optional';
   };
 
   const renderStepContent = () => {
@@ -525,45 +568,6 @@ const CompanySetupForm = () => {
           </div>
         );
 
-      case 5:
-        return (
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-lg font-medium text-gray-900 mb-4">Estimate Templates</h3>
-              <p className="text-sm text-gray-600 mb-4">
-                Configure default settings for your estimates and invoices.
-              </p>
-              
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <div className="flex">
-                  <div className="flex-shrink-0">
-                    <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                  <div className="ml-3">
-                    <h4 className="text-sm font-medium text-yellow-800">
-                      Coming Soon
-                    </h4>
-                    <div className="mt-2 text-sm text-yellow-700">
-                      <p>
-                        Estimate template configuration will include:
-                      </p>
-                      <ul className="mt-2 list-disc list-inside space-y-1">
-                        <li>Default labor rates</li>
-                        <li>Material markup percentages</li>
-                        <li>Estimate validity periods</li>
-                        <li>Terms and conditions</li>
-                        <li>Payment terms</li>
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-
       default:
         return null;
     }
@@ -587,75 +591,51 @@ const CompanySetupForm = () => {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}
-      className="space-y-6"
+      className="space-y-6 pb-24"
     >
-      {company && isOwner && <div className="space-y-3"><label className="flex gap-3 rounded-lg border bg-white p-4"><input type="checkbox" checked={companyData.invoiceRemindersEnabled} onChange={(e) => handleInputChange('invoiceRemindersEnabled', e.target.checked)} />Send weekly overdue reminders to customers who have consented to invoice emails. Save company settings to apply.</label></div>}
       {/* Header */}
       {inviteLink && <div className="rounded-lg border border-green-200 bg-green-50 p-4"><p className="mb-2">{inviteDelivery === 'queued' ? 'Invitation email queued. You can also share this link directly:' : 'Email delivery is disabled. Copy this invitation link to share it directly:'}</p><input aria-label="Invitation link" readOnly value={inviteLink} onFocus={(e) => e.target.select()} className="w-full rounded border-gray-300" /><button type="button" className="mt-2 underline" onClick={async () => { try { await navigator.clipboard.writeText(inviteLink); toast.success('Link copied'); } catch { toast.error('Select and copy the link above.'); } }}>Copy invitation link</button></div>}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      <div ref={stickyHeaderRef} data-testid="company-settings-sticky-header" className="sticky top-16 z-30 space-y-2 bg-gray-50 pb-2">
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center">
           <BuildingOfficeIcon className="h-8 w-8 text-primary-500 mr-3" />
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Company Setup</h1>
+             <h1 className="text-2xl font-bold text-gray-900">Company Settings</h1>
             <p className="text-gray-600">
               {company ? 'Manage your company settings' : 'Set up your company profile'}
             </p>
           </div>
           </div>
-          {company && isOwner && <a className="btn-primary" href="/company-setup/review">Review Company Setup</a>}
+          {company && <a className="btn-secondary" href="/company-setup/review">Review Company Setup</a>}
         </div>
       </div>
 
-      {/* Progress Steps */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <div className="flex items-center justify-between">
-          {steps.map((step, index) => {
+      <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+        <nav aria-label="Company settings sections" className="flex flex-wrap gap-2" role="tablist">
+          {steps.map((step) => {
             const Icon = step.icon;
             const isActive = currentStep === step.id;
-            const isCompleted = currentStep > step.id;
-            
             return (
-              <div key={step.id} className="flex items-center">
-                <div className={`flex items-center justify-center w-10 h-10 rounded-full border-2 ${
-                  isCompleted 
-                    ? 'bg-primary-500 border-primary-500 text-white' 
-                    : isActive 
-                    ? 'border-primary-500 text-primary-500' 
-                    : 'border-gray-300 text-gray-400'
-                }`}>
-                  {isCompleted ? (
-                    <CheckCircleIcon className="w-6 h-6" />
-                  ) : (
-                    <Icon className="w-6 h-6" />
-                  )}
-                </div>
-                <div className="ml-3">
-                  <p className={`text-sm font-medium ${
-                    isActive ? 'text-primary-600' : isCompleted ? 'text-gray-900' : 'text-gray-500'
-                  }`}>
-                    {step.name}
-                  </p>
-                </div>
-                {index < steps.length - 1 && (
-                  <div className={`ml-8 w-16 h-0.5 ${
-                    isCompleted ? 'bg-primary-500' : 'bg-gray-300'
-                  }`} />
-                )}
-              </div>
+              <button type="button" role="tab" id={`company-settings-tab-${step.key}`} key={step.id} aria-selected={isActive} aria-controls="company-settings-panel" tabIndex={isActive ? 0 : -1} onClick={() => selectStep(step.id)} onKeyDown={event => { const next = event.key === 'ArrowRight' ? step.id % steps.length + 1 : event.key === 'ArrowLeft' ? (step.id + steps.length - 2) % steps.length + 1 : event.key === 'Home' ? 1 : event.key === 'End' ? steps.length : null; if (next) { event.preventDefault(); selectStep(next); event.currentTarget.parentElement?.querySelectorAll('[role="tab"]')[next - 1]?.focus(); } }} className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-600 ${isActive ? 'bg-primary-700 text-white' : 'text-gray-700 hover:bg-gray-100'}`}>
+                <Icon className="h-4 w-4" /><span>{step.name}<small className="block font-normal opacity-80">{stepStatus(step)}</small></span>
+              </button>
             );
           })}
-        </div>
+        </nav>
+      </div>
       </div>
 
-      {/* Step Content */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        {renderStepContent()}
+      <div id="company-settings-panel" role="tabpanel" aria-labelledby={`company-settings-tab-${steps[currentStep - 1].key}`} ref={sectionRef} tabIndex={-1} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm focus:outline-none sm:p-6">
+        {currentStep <= 4 && renderStepContent()}
+        {company && isOwner && <div hidden={currentStep !== 5}><ServiceAreasSettings company={company} /></div>}
+        {company && isOwner && <div hidden={currentStep !== 6} className="space-y-4"><label className="flex gap-3 rounded-lg border bg-white p-4"><input type="checkbox" checked={companyData.invoiceRemindersEnabled} onChange={(e) => handleInputChange('invoiceRemindersEnabled', e.target.checked)} />Send weekly overdue reminders to customers who have consented to invoice emails. Save company settings to apply.</label><BillingSettingsPanel /></div>}
+        {!company && currentStep > 4 && <p>Save the company before configuring this section.</p>}
       </div>
 
       {/* Navigation */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <div className="flex justify-between">
+        <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
           <button
             type="button"
             onClick={prevStep}
@@ -665,7 +645,7 @@ const CompanySetupForm = () => {
             Previous
           </button>
           
-          <div className="flex space-x-3">
+          <div className="flex flex-wrap gap-3">
             <button
               type="button"
               onClick={handleSaveCompany}
@@ -687,8 +667,6 @@ const CompanySetupForm = () => {
           </div>
         </div>
       </div>
-      {company && isOwner && <ServiceAreasSettings company={company} />}
-      {company && isOwner && <BillingSettingsPanel />}
     </Motion.div>
   );
 };

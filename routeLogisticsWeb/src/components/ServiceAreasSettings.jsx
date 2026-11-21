@@ -153,7 +153,7 @@ function ServiceAreasForm({ company, allowed }) {
         <button type="button" className="text-sm font-medium text-primary-700 underline disabled:opacity-50" disabled={dirty || !data.settings?.configured || !data.settings?.operatingLocation} onClick={() => setPreview(value => !value)}>{preview ? 'Hide coverage map' : 'Show coverage map'}</button>
         {preview && <CoverageMap settings={data.settings} rule={previewRule} />}
       </section>
-      {!dirty && <ServicePropertyEligibility companyId={company.id} serviceCategories={categories} policy={data} value={property} onChange={setProperty} />}
+      {!dirty && <details className="rounded-lg border p-4"><summary className="cursor-pointer font-medium">Check a service property</summary><div className="mt-4"><ServicePropertyEligibility companyId={company.id} serviceCategories={categories} policy={data} value={property} onChange={setProperty} /></div></details>}
     </>}
   </section>;
 }

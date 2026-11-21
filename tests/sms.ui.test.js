@@ -18,6 +18,7 @@ function load(relative){const file=path.resolve(__dirname,'../routeLogisticsWeb/
   if(name.endsWith('/AuthContext'))return {useAuth:()=>({company:{id:companyId,ownerId:'owner'},currentUser:{uid:owner?'owner':'manager'},role:owner?'owner':'manager',updateUserProfile:async()=>{},refreshSession:async()=>{}})};
   if(name.endsWith('/useUnsavedChanges'))return {useUnsavedChanges:value=>{dirty=value;return {confirmDiscard:async()=>true};}};
   if(name.endsWith('/ServiceAreasSettings'))return {__esModule:true,default:()=>null};
+  if(name.endsWith('/BillingSettingsPanel'))return {__esModule:true,default:()=>null};
   if(name.endsWith('/workspaceApi'))return {callWorkspace:async(name,params)=>{calls.push({name,params});if(name==='rlSmsConfig'&&params.action==='save'){if(pendingSave)await pendingSave.promise;if(saveFailure)throw saveFailure;return {...data,settings:params.settings};}return data;}};
   if(name.endsWith('/tenancy'))return {getClaims:()=>({companyId})};
   if(name.endsWith('/companyService'))return {__esModule:true,default:{getCompany:async()=>({success:true,company:companyProfile}),getTeamMembers:async()=>({success:true,teamMembers:[]}),updateCompany:async(id,values)=>{companyUpdates.push({id,values});if(saveFailure)throw saveFailure;companyProfile={...companyProfile,...values};return {success:true,company:companyProfile};}}};
@@ -33,7 +34,7 @@ const Settings=load('components/SmsSettings.jsx').default,Consent=load('componen
 const text=()=>JSON.stringify(tree.toJSON());
 const labels=['appointment-confirmation','pre-visit','en-route','service-completed','service-follow-up'];
 const status=()=>({settings:{enabled:false,timeZone:'America/Los_Angeles',reminderMinutes:1440,followUpMinutes:1440,purposes:labels.slice(0,4),templates:Object.fromEntries(labels.map(p=>[p,'Your service visit update.']))},delivery:{active:false,senderApproved:false,automationApproved:false},consent:null,disclosure:'Synthetic customer SMS disclosure.',history:[]});
-afterEach(async()=>{if(tree)await act(async()=>tree.unmount());tree=null;owner=true;calls=[];companyId='co';dirty=false;toasts=[];saveFailure=null;pendingSave=null;companyUpdates=[];companyProfile={id:'co',ownerId:'owner',name:'Acme',serviceCategories:['Pest control']};});
+afterEach(async()=>{if(tree)await act(async()=>tree.unmount());tree=null;delete global.window;owner=true;calls=[];companyId='co';dirty=false;toasts=[];saveFailure=null;pendingSave=null;companyUpdates=[];companyProfile={id:'co',ownerId:'owner',name:'Acme',serviceCategories:['Pest control']};});
 test('SMS settings cannot activate live delivery and managers cannot edit owner configuration',async()=>{
   owner=false;data=status();await act(async()=>{tree=create(React.createElement(Settings));});assert.equal(calls.length,0);assert.match(text(),/owner manages SMS/);assert.equal(tree.root.findAllByType('input').length,0);
   await act(async()=>tree.unmount());tree=null;owner=true;
@@ -119,4 +120,15 @@ test('failed company profile saves retain edited fields and their unsaved warnin
   await act(async()=>{tree=create(React.createElement(Company));});const name=()=>tree.root.findByProps({placeholder:'Enter company name'});
   await act(async()=>name().props.onChange({target:{value:'Edited company'}}));saveFailure=Error('Company save unavailable.');await act(async()=>button('Save Changes').props.onClick());
   assert.equal(name().props.value,'Edited company');assert.equal(dirty,true);assert.equal(button('Save Changes').props.disabled,false);assert.equal(toasts.at(-1).type,'error');
+});
+
+test('company settings tabs retain unsaved company input and Next shows only its section',async()=>{
+  await act(async()=>{tree=create(React.createElement(Company));});
+  const name=tree.root.findByProps({placeholder:'Enter company name'});
+  await act(async()=>name.props.onChange({target:{value:'Acme draft'}}));
+  await act(async()=>button('Next').props.onClick());
+  assert.match(text(),/Service Categories/);assert.doesNotMatch(text(),/Basic Company Information/);
+  await act(async()=>button('Previous').props.onClick());
+  assert.equal(tree.root.findByProps({placeholder:'Enter company name'}).props.value,'Acme draft');
+  assert.equal(dirty,true);assert.equal(companyUpdates.length,0);
 });

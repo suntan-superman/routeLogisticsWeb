@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { callWorkspace } from '../services/workspaceApi';
 import SelectControl from './SelectControl';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 
 const cadences = [['manual','Manual'],['daily','Daily, previous completed workday'],['weekly','Weekly'],['biweekly','Every two weeks'],['monthly','Monthly']];
 const today = () => new Date().toISOString().slice(0,10);
@@ -11,6 +12,7 @@ export default function BillingSettingsPanel() {
   const [settings, setSettings] = useState(defaults), [saved, setSaved] = useState(''), [zone, setZone] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [recipientText, setRecipientText] = useState(''), [holidayText, setHolidayText] = useState('');
   const [runs, setRuns] = useState(null), [historyBusy, setHistoryBusy] = useState(false);
+  useUnsavedChanges(!!saved && saved !== JSON.stringify(settings), { message: 'You have unsaved billing and report settings. Leave without saving them?' });
   useEffect(() => { let active = true; callWorkspace('rlBillingSettings', { action: 'read' }).then(result => { if (active) { const next = { ...defaults, ...result.settings }; setSettings(next); setSaved(JSON.stringify(next)); setRecipientText(next.reportRecipients.join(', ')); setHolidayText(next.holidays.join(', ')); setZone(result.timeZone); } }).catch(failure => { if (active) setError(failure.message); }); return () => { active = false; }; }, []);
   const change = (key, value) => setSettings(previous => ({ ...previous, [key]: value }));
   const save = async () => { if (busy) return; setBusy(true); setError(''); try { const result = await callWorkspace('rlBillingSettings', { action: 'update', settings }); const next = { ...defaults, ...result.settings }; setSettings(next); setSaved(JSON.stringify(next)); setRecipientText(next.reportRecipients.join(', ')); setHolidayText(next.holidays.join(', ')); toast.success('Billing and report settings saved'); } catch (failure) { setError(failure.message || 'Settings could not be saved.'); } finally { setBusy(false); } };
@@ -30,10 +32,10 @@ export default function BillingSettingsPanel() {
     </div>
     {error && <p role="alert" className="mt-3 text-red-700">{error}</p>}
     <button type="button" disabled={busy || !saved || saved === JSON.stringify(settings)} onClick={save} className="btn-primary mt-4 disabled:opacity-50">{busy ? 'Saving…' : 'Save billing settings'}</button>
-    <div className="mt-6 border-t pt-4"><div className="flex items-center justify-between gap-3"><h3 className="font-semibold">Scheduled run history</h3><button type="button" disabled={historyBusy} onClick={loadHistory} className="btn-secondary">{historyBusy ? 'Loading…' : 'Refresh history'}</button></div>
+    <details className="mt-6 border-t pt-4"><summary className="cursor-pointer font-semibold">Scheduled run history</summary><div className="mt-3"><button type="button" disabled={historyBusy} onClick={loadHistory} className="btn-secondary">{historyBusy ? 'Loading…' : 'Refresh history'}</button></div>
       {runs && (runs.length ? <ul className="mt-3 space-y-2 text-sm">{runs.map(run => <li key={run.id} className="rounded border p-3"><strong>{run.kind === 'invoice' ? 'Invoice drafts' : 'Management reports'} · {run.date}</strong> — {run.status}{run.attempts > 1 ? ` · ${run.attempts} attempts` : ''}
         {run.status === 'failed' && <p className="text-red-700">Failure: {run.failureCode || 'processing error'}. The scheduler will retry automatically.</p>}
         {run.status === 'complete' && <p>{run.kind === 'invoice' ? `${run.result?.created?.length || 0} drafts created; ${run.result?.skipped?.length || 0} jobs skipped` : `${run.result?.reports?.length || 0} reports prepared for ${run.result?.recipientCount || 0} recipients`}</p>}</li>)}</ul> : <p className="mt-3 text-sm text-gray-600">No scheduled runs yet.</p>)}
-    </div>
+    </details>
   </section>;
 }

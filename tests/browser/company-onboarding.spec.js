@@ -58,7 +58,7 @@ test('PW-ONBOARD-02 @onboarding existing owner reviews an explicit section while
   await page.getByRole('link', { name: 'Review Company Setup' }).click();
   await expect(page.getByRole('heading', { name: 'Review Company Setup' })).toBeVisible();
   const phone = page.getByLabel('Company phone');
-  await expect(phone).toHaveValue('+12025550101');
+  await expect(phone).toHaveValue('(202) 555-0101');
   await phone.fill('+12025550199');
   await page.getByRole('button', { name: 'Save company information' }).click();
   await expect(page.getByRole('status')).toContainText('saved successfully');
@@ -67,6 +67,7 @@ test('PW-ONBOARD-02 @onboarding existing owner reviews an explicit section while
   expect(await scenario.read('teamMembers', scenario.accounts.technician.membershipId)).toEqual(memberBefore);
 
   await page.getByRole('button', { name: 'Sign out' }).first().click();
+  await expect(page.getByRole('textbox', { name: 'Email address', exact: true })).toBeVisible();
   await signIn(page, scenario.accounts.manager);
   await page.goto('/company-setup/review');
   await expect(page.getByRole('alert')).toContainText('Only the company owner or an administrator');

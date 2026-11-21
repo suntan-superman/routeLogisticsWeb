@@ -79,6 +79,7 @@ const button=label=>tree.root.findAll(node=>node.type==='button'&&node.children.
 const control=id=>tree.root.findAll(node=>node.props.id===id)[0];
 const inputFor=label=>tree.root.findAll(node=>node.type==='label'&&node.children[0]===label)[0].findAll(node=>node.type==='input')[0];
 const click=async label=>{await act(async()=>button(label).props.onClick());await act(settle);};
+const tab=async label=>{const target=tree.root.findAll(node=>node.props.role==='tab'&&node.children[0]===label)[0];assert.ok(target,label);await act(async()=>target.props.onClick());await act(settle);};
 afterEach(async()=>{if(tree)await act(async()=>tree.unmount());tree=null;});
 
 test('route changes disable unchanged saves, survive failure and clear only after confirmed success',async()=>{
@@ -174,6 +175,18 @@ test('estimate background list refresh never replaces an open dirty estimate or 
   await click('Save estimate version');assert.equal(env.calls.find(row=>row.name==='save').data.expectedVersion,1);
 });
 
+test('estimate tabs keep unsaved input and restore the selected tab for the same estimate',async()=>{
+  reset('estimates');await render('pages/EstimatesPage.jsx');await click('Open estimate');
+  await act(async()=>inputFor('Estimate title').props.onChange({target:{value:'Unsaved tabbed estimate'}}));
+  await tab('Scope & Pricing');assert.match(text(),/Scope of work/);assert.equal(env.dirty,true);
+  await tab('Photos');assert.match(text(),/Work photos/);assert.doesNotMatch(text(),/Scope of work/);
+  await tab('Details');assert.equal(inputFor('Estimate title').props.value,'Unsaved tabbed estimate');
+  await click('Save estimate version');await tab('History');assert.match(text(),/Version history/);
+  await click('Back to estimates');await click('Open estimate');assert.match(text(),/Version history/);
+  await tab('Details');assert.equal(inputFor('Estimate title').props.value,'Unsaved tabbed estimate');
+  assert.equal(env.calls.filter(row=>row.name==='save').length,1);
+});
+
 test('approved estimate asks for delivery choice before closing without sending automatically',async()=>{
   reset('estimates');env.estimate={...env.estimate,status:'approved-for-delivery',recipient:{name:'Test customer',email:'customer@example.invalid'}};
   await render('pages/EstimatesPage.jsx');await click('Open estimate');await click('Back to estimates');
@@ -210,7 +223,7 @@ test('estimate property selection is explicit and saves only server-checkable pr
 });
 
 test('approved estimate conversion fixes its recorded property but can select a missing category',async()=>{
-  reset('estimates-geography');env.estimate={...env.estimate,status:'approved',serviceProperty:{address:'Approved property, Bakersfield, CA 93312',latitude:35,longitude:-119,validated:true}};await render('pages/EstimatesPage.jsx');await click('Open estimate');
+  reset('estimates-geography');env.estimate={...env.estimate,status:'approved',serviceProperty:{address:'Approved property, Bakersfield, CA 93312',latitude:35,longitude:-119,validated:true}};await render('pages/EstimatesPage.jsx');await click('Open estimate');await tab('Review & Send');
   const property=tree.root.findByProps({'aria-label':'Service property address'}),category=tree.root.findByProps({'aria-label':'Service property category'});
   assert.equal(property.props.value,env.estimate.serviceProperty.address);assert.equal(property.props.disabled,true);assert.equal(category.props.disabled,false);assert.equal(button('Use this as the service property'),undefined);
   await act(async()=>category.props.onChange({target:{value:'Pest Control'}}));await click('Check service property');const checked=env.calls.find(row=>row.name==='rlServiceAreas'&&row.data.action==='check').data;assert.equal(checked.purpose,'scheduling');assert.equal(checked.propertyAddress,env.estimate.serviceProperty.address);assert.equal(checked.serviceCategory,'Pest Control');

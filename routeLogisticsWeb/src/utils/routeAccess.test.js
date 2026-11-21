@@ -12,6 +12,7 @@ test('direct URLs and navigation share explicit role capabilities', () => {
     assert.equal(mayOpenRoute('/my-work', can(role)), true);
     assert.equal(mayOpenRoute('/routes', can(role)), true);
     assert.equal(mayOpenRoute('/reports', can(role)), role !== 'technician');
+    assert.equal(mayOpenRoute('/location-history/map', can(role)), role !== 'technician');
   }
   for (const path of Object.keys(routeCapabilities)) assert.equal(mayOpenRoute(path, () => false), false);
   assert.equal(mayOpenRoute('/unknown-admin-route', () => true), false);

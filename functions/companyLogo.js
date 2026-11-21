@@ -40,7 +40,7 @@ function companyLogoHandler(db, { bucket = () => getStorage().bucket() } = {}) {
     const { token } = requireAuth(request, true);
     const companyId = token.companyId;
     const scope = await requireStaff(db, request, companyId);
-    if (!['owner', 'admin'].includes(scope.role) || !scope.company.exists || scope.company.get('isActive') === false || scope.company.get('deletedAt')) throw new HttpsError('permission-denied', 'Only an active company owner or administrator can manage its logo.');
+    if (!['owner', 'admin', 'manager'].includes(scope.role) || !scope.company.exists || scope.company.get('isActive') === false || scope.company.get('deletedAt')) throw new HttpsError('permission-denied', 'An active company manager or owner is required to view its logo.');
     await rateLimit(db, 'company-logo', scope.uid, 40);
     const action = request.data?.action;
     if (action === 'read') {
@@ -49,6 +49,7 @@ function companyLogoHandler(db, { bucket = () => getStorage().bucket() } = {}) {
       const image = await loadLogo(path, companyId, bucket());
       return { logo: path, preview: `data:${image.contentType};base64,${image.bytes.toString('base64')}` };
     }
+    if (!['owner', 'admin'].includes(scope.role)) throw new HttpsError('permission-denied', 'Only a company owner or administrator can manage its logo.');
     if (!['upload', 'remove', 'url'].includes(action)) throw new HttpsError('invalid-argument', 'Choose a supported logo action.');
     const bytes = action === 'upload' ? validatedBytes(request.data?.base64, request.data?.contentType) : null;
     if (bytes) {

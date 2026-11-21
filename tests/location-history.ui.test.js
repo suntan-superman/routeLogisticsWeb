@@ -9,12 +9,16 @@ const { createWorkspaceQueryMock, selectControlMock } = require('./support/works
 const workspaceHooks = createWorkspaceQueryMock(React, { scopeId: 'location-history-workspace' });
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
-let tree, calls, mapContainers, mapNode, markers = [], infoWindows = [], geocodeCalls = 0, geocodeFailure = null;
+let tree, calls, mapContainers, mapNode, markers = [], infoWindows = [], geocodeCalls = 0, geocodeFailure = null, historyRows = null, resizeCallback = null;
+const stored = new Map();
+global.localStorage = { getItem: key => stored.get(key) || null, setItem: (key, value) => stored.set(key, value), removeItem: key => stored.delete(key) };
+global.sessionStorage = { getItem: key => stored.get(`session:${key}`) || null, setItem: (key, value) => stored.set(`session:${key}`, value), removeItem: key => stored.delete(`session:${key}`) };
+global.ResizeObserver = class { constructor(callback) { resizeCallback = callback; } observe() {} disconnect() {} };
 global.document = {
   visibilityState: 'visible',
   createElement: () => ({ style: {}, textContent: '', children: [], append(...children) { this.children.push(...children); } })
 };
-global.window = { google: { maps: { Geocoder: class { async geocode() { geocodeCalls++; if (geocodeFailure) { const failure = geocodeFailure; geocodeFailure = null; throw failure; } return { results: [{ formatted_address: '123 Synthetic Street, Bakersfield, CA' }] }; } } } } };
+global.window = { innerWidth: 1024, open: () => ({}), print: () => {}, google: { maps: { Geocoder: class { async geocode() { geocodeCalls++; if (geocodeFailure) { const failure = geocodeFailure; geocodeFailure = null; throw failure; } return { results: [{ formatted_address: '123 Synthetic Street, Bakersfield, CA' }] }; } } } } };
 
 class Bounds {
   constructor() { this.points = []; }
@@ -63,12 +67,13 @@ function load(relative) {
       calls.push({ name, data });
       if (name === 'rlGetLocationHistoryMembers') return { technicians: [{ memberId: 'tech-3', name: 'Luis Gonzales', status: 'active' }], truncated: false };
       if (name === 'rlGetLocationHistory') return {
-        points: Array.from({ length: 6 }, (_, index) => ({ id: `fix-${index + 1}`, lat: 35.38, lng: -119.01, accuracy: 10, capturedAt: new Date(Date.parse('2026-11-20T16:00:00.000Z') + index * 180000).toISOString() })),
+        points: historyRows ?? Array.from({ length: 6 }, (_, index) => ({ id: `fix-${index + 1}`, lat: 35.38, lng: -119.01, accuracy: 10, capturedAt: new Date(Date.parse('2026-11-20T16:00:00.000Z') + index * 180000).toISOString() })),
         events: [], nextCursor: null, hasMore: false, eventsTruncated: false, retentionHours: 24, intervalMinutes: 3
       };
       throw Error(`Unexpected callable ${name}`);
     } };
     if (name.endsWith('/maps')) return { loadMaps: async () => mapsApi };
+    if (name.endsWith('.css')) return {};
     if (name.startsWith('.')) {
       const target = path.resolve(path.dirname(file), name);
       const resolved = path.extname(target) ? target : fs.existsSync(`${target}.jsx`) ? `${target}.jsx` : `${target}.js`;
@@ -91,7 +96,7 @@ const button = label => tree.root.findAll(node => node.type === 'button' && node
 
 afterEach(async () => {
   if (tree) await act(async () => tree.unmount());
-  tree = null; calls = []; mapContainers = []; markers = []; infoWindows = []; geocodeCalls = 0; geocodeFailure = null;
+  tree = null; calls = []; mapContainers = []; markers = []; infoWindows = []; geocodeCalls = 0; geocodeFailure = null; historyRows = null; resizeCallback = null; stored.clear(); window.open = () => ({});
 });
 
 test('the observed-route map initializes only after its container is mounted', async () => {
@@ -122,7 +127,7 @@ test('selecting a history marker shows its recorded time and lazily resolves one
   assert.ok(stop, 'A recorded stop marker should be present');
   await act(async () => { stop.listeners.click(); await new Promise(resolve => setImmediate(resolve)); });
   assert.equal(geocodeCalls, 1);
-  assert.match(infoWindows.at(-1).content.children.map(node => node.textContent).join(' '), /Stop 1.*Approximate address: 123 Synthetic Street.*Observed:/);
+  assert.match(infoWindows.at(-1).content.children.map(node => node.textContent).join(' '), /Luis Gonzales.*Estimated stop 1.*Approximate address: 123 Synthetic Street.*Estimated arrival:.*Estimated departure:.*Observed dwell:/);
   await act(async () => { stop.listeners.click(); await new Promise(resolve => setImmediate(resolve)); });
   assert.equal(geocodeCalls, 1, 'Reopening the same marker should reuse its address');
   const start = markers.find(marker => marker.content.textContent === 'S');
@@ -164,4 +169,69 @@ test('the stop-address action can retry after a Google lookup failure', async ()
   assert.equal(geocodeCalls, 2);
   assert.equal(tree.root.findAllByProps({ role: 'alert' }).length, 0);
   assert.match(tree.root.findAll(node => node.type === 'p' && node.children.join('').includes('123 Synthetic Street'))[0].children.join(''), /Approximate address:/);
+});
+
+test('dedicated map URL contains no private data and blocked popups show an actionable error', async () => {
+  calls = []; mapContainers = []; mapNode = { nodeType: 1 };
+  await act(async () => { tree = create(React.createElement(Page)); });
+  await act(async () => tree.root.findByType('select').props.onChange({ target: { value: 'tech-3' } }));
+  await act(async () => button('Load history').props.onClick());
+  let openedPath, transferred;
+  window.open = path => { openedPath = path; transferred = JSON.parse(sessionStorage.getItem('rl-location-history-window-filters')); return {}; };
+  await act(async () => button('Open Map in New Window').props.onClick());
+  assert.equal(openedPath, '/location-history/map');
+  assert.equal(transferred.memberId, 'tech-3');
+  assert.equal(transferred.companyId, 'acme');
+  assert.equal(sessionStorage.getItem('rl-location-history-window-filters'), null);
+  window.open = () => null;
+  await act(async () => button('Open Map in New Window').props.onClick());
+  assert.match(tree.root.findByProps({ role: 'alert' }).children.join(''), /Allow popups/);
+});
+
+test('map size restores, resets, and print report retains timezone and estimated-stop evidence', async () => {
+  stored.set('rl-location-history-map-height', '680');
+  calls = []; mapContainers = []; mapNode = { nodeType: 1 };
+  await act(async () => { tree = create(React.createElement(Page), { createNodeMock: element => element.props['aria-label'] === 'Observed technician GPS route map' ? mapNode : {} }); });
+  await act(async () => tree.root.findByType('select').props.onChange({ target: { value: 'tech-3' } }));
+  await act(async () => button('Load history').props.onClick());
+  await act(async () => button('Show observed route on map').props.onClick());
+  assert.equal(tree.root.findByProps({ 'aria-label': 'Observed technician GPS route map' }).props.style.height, 680);
+  await act(async () => button('Reset Size').props.onClick());
+  assert.equal(tree.root.findByProps({ 'aria-label': 'Observed technician GPS route map' }).props.style.height, 560);
+  const report = tree.root.findByProps({ 'aria-label': 'Printable location history report' });
+  assert.equal(report.props['aria-label'], 'Printable location history report');
+  assert.ok(report.findAll(node => node.type === 'svg').length > 0);
+  assert.match(report.findAll(node => node.type === 'p').map(node => node.children.join('')).join(' '), /America\/Los_Angeles/);
+});
+
+test('desktop drag saves the new map height without changing history filters', async () => {
+  calls = []; mapContainers = []; mapNode = { nodeType: 1, getBoundingClientRect: () => ({ height: 712 }) };
+  await act(async () => { tree = create(React.createElement(Page), { createNodeMock: element => element.props['aria-label'] === 'Observed technician GPS route map' ? mapNode : {} }); });
+  await act(async () => tree.root.findByType('select').props.onChange({ target: { value: 'tech-3' } }));
+  await act(async () => button('Load history').props.onClick());
+  await act(async () => button('Show observed route on map').props.onClick());
+  await act(async () => resizeCallback());
+  assert.equal(localStorage.getItem('rl-location-history-map-height'), '712');
+  assert.equal(tree.root.findByProps({ 'aria-label': 'Observed technician GPS route map' }).props.style.height, 712);
+  assert.equal(calls.filter(call => call.name === 'rlGetLocationHistory').length, 1);
+});
+
+test('no-data history keeps the print report available without opening a blank map', async () => {
+  historyRows = []; calls = []; mapContainers = [];
+  await act(async () => { tree = create(React.createElement(Page)); });
+  await act(async () => tree.root.findByType('select').props.onChange({ target: { value: 'tech-3' } }));
+  await act(async () => button('Load history').props.onClick());
+  assert.ok(button('Print Location Report'));
+  assert.equal(tree.root.findAllByProps({ 'aria-label': 'Observed technician GPS route map' }).length, 0);
+  assert.equal(tree.root.findAll(node => node.type === 'svg').length, 0);
+});
+
+test('protected standalone map restores only its own tenant filters and reloads authorized history', async () => {
+  sessionStorage.setItem('rl-location-history-window-filters', JSON.stringify({ companyId: 'acme', memberId: 'tech-3', startDate: '2026-11-20', endDate: '2026-11-20', radius: 125, minimumDwell: 10 }));
+  calls = []; mapContainers = []; mapNode = { nodeType: 1 };
+  await act(async () => { tree = create(React.createElement(Page, { standalone: true }), { createNodeMock: element => element.props['aria-label'] === 'Observed technician GPS route map' ? mapNode : {} }); });
+  assert.equal(calls.filter(call => call.name === 'rlGetLocationHistory').length, 1);
+  assert.deepEqual(mapContainers, [mapNode]);
+  assert.equal(tree.root.findAllByProps({ 'aria-label': 'Location history filters' }).length, 0);
+  assert.ok(button('Fit Route'));
 });

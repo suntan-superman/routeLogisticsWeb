@@ -1,0 +1,29 @@
+.rl-history-map { min-height: 320px; max-height: 900px; resize: vertical; overflow: hidden; }
+.rl-history-map-window { height: min(72vh, 1000px); max-height: none; min-height: 480px; resize: none; }
+.rl-history-print-report { display: none; }
+
+@media (max-width: 640px) {
+  .rl-history-map { min-height: 320px; max-height: 72vh; }
+  .rl-history-map-window { height: 68vh; min-height: 360px; }
+}
+
+@page { size: auto; margin: 0.55in; @bottom-right { content: 'Page ' counter(page); font-size: 9pt; color: #475569; } }
+@media print {
+  body * { visibility: hidden !important; }
+  .rl-history-print-report, .rl-history-print-report * { visibility: visible !important; }
+  .rl-history-print-report { display: block !important; position: absolute; top: 0; left: 0; width: 100%; color: #172a27; background: white; font: 10pt/1.4 Arial, sans-serif; }
+  .rl-history-print-report h1 { margin: 0; font-size: 18pt; }
+  .rl-history-print-report h2 { margin: 0; font-size: 13pt; color: #065f46; }
+  .rl-history-print-report h3 { margin: 16pt 0 5pt; font-size: 11pt; border-bottom: 1px solid #a7b9b1; break-after: avoid; }
+  .rl-history-print-report ol, .rl-history-print-report ul { padding-left: 20pt; margin: 3pt 0; }
+  .rl-history-print-report li { margin: 3pt 0; break-inside: avoid; }
+  .rl-history-print-header { display: flex; align-items: center; gap: 14pt; padding-bottom: 12pt; border-bottom: 2px solid #047857; }
+  .rl-history-print-header img { max-width: 100pt; max-height: 55pt; object-fit: contain; }
+  .rl-history-print-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 2pt 18pt; margin: 10pt 0; }
+  .rl-history-print-meta p { margin: 0; }
+  .rl-history-print-warning { padding: 7pt; border: 1px solid #cbd5e1; background: #f8fafc; }
+  .rl-history-schematic { margin: 10pt 0; break-inside: avoid; }
+  .rl-history-schematic svg { display: block; width: 100%; max-height: 270pt; border: 1px solid #cbd5e1; }
+  .rl-history-schematic figcaption { margin-top: 3pt; font-size: 8pt; color: #475569; }
+  .rl-history-print-report footer { margin-top: 16pt; border-top: 1px solid #cbd5e1; padding-top: 5pt; font-size: 8pt; color: #475569; }
+}

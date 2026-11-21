@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { addCalendarDays, analyzeLocationHistory, localMidnightUtc } from './locationHistory.js';
+import { DEFAULT_MAP_HEIGHT, mapHeight, schematicPosition } from './locationHistoryView.js';
 
 const point = (minute, lat = 36, lng = -119, accuracy = 8, day = '2026-11-19') => ({ lat, lng, accuracy, capturedAt: new Date(Date.parse(`${day}T08:00:00Z`) + minute * 60000).toISOString() });
 
@@ -44,4 +45,20 @@ test('company calendar boundaries honor the timezone offset and daylight saving 
   assert.equal(localMidnightUtc('2026-11-19', 'America/Los_Angeles'), '2026-11-19T08:00:00.000Z');
   assert.equal(localMidnightUtc('2026-07-19', 'America/Los_Angeles'), '2026-07-19T07:00:00.000Z');
   assert.equal(addCalendarDays('2026-11-19', 1), '2026-11-20');
+});
+
+test('Location History map size is bounded and invalid saved preferences reset safely', () => {
+  assert.equal(mapHeight(320), 320);
+  assert.equal(mapHeight(900), 900);
+  assert.equal(mapHeight(319), DEFAULT_MAP_HEIGHT);
+  assert.equal(mapHeight(901), DEFAULT_MAP_HEIGHT);
+  assert.equal(mapHeight('not a number'), DEFAULT_MAP_HEIGHT);
+});
+
+test('print schematic places observed fixes within the page and keeps north above south', () => {
+  const points = [{ lat: 35, lng: -119 }, { lat: 36, lng: -118 }];
+  const southWest = schematicPosition(points[0], points), northEast = schematicPosition(points[1], points);
+  assert.ok(southWest.x < northEast.x);
+  assert.ok(southWest.y > northEast.y);
+  for (const value of [southWest.x, southWest.y, northEast.x, northEast.y]) assert.ok(value >= 0 && value <= 720);
 });

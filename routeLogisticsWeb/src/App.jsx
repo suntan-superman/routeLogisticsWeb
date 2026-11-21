@@ -120,6 +120,7 @@ function AppContent() {
                 <Route path="/notifications" element={<ProtectedRoute><Layout><NotificationsPage /></Layout></ProtectedRoute>} />
                 <Route path="/routes" element={<ProtectedRoute><Layout><RoutesPage /></Layout></ProtectedRoute>} />
                 <Route path="/location-history" element={<ProtectedRoute><Layout><LocationHistoryPage /></Layout></ProtectedRoute>} />
+                <Route path="/location-history/map" element={<ProtectedRoute><LocationHistoryPage standalone /></ProtectedRoute>} />
                 <Route path="/team-locations" element={<ProtectedRoute><Layout><TeamLocationsPage /></Layout></ProtectedRoute>} />
                 <Route path="/integrations" element={<ProtectedRoute><Layout><IntegrationsPage /></Layout></ProtectedRoute>} />
 

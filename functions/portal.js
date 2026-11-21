@@ -21,6 +21,10 @@ const providerScope = customer => customer.get('companyId') ? `company:${custome
 function publicProperty(property) {
   return { id: property.id, label: property.label || 'Property', address: property.address, unit: property.unit || '', isPrimary: property.isPrimary === true };
 }
+function portalCustomerNames(customers) {
+  const names = customers.map(customer => customer.get('name'));
+  return [...new Set(names.map(name => typeof name === 'string' ? name.trim().replace(/\s+/g, ' ').slice(0, 150) : '').filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
 function jobPropertyId(job, customer) {
   const id = job.servicePropertyId || job.propertyId;
   if (id && propertiesFor(customer.data()).some(property => property.id === id)) return id;
@@ -221,9 +225,9 @@ function portalHandlers(db, auth, emailEnabled = () => true, { bucketProvider = 
         const visiblePhotos = [...photos.values()].filter(row => visits.has(row.jobId));
         const visibleDocuments = [...documents.values()].filter(row => visits.has(row.jobId));
         hasMore ||= visits.size > 50 || bills.size > 50 || visiblePhotos.length > 50 || visibleDocuments.length > 50;
-        accounts.push({ id: group.id, companyId: group.companyId, companyName: group.company?.get('name') || 'Service provider', contactEmail: group.company?.get('email') || '', duplicateCustomerCount: Math.max(0, group.customers.length - 1), properties: group.customers.flatMap(customer => propertiesFor(customer.data()).map(publicProperty).map(property => ({ ...property, customerId: customer.id }))), jobs: [...visits.values()].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 50), invoices: [...bills.values()].sort((a, b) => b.sortDate.localeCompare(a.sortDate)).slice(0, 50).map(({ sortDate, ...invoice }) => invoice), photos: visiblePhotos.slice(0, 50), documents: visibleDocuments.slice(0, 50), hasMore });
+        accounts.push({ id: group.id, companyId: group.companyId, companyName: group.company?.get('name') || 'Service provider', contactEmail: group.company?.get('email') || '', timeZone: group.company?.get('timeZone') || 'America/Los_Angeles', customerNames: portalCustomerNames(group.customers), duplicateCustomerCount: Math.max(0, group.customers.length - 1), properties: group.customers.flatMap(customer => propertiesFor(customer.data()).map(publicProperty).map(property => ({ ...property, customerId: customer.id }))), jobs: [...visits.values()].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 50), invoices: [...bills.values()].sort((a, b) => b.sortDate.localeCompare(a.sortDate)).slice(0, 50).map(({ sortDate, ...invoice }) => invoice), photos: visiblePhotos.slice(0, 50), documents: visibleDocuments.slice(0, 50), hasMore });
       }
-      return { accounts, hasMoreAccounts: groups.length > 25 };
+      return { accounts, loginEmail: email, hasMoreAccounts: groups.length > 25 };
     },
     getCustomerPortalFile: async request => {
       const email = portalEmailFor(request), data = request.data || {};

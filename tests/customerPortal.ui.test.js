@@ -9,14 +9,14 @@ const {createPrincipalQueryMock}=require('./support/principalQueryMock.cjs');
 const principalHooks=createPrincipalQueryMock(React);
 global.IS_REACT_ACT_ENVIRONMENT = true;
 const client = { name: 'isolated-customer-functions' };
-let tree, user = { uid: 'synthetic-portal-user' }, listener, calls = [], accounts, pendingPortal = null, pendingFile = null, fileError = null, portalError = null, otpError = null, requestNumber = 0, paymentProps = [], allowDiscard = true;
+let tree, user = { uid: 'synthetic-portal-user' }, listener, calls = [], accounts, pendingPortal = null, pendingFile = null, fileError = null, portalError = null, otpError = null, requestNumber = 0, paymentProps = [], allowDiscard = true, legacyPortalResponse = false;
 const portalAuth = { get currentUser() { return user; } };
-const a = { id: 'company:provider-a', companyName: 'Provider A', contactEmail: 'a@example.invalid', duplicateCustomerCount: 1, jobs: [{ id: 'visit-a', serviceType: 'Provider A service visit', date: '2026-11-14', time: '10:00', status: 'completed' }], invoices: [{ id: 'invoice-a', invoiceNumber: 'INV-A', total: 35, dueDate: '2026-11-20', status: 'sent', lineItems: [{ description: 'Service A', quantity: 1, unitPrice: 35, amount: 35 }] }], photos: [{ id: 'photo-a', jobId: 'visit-a', kind: 'photo', caption: 'Shared provider A visit photo' }], documents: [{ id: 'document-a', jobId: 'visit-a', kind: 'document', name: 'Provider A service report' }], hasMore: false };
-const b = { id: 'company:provider-b', companyName: 'Provider B', contactEmail: 'b@example.invalid', jobs: [{ id: 'visit-b', serviceType: 'Provider B service visit', date: '2026-11-15', time: '11:00', status: 'scheduled' }], invoices: [{ id: 'invoice-b', invoiceNumber: 'INV-B', total: 80, dueDate: '2026-11-25', status: 'sent', lineItems: [] }], photos: [], documents: [], hasMore: false };
+const a = { id: 'company:provider-a', companyName: 'Provider A', contactEmail: 'a@example.invalid', customerNames: ['Alex Customer'], duplicateCustomerCount: 1, jobs: [{ id: 'visit-a', serviceType: 'Provider A service visit', date: '2026-11-14', time: '10:00', status: 'completed' }], invoices: [{ id: 'invoice-a', invoiceNumber: 'INV-A', total: 35, dueDate: '2026-11-20', status: 'sent', lineItems: [{ description: 'Service A', quantity: 1, unitPrice: 35, amount: 35 }] }], photos: [{ id: 'photo-a', jobId: 'visit-a', kind: 'photo', caption: 'Shared provider A visit photo' }], documents: [{ id: 'document-a', jobId: 'visit-a', kind: 'document', name: 'Provider A service report' }], hasMore: false };
+const b = { id: 'company:provider-b', companyName: 'Provider B', contactEmail: 'b@example.invalid', customerNames: ['Alexander Client'], jobs: [{ id: 'visit-b', serviceType: 'Provider B service visit', date: '2026-11-15', time: '11:00', status: 'scheduled' }], invoices: [{ id: 'invoice-b', invoiceNumber: 'INV-B', total: 80, dueDate: '2026-11-25', status: 'sent', lineItems: [] }], photos: [], documents: [], hasMore: false };
 accounts = [a, b];
 const call = async (name, data, functionClient) => {
   calls.push({ name, data, client: functionClient });
-  if (name === 'getCustomerPortal') { if (pendingPortal) return pendingPortal; if (portalError) throw portalError; return { accounts, hasMoreAccounts: false }; }
+  if (name === 'getCustomerPortal') { if (pendingPortal) return pendingPortal; if (portalError) throw portalError; return legacyPortalResponse ? { accounts: accounts.map(({ customerNames, ...account }) => account), hasMoreAccounts: false } : { accounts, loginEmail: 'verified@example.invalid', hasMoreAccounts: false }; }
   if (name === 'rlRequestCustomerOTP') return { challengeId: `synthetic-challenge-${++requestNumber}`, message: 'If your provider has registered this email, a code will arrive shortly.' };
   if (name === 'rlVerifyCustomerOTP') { if (otpError) throw otpError; return { token: 'synthetic-local-custom-token' }; }
   if (name === 'rlGetCustomerPortalFile') { if (pendingFile) return pendingFile; if (fileError) throw fileError; return data.kind === 'photo' ? { dataUri: 'data:image/png;base64,cGhvdG8=', contentType: 'image/png', name: 'Shared service photo' } : { dataUri: 'data:application/pdf;base64,cGRm', contentType: 'application/pdf', name: 'Service report.pdf' }; }
@@ -53,32 +53,68 @@ const { code } = transformSync(source, { loader: 'jsx', format: 'cjs' });
 new Function('React', 'require', 'module', 'exports', code)(React, mock, moduleFile, moduleFile.exports);
 const Portal = moduleFile.exports.default;
 const text = () => JSON.stringify(tree.toJSON());
+const paragraphs = () => tree.root.findAllByType('p').map(node => node.children.join('')).join('\n');
 const button = label => tree.root.findAll(node => node.type === 'button' && node.children.join('') === label)[0];
 const mount = async () => { await act(async () => { tree = create(React.createElement(Portal)); }); };
-const choose = async id => act(async () => tree.root.findByType('select').props.onChange({ target: { value: id } }));
+const choose = async id => act(async () => tree.root.findAllByType('select')[0].props.onChange({ target: { value: id } }));
 const expandInvoice = async index => act(async () => tree.root.findAllByType('details')[index].props.onToggle({ currentTarget: { open: true } }));
 afterEach(async () => {
   if (tree) await act(async () => tree.unmount());
-  tree = null; user = { uid: 'synthetic-portal-user' }; listener = null; calls = []; accounts = [a, b]; pendingPortal = null; pendingFile = null; fileError = null; portalError = null; otpError = null; requestNumber = 0; paymentProps = []; allowDiscard = true;
+  tree = null; user = { uid: 'synthetic-portal-user' }; listener = null; calls = []; accounts = [a, b]; pendingPortal = null; pendingFile = null; fileError = null; portalError = null; otpError = null; requestNumber = 0; paymentProps = []; allowDiscard = true; legacyPortalResponse = false;
 });
 
 test('review scope follows the selected provider and unsaved review protection blocks switching, refresh and sign-out', async () => {
   await mount(); assert.equal(tree.root.findByProps({ 'aria-label': 'Selected provider review scope' }).props['data-review-account'], a.id);
   const before = calls.filter(row => row.name === 'getCustomerPortal').length; allowDiscard = false;
   await choose(b.id); await act(async () => button('Refresh visits and invoices').props.onClick()); await act(async () => button('Sign out').props.onClick());
-  assert.equal(tree.root.findByType('select').props.value, a.id); assert.equal(calls.filter(row => row.name === 'getCustomerPortal').length, before); assert.equal(user.uid, 'synthetic-portal-user');
+  assert.equal(tree.root.findAllByType('select')[0].props.value, a.id); assert.equal(calls.filter(row => row.name === 'getCustomerPortal').length, before); assert.equal(user.uid, 'synthetic-portal-user');
   allowDiscard = true; await choose(b.id); assert.equal(tree.root.findByProps({ 'aria-label': 'Selected provider review scope' }).props['data-review-account'], b.id);
 });
 
 test('multi-provider records and payment buttons are shown only for the explicitly selected provider', async () => {
   await mount();
-  assert.equal(tree.root.findByType('select').props.value, a.id);
+  assert.equal(tree.root.findAllByType('select')[0].props.value, a.id);
   assert.match(text(), /Provider A service visit/); assert.doesNotMatch(text(), /Provider B service visit|INV-B/);
   assert.match(text(), /Matching customer records have been combined/);
   assert.equal(tree.root.findByProps({ name: 'robots' }).props.content, 'noindex,nofollow');
   await choose(b.id);
   assert.match(text(), /Provider B service visit|INV-B/); assert.doesNotMatch(text(), /Provider A service visit|INV-A|Shared provider A visit photo/);
   assert.ok(button('Test payment for INV-B')); assert.equal(button('Test payment for INV-A'), undefined);
+});
+
+test('greeting uses the authorized selected-provider customer name and keeps login email separate', async () => {
+  await mount();
+  assert.match(text(), /Welcome, Alex Customer/);
+  assert.match(paragraphs(), /Verified sign-in email: verified@example.invalid/);
+  assert.match(paragraphs(), /Provider contact: a@example.invalid/);
+  assert.doesNotMatch(text(), /Welcome, a@example.invalid|Alexander Client/);
+  await choose(b.id);
+  assert.match(text(), /Welcome, Alexander Client/);
+  assert.doesNotMatch(text(), /Welcome, Alex Customer|Provider contact: a@example.invalid/);
+});
+
+test('single-provider customer sees only that provider and its authorized overview', async () => {
+  accounts = [{ ...a, duplicateCustomerCount: 0 }];
+  await mount();
+  assert.equal(tree.root.findAllByType('select')[0].findAllByType('option').length, 1);
+  assert.match(text(), /Welcome, Alex Customer/);
+  assert.ok(tree.root.findByProps({ 'aria-label': 'Portal overview' }));
+  assert.doesNotMatch(text(), /Provider B service visit|Alexander Client/);
+});
+
+test('missing and different provider-specific names do not become guessed identities', async () => {
+  accounts = [{ ...a, customerNames: [] }, { ...b, customerNames: ['First Name', 'Second Name'] }];
+  await mount(); assert.match(text(), /Welcome to your portal/); assert.doesNotMatch(text(), /Welcome, verified@example.invalid/);
+  await choose(b.id); assert.match(paragraphs(), /Names on this provider account: First Name · Second Name/);
+  assert.doesNotMatch(text(), /Welcome, First Name/);
+});
+
+test('an older portal response does not leave the identity loading indefinitely', async () => {
+  legacyPortalResponse = true;
+  await mount();
+  assert.match(text(), /Welcome to your portal/);
+  assert.doesNotMatch(text(), /Verified sign-in email: Loading|Welcome, Alex Customer/);
+  assert.match(text(), /Provider A service visit/);
 });
 
 test('provider switching closes payment/file context and old payment refresh callbacks cannot reload another provider', async () => {
@@ -95,10 +131,10 @@ test('provider switching closes payment/file context and old payment refresh cal
 test('refresh removes revoked associations and preserves a selected provider only while it remains authorized', async () => {
   await mount(); await choose(b.id);
   await act(async () => button('Refresh visits and invoices').props.onClick());
-  assert.equal(tree.root.findByType('select').props.value, b.id);
+  assert.equal(tree.root.findAllByType('select')[0].props.value, b.id);
   await act(async () => button('Test payment for INV-B').props.onClick());
   accounts = [a]; await act(async () => button('Refresh visits and invoices').props.onClick());
-  assert.equal(tree.root.findByType('select').props.value, a.id);
+  assert.equal(tree.root.findAllByType('select')[0].props.value, a.id);
   assert.equal(tree.root.findAllByProps({ role: 'dialog' }).length, 0); assert.doesNotMatch(text(), /Provider B service visit|INV-B/);
 });
 
@@ -107,9 +143,9 @@ test('automatic provider refresh preserves unsent feedback until the selected as
   await act(async()=>tree.root.findByProps({'aria-label':'Unsent synthetic review'}).props.onChange({target:{value:'Unsent feedback for provider B'}}));allowDiscard=false;
   accounts=[a,{...b,jobs:[...b.jobs,{id:'visit-new',serviceType:'New authorized provider B visit',date:'2026-11-16',time:'09:00',status:'scheduled'}]}];
   await act(async()=>principalHooks.refresh(['rl-customer-portal']));
-  assert.equal(tree.root.findByType('select').props.value,b.id);assert.equal(tree.root.findByProps({'aria-label':'Unsent synthetic review'}).props.value,'Unsent feedback for provider B');assert.match(text(),/New authorized provider B visit/);
+  assert.equal(tree.root.findAllByType('select')[0].props.value,b.id);assert.equal(tree.root.findByProps({'aria-label':'Unsent synthetic review'}).props.value,'Unsent feedback for provider B');assert.match(text(),/New authorized provider B visit/);
   accounts=[a];await act(async()=>principalHooks.refresh(['rl-customer-portal']));
-  assert.equal(tree.root.findByType('select').props.value,a.id);assert.equal(tree.root.findByProps({'aria-label':'Unsent synthetic review'}).props.value,'');assert.doesNotMatch(text(),/New authorized provider B visit|INV-B/);
+  assert.equal(tree.root.findAllByType('select')[0].props.value,a.id);assert.equal(tree.root.findByProps({'aria-label':'Unsent synthetic review'}).props.value,'');assert.doesNotMatch(text(),/New authorized provider B visit|INV-B/);
 });
 
 test('late file responses cannot render data after a provider switch', async () => {
@@ -194,9 +230,13 @@ test('property selection filters visits within the selected provider and connect
     { id: 'visit-rental', serviceType: 'Rental inspection', date: '2026-11-15', time: '10:00', status: 'scheduled', propertyKey: 'customer-a:rental' },
   ] }, b];
   await mount();
-  await act(async () => button('Rental · 200 Example Lane').props.onClick());
+  await act(async () => tree.root.findByProps({ 'aria-label': 'Service property' }).props.onChange({ target: { value: 'customer-a:rental' } }));
   assert.match(text(), /Rental inspection/); assert.doesNotMatch(text(), /Provider A service visit|Provider B service visit/);
-  await act(async () => button('All properties').props.onClick()); assert.match(text(), /Provider A service visit/);
+  assert.equal(button('View photo'), undefined);
+  await act(async () => tree.root.findByProps({ 'aria-label': 'Service property' }).props.onChange({ target: { value: '' } })); assert.match(text(), /Provider A service visit/);
+  assert.ok(button('View photo'));
+  assert.equal(tree.root.findAllByProps({ placeholder: 'Paste your invitation link' }).length, 0);
+  await act(async () => button('Connect provider').props.onClick());
   const input = tree.root.findByProps({ placeholder: 'Paste your invitation link' });
   await act(async () => input.props.onChange({ target: { value: `https://route-logistics.com/portal#link=${'a'.repeat(64)}` } }));
   await act(async () => button('Connect provider').props.onClick());

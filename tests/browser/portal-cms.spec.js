@@ -138,6 +138,9 @@ test.describe('Customer portal — real Firebase emulator journeys', () => {
       scenario.readDoc(`jobs/${scenario.ids.jobId}`), scenario.readDoc(`jobs/${scenario.ids.otherJobId}`),
     ]);
     await enterPortal(page, scenario);
+    await expect(page.getByRole('heading', { name: 'Welcome to your portal' })).toBeVisible();
+    await expect(page.getByText(`Verified sign-in email: ${scenario.customerEmail}`)).toBeVisible();
+    await expect(page.getByText(`Names on this provider account: ${scenario.customerName} · ${scenario.customerName} duplicate`)).toBeVisible();
     const options = await selectOptions(page.getByRole('combobox', { name: 'Service provider' }));
     await expect(options).toHaveCount(2);
     await expect(records(page).getByRole('heading', { name: company.name, exact: true })).toBeVisible();
@@ -145,11 +148,16 @@ test.describe('Customer portal — real Firebase emulator journeys', () => {
     await expect(records(page)).toContainText(job.serviceType);
     await expect(records(page)).not.toContainText(otherJob.serviceType);
     await selectProvider(page, scenario.ids.otherCompanyId);
+    await expect(page.getByRole('heading', { name: `Welcome, ${scenario.customerName}` })).toBeVisible();
     await expect(records(page).getByRole('heading', { name: other.name, exact: true })).toBeVisible();
     await expect(records(page)).toContainText(otherJob.serviceType);
     await expect(records(page)).not.toContainText(job.serviceType);
     await selectProvider(page, scenario.ids.companyId);
     await expect(records(page)).toContainText(job.serviceType);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByRole('combobox', { name: 'Service provider' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Portal overview' })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   });
 
   test('PW-POR-03 retrieves authorized image/PDF bytes and clears the preview on provider switch', async ({ page, scenario }) => {

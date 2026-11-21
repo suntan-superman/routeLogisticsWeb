@@ -77,6 +77,25 @@ test('provider discovery merges duplicate identities without losing their separa
   assert.equal(JSON.stringify(result).includes('INTERNAL-DO-NOT-EXPOSE'),false);assert.equal(a.invoices[0].lineItems[0].internalCost,undefined);assert.equal(a.photos[0].storagePath,undefined);
 });
 
+test('portal identity comes only from linked customer records and keeps provider names separate',async()=>{
+  const f=await fixture();
+  await db.doc('customers/'+f.customerA).update({name:'  First   Customer  '});
+  await db.doc('customers/'+f.duplicateA).update({name:'Second Customer'});
+  await db.doc('customers/'+f.customerB).update({name:'Provider B Customer'});
+  await db.doc('customers/'+f.other).update({name:'Unlinked Person'});
+  await db.doc('companies/'+f.companyA).update({timeZone:'America/New_York'});
+  const result=await f.handlers.getCustomerPortal(f.request());
+  assert.equal(result.loginEmail,f.email);
+  const a=result.accounts.find(row=>row.companyId===f.companyA),b=result.accounts.find(row=>row.companyId===f.companyB);
+  assert.deepEqual(a.customerNames,['First Customer','Second Customer']);
+  assert.equal(a.timeZone,'America/New_York');
+  assert.deepEqual(b.customerNames,['Provider B Customer']);
+  assert.equal(JSON.stringify(result).includes('Unlinked Person'),false);
+  await db.doc('customers/'+f.customerB).update({name:''});
+  const missing=await f.handlers.getCustomerPortal(f.request({accountId:'company:'+f.companyB}));
+  assert.deepEqual(missing.accounts[0].customerNames,[]);
+});
+
 test('provider switching is server-scoped and rejects another company or customer identity',async()=>{
   const f=await fixture();for(const company of [f.companyA,f.companyB]){const result=await f.handlers.getCustomerPortal(f.request({accountId:'company:'+company}));assert.equal(result.accounts.length,1);assert.equal(result.accounts[0].companyId,company);}
   await assert.rejects(f.handlers.getCustomerPortal(f.request({accountId:'company:'+f.companyC})),{code:'permission-denied'});
@@ -130,7 +149,7 @@ test('missing Storage files return an actionable error without bucket paths or c
 });
 
 test('no remaining association returns a safe empty state for an otherwise valid portal session',async()=>{
-  const f=await fixture();for(const customer of [f.customerA,f.duplicateA,f.customerB])await db.doc('customers/'+customer).update({isActive:false});assert.deepEqual(await f.handlers.getCustomerPortal(f.request()),{accounts:[],hasMoreAccounts:false});
+  const f=await fixture();for(const customer of [f.customerA,f.duplicateA,f.customerB])await db.doc('customers/'+customer).update({isActive:false});assert.deepEqual(await f.handlers.getCustomerPortal(f.request()),{accounts:[],loginEmail:f.email,hasMoreAccounts:false});
 });
 
 test('matching email alone grants no portal, file, or invoice access without an explicit provider link',async()=>{

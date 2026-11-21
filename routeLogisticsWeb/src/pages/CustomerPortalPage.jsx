@@ -15,6 +15,15 @@ import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 import { useConfirmUnsavedChanges } from '../hooks/useUnsavedChanges';
 const call = (name, data) => httpsCallable(portalFunctions, name)(data).then((result) => result.data);
 const money = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+const portalName = account => Array.isArray(account?.customerNames) && account.customerNames.length === 1 ? account.customerNames[0] : '';
+const today = timeZone => {
+  const now = new Date();
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
+    const value = type => parts.find(part => part.type === type)?.value;
+    return `${value('year')}-${value('month')}-${value('day')}`;
+  } catch { return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`; }
+};
 
 export default function CustomerPortalPage() {
   const confirmDiscard = useConfirmUnsavedChanges();
@@ -28,6 +37,7 @@ export default function CustomerPortalPage() {
     const match = window.location.hash.match(/^#link=([a-f0-9]{64})$/);
     return match?.[1] || '';
   });
+  const [connectOpen, setConnectOpen] = useState(() => Boolean(pendingInvite));
   useEffect(() => {
     if (pendingInvite) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
   }, [pendingInvite]);
@@ -65,6 +75,9 @@ export default function CustomerPortalPage() {
   const selectedProperty = selectedAccount?.properties?.find(property => `${property.customerId}:${property.id}` === propertyKey);
   const displayedJobs = selectedAccount?.jobs?.filter(job => !selectedProperty || job.propertyKey === propertyKey) || [];
   const selectedAccounts = selectedAccount ? [selectedAccount] : [];
+  const upcomingJobs = displayedJobs.filter(job => ['scheduled', 'en-route', 'in-progress'].includes(job.status) && job.date >= today(selectedAccount?.timeZone)).sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+  const recentJobs = displayedJobs.filter(job => job.status === 'completed').slice(0, 3);
+  const sharedFiles = selectedAccount ? [...(selectedAccount.photos || []), ...(selectedAccount.documents || [])].filter(item => !selectedProperty || displayedJobs.some(job => job.id === item.jobId)) : [];
   const chooseProvider = async event => {
     const next = event.target.value;
     if (!accounts.some(account => account.id === next) || !await confirmDiscard()) return;
@@ -74,7 +87,7 @@ export default function CustomerPortalPage() {
     const token = pendingInvite || inviteLink.trim().match(/(?:#link=)?([a-f0-9]{64})$/)?.[1];
     if (!token || !user) { setError('That is not a provider invitation link. Open the separate “Connect your Route Logistics service provider” email and use its link. A sign-in code email only signs you in.'); return; }
     setBusy(true); setError('');
-    try { await call('rlClaimPortalLink', { token }); setPendingInvite(''); setInviteLink(''); setMessage('Provider connected.'); await load(); }
+    try { await call('rlClaimPortalLink', { token }); setPendingInvite(''); setInviteLink(''); setConnectOpen(false); setMessage('Provider connected.'); await load(); }
     catch (failure) { setError(failure.message || 'This invitation could not be connected. Ask your provider for a new link.'); }
     finally { setBusy(false); }
   };
@@ -129,7 +142,7 @@ export default function CustomerPortalPage() {
   return <main className="mx-auto max-w-5xl p-5 sm:p-8">
     <Helmet><title>Customer portal | Route Logistics</title><meta name="robots" content="noindex,nofollow" /></Helmet>
     <div className="mb-8 flex flex-wrap items-center justify-between gap-3"><Link className="font-bold text-primary-700" to="/">Route Logistics</Link><div className="flex items-center gap-4"><ThemeControl />{(user || logoutFailed) && <button type="button" disabled={busy && !user} className="text-primary-700 underline" onClick={logout}>{logoutFailed ? 'Retry sign out' : 'Sign out'}</button>}</div></div>
-    <h1 className="mb-6 text-3xl font-bold">Customer portal</h1>
+    {!user && <h1 className="mb-6 text-3xl font-bold">Customer portal</h1>}
     {!user ? <form onSubmit={submit} aria-label="Customer email sign-in" className="max-w-md space-y-4 rounded-xl border bg-white p-6">
       <p>Use the email your provider invited. Sign in, then connect the provider with its invitation link.</p>
       <label className="block">Email address<input className="mt-1 block w-full rounded border-gray-300" type="email" autoComplete="email" required disabled={!!challenge || busy || logoutFailed} value={email} onChange={(e) => setEmail(e.target.value)} /></label>
@@ -137,22 +150,44 @@ export default function CustomerPortalPage() {
       <button disabled={busy || logoutFailed} className="rounded bg-primary-700 px-4 py-2 text-white hover:bg-primary-800 disabled:opacity-50">{busy ? 'Please wait…' : challenge ? 'Sign in' : 'Email a sign-in code'}</button>
       {challenge && <button type="button" disabled={busy || logoutFailed} className="block underline" onClick={() => { authVersion.current++; setChallenge(null); setCode(''); setMessage(''); setError(''); }}>Request a new code or change email</button>}
     </form> : <>
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-4 rounded-xl border bg-white p-5"><label className="min-w-0 flex-1 font-semibold sm:max-w-lg">Service provider<SelectControl className="mt-2 block w-full rounded border-gray-300 font-normal" value={selectedId} disabled={busy || !accounts.length} onChange={chooseProvider} aria-describedby="portal-provider-help">{!accounts.length && <option value="">{busy ? 'Loading providers…' : 'No available providers'}</option>}{accounts.map(account => <option key={account.id} value={account.id}>{account.companyName}{account.contactEmail ? ` · ${account.contactEmail}` : ''}</option>)}</SelectControl></label><button type="button" className="text-primary-700 underline" disabled={busy} onClick={async () => { if (await confirmDiscard()) load(); }}>{busy ? 'Refreshing…' : 'Refresh visits and invoices'}</button><p id="portal-provider-help" className="w-full text-sm text-gray-500">Only the selected provider's records are shown. Switching providers closes open files, review drafts, and payment details.</p></div>
-      <section className="mb-5 rounded-xl border bg-white p-5"><h2 className="font-semibold">{accounts.length ? 'Connect another provider' : 'Connect provider'}</h2><p className="mb-3 text-sm text-gray-600">Your connected providers appear below. To add another, open the separate email titled “Connect your Route Logistics service provider.” Its link can be used once and expires after seven days. Your sign-in code email does not contain a provider invitation.</p>{pendingInvite ? <p>Invitation link ready. Connect it while signed in with the invited email.</p> : <label className="block text-sm">Provider invitation link<input className="mt-1 block w-full rounded border-gray-300" value={inviteLink} onChange={event => setInviteLink(event.target.value)} placeholder="Paste the Route Logistics portal invitation URL" autoComplete="off" /></label>}<button type="button" className="mt-3 rounded bg-primary-700 px-4 py-2 text-white disabled:opacity-50" disabled={busy || (!pendingInvite && !inviteLink.trim())} onClick={connectProvider}>Connect provider</button></section>
+      <header className="mb-5 rounded-2xl bg-emerald-900 p-6 text-white sm:p-8">
+        <p className="text-sm font-semibold uppercase tracking-widest text-emerald-200">Customer portal</p>
+        <h1 className="mt-2 break-words text-3xl font-bold sm:text-4xl">{portalName(selectedAccount) ? `Welcome, ${portalName(selectedAccount)}` : 'Welcome to your portal'}</h1>
+        {Array.isArray(selectedAccount?.customerNames) && selectedAccount.customerNames.length > 1 && <p className="mt-2 break-words text-lg font-semibold text-emerald-100">Names on this provider account: {selectedAccount.customerNames.join(' · ')}</p>}
+        {portalQuery.data?.loginEmail && <p className="mt-3 break-all text-sm text-emerald-100">Verified sign-in email: {portalQuery.data.loginEmail}</p>}
+      </header>
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-4 rounded-2xl border bg-white p-5 shadow-sm">
+        <label className="min-w-0 flex-1 font-semibold sm:max-w-lg">Service provider
+          <SelectControl className="mt-2 block w-full rounded border-emerald-400 font-normal" value={selectedId} disabled={busy || !accounts.length} onChange={chooseProvider} aria-describedby="portal-provider-help">{!accounts.length && <option value="">{busy ? 'Loading providers…' : 'No available providers'}</option>}{accounts.map(account => <option key={account.id} value={account.id}>{account.companyName}</option>)}</SelectControl>
+        </label>
+        <button type="button" className="text-primary-700 underline" disabled={busy} onClick={async () => { if (await confirmDiscard()) load(); }}>{busy ? 'Refreshing…' : 'Refresh visits and invoices'}</button>
+        <p id="portal-provider-help" className="w-full text-sm text-gray-600">Showing only {selectedAccount?.companyName || 'your selected provider'} records. Switching providers closes open files, review drafts, and payment details.</p>
+      </div>
+      <section className="mb-5 rounded-2xl border bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">Connect another provider</h2><p className="text-sm text-gray-600">Add a provider with its personal, single-use invitation.</p></div><button type="button" aria-expanded={connectOpen} aria-controls="portal-connect-form" className="rounded-lg bg-primary-700 px-4 py-2 font-semibold text-white" onClick={() => setConnectOpen(open => !open)}>{connectOpen ? 'Hide invitation form' : 'Connect provider'}</button></div>
+        {connectOpen && <div id="portal-connect-form" className="mt-4 border-t pt-4"><p className="mb-3 text-sm text-gray-600">Ask your provider to send a separate “Connect your Route Logistics service provider” invitation. Verify your sign-in email, then claim that link within seven days. A sign-in code is not an invitation.</p>{pendingInvite ? <p>Invitation link ready. Connect it while signed in with the invited email.</p> : <label className="block text-sm">Provider invitation link<input className="mt-1 block w-full rounded border-gray-300" value={inviteLink} onChange={event => setInviteLink(event.target.value)} placeholder="Paste your invitation link" autoComplete="off" /></label>}<button type="button" className="mt-3 rounded bg-primary-700 px-4 py-2 text-white disabled:opacity-50" disabled={busy || (!pendingInvite && !inviteLink.trim())} onClick={connectProvider}>Connect provider</button></div>}
+      </section>
       {busy && <p role="status" className="py-4 text-gray-600">Loading your authorized providers and service records…</p>}
       {!busy && !accounts.length && !error && <p>No providers are connected yet. Ask your provider for an invitation link.</p>}
       {selectedAccounts.map((account) => <section key={`${user.uid}:${account.id}`} aria-label="Selected provider records" className="mb-6 rounded-xl border bg-white p-5 sm:p-7">
-        <h2 className="text-xl font-bold">{account.companyName}</h2>
+        <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wider text-primary-700">Selected provider</p><h2 className="break-words text-xl font-bold">{account.companyName}</h2></div><button type="button" className="text-sm text-primary-700 underline" onClick={disconnectProvider}>Disconnect provider</button></div>
         {account.contactEmail && <p className="mt-2 break-all text-sm text-gray-600">Provider contact: {account.contactEmail}</p>}
-        <button type="button" className="mt-2 text-sm text-primary-700 underline" onClick={disconnectProvider}>Disconnect provider</button>
         {account.duplicateCustomerCount > 0 && <p className="mt-2 text-sm text-gray-500">Matching customer records have been combined for this provider.</p>}
-        <h3 className="mb-3 mt-5 font-semibold">Service properties</h3>
-        {account.properties?.length ? <div className="flex flex-wrap gap-2"><button type="button" className={`rounded border px-3 py-2 ${!selectedProperty ? 'bg-primary-700 text-white' : ''}`} onClick={() => setPropertyKey('')}>All properties</button>{account.properties.map(property => <button type="button" key={`${property.customerId}:${property.id}`} className={`rounded border px-3 py-2 ${propertyKey === `${property.customerId}:${property.id}` ? 'bg-primary-700 text-white' : ''}`} onClick={() => setPropertyKey(`${property.customerId}:${property.id}`)}>{property.label} · {property.address}</button>)}</div> : <p>No service property is recorded yet.</p>}
+        <section aria-label="Portal overview" className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="rounded-xl border p-4" style={{ background: 'var(--rl-accent-soft)', borderColor: 'var(--rl-accent-border)' }}><h3 className="font-semibold">Upcoming appointments</h3>{upcomingJobs.length ? <p className="mt-2 text-sm">{upcomingJobs.length} upcoming · Next: {upcomingJobs[0].serviceType} on {upcomingJobs[0].date}</p> : <p className="mt-2 text-sm">No upcoming appointments for this {selectedProperty ? 'property' : 'provider'}.</p>}</div>
+          <div className="rounded-xl border p-4"><h3 className="font-semibold">Service properties</h3><p className="mt-2 text-sm text-gray-600">{account.properties?.length ? `${account.properties.length} saved ${account.properties.length === 1 ? 'property' : 'properties'} · ${account.properties[0].label}: ${account.properties[0].address}` : 'No service properties yet.'}</p></div>
+          <div className="rounded-xl border p-4"><h3 className="font-semibold">Recent service history</h3><p className="mt-2 text-sm text-gray-600">{recentJobs.length ? `Latest: ${recentJobs[0].serviceType} · ${recentJobs[0].date}` : 'No completed visits yet.'}</p></div>
+          <div className="rounded-xl border p-4"><h3 className="font-semibold">Shared documents</h3><p className="mt-2 text-sm text-gray-600">{sharedFiles.length ? `${sharedFiles.length} shared ${sharedFiles.length === 1 ? 'file' : 'files'} · ${sharedFiles[0].caption || sharedFiles[0].name || 'Service file'}` : 'No photos or documents shared yet.'}</p></div>
+          <div className="rounded-xl border p-4"><h3 className="font-semibold">Reviews and feedback</h3><p className="mt-2 text-sm text-gray-600">Review eligible visits and see your submitted feedback below.</p></div>
+        </section>
+        <h3 className="mb-3 mt-6 font-semibold">Service properties</h3>
+        <p className="mb-2 text-sm text-gray-600">Choose a property to filter visits for this provider.</p>
+        {account.properties?.length ? <SelectControl aria-label="Service property" className="block w-full max-w-xl rounded border-emerald-400" value={propertyKey} onChange={event => { setPropertyKey(event.target.value); clearDetails(); }}><option value="">All properties</option>{account.properties.map(property => <option key={`${property.customerId}:${property.id}`} value={`${property.customerId}:${property.id}`}>{property.label} · {property.address}{property.unit ? `, ${property.unit}` : ''}</option>)}</SelectControl> : <p>No service property is recorded yet.</p>}
         <h3 className="mb-3 mt-5 font-semibold">Service visits</h3>
         {displayedJobs.length ? <ul className="divide-y">{displayedJobs.map((job) => <li key={job.id} className="flex flex-wrap justify-between gap-2 py-3"><span>{job.serviceType} · {job.date} {job.time}</span><span className="capitalize">{job.status.replace('-', ' ')}</span></li>)}</ul> : <p>No visits for this property yet.</p>}
-        <CustomerReviews accountId={account.id} userId={user.uid} />
+        <div id="portal-reviews"><CustomerReviews accountId={account.id} userId={user.uid} /></div>
         <h3 className="mb-3 mt-6 font-semibold">Photos and documents</h3>
-        {account.photos?.length || account.documents?.length ? <ul className="grid gap-3 sm:grid-cols-2">{[...(account.photos || []), ...(account.documents || [])].map(item => <li key={`${item.kind}:${item.id}`} className="min-w-0 rounded-lg border p-4"><p className="break-words text-sm">{item.caption || item.name || (item.kind === 'photo' ? 'Service photo' : 'Service document')}</p><button type="button" className="mt-3 text-sm font-semibold text-primary-700 underline" disabled={currentFile?.loading && currentFile.item.id === item.id} onClick={() => readFile(item)}>{item.kind === 'photo' ? 'View photo' : 'Open document'}</button></li>)}</ul> : <p className="text-gray-600">No photos or documents have been shared by this provider yet.</p>}
+        {sharedFiles.length ? <ul className="grid gap-3 sm:grid-cols-2">{sharedFiles.map(item => <li key={`${item.kind}:${item.id}`} className="min-w-0 rounded-lg border p-4"><p className="break-words text-sm">{item.caption || item.name || (item.kind === 'photo' ? 'Service photo' : 'Service document')}</p><button type="button" className="mt-3 text-sm font-semibold text-primary-700 underline" disabled={currentFile?.loading && currentFile.item.id === item.id} onClick={() => readFile(item)}>{item.kind === 'photo' ? 'View photo' : 'Open document'}</button></li>)}</ul> : <p className="text-gray-600">No photos or documents have been shared for this {selectedProperty ? 'property' : 'provider'} yet.</p>}
         {currentFile && <section aria-label="Shared file preview" className="mt-5 space-y-4 rounded-xl border border-primary-200 bg-primary-50 p-5"><div className="flex items-start justify-between gap-4"><h4 className="break-words font-semibold">{currentFile.item.caption || currentFile.item.name || 'Shared service file'}</h4><button type="button" className="text-sm text-primary-700 underline" onClick={() => { fileVersion.current++; setFileView(null); }}>Close file</button></div>{currentFile.loading ? <p role="status">Loading shared file…</p> : currentFile.error ? <><p role="alert" className="text-red-700">{currentFile.error}</p><button type="button" className="underline" onClick={() => readFile(currentFile.item)}>Retry file</button></> : currentFile.data?.contentType === 'application/pdf' ? <a className="font-semibold text-primary-700 underline" href={currentFile.data.dataUri} download={String(currentFile.data.name || 'Service document').replace(/[^a-zA-Z0-9 ._-]/g, '').slice(0, 160).replace(/\.pdf$/i, '') + '.pdf'}>Download PDF document</a> : currentFile.data ? <img className="max-h-[32rem] max-w-full rounded-lg object-contain" src={currentFile.data.dataUri} alt={currentFile.item.caption || currentFile.data.name || 'Shared service visit photo'} /> : null}</section>}
         <h3 className="mb-3 mt-6 font-semibold">Invoices</h3>
         {account.invoices.length ? account.invoices.map((invoice) => <details key={`${account.id}:${invoice.id}`} className="border-t py-3" onToggle={event => setOpenInvoice(event.currentTarget.open ? invoice.id : previous => previous === invoice.id ? null : previous)}><summary className="cursor-pointer">{invoice.invoiceNumber} · {money(invoice.total)} · {invoice.status} · Due {invoice.dueDate}</summary><ul className="mt-3 text-sm">{invoice.lineItems.map((item, i) => <li key={i}>{item.description} — {item.quantity} × {money(item.unitPrice)} = {money(item.amount)}</li>)}</ul><p className="mt-3 text-sm">Contact your provider for payment arrangements.</p>{openInvoice === invoice.id && activePayment !== invoice.id && <PaymentHistory key={`${user.uid}:${account.id}:${invoice.id}`} invoiceId={invoice.id} functionClient={portalFunctions} />}</details>) : <p>No invoices yet.</p>}

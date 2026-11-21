@@ -14,7 +14,7 @@ const utilities = name => compile('utils/'+name+'.js', () => { throw Error('Unex
 const template = {id:'custom-service',name:'Inspection',version:1,fields:[{id:'notes',label:'Notes',type:'notes',maxLength:100},{id:'checks',label:'Checks',type:'checklist',options:['A','B']},{id:'photos',label:'Photos',type:'photos',maxPhotos:3}]};
 const estimate = () => ({id:'estimate-1',title:'Inspection estimate',serviceType:'Pest',scopeOfWork:'Inspect property',customerId:'customer-1',status:'draft',version:1,totalCents:2000,lineItems:[{kind:'labor',description:'Inspection',quantity:1,unitPrice:20}],photoIds:[]});
 function reset(kind) {
-  env={kind,calls:[],toasts:[],dirty:false,confirm:true,confirmCalls:0,failSave:false,failListAfterSave:false,saved:false,estimate:estimate(),answers:{notes:'Saved note',checks:['A','B'],photos:['photo-1']},version:1};
+  env={kind,calls:[],toasts:[],dirty:false,confirm:true,confirmCalls:0,failSave:false,failListAfterSave:false,saved:false,estimate:estimate(),delivery:null,pdfPreviews:0,answers:{notes:'Saved note',checks:['A','B'],photos:['photo-1']},version:1};
   const memory = new Map(); global.localStorage={getItem:key=>memory.get(key)||null,setItem:(key,value)=>memory.set(key,value),removeItem:key=>memory.delete(key)};
   Object.defineProperty(global,'navigator',{configurable:true,value:{onLine:true}});
 }
@@ -34,7 +34,7 @@ async function service(_name,data) {
 async function estimates(name,data) {
   env.calls.push({name,data});
   if(name==='list'){if(env.saved&&env.failListAfterSave)throw Error('List refresh failed.');return{estimates:[env.estimate],enabled:true,emailEnabled:false};}
-  if(name==='get')return{estimate:env.estimate,photos:[],versions:[],emailEnabled:true,delivery:null,permissions:{canEdit:!['approved','converted'].includes(env.estimate.status),canReview:['draft','submitted-for-review'].includes(env.estimate.status),canDeliver:env.estimate.status==='approved-for-delivery'}};
+  if(name==='get')return{estimate:env.estimate,photos:[],versions:[],emailEnabled:true,delivery:env.delivery,permissions:{canEdit:!['approved','converted'].includes(env.estimate.status),canReview:['draft','submitted-for-review'].includes(env.estimate.status),canDeliver:env.estimate.status==='approved-for-delivery'}};
   if(name==='save'){if(env.failSave)throw Error('Estimate save failed.');env.saved=true;env.estimate={...env.estimate,...data.data,version:env.estimate.version+1};return{estimate:env.estimate};}
   if(name==='convert'){env.estimate={...env.estimate,convertedJobId:'controlled-converted-job'};return{jobId:'controlled-converted-job'};}
   throw Error('Unexpected estimate operation');
@@ -69,7 +69,7 @@ const mock = name => {
   if(name.endsWith('/AddressValidationNotice'))return compile('components/AddressValidationNotice.jsx',mock);
   if(name.endsWith('/components/ServicePropertyEligibility'))return env.kind==='estimates-geography'?compile('components/ServicePropertyEligibility.jsx',mock):{__esModule:true,default:()=>null};
   if(name.endsWith('/services/customerService'))return{__esModule:true,default:{getCustomers:async()=>({success:true,customers:[{id:'customer-1',name:'Customer',address:'Customer billing address must not become the service property'}],hasMore:false})}};
-  if(name.endsWith('/services/estimateService'))return{callEstimate:estimates,prepareEstimatePhoto:()=>{},previewEstimatePdf:()=>{},downloadEstimatePdf:()=>{}};
+  if(name.endsWith('/services/estimateService'))return{callEstimate:estimates,prepareEstimatePhoto:()=>{},previewEstimatePdf:async()=>{env.pdfPreviews++;if(env.previewFailure)throw Error('PDF preview failed.');},downloadEstimatePdf:()=>{}};
   throw Error('Unexpected dependency: '+name);
 };
 const page = relative => compile(relative,mock).default;
@@ -172,6 +172,31 @@ test('estimate background list refresh never replaces an open dirty estimate or 
   await act(async()=>workspaceHooks.useInvalidateWorkspace()(['estimates','estimate']));
   assert.equal(inputFor('Estimate title').props.value,'Unsaved estimate draft');assert.equal(env.dirty,true);
   await click('Save estimate version');assert.equal(env.calls.find(row=>row.name==='save').data.expectedVersion,1);
+});
+
+test('approved estimate asks for delivery choice before closing without sending automatically',async()=>{
+  reset('estimates');env.estimate={...env.estimate,status:'approved-for-delivery',recipient:{name:'Test customer',email:'customer@example.invalid'}};
+  await render('pages/EstimatesPage.jsx');await click('Open estimate');await click('Back to estimates');
+  assert.match(text(),/How will you deliver this approved estimate/);assert.equal(button('Email approved version').props.disabled,false);
+  await click('Keep estimate open');assert.equal(button('New photo estimate'),undefined);
+  await click('Back to estimates');await click('Email approved version');assert.match(text(),/Email saved version 1 as a PDF attachment/);
+  assert.equal(env.calls.some(row=>row.name==='deliver'),false);
+  await click('Keep estimate open');await click('Back to estimates');await click('Leave for later');
+  assert.ok(button('New photo estimate'));assert.equal(env.calls.some(row=>row.name==='deliver'),false);
+});
+
+test('approved estimate print option opens the saved PDF and never records email or postal delivery',async()=>{
+  reset('estimates');env.estimate={...env.estimate,status:'approved-for-delivery',recipient:{name:'Test customer',email:'customer@example.invalid'}};
+  await render('pages/EstimatesPage.jsx');await click('Open estimate');await click('Back to estimates');
+  env.previewFailure=true;await click('Open PDF to print');assert.match(text(),/How will you deliver this approved estimate/);assert.equal(button('New photo estimate'),undefined);
+  env.previewFailure=false;await click('Open PDF to print');assert.equal(env.pdfPreviews,2);assert.ok(button('New photo estimate'));
+  assert.equal(env.calls.some(row=>row.name==='deliver'),false);
+});
+
+test('approved estimate with email already queued closes without a redundant delivery prompt',async()=>{
+  reset('estimates');env.estimate={...env.estimate,status:'approved-for-delivery',recipient:{name:'Test customer',email:'customer@example.invalid'}};env.delivery={status:'queued',recipient:'customer@example.invalid'};
+  await render('pages/EstimatesPage.jsx');await click('Open estimate');await click('Back to estimates');
+  assert.ok(button('New photo estimate'));assert.doesNotMatch(text(),/How will you deliver this approved estimate/);
 });
 
 test('estimate property selection is explicit and saves only server-checkable property fields',async()=>{

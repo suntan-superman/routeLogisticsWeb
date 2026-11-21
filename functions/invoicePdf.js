@@ -26,10 +26,14 @@ function wrap(value, font, size, width) {
   return lines.length ? lines : [''];
 }
 
-async function buildInvoicePdf(snapshot, { preview = false, photoProvider = null, logoProvider = loadLogo } = {}) {
+function color(value, fallback) {
+  const hex = /^#[0-9a-f]{6}$/i.test(value || '') ? value : fallback;
+  return rgb(...[1, 3, 5].map(index => parseInt(hex.slice(index, index + 2), 16) / 255));
+}
+async function buildInvoicePdf(snapshot, { preview = false, photoProvider = null, logoProvider = loadLogo, paymentSummary = null } = {}) {
   if (!snapshot || snapshot.financialVersion !== 2 || snapshot.fingerprint !== fingerprint(Object.fromEntries(Object.entries(snapshot).filter(([key]) => key !== 'fingerprint')))) throw new HttpsError('failed-precondition', 'The issued invoice snapshot is invalid.');
   const pdf = await PDFDocument.create(), regular = await pdf.embedFont(StandardFonts.Helvetica), bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const green = rgb(0.03, 0.34, 0.25), dark = rgb(0.12, 0.19, 0.18), muted = rgb(0.38, 0.43, 0.42), width = 612, height = 792;
+  const green = color(snapshot.business.primaryColor, '#087c60'), dark = rgb(0.12, 0.19, 0.18), muted = color(snapshot.business.secondaryColor, '#54605e'), width = 612, height = 792;
   let page, y;
   const newPage = () => { page = pdf.addPage([width, height]); y = height - 48; };
   const line = (value, options = {}) => {
@@ -57,10 +61,10 @@ async function buildInvoicePdf(snapshot, { preview = false, photoProvider = null
     }
   }
   line(snapshot.business.name || 'Service provider', { size: 20, bold: true, color: green, width: 380 });
-  for (const value of [snapshot.business.address, snapshot.business.phone, snapshot.business.email]) if (value) line(value, { size: 9, color: muted });
+  for (const value of [snapshot.business.address, snapshot.business.phone, snapshot.business.email, snapshot.business.website]) if (value) line(value, { size: 9, color: muted });
   y -= 16;
   line(preview ? 'INVOICE PREVIEW — NOT ISSUED' : 'INVOICE', { size: 18, bold: true, color: green });
-  line(`Number: ${snapshot.invoiceNumber}`);
+  line(`Number: ${snapshot.invoiceNumber || 'Assigned when issued'}`);
   line(`Issued: ${snapshot.issueDate}    Due: ${snapshot.dueDate}`);
   y -= 12;
   line('BILL TO', { bold: true, color: green });
@@ -72,7 +76,7 @@ async function buildInvoicePdf(snapshot, { preview = false, photoProvider = null
   y -= 18;
   line('ITEMIZED SERVICES', { bold: true, color: green });
   for (const item of snapshot.lineItems) {
-    const amount = dollars(item.amountCents), qty = `${item.quantity} × ${dollars(item.unitPriceCents)}`;
+    const amount = dollars(item.amountCents), qty = `${item.quantity} x ${dollars(item.unitPriceCents)}`;
     const parts = wrap(`${item.description}  (${qty}${item.discountCents ? `, discount ${dollars(item.discountCents)}` : ''})`, regular, 10, 400);
     if (y < 65 + Math.min(parts.length, 3) * 15) newPage();
     page.drawText(amount, { x: width - 50 - bold.widthOfTextAtSize(amount, 10), y, size: 10, font: bold, color: dark });
@@ -84,6 +88,14 @@ async function buildInvoicePdf(snapshot, { preview = false, photoProvider = null
   line(`Subtotal: ${dollars(snapshot.subtotalCents)}`, { bold: true });
   line(`Tax (${snapshot.taxRate}%): ${dollars(snapshot.taxCents)}`);
   line(`Total: ${dollars(snapshot.totalCents)} USD`, { size: 14, bold: true, color: green });
+  if (!preview && paymentSummary && Number.isSafeInteger(paymentSummary.paidCents) && Number.isSafeInteger(paymentSummary.creditCents)
+    && Number.isSafeInteger(paymentSummary.balanceCents) && paymentSummary.paidCents >= 0 && paymentSummary.creditCents >= 0
+    && paymentSummary.balanceCents >= 0 && paymentSummary.paidCents + paymentSummary.creditCents + paymentSummary.balanceCents === snapshot.totalCents) {
+    y -= 8;
+    line(`Applied payments: -${dollars(paymentSummary.paidCents)}`);
+    if (paymentSummary.creditCents) line(`Applied credits: -${dollars(paymentSummary.creditCents)}`);
+    line(`Remaining balance: ${dollars(paymentSummary.balanceCents)}`, { size: 12, bold: true, color: green });
+  }
   if (snapshot.paymentTerms) { y -= 10; line('PAYMENT TERMS', { bold: true, color: green }); line(snapshot.paymentTerms); }
   if (photoProvider) for (const photo of snapshot.approvedPhotos || []) {
     const bytes = await photoProvider(photo.storagePath);
@@ -95,7 +107,11 @@ async function buildInvoicePdf(snapshot, { preview = false, photoProvider = null
     const scaled = image.scale(Math.min(500 / image.width, 620 / image.height));
     page.drawImage(image, { x: 50, y: Math.max(65, y - scaled.height), width: scaled.width, height: scaled.height });
   }
-  pdf.getPages().forEach((sheet, index) => sheet.drawText(`Page ${index + 1} of ${pdf.getPageCount()}`, { x: 500, y: 28, size: 9, font: regular, color: muted }));
+  pdf.getPages().forEach((sheet, index) => {
+    sheet.drawLine({ start: { x: 50, y: 43 }, end: { x: 562, y: 43 }, thickness: .6, color: muted });
+    sheet.drawText(text(snapshot.business.name || 'Service provider').slice(0, 60), { x: 50, y: 28, size: 8, font: regular, color: muted });
+    sheet.drawText(`Page ${index + 1} of ${pdf.getPageCount()}`, { x: 500, y: 28, size: 9, font: regular, color: muted });
+  });
   return Buffer.from(await pdf.save());
 }
 
@@ -119,9 +135,9 @@ function invoicePdfHandler(db) {
     if (!preview && !row.get('issuedSnapshot')) throw new HttpsError('failed-precondition', 'Invoice has not been issued.');
     const company = preview && row.get('companyId') ? await db.doc(`companies/${row.get('companyId')}`).get() : null;
     const snapshot = preview ? publicSnapshot(row.data(), company?.data() || {}) : row.get('issuedSnapshot');
-    const bytes = await buildInvoicePdf(snapshot, { preview, photoProvider: approvedPhotoBytes });
+    const bytes = await buildInvoicePdf(snapshot, { preview, photoProvider: approvedPhotoBytes, paymentSummary: preview ? null : { paidCents: row.get('paidCents') || 0, creditCents: row.get('creditCents') || 0, balanceCents: row.get('balanceCents') } });
     if (bytes.length > 8 * 1024 * 1024) throw new HttpsError('resource-exhausted', 'Invoice PDF is too large.');
-    return { fileName: `${snapshot.invoiceNumber}.pdf`, base64: bytes.toString('base64'), contentType: 'application/pdf' };
+    return { fileName: `${snapshot.invoiceNumber || 'draft-invoice'}.pdf`, base64: bytes.toString('base64'), contentType: 'application/pdf' };
   };
 }
 

@@ -1,5 +1,5 @@
 // Client draft validation only. The backend owns all prices, totals and versions.
-const blankLine = kind => ({ kind, description: '', quantity: '1', unitPrice: '', unit: kind === 'labor' ? 'hour' : 'item' });
+const blankLine = kind => ({ kind, description: '', quantity: '1', unitPrice: '', discount: '0', unit: kind === 'labor' ? 'hour' : 'item' });
 const blankEstimate = () => ({ customerId: '', prospect: { name: '', email: '', phone: '', address: '' }, title: '', serviceType: '', scopeOfWork: '', notes: '', technicianNotes: '', internalReviewNotes: '', validDays: '30', taxRate: '0', lineItems: [blankLine('labor'), blankLine('material')], photoIds: [] });
 function propertyInput(value = {}) {
   const address = String(value.serviceProperty?.address || '').trim(), serviceCategory = String(value.serviceCategory || '').trim();
@@ -7,7 +7,7 @@ function propertyInput(value = {}) {
   return { ...(Object.hasOwn(value, 'serviceProperty') ? { serviceProperty: { address } } : {}), ...(Object.hasOwn(value, 'serviceCategory') ? { serviceCategory } : {}), ...(Object.hasOwn(value, 'serviceAreaExceptionId') ? { serviceAreaExceptionId: address && value.serviceAreaExceptionId || null } : {}) };
 }
 function draftFromEstimate(estimate) {
-  return { ...blankEstimate(), ...estimate, prospect: { ...blankEstimate().prospect, ...(!estimate.customerId ? estimate.recipient || { name: estimate.customerName || '', email: estimate.customerEmail || '', address: estimate.address || '' } : {}), ...(estimate.prospect || {}) }, lineItems: (estimate.lineItems || []).map(line => ({ ...line, quantity: String(line.quantity), unitPrice: String(line.unitPrice ?? (Number(line.unitPriceCents || 0) / 100)) })), taxRate: String(estimate.taxRate ?? Number(estimate.taxBasisPoints || 0) / 100), validDays: String(estimate.validDays || 30), photoIds: estimate.photoIds || [] };
+  return { ...blankEstimate(), ...estimate, prospect: { ...blankEstimate().prospect, ...(!estimate.customerId ? estimate.recipient || { name: estimate.customerName || '', email: estimate.customerEmail || '', address: estimate.address || '' } : {}), ...(estimate.prospect || {}) }, lineItems: (estimate.lineItems || []).map(line => ({ ...line, quantity: String(line.quantity), unitPrice: String(line.unitPrice ?? (Number(line.unitPriceCents || 0) / 100)), discount: String(line.discount ?? 0) })), taxRate: String(estimate.taxRate ?? Number(estimate.taxBasisPoints || 0) / 100), validDays: String(estimate.validDays || 30), photoIds: estimate.photoIds || [] };
 }
 function estimateInput(draft) {
   if (!draft.title?.trim() || !draft.serviceType?.trim() || !draft.scopeOfWork?.trim()) throw new Error('Add a title, service type and scope of work.');
@@ -17,7 +17,9 @@ function estimateInput(draft) {
   const cleaned = lines.map(line => {
     const quantity = Number(line.quantity), unitPrice = Number(line.unitPrice);
     if (!['labor', 'material', 'service'].includes(line.kind) || !line.description?.trim() || !Number.isFinite(quantity) || quantity <= 0 || quantity > 100000 || !/^\d+(\.\d{1,3})?$/.test(String(line.quantity).trim()) || !/^\d+(\.\d{1,2})?$/.test(String(line.unitPrice).trim()) || !Number.isFinite(unitPrice) || unitPrice < 0 || unitPrice > 1000000) throw new Error('Each line needs a description, positive quantity (up to three decimals) and a non-negative price (up to two decimals).');
-    return { kind: line.kind, description: line.description.trim(), quantity, unitPrice };
+    const discount = Number(line.discount || 0);
+    if (!Number.isFinite(discount) || discount < 0 || !/^\d+(\.\d{1,2})?$/.test(String(line.discount || 0).trim())) throw new Error('Use a non-negative line discount with up to two decimal places.');
+    return { kind: line.kind, description: line.description.trim(), quantity, unitPrice, discount };
   });
   const taxRate = Number(draft.taxRate || 0), validDays = Number(draft.validDays || 30);
   if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100 || !/^\d+(\.\d{1,2})?$/.test(String(draft.taxRate || 0)) || !Number.isInteger(validDays) || validDays < 1 || validDays > 90) throw new Error('Tax must be 0–100% (up to two decimals); validity must be 1–90 days.');

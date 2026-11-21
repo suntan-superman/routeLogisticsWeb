@@ -47,12 +47,13 @@ test('PW-INVOICE-01 @smoke owner reviews approved 108.25 terms, creates once and
   const created = await createdResponse; expect(created.ok()).toBe(true); const result = (await created.json()).result;
   await expect(page.getByRole('heading', { name: 'Invoices', exact: true })).toBeVisible();
   const records = await createdForJob(); expect(records).toHaveLength(1);
+  expect(records[0].invoiceNumber).toBeNull();
   expect(records[0]).toMatchObject({ id: result.id, status: 'draft', revision: 1, subtotalCents: 10000, taxCents: 825, totalCents: 10825, subtotal: 100, tax: 8.25, total: 108.25, estimateId: scenario.ids.estimateId, estimateVersion: 1 });
   expect(records[0].lineItems).toEqual([expect.objectContaining({ description: 'Synthetic inspection', quantity: 1, unitPriceCents: 10000, amountCents: 10000 })]);
   const invoiceRow = page.locator(`[id="invoice-${result.id}"]`);
   await expect(invoiceRow).toContainText('$108.25'); await expect(invoiceRow.getByText('Historical invoice — source needs review', { exact: true })).toHaveCount(0);
   await page.goto('/jobs'); await openJob.click(); await details.getByRole('button', { name: 'Create Invoice', exact: true }).click();
-  await expect(preview.getByText(`Existing invoice: ${records[0].invoiceNumber}`, { exact: true })).toBeVisible();
+  await expect(preview.getByText('Existing invoice: Draft — unnumbered', { exact: true })).toBeVisible();
   await expect(preview.getByRole('button', { name: 'Create draft invoice', exact: true })).toHaveCount(0);
   await preview.getByRole('button', { name: 'Open existing invoice', exact: true }).click();
   await expect(invoiceRow).toBeVisible(); expect(await createdForJob()).toHaveLength(1);
@@ -62,6 +63,7 @@ test('PW-INVOICE-01 @smoke owner reviews approved 108.25 terms, creates once and
   await expect(invoiceRow.getByRole('button', { name: 'Issue', exact: true })).toBeVisible();
   await invoiceRow.getByRole('button', { name: 'Issue', exact: true }).click();
   await expect(invoiceRow.getByText('issued', { exact: true })).toBeVisible();
+  await expect(invoiceRow).toContainText(/\d{8}-I\d{3}/);
   await expect(invoiceRow.getByRole('button', { name: 'View PDF', exact: true })).toBeVisible();
   await invoiceRow.getByRole('button', { name: 'Void', exact: true }).click();
   await page.getByRole('dialog', { name: 'Void this invoice?', exact: true }).getByRole('button', { name: 'Void invoice', exact: true }).click();

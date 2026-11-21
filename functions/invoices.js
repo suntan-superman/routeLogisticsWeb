@@ -3,6 +3,7 @@ const { requireCapability, hasCapability } = require('./access');
 const { documentId, hash, normalizeEmail, rateLimit } = require('./security');
 const { calculateTotals, approvedBillingSnapshot, canonical, fingerprint, financialReviewReasons } = require('./shared/invoiceMath');
 const { assertCurrentInvoice, publicSnapshot } = require('./shared/invoiceV2');
+const { allocateDocumentNumber, localDocumentDay } = require('./shared/documentNumbers');
 const fail = (code, message, details) => { throw new HttpsError(code, message, details); };
 const scoped = (scope, data) => !!data && (scope.companyId ? data.companyId === scope.companyId : !data.companyId && data.userId === scope.uid);
 const scopeKey = scope => scope.companyId ? `company:${scope.companyId}` : `solo:${scope.uid}`;
@@ -124,7 +125,7 @@ function invoiceHandlers(db, { now = () => Date.now(), trustedSystem = false } =
   }
   function recordMutation(tx, scope, operationRef, operationFingerprint, invoiceId, before, after, action, result) {
     const auditId = hash(`mutation:${scopeKey(scope)}:${scope.uid}:${operationRef.id}`);
-    const metadata = ['status', 'notes', 'customerFacingSummary', 'paymentTerms', 'approvedPhotos', 'lineItems', 'taxRate', 'totalCents', 'pricingOverrideReason', 'issueDate', 'dueDate', 'approvedAt', 'issuedAt', 'voidedAt'];
+    const metadata = ['status', 'notes', 'customerFacingSummary', 'paymentTerms', 'approvedPhotos', 'lineItems', 'taxRate', 'totalCents', 'pricingOverrideReason', 'issueDate', 'dueDate', 'approvedAt', 'approvalRevokedAt', 'approvalRevocationReason', 'invoiceNumber', 'issuedAt', 'voidedAt'];
     const changedFields = metadata.filter(key => fingerprint(before?.[key] ?? null) !== fingerprint(after[key] ?? null));
     tx.create(operationRef, { companyId: scope.companyId || null, userId: scope.uid, invoiceId, fingerprint: operationFingerprint, action, result, createdAt: new Date(now()) });
     tx.create(ref('rlInvoiceAudit', auditId), { companyId: scope.companyId || null, actorId: scope.uid, invoiceId, action, fromRevision: before ? invoiceRevision(before) : null, toRevision: invoiceRevision(after), fromStatus: before?.status || null, toStatus: after.status, totalCents: after.totalCents ?? null, sourceFingerprint: after.sourceFingerprint || null,
@@ -132,8 +133,8 @@ function invoiceHandlers(db, { now = () => Date.now(), trustedSystem = false } =
   }
   return { handle: async request => {
     const scope = await requireCapability(db, request, 'invoices.manage'), data = request.data || {}, action = data.action;
-    if (!['preview', 'create', 'replace', 'previewGroup', 'createGroup', 'createManual', 'update', 'status'].includes(action)) fail('invalid-argument', 'Choose a supported invoice action.');
-    const allowed = action === 'preview' ? ['action','jobId','replacementOf','expectedRevision'] : ['create','replace'].includes(action) ? ['action','jobId','operationId','sourceFingerprint','notes','dueInDays', ...(action === 'replace' ? ['replacementOf','expectedRevision'] : [])] : action === 'previewGroup' ? ['action','jobIds'] : action === 'createGroup' ? ['action','jobIds','operationId','sourceFingerprint','dueInDays'] : action === 'createManual' ? ['action','customerId','lineItems','taxRate','servicePropertyAddress','customerFacingSummary','paymentTerms','dueInDays','operationId'] : action === 'update' ? ['action','invoiceId','operationId','expectedRevision','changes'] : ['action','invoiceId','operationId','expectedRevision','status','paymentMethod'];
+    if (!['preview', 'create', 'replace', 'previewGroup', 'createGroup', 'createManual', 'update', 'status', 'unlock'].includes(action)) fail('invalid-argument', 'Choose a supported invoice action.');
+    const allowed = action === 'preview' ? ['action','jobId','replacementOf','expectedRevision'] : ['create','replace'].includes(action) ? ['action','jobId','operationId','sourceFingerprint','notes','dueInDays', ...(action === 'replace' ? ['replacementOf','expectedRevision'] : [])] : action === 'previewGroup' ? ['action','jobIds'] : action === 'createGroup' ? ['action','jobIds','operationId','sourceFingerprint','dueInDays'] : action === 'createManual' ? ['action','customerId','lineItems','taxRate','servicePropertyAddress','customerFacingSummary','paymentTerms','dueInDays','operationId'] : action === 'update' ? ['action','invoiceId','operationId','expectedRevision','changes'] : action === 'unlock' ? ['action','invoiceId','operationId','expectedRevision','reason'] : ['action','invoiceId','operationId','expectedRevision','status','paymentMethod'];
     knownFields(data, allowed);
     if (!trustedSystem) await rateLimit(db, 'invoice-' + action, scope.uid, action === 'preview' ? 60 : 30);
     let operationRef, operationFingerprint;
@@ -176,7 +177,7 @@ function invoiceHandlers(db, { now = () => Date.now(), trustedSystem = false } =
           customerId: sources[0].customer.id, customerName: sources[0].customer.get('name') || '', customerEmail: normalizeEmail(sources[0].customer.get('email')),
           customerAddress: sources[0].customer.get('address') || '', ...snapshot, billingSource: { kind: 'consolidated', jobIds: sorted, sources: sources.map(source => source.snapshot) }, sourceFingerprint,
           sourceJobVersions: Object.fromEntries(contexts.map(item => [item.job.id, item.job.get('updatedAt') || null])),
-          invoiceNumber: invoiceNumber(groupId, 1), financialVersion: 2, status: 'draft', revision: 1, rlManaged: true, paidCents: 0, creditCents: 0, balanceCents: snapshot.totalCents,
+          invoiceNumber: null, numberingVersion: 1, financialVersion: 2, status: 'draft', revision: 1, rlManaged: true, paidCents: 0, creditCents: 0, balanceCents: snapshot.totalCents,
           notes: '', customerFacingSummary: '', issueDate, dueDate, createdAt: new Date(now()), updatedAt: new Date(now()) };
         const result = { id: invoiceId, invoiceId, invoice: canonical({ ...invoice, id: invoiceId }), existing: false };
         tx.create(destination, invoice);
@@ -205,7 +206,7 @@ function invoiceHandlers(db, { now = () => Date.now(), trustedSystem = false } =
         const issueDate = new Date(now()).toISOString().slice(0, 10), dueDate = new Date(Date.parse(issueDate) + dueInDays * 86400000).toISOString().slice(0, 10);
         const invoice = { companyId: scope.companyId || null, userId: scope.uid, customerId, customerName: customer.get('name') || '', customerEmail: normalizeEmail(customer.get('email')),
           customerAddress: customer.get('address') || '', billingSource: { kind: 'manual', serviceProperty: { address: servicePropertyAddress } }, sourceFingerprint: fingerprint({ customerId, totals, servicePropertyAddress }),
-          ...totals, invoiceNumber: number, financialVersion: 2, status: 'draft', revision: 1, rlManaged: true, paidCents: 0, creditCents: 0, balanceCents: totals.totalCents,
+          ...totals, invoiceNumber: null, numberingVersion: 1, financialVersion: 2, status: 'draft', revision: 1, rlManaged: true, paidCents: 0, creditCents: 0, balanceCents: totals.totalCents,
           notes: '', customerFacingSummary, paymentTerms, issueDate, dueDate, createdAt: new Date(now()), updatedAt: new Date(now()) };
         const result = { id: invoiceId, invoiceId, invoice: canonical({ ...invoice, id: invoiceId }), existing: false };
         tx.create(destination, invoice); recordMutation(tx, scope, operationRef, operationFingerprint, invoiceId, null, invoice, 'invoice.createManual', result);
@@ -242,7 +243,7 @@ function invoiceHandlers(db, { now = () => Date.now(), trustedSystem = false } =
         const issueDate = new Date(now()).toISOString().slice(0,10), dueDate = new Date(Date.parse(issueDate) + dueInDays * 86400000).toISOString().slice(0,10);
         const invoice = { companyId: scope.companyId || null, userId: job.get('userId') || scope.uid, jobId, customerId: source.customer.id, customerName: source.customer.get('name') || job.get('customerName') || '',
           customerEmail: normalizeEmail(source.customer.get('email')), customerAddress: snapshot.serviceProperty?.address || source.customer.get('address') || '', ...snapshot,
-          billingSource: snapshot, sourceFingerprint: source.sourceFingerprint, sourceJobVersions: { [jobId]: job.get('updatedAt') || null }, invoiceNumber: displayNumber,
+          billingSource: snapshot, sourceFingerprint: source.sourceFingerprint, sourceJobVersions: { [jobId]: job.get('updatedAt') || null }, invoiceNumber: null, numberingVersion: 1,
           status: 'draft', financialVersion: 2, paidCents: 0, creditCents: 0, balanceCents: snapshot.totalCents,
           revision: 1, rlManaged: true, notes, customerFacingSummary: '', issueDate, dueDate, createdAt: new Date(now()), updatedAt: new Date(now()), ...(existing ? { replacementOf: existing.id } : {}) };
         const result = { id: invoiceId, invoiceId, invoice: canonical({ ...invoice, id: invoiceId }), existing: false };
@@ -293,7 +294,12 @@ function invoiceHandlers(db, { now = () => Date.now(), trustedSystem = false } =
         if (data.changes.dueDate !== undefined) patch.dueDate = day(data.changes.dueDate, 'due date');
         if ((patch.dueDate || invoice.dueDate) < (patch.issueDate || invoice.issueDate)) fail('invalid-argument', 'Due date cannot be before the issue date.');
       } else {
-        const transitions = { draft: ['awaiting_approval', 'void'], awaiting_approval: ['draft', 'approved', 'void'], approved: ['draft', 'issued', 'void'], issued: ['void'], partially_paid: [] };
+        if (action === 'unlock') {
+          const reason = typeof data.reason === 'string' ? data.reason.trim() : '';
+          if (invoice.status !== 'approved' || reason.length < 5 || reason.length > 500) fail('failed-precondition', 'Only an approved, unissued invoice can be unlocked with a reason. Issued invoices require an audited void and replacement.');
+          Object.assign(patch, { status: 'draft', approvedAt: null, approvedBy: null, approvalRevokedBy: scope.uid, approvalRevokedAt: new Date(now()), approvalRevocationReason: reason });
+        } else {
+        const transitions = { draft: ['awaiting_approval', 'void'], awaiting_approval: ['draft', 'approved', 'void'], approved: ['issued', 'void'], issued: ['void'], partially_paid: [] };
         if (!transitions[invoice.status]?.includes(data.status)) fail('failed-precondition', 'That invoice transition is not permitted. Refresh the invoice.');
         if (data.paymentMethod !== undefined) fail('invalid-argument', 'Record payments through the audited payment ledger.');
         if (['approved', 'issued'].includes(data.status)) { assertInvoiceTerms(invoice); await assertInvoiceRelationships(db, tx, scope, invoice); }
@@ -303,18 +309,28 @@ function invoiceHandlers(db, { now = () => Date.now(), trustedSystem = false } =
         if (data.status === 'issued') {
           if (!invoice.approvedAt || !invoice.approvedBy) fail('failed-precondition', 'Management approval is required before issuing.');
           const company = scope.companyId ? await tx.get(ref('companies', scope.companyId)) : null;
-          patch.issuedSnapshot = publicSnapshot(invoice, company?.data() || {});
-          patch.issuedAt = new Date(now());
+          const issuedAt = new Date(now());
+          if (invoice.numberingVersion === 1 && !invoice.invoiceNumber) {
+            patch.invoiceNumber = await allocateDocumentNumber(tx, db, { companyId: scope.companyId, userId: scope.uid, kind: 'I', timeZone: company?.get('timeZone') || 'America/Los_Angeles', date: issuedAt });
+            const day = localDocumentDay(issuedAt, company?.get('timeZone') || 'America/Los_Angeles');
+            const issueDate = `${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6)}`;
+            const priorDays = Math.max(0, Math.round((Date.parse(`${invoice.dueDate}T00:00:00Z`) - Date.parse(`${invoice.issueDate}T00:00:00Z`)) / 86400000));
+            patch.issueDate = issueDate;
+            patch.dueDate = new Date(Date.parse(`${issueDate}T00:00:00Z`) + priorDays * 86400000).toISOString().slice(0, 10);
+          }
+          patch.issuedSnapshot = publicSnapshot({ ...invoice, ...patch }, company?.data() || {});
+          patch.issuedAt = issuedAt;
           patch.balanceCents = invoice.totalCents;
         }
         if (data.status === 'void') {
           if (invoice.paidCents || invoice.creditCents) fail('failed-precondition', 'An invoice with payment activity requires an audited correction before voiding.');
           patch.voidedAt = new Date(now());
         }
+        }
       }
       const updated = { ...invoice, ...patch }, result = { id: invoiceId, invoiceId, invoice: canonical({ ...updated, id: invoiceId }), existing: false };
       tx.update(invoiceRef, patch);
-      recordMutation(tx, scope, operationRef, operationFingerprint, invoiceId, invoice, updated, action === 'status' ? 'invoice.' + data.status : 'invoice.update', result);
+      recordMutation(tx, scope, operationRef, operationFingerprint, invoiceId, invoice, updated, action === 'status' ? 'invoice.' + data.status : action === 'unlock' ? 'invoice.approval-revoked' : 'invoice.update', result);
       return result;
     });
   } };

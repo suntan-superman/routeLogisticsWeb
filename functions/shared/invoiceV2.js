@@ -1,5 +1,6 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { fingerprint, financialReviewReasons } = require('./invoiceMath');
+const { companyAddress } = require('./companyAddress');
 
 const fail = message => { throw new HttpsError('failed-precondition', message); };
 const isCurrentInvoice = invoice => invoice?.financialVersion === 2;
@@ -22,9 +23,12 @@ function publicSnapshot(invoice, company = {}) {
     business: {
       name: safe(company.name || company.businessName || invoice.businessName),
       email: safe(company.email), phone: safe(company.phone),
-      address: [company.address, company.city, company.state, company.zipCode].filter(Boolean).join(', '),
+      address: companyAddress(company),
       logo: safe(company.logo),
       logoCompanyId: safe(invoice.companyId),
+      website: safe(company.website),
+      primaryColor: safe(company.primaryColor),
+      secondaryColor: safe(company.secondaryColor),
     },
     customer: { name: safe(invoice.customerName), email: safe(invoice.customerEmail), billingAddress: safe(invoice.billingAddress || invoice.customerAddress) },
     propertyAddress: safe(invoice.billingSource?.serviceProperty?.address || invoice.customerAddress),

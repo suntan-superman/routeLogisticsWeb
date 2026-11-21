@@ -7,6 +7,15 @@ test('estimate totals use integer cents, round line quantities and tax once, and
   assert.equal(totals.subtotalCents,21011);assert.equal(totals.taxCents,1576);assert.equal(totals.totalCents,22587);
   const draft=cleanDraft({title:'Quote',serviceType:'Service',lineItems:[{kind:'service',description:'Visit',quantity:1,unitPrice:10}],totalCents:1,total:0});assert.equal(draft.totalCents,1000);
 });
+test('estimate line discounts reduce the taxable amount without trusting client totals',()=>{
+  const totals=estimateTotals([{kind:'service',description:'Synthetic service',quantity:2,unitPrice:50,discount:10}],8);
+  assert.equal(totals.grossSubtotalCents,10000);
+  assert.equal(totals.discountCents,1000);
+  assert.equal(totals.subtotalCents,9000);
+  assert.equal(totals.taxCents,720);
+  assert.equal(totals.totalCents,9720);
+  assert.throws(()=>estimateTotals([{kind:'service',description:'Synthetic service',quantity:1,unitPrice:50,discount:51}]));
+});
 test('estimate amounts reject malformed, negative, overflowing and overly precise values',()=>{
   const item={kind:'service',description:'Visit',quantity:1,unitPrice:10};
   for(const patch of [{quantity:0},{quantity:-1},{quantity:.0001},{unitPrice:-1},{unitPrice:1.001},{unitPrice:Infinity},{unitPrice:'10'},{unitPrice:1000000000}])assert.throws(()=>estimateTotals([{...item,...patch}]));

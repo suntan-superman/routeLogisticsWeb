@@ -25,7 +25,10 @@ async function deliverMail(db, ref, transport, from, now = Date.now(), options =
       const customer = issued && invoice.get('customerId') ? await tx.get(db.collection('customers').doc(invoice.get('customerId'))) : null;
       const currentRecipient = String(customer?.get('email') || '').trim().toLowerCase();
       const sameTenant = customer?.exists && (invoice.get('companyId') ? customer.get('companyId') === invoice.get('companyId') : !customer.get('companyId') && customer.get('userId') === invoice.get('userId'));
-      if (!issued || !['issued', 'partially_paid'].includes(invoice.get('status')) || (invoice.get('balanceCents') || 0) <= 0
+      if (!issued || !['issued', 'partially_paid', 'paid'].includes(invoice.get('status')) || !Number.isSafeInteger(invoice.get('balanceCents'))
+        || invoice.get('balanceCents') < 0 || data.invoiceBalanceCents === undefined && invoice.get('balanceCents') === 0
+        || data.subject?.startsWith('Payment reminder:') && invoice.get('balanceCents') === 0
+        || Number.isSafeInteger(data.invoiceBalanceCents) && (invoice.get('balanceCents') !== data.invoiceBalanceCents || (invoice.get('paidCents') || 0) !== data.invoicePaidCents || (invoice.get('creditCents') || 0) !== data.invoiceCreditCents)
         || !sameTenant || customer.get('isActive') === false || customer.get('deletedAt') || currentRecipient !== data.to) {
         tx.update(ref, { status: 'cancelled', failureCode: 'invoice-or-recipient-changed' }); return null;
       }
@@ -100,13 +103,14 @@ async function deliverMail(db, ref, transport, from, now = Date.now(), options =
       if (!Number.isFinite(Number(metadata.size)) || Number(metadata.size) > 10 * 1024 * 1024 || metadata.contentType !== 'application/pdf') throw Object.assign(new Error('Unsupported estimate document.'),{code:'estimate-pdf-invalid'});
       const [bytes] = await file.download();
       if (bytes.length > 10 * 1024 * 1024 || bytes.subarray(0,5).toString() !== '%PDF-') throw Object.assign(new Error('Unsupported estimate document.'),{code:'estimate-pdf-invalid'});
-      attachments = [{ filename:`estimate-v${mail.estimateVersion}.pdf`, content:bytes, contentType:'application/pdf' }];
+      attachments = [{ filename:`${mail.estimateNumber || 'estimate'}-v${mail.estimateVersion}.pdf`, content:bytes, contentType:'application/pdf' }];
     }
     if (mail.invoiceId) {
       const invoice = await db.doc(`invoices/${mail.invoiceId}`).get();
       if (!invoice.exists || invoice.get('issuedSnapshot')?.fingerprint !== mail.invoiceSnapshotFingerprint) throw Object.assign(new Error('Invoice snapshot changed.'), { code: 'invoice-snapshot-changed' });
       const { buildInvoicePdf, approvedPhotoBytes } = require('./invoicePdf');
-      const bytes = await buildInvoicePdf(invoice.get('issuedSnapshot'), { photoProvider: approvedPhotoBytes });
+      const bytes = await buildInvoicePdf(invoice.get('issuedSnapshot'), { photoProvider: approvedPhotoBytes,
+        paymentSummary: { paidCents: invoice.get('paidCents') || 0, creditCents: invoice.get('creditCents') || 0, balanceCents: invoice.get('balanceCents') } });
       if (bytes.length > 8 * 1024 * 1024) throw Object.assign(new Error('Invoice PDF too large.'), { code: 'invoice-pdf-too-large' });
       attachments = [{ filename: `${invoice.get('invoiceNumber') || 'invoice'}.pdf`, content: bytes, contentType: 'application/pdf' }];
     }

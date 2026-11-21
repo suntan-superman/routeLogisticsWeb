@@ -56,6 +56,9 @@ const setStatus = (id, status, options = {}, extra = {}) => invoke('status', {
 });
 export const submitInvoiceForApproval = (id, options = {}) => setStatus(id, 'awaiting_approval', options);
 export const approveInvoice = (id, options = {}) => setStatus(id, 'approved', options);
+export const unlockApprovedInvoice = (id, reason, options = {}) => invoke('unlock', {
+  invoiceId: id, reason, expectedRevision: options.expectedRevision, operationId: operationId(options),
+});
 export const issueInvoice = (id, options = {}) => setStatus(id, 'issued', options);
 export const voidInvoice = (id, options = {}) => setStatus(id, 'void', options);
 

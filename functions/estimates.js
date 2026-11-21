@@ -30,6 +30,7 @@ const { serviceAreaHandlers } = require('./serviceAreas');
 const { validatedCustomerAddress } = require('./customerAddresses');
 const { approvedBillingSnapshot } = require('./shared/invoiceMath');
 const { lifecycleFor } = require('./shared/customerLifecycle');
+const { allocateDocumentNumber } = require('./shared/documentNumbers');
 const PHOTO_LIMIT = 1572864,
   PDF_LIMIT = 10 * 1024 * 1024;
 const timestamp = value => value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : Date.parse(value || '');
@@ -47,14 +48,19 @@ function decimal(value, places, label) {
 }
 function estimateTotals(items, taxRate = 0, { allowEmpty = false } = {}) {
   if (!Array.isArray(items) || items.length > 50 || !allowEmpty && !items.length) fail('invalid-argument', 'Include between 1 and 50 labor, material or service lines.');
-  let subtotal = 0n;
+  let subtotal = 0n, grossSubtotal = 0n, discounts = 0n;
   const lineItems = items.map(item => {
     const description = typeof item.description === 'string' ? item.description.trim() : '';
     if (!description || description.length > 300 || !['labor', 'material', 'service'].includes(item.kind)) fail('invalid-argument', 'Each estimate line needs a description and valid kind.');
     const quantity = decimal(item.quantity, 3, 'Quantity'),
       unitPrice = decimal(item.unitPrice, 2, 'Unit price');
     if (quantity === 0n) fail('invalid-argument', 'Line quantities must be greater than zero.');
-    const amount = (quantity * unitPrice + 500n) / 1000n;
+    const gross = (quantity * unitPrice + 500n) / 1000n;
+    const discount = decimal(item.discount ?? 0, 2, 'Discount');
+    if (discount > gross) fail('invalid-argument', 'A line discount cannot exceed its amount.');
+    const amount = gross - discount;
+    grossSubtotal += gross;
+    discounts += discount;
     subtotal += amount;
     return {
       kind: item.kind,
@@ -62,6 +68,9 @@ function estimateTotals(items, taxRate = 0, { allowEmpty = false } = {}) {
       quantity: item.quantity,
       unitPrice: Number(unitPrice) / 100,
       unitPriceCents: Number(unitPrice),
+      discount: Number(discount) / 100,
+      discountCents: Number(discount),
+      amount: Number(amount) / 100,
       amountCents: Number(amount)
     };
   });
@@ -73,6 +82,8 @@ function estimateTotals(items, taxRate = 0, { allowEmpty = false } = {}) {
   return {
     lineItems,
     taxRate: Number(rate) / 100,
+    grossSubtotalCents: Number(grossSubtotal),
+    discountCents: Number(discounts),
     subtotalCents: Number(subtotal),
     taxCents: Number(tax),
     totalCents: Number(total),
@@ -123,10 +134,15 @@ const managed = (scope, row) => {
   if (!row.exists || !scoped(scope, row.data())) fail('permission-denied', 'Estimate is not available in your workspace.');
 };
 const printable = value => String(value || '').replace(/[^\x20-\x7e\xa0-\xff\n]/g, '?');
+const brandColor = (value, fallback = '#087c60') => {
+  const hex = /^#[0-9a-f]{6}$/i.test(value || '') ? value : fallback;
+  return rgb(...[1, 3, 5].map(index => parseInt(hex.slice(index, index + 2), 16) / 255));
+};
 async function createEstimatePdf(estimate, company, photos = [], logo = null) {
   const pdf = await PDFDocument.create(),
     font = await pdf.embedFont(StandardFonts.Helvetica),
     bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const primary = brandColor(company.primaryColor), secondary = brandColor(company.secondaryColor, '#405a52');
   let page, y;
   const next = () => {
     page = pdf.addPage([612, 792]);
@@ -142,48 +158,63 @@ async function createEstimatePdf(estimate, company, photos = [], logo = null) {
   const line = (value, {
     size = 11,
     strong = false,
-    color = rgb(.12, .16, .18)
+    color = rgb(.12, .16, .18),
+    x = 44,
+    width = 520,
+    gap = 6
   } = {}) => {
     const selected = strong ? bold : font;
     let current = '';
-    const words = printable(value).split(/\s+/);
+    const words = printable(value).split(/\s+/).flatMap(word => {
+      const pieces = []; let part = '';
+      for (const char of word) {
+        if (selected.widthOfTextAtSize(part + char, size) > width && part) { pieces.push(part); part = ''; }
+        part += char;
+      }
+      if (part) pieces.push(part);
+      return pieces;
+    });
     for (const word of words) {
       const candidate = current ? current + ' ' + word : word;
-      if (selected.widthOfTextAtSize(candidate, size) > 520 && current) {
+      if (selected.widthOfTextAtSize(candidate, size) > width && current) {
         if (y < 50) next();
         page.drawText(current, {
-          x: 44,
+          x,
           y,
           size,
           font: selected,
           color
         });
-        y -= size + 6;
+        y -= size + 4;
         current = word;
       } else current = candidate;
     }
     if (y < 50) next();
     page.drawText(current, {
-      x: 44,
+      x,
       y,
       size,
       font: selected,
       color
     });
-    y -= size + 9;
+    y -= size + gap;
   };
-  line(company.name || company.businessName || 'Route Logistics', {
+  const companyName = company.name || company.businessName || 'Service provider';
+  line(companyName, {
     size: 22,
     strong: true,
-    color: rgb(.02, .4, .27)
+    color: primary
   });
+  const businessAddress = require('./shared/companyAddress').companyAddress(company);
+  if (businessAddress) line(businessAddress, { size: 9, color: secondary });
   if (company.phone || company.phoneNumber) line(company.phone || company.phoneNumber, {
-    size: 10
+    size: 9, color: secondary
   });
-  line(`Estimate ${estimate.estimateNumber} / version ${estimate.version}`, {
-    size: 15,
-    strong: true
-  });
+  if (company.email) line(company.email, { size: 9, color: secondary });
+  if (company.website) line(company.website, { size: 9, color: secondary });
+  y -= 12;
+  line(estimate.estimateNumber ? 'ESTIMATE' : 'ESTIMATE DRAFT — NOT APPROVED', { size: 20, strong: true, color: primary });
+  line(`Number: ${estimate.estimateNumber || 'Assigned when approved'}    Version: ${estimate.version}`, { size: 10 });
   line(estimate.title, {
     size: 14,
     strong: true
@@ -191,6 +222,10 @@ async function createEstimatePdf(estimate, company, photos = [], logo = null) {
   line(`Prepared for: ${estimate.recipient.name}`);
   if (estimate.recipient.address) line(estimate.recipient.address);
   if (estimate.serviceProperty?.address) line(`Service property: ${estimate.serviceProperty.address}`);
+  if (dateString(estimate.createdAt)) {
+    const day = require('./shared/documentNumbers').localDocumentDay(estimate.createdAt, company.timeZone || 'America/Los_Angeles');
+    line(`Created: ${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6)}`);
+  }
   line(`Valid until: ${estimate.validUntil.slice(0, 10)}`);
   line('Scope of work', {
     strong: true
@@ -199,7 +234,55 @@ async function createEstimatePdf(estimate, company, photos = [], logo = null) {
   line('Labor, materials and services', {
     strong: true
   });
-  for (const item of estimate.lineItems) line(`${item.description} - ${item.quantity} x $${item.unitPrice.toFixed(2)} = $${(item.amountCents / 100).toFixed(2)}`);
+  const itemWidth = 330;
+  const itemLines = value => {
+    const result = [], words = printable(value).split(/\s+/).flatMap(word => {
+      const pieces = []; let part = '';
+      for (const char of word) {
+        if (font.widthOfTextAtSize(part + char, 10) > itemWidth && part) { pieces.push(part); part = ''; }
+        part += char;
+      }
+      if (part) pieces.push(part);
+      return pieces;
+    }); let row = '';
+    for (const word of words) {
+      const candidate = row ? `${row} ${word}` : word;
+      if (font.widthOfTextAtSize(candidate, 10) > itemWidth && row) { result.push(row); row = word; }
+      else row = candidate;
+    }
+    if (row) result.push(row);
+    return result.length ? result : [''];
+  };
+  const tableHead = () => {
+    if (pdf.getPageCount() > 1) line(`Estimate ${estimate.estimateNumber || 'draft'} · continued`, { size: 9, color: secondary });
+    page.drawText('DESCRIPTION', { x: 44, y, size: 8, font: bold, color: secondary });
+    page.drawText('QTY', { x: 392, y, size: 8, font: bold, color: secondary });
+    page.drawText('RATE', { x: 442, y, size: 8, font: bold, color: secondary });
+    page.drawText('AMOUNT', { x: 518, y, size: 8, font: bold, color: secondary });
+    y -= 17;
+  };
+  tableHead();
+  for (let index = 0; index < estimate.lineItems.length; index++) {
+    const item = estimate.lineItems[index];
+    const description = itemLines(item.description);
+    const rowHeight = description.length * 14 + (item.discountCents ? 13 : 0) + 10;
+    if (y < 56 + rowHeight || estimate.lineItems.length - index <= 4 && y < 280) { next(); tableHead(); }
+    const top = y;
+    page.drawText(printable(String(item.quantity)), { x: 392, y: top, size: 9, font, color: secondary });
+    page.drawText(`$${item.unitPrice.toFixed(2)}`, { x: 442, y: top, size: 9, font, color: secondary });
+    const amount = `$${(item.amountCents / 100).toFixed(2)}`;
+    page.drawText(amount, { x: 568 - bold.widthOfTextAtSize(amount, 10), y: top, size: 10, font: bold, color: primary });
+    for (const part of description) { page.drawText(part, { x: 44, y, size: 10, font, color: rgb(.12, .16, .18) }); y -= 14; }
+    if (item.discountCents) { page.drawText(`Includes $${(item.discountCents / 100).toFixed(2)} discount`, { x: 44, y, size: 8, font, color: secondary }); y -= 13; }
+    y -= 10;
+  }
+  if (y < 180) {
+    next();
+    line('ESTIMATE SUMMARY', { size: 14, strong: true, color: primary });
+    line(`${estimate.estimateNumber || 'Draft'} · Version ${estimate.version} · ${estimate.recipient.name}`, { size: 9, color: secondary });
+    y -= 10;
+  }
+  if (estimate.discountCents) line(`Services: $${((estimate.grossSubtotalCents || estimate.subtotalCents + estimate.discountCents) / 100).toFixed(2)}    Discounts: -$${(estimate.discountCents / 100).toFixed(2)}`);
   line(`Subtotal: $${(estimate.subtotalCents / 100).toFixed(2)}`);
   line(`Tax (${estimate.taxRate}%): $${(estimate.taxCents / 100).toFixed(2)}`);
   line(`Total: $${(estimate.totalCents / 100).toFixed(2)} USD`, {
@@ -213,6 +296,8 @@ async function createEstimatePdf(estimate, company, photos = [], logo = null) {
     line(estimate.notes);
   }
   for (const photo of photos) {
+    if (y < 300) next();
+    line('APPROVED SERVICE PHOTO', { size: 12, strong: true, color: primary });
     // pdf-lib's JPEG parser reads from byte zero of the underlying ArrayBuffer.
     // Node Buffers can be slices of a larger pool; give it an exact owned view.
     const image = await pdf.embedJpg(Uint8Array.from(photo.bytes));
@@ -231,6 +316,11 @@ async function createEstimatePdf(estimate, company, photos = [], logo = null) {
   }
   line('Customer approval confirms the scope and quoted total for this version. Scheduling is confirmed separately.', {
     size: 9
+  });
+  pdf.getPages().forEach((sheet, index) => {
+    sheet.drawLine({ start: { x: 44, y: 43 }, end: { x: 568, y: 43 }, thickness: 0.6, color: secondary });
+    sheet.drawText(printable(companyName).slice(0, 60), { x: 44, y: 28, size: 8, font, color: secondary });
+    sheet.drawText(`Page ${index + 1} of ${pdf.getPageCount()}`, { x: 510, y: 28, size: 8, font, color: secondary });
   });
   const bytes = Buffer.from(await pdf.save());
   if (bytes.length > PDF_LIMIT) fail('resource-exhausted', 'Estimate PDF is too large. Reduce the attached photos.');
@@ -434,7 +524,7 @@ function estimateHandlers(db, config = {}) {
         if (initial.exists) await assertEstimateAccess(scope, initial);
         if (initial.exists && !initialOperation.exists) {
           if (initial.get('rlManaged') !== true) fail('failed-precondition', 'Legacy estimates are preserved. Copy their content into a new photo estimate.');
-          const locked = manages(scope) ? ['approved', 'converted'] : ['approved', 'converted', 'sent', 'submitted-for-review', 'approved-for-delivery'];
+          const locked = manages(scope) ? ['approved', 'converted', 'sent', 'approved-for-delivery'] : ['approved', 'converted', 'sent', 'submitted-for-review', 'approved-for-delivery'];
           if (locked.includes(initial.get('status'))) fail('failed-precondition', 'This estimate version is locked. Request changes or create an authorized revision first.');
           if (data.expectedVersion !== initial.get('version')) fail('aborted', 'This estimate changed. Reload before saving your draft.');
         }
@@ -461,7 +551,7 @@ function estimateHandlers(db, config = {}) {
           if (old.exists) {
             await assertEstimateAccess(scope, old, tx);
             if (old.get('rlManaged') !== true) fail('failed-precondition', 'Legacy estimates are preserved. Copy their content into a new photo estimate.');
-            const locked = manages(scope) ? ['approved', 'converted'] : ['approved', 'converted', 'sent', 'submitted-for-review', 'approved-for-delivery'];
+            const locked = manages(scope) ? ['approved', 'converted', 'sent', 'approved-for-delivery'] : ['approved', 'converted', 'sent', 'submitted-for-review', 'approved-for-delivery'];
             if (locked.includes(old.get('status'))) fail('failed-precondition', 'This estimate version is locked. Request changes or create an authorized revision first.');
             if (data.expectedVersion !== old.get('version')) fail('aborted', 'This estimate changed. Reload before saving your draft.');
           } else if (!isNew) fail('not-found', 'Estimate not found.');
@@ -498,7 +588,9 @@ function estimateHandlers(db, config = {}) {
             preparedByName: old.get('preparedByName') || scope.name || scope.email || '',
             version,
             status: 'draft',
-            estimateNumber: old.get('estimateNumber') || `RL-${id.slice(0, 8).toUpperCase()}`,
+            resendCount: 0,
+            estimateNumber: old.exists ? old.get('estimateNumber') || null : null,
+            numberingVersion: old.get('numberingVersion') || 1,
             estimatedCost: draft.total,
             totalAmount: draft.total,
             createdAt: created,
@@ -552,16 +644,19 @@ function estimateHandlers(db, config = {}) {
       if (action === 'get') {
         const versions = await db.collection('rlEstimateVersions').where('estimateId', '==', id).limit(100).get(),
           photos = estimate.rlManaged ? await photosFor(scope, id, estimate.photoIds || []) : [],
-          mail = estimate.rlManaged ? await ref('rlMail', `estimate_${id}_v${estimate.version}`).get() : null,
+          mails = estimate.rlManaged ? await Promise.all([0, 1, 2, 3].map(attempt => ref('rlMail', `estimate_${id}_v${estimate.version}${attempt ? `_resend${attempt}` : ''}`).get())) : [],
           canManage = manages(scope);
+        const mail = mails.filter(item => item.exists).at(-1) || null;
         return {
           estimate: staffView(scope, id, estimate),
           emailEnabled: canManage && emailEnabled(),
           permissions: {
-            canEdit: canManage ? !['approved', 'converted'].includes(estimate.status) : ['draft', 'changes-requested'].includes(estimate.status),
+            canEdit: canManage ? ['draft', 'submitted-for-review', 'changes-requested', 'revision-requested'].includes(estimate.status) : ['draft', 'changes-requested'].includes(estimate.status),
+            canStartRevision: canManage && ['approved-for-delivery', 'sent', 'declined'].includes(estimate.status),
             canSubmit: !manages(scope) && ['draft', 'changes-requested'].includes(estimate.status),
             canReview: canManage && ['draft', 'submitted-for-review'].includes(estimate.status),
-            canDeliver: canManage && estimate.status === 'approved-for-delivery' && estimate.approvedForDeliveryVersion === estimate.version
+            canDeliver: canManage && estimate.status === 'approved-for-delivery' && estimate.approvedForDeliveryVersion === estimate.version,
+            canResend: canManage && estimate.status === 'sent' && ['sent', 'failed', 'cancelled'].includes(mail?.get('status')) && (estimate.resendCount || 0) < 3
           },
           delivery: mail?.exists ? {status:mail.get('status'),attempts:mail.get('attempts') || 0,failureCode:mail.get('failureCode') || null,sentAt:dateString(mail.get('sentAt')),recipient:normalizeEmail(mail.get('to'))} : null,
           versions: versions.docs.map(v => ({
@@ -577,6 +672,21 @@ function estimateHandlers(db, config = {}) {
         };
       }
       if (estimate.rlManaged !== true) fail('failed-precondition', 'This legacy estimate is read-only in the photo workflow.');
+      if (action === 'start-revision') {
+        if (!manages(scope)) fail('permission-denied', 'Management permission is required to revise an approved estimate.');
+        if (data.expectedVersion !== estimate.version || typeof data.reason !== 'string' || data.reason.trim().length < 5 || data.reason.length > 500) fail('invalid-argument', 'Enter a reason for revising this exact estimate version.');
+        return db.runTransaction(async tx => {
+          const [current, secret] = await Promise.all([tx.get(target), tx.get(secretRef(id))]);
+          managed(scope, current);
+          if (current.get('version') !== data.expectedVersion || !['approved-for-delivery', 'sent', 'declined', 'revision-requested'].includes(current.get('status')) || current.get('convertedJobId')) fail('failed-precondition', 'This estimate cannot be revised. Refresh it before continuing.');
+          if (secret.exists && secret.get('status') === 'approved') fail('failed-precondition', 'The customer approved this version. Create a separate estimate for changed work.');
+          const at = new Date(now());
+          tx.update(target, { status: 'changes-requested', approvedForDeliveryVersion: null, revisionReason: data.reason.trim(), revisionAuthorizedByUid: scope.uid, revisionAuthorizedAt: at.toISOString(), updatedAt: at.toISOString() });
+          if (secret.exists && secret.get('status') === 'open') tx.update(secretRef(id), { status: 'superseded' });
+          tx.create(ref('rlAudit', `estimate_${id}_v${current.get('version')}_revision-authorized`), { action: 'estimate.revision-authorized', companyId: scope.companyId || null, actorId: scope.uid, estimateId: id, version: current.get('version'), reason: data.reason.trim(), createdAt: at });
+          return { authorized: true, version: current.get('version') };
+        });
+      }
       if (action === 'submit-review') {
         if (manages(scope) || !['draft', 'changes-requested'].includes(estimate.status)) fail('failed-precondition', 'Only an assigned technician draft can be submitted for review.');
         if (data.expectedVersion !== estimate.version) fail('aborted', 'This estimate changed. Reload before submitting it.');
@@ -596,11 +706,13 @@ function estimateHandlers(db, config = {}) {
         if (data.decision === 'request-changes' && !data.comments.trim()) fail('invalid-argument', 'Explain the requested changes.');
         if (data.expectedVersion !== estimate.version) fail('aborted', 'This estimate changed. Reload before reviewing it.');
         return db.runTransaction(async tx => {
-          const [current, task] = await Promise.all([tx.get(target), tx.get(taskRef(id, data.expectedVersion))]); managed(scope, current);
+          const [current, task, company] = await Promise.all([tx.get(target), tx.get(taskRef(id, data.expectedVersion)), scope.companyId ? tx.get(ref('companies', scope.companyId)) : Promise.resolve(null)]); managed(scope, current);
           if (current.get('version') !== data.expectedVersion || !['draft', 'submitted-for-review'].includes(current.get('status')) || current.get('status') === 'submitted-for-review' && current.get('submittedVersion') !== current.get('version') || data.decision === 'request-changes' && current.get('status') !== 'submitted-for-review') fail('failed-precondition', 'Review the current immutable version. Changes can be requested only from a technician submission.');
           const at = new Date(now()), approved = data.decision === 'approve';
           if (approved) assertDeliveryReady(current.data());
-          tx.update(target, { status: approved ? 'approved-for-delivery' : 'changes-requested', reviewVersion: current.get('version'), approvedForDeliveryVersion: approved ? current.get('version') : null, reviewComments: data.comments.trim(), reviewedByUid: scope.uid, reviewedAt: at.toISOString(), updatedAt: at.toISOString() });
+          const estimateNumber = approved && !current.get('estimateNumber') ? await allocateDocumentNumber(tx, db, { companyId: scope.companyId, userId: scope.uid, kind: 'E', timeZone: company?.get('timeZone') || 'America/Los_Angeles', date: at }) : current.get('estimateNumber') || null;
+          tx.update(target, { status: approved ? 'approved-for-delivery' : 'changes-requested', ...(approved ? { estimateNumber } : {}), reviewVersion: current.get('version'), approvedForDeliveryVersion: approved ? current.get('version') : null, reviewComments: data.comments.trim(), reviewedByUid: scope.uid, reviewedAt: at.toISOString(), updatedAt: at.toISOString() });
+          if (approved) tx.update(versionRef(id, current.get('version')), { estimateNumber });
           tx.set(taskRef(id, current.get('version')), { ...(task.exists ? task.data() : {}), companyId: scope.companyId, estimateId: id, version: current.get('version'), type: 'estimate-review', status: approved ? 'approved' : 'changes-requested', comments: data.comments.trim(), reviewedByUid: scope.uid, updatedAt: at }, { merge: true });
           tx.create(ref('rlAudit', `estimate_${id}_v${current.get('version')}_${approved ? 'delivery-approved' : 'changes-requested'}`), { action: approved ? 'estimate.delivery-approved' : 'estimate.changes-requested', companyId: scope.companyId, actorId: scope.uid, estimateId: id, version: current.get('version'), comments: data.comments.trim(), createdAt: at });
           return { status: approved ? 'approved-for-delivery' : 'changes-requested', version: current.get('version') };
@@ -666,7 +778,7 @@ function estimateHandlers(db, config = {}) {
         if (!manages(scope)) fail('permission-denied', 'Management permission is required to generate the formal customer estimate PDF.');
         return {
           dataUri: `data:application/pdf;base64,${(await buildPdf(scope, id, estimate)).toString('base64')}`,
-          filename: `${estimate.estimateNumber}-v${estimate.version}.pdf`
+          filename: `${estimate.estimateNumber || `estimate-${id}`}-v${estimate.version}.pdf`
         };
       }
       if (action === 'deliver') {
@@ -717,8 +829,9 @@ function estimateHandlers(db, config = {}) {
           });
           tx.create(mailRef, {
             to: recipientEmail,
-            subject: `Estimate ${estimate.estimateNumber} from your service provider`,
-            text: `Review the attached estimate PDF and its quoted scope and total.\n\nReview and approve this specific version: ${link}\n\nThis private link expires ${estimate.validUntil.slice(0, 10)}. Contact your provider with questions.`,
+            subject: `Estimate ${estimate.estimateNumber || estimate.id} from your service provider`,
+            estimateNumber: estimate.estimateNumber,
+            text: `Review the attached estimate ${estimate.estimateNumber || estimate.id} PDF and its quoted scope and total.\n\nReview and approve this specific version: ${link}\n\nThis private link expires ${estimate.validUntil.slice(0, 10)}. Contact your provider with questions.`,
             status: 'queued',
             attempts: 0,
             availableAt: now(),
@@ -750,6 +863,33 @@ function estimateHandlers(db, config = {}) {
             queued: true,
             mailId
           };
+        });
+      }
+      if (action === 'resend') {
+        if (!manages(scope) || estimate.status !== 'sent') fail('permission-denied', 'Only management may resend a delivered estimate version.');
+        const operation = documentId(data.operationId, 'resend operation');
+        if (!/^[A-Za-z0-9_-]{16,80}$/.test(operation)) fail('invalid-argument', 'A stable resend operation ID is required.');
+        return db.runTransaction(async tx => {
+          const [current, secret, original, priorOperation] = await Promise.all([
+            tx.get(target), tx.get(secretRef(id)), tx.get(ref('rlMail', `estimate_${id}_v${estimate.version}`)),
+            tx.get(ref('rlEstimateResendOperations', hash(`${id}:${operation}`)))
+          ]);
+          managed(scope, current);
+          if (priorOperation.exists) return { queued: true, existing: true, mailId: priorOperation.get('mailId') };
+          if (current.get('version') !== data.expectedVersion || current.get('status') !== 'sent' || secret.get('status') !== 'open' || secret.get('version') !== data.expectedVersion || !original.exists) fail('failed-precondition', 'This estimate is no longer open for resending. Refresh it.');
+          if (timestamp(secret.get('expiresAt')) <= now()) fail('failed-precondition', 'The customer approval link expired. Prepare a newly approved version before delivery.');
+          const count = (current.get('resendCount') || 0) + 1;
+          if (count > 3) fail('resource-exhausted', 'The resend limit for this version has been reached.');
+          const previous = await tx.get(ref('rlMail', `estimate_${id}_v${estimate.version}${count > 1 ? `_resend${count - 1}` : ''}`));
+          if (!['sent', 'failed', 'cancelled'].includes(previous.get('status'))) fail('failed-precondition', 'The previous email is still processing. Refresh delivery status.');
+          const mailId = `estimate_${id}_v${estimate.version}_resend${count}`;
+          const next = await tx.get(ref('rlMail', mailId));
+          if (next.exists) fail('aborted', 'A resend is already queued. Refresh delivery status.');
+          tx.create(ref('rlMail', mailId), { ...original.data(), status: 'queued', attempts: 0, availableAt: now(), createdAt: new Date(now()), sentAt: null, failureCode: null, resendOf: original.id });
+          tx.update(target, { resendCount: count });
+          tx.create(ref('rlEstimateResendOperations', hash(`${id}:${operation}`)), { companyId: scope.companyId || null, estimateId: id, version: estimate.version, mailId, actorId: scope.uid, createdAt: new Date(now()) });
+          tx.create(ref('rlAudit', `estimate_${id}_v${estimate.version}_resend${count}`), { action: 'estimate.email-resend-queued', companyId: scope.companyId || null, actorId: scope.uid, estimateId: id, version: estimate.version, mailId, createdAt: new Date(now()) });
+          return { queued: true, mailId };
         });
       }
       if (action === 'convert') {
@@ -909,7 +1049,7 @@ function estimateHandlers(db, config = {}) {
             companyId: value.companyId || null,
             uid: value.userId
           };
-        if (data.action === 'pdf') return { dataUri: `data:application/pdf;base64,${(await buildPdf(scope, id, value)).toString('base64')}`, filename: `${value.estimateNumber}-v${value.version}.pdf` };
+        if (data.action === 'pdf') return { dataUri: `data:application/pdf;base64,${(await buildPdf(scope, id, value)).toString('base64')}`, filename: `${value.estimateNumber || `estimate-${id}`}-v${value.version}.pdf` };
         const
           company = scope.companyId ? await ref('companies', scope.companyId).get() : await ref('users', scope.uid).get(),
           photos = await photosFor(scope, id, value.photoIds || []);

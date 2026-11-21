@@ -19,14 +19,14 @@ async function requestEstimatePdf(estimateId, version) {
   requireCapability('estimates.manage');
   if (JSON.stringify([auth.currentUser?.uid, getClaims()]) !== scope) throw new Error('Your work account changed. Reopen the estimate before downloading its PDF.');
   if (!/^data:application\/pdf;base64,[A-Za-z0-9+/=\r\n]+$/.test(result.dataUri || '')) throw new Error('The server returned no valid estimate PDF.');
-  return result.dataUri;
+  return { dataUri: result.dataUri, filename: /^[A-Za-z0-9_-]+-v\d+\.pdf$/.test(result.filename || '') ? result.filename : `estimate-v${version}.pdf` };
 }
 export async function previewEstimatePdf(estimateId, version) {
   const popup = window.open('about:blank', '_blank');
   if (!popup) throw new Error('Allow pop-ups for Route Logistics to preview this estimate PDF.');
   popup.opener = null;
   try {
-    const dataUri = await requestEstimatePdf(estimateId, version), base64 = dataUri.split(',')[1];
+    const { dataUri } = await requestEstimatePdf(estimateId, version), base64 = dataUri.split(',')[1];
     const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
     const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
     popup.location.replace(url);
@@ -37,6 +37,6 @@ export async function previewEstimatePdf(estimateId, version) {
   }
 }
 export async function downloadEstimatePdf(estimateId, version) {
-  const dataUri = await requestEstimatePdf(estimateId, version);
-  const link = document.createElement('a'); link.href = dataUri; link.download = `estimate-${estimateId}-v${version}.pdf`; link.click();
+  const { dataUri, filename } = await requestEstimatePdf(estimateId, version);
+  const link = document.createElement('a'); link.href = dataUri; link.download = filename; link.click();
 }

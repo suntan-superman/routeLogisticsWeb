@@ -17,7 +17,7 @@ async function estimateCall(action, data) {
   env.calls.push({ action, data });
   if (env.failures[action]) throw env.failures[action];
   if (action === 'list') return { enabled: true, emailEnabled: true, estimates: [env.record] };
-  if (action === 'get') return { enabled: true, emailEnabled: true, estimate: env.record, photos: [{ id: 'photo-1', dataUri: 'data:image/jpeg;base64,eA==' }], versions: [] };
+  if (action === 'get') return { enabled: true, emailEnabled: true, estimate: env.record, permissions: { canEdit: ['draft', 'changes-requested'].includes(env.record.status) }, photos: [{ id: 'photo-1', dataUri: 'data:image/jpeg;base64,eA==' }], versions: [] };
   if (action === 'save') { env.record = { ...env.record, ...data.data, version: env.record.version + 1 }; return { estimate: env.record }; }
   if (action === 'convert') return { jobId: 'synthetic-converted-job' };
   throw Error('Unexpected estimate action ' + action);

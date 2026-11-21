@@ -109,7 +109,7 @@ test('private photo uploads are idempotent, version-neutral, scoped and have no 
 test('email queues one versioned private PDF, worker guards it and approval/conversion remain idempotent',async()=>{
   const f=await fixture(),{estimate}=await f.save(),{result,mail,token}=await f.send(estimate);assert.equal((await f.send(estimate)).result.mailId,result.mailId);assert.ok(mail.get('estimatePdfPath').startsWith(`rlEstimateDocuments/${f.id}/`));
   const queuedState=await f.handlers.handle(f.request({action:'get',estimateId:estimate.id}));assert.equal(queuedState.delivery.status,'queued');assert.equal(queuedState.delivery.recipient,`${f.id}@example.invalid`);assert.equal(queuedState.delivery.to,undefined);assert.equal(queuedState.delivery.text,undefined);
-  let sends=0;await deliverMail(db,mail.ref,{sendMail:async message=>{sends++;assert.equal(message.attachments[0].content.subarray(0,5).toString(),'%PDF-');assert.equal(message.attachments[0].path,undefined);return {accepted:[message.to]};}},'sender@example.invalid',f.time(),{estimateEmailEnabled:()=>true,bucketProvider:()=>f.bucket});assert.equal(sends,1);assert.equal((await mail.ref.get()).get('status'),'sent');
+  let sends=0;await deliverMail(db,mail.ref,{sendMail:async message=>{sends++;assert.equal(message.attachments[0].content.subarray(0,5).toString(),'%PDF-');assert.equal(message.attachments[0].path,undefined);return {accepted:[message.to]};}},'sender@example.invalid',f.time(),{estimateEmailEnabled:()=>true,bucketProvider:()=>f.bucket});assert.equal(sends,1,`mail status: ${(await mail.ref.get()).get('status')} / ${(await mail.ref.get()).get('failureCode')}`);assert.equal((await mail.ref.get()).get('status'),'sent');
   const sentState=await f.handlers.handle(f.request({action:'get',estimateId:estimate.id}));assert.equal(sentState.delivery.status,'sent');assert.equal(sentState.delivery.attempts,1);assert.ok(sentState.delivery.sentAt);
   await assert.rejects(f.approve(estimate,'0'.repeat(64)),{code:'permission-denied'});assert.equal((await f.approve(estimate,token)).approved,true);assert.equal((await f.approve(estimate,token)).existing,true);
   const convert={action:'convert',estimateId:estimate.id,expectedVersion:1,schedule:{date:'2026-12-01',time:'10:00',assignedTo:f.memberId}};
@@ -121,13 +121,31 @@ test('authorized alternate estimate delivery is attached, tenant-scoped and does
   assert.equal(mail.get('to'),alternate);assert.equal(mail.get('estimateRecipient'),alternate);assert.deepEqual((await db.doc(`customers/${f.customerId}`).get()).data(),before);
   const state=await f.handlers.handle(f.request({action:'get',estimateId:estimate.id}));assert.equal(state.delivery.recipient,alternate);
   let sent;await deliverMail(db,mail.ref,{sendMail:async message=>{sent=message;return {accepted:[message.to]};}},'sender@example.invalid',f.time(),{estimateEmailEnabled:()=>true,bucketProvider:()=>f.bucket});
-  assert.equal(sent.to,alternate);assert.equal(sent.attachments.length,1);assert.equal(sent.attachments[0].content.subarray(0,5).toString(),'%PDF-');
+  assert.ok(sent,`mail status: ${(await mail.ref.get()).get('status')} / ${(await mail.ref.get()).get('failureCode')}`);assert.equal(sent.to,alternate);assert.equal(sent.attachments.length,1);assert.equal(sent.attachments[0].content.subarray(0,5).toString(),'%PDF-');
   const publicView=await f.handlers.approval({data:{action:'get',estimateId:estimate.id,token},rawRequest:{ip:f.id}});assert.equal(publicView.estimate.internalReviewNotes,undefined);assert.equal(publicView.estimate.technicianNotes,undefined);
 });
 test('superseded and expired approval tokens cannot approve or convert a different quote',async()=>{
-  const f=await fixture(),{estimate}=await f.save(),{token,mail}=await f.send(estimate);const newer=await f.save({...f.draft,notes:'New version'},{estimateId:estimate.id,expectedVersion:1});
+  const f=await fixture(),{estimate}=await f.save(),{token,mail}=await f.send(estimate);
+  await assert.rejects(f.save({...f.draft,notes:'New version'},{estimateId:estimate.id,expectedVersion:1}),{code:'failed-precondition'});
+  await f.handlers.handle(f.request({action:'start-revision',estimateId:estimate.id,expectedVersion:1,reason:'Customer requested revised work scope'}));
+  const newer=await f.save({...f.draft,notes:'New version'},{estimateId:estimate.id,expectedVersion:1});
+  assert.equal(newer.estimate.estimateNumber,(await db.doc(`rlEstimateVersions/${hash(`${estimate.id}:1`)}`).get()).get('estimateNumber'));
   await assert.rejects(f.approve(estimate,token),{code:'permission-denied'});let sends=0;await deliverMail(db,mail.ref,{sendMail:async()=>{sends++;return {accepted:['nobody@example.invalid']};}},'sender@example.invalid',f.time(),{estimateEmailEnabled:()=>true,bucketProvider:()=>f.bucket});assert.equal(sends,0);assert.equal((await mail.ref.get()).get('status'),'cancelled');
   const fresh=await f.send(newer.estimate);f.advance(31*86400000);await assert.rejects(f.approve(newer.estimate,fresh.token),{code:'permission-denied'});
+});
+test('estimate numbers begin at approval, remain stable on revision, and resends retain the approved PDF',async()=>{
+  const f=await fixture(),first=(await f.save()).estimate,second=(await f.save({...f.draft,title:'Second quote'})).estimate;
+  assert.equal(first.estimateNumber,null);assert.equal(second.estimateNumber,null);
+  const initial=await f.send(first),approved=(await db.doc(`estimates/${first.id}`).get()).data();
+  assert.match(approved.estimateNumber,/^20261113-E001$/);
+  const secondSent=await f.send(second);assert.equal((await db.doc(`estimates/${second.id}`).get()).get('estimateNumber'),'20261113-E002');
+  let sends=0;await deliverMail(db,initial.mail.ref,{sendMail:async message=>{sends++;assert.equal(message.attachments[0].filename,`${approved.estimateNumber}-v1.pdf`);return {accepted:[message.to]};}},'sender@example.invalid',f.time(),{estimateEmailEnabled:()=>true,bucketProvider:()=>f.bucket});
+  const request={action:'resend',estimateId:first.id,expectedVersion:1,operationId:`${f.id}-resend-operation-0001`};
+  const resent=await f.handlers.handle(f.request(request)),retried=await f.handlers.handle(f.request(request));
+  assert.equal(resent.mailId,retried.mailId);assert.equal((await db.doc(`rlMail/${resent.mailId}`).get()).get('status'),'queued');
+  await f.handlers.handle(f.request({action:'start-revision',estimateId:first.id,expectedVersion:1,reason:'Authorized revised estimate required'}));
+  await assert.rejects(f.handlers.handle(f.request({action:'resend',estimateId:first.id,expectedVersion:1,operationId:`${f.id}-resend-operation-0002`})),{code:'permission-denied'});
+  assert.equal(sends,1);assert.ok(secondSent.mail.exists);
 });
 test('forged PDF paths, changed queued recipient and removed sender cannot pass the email worker',async()=>{
   for(const change of ['path','recipient','sender','disabled']){const f=await fixture(),{estimate}=await f.save(),{mail}=await f.send(estimate);

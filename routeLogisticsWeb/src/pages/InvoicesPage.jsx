@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { listInvoices, submitInvoiceForApproval, approveInvoice, issueInvoice, voidInvoice } from '../services/invoiceService';
+import { listInvoices, submitInvoiceForApproval, approveInvoice, unlockApprovedInvoice, issueInvoice, voidInvoice } from '../services/invoiceService';
 import { isOverdue } from '../services/invoiceMath';
 import { can } from '../services/tenancy';
 import { useConfirm } from '../components/ConfirmProvider';
@@ -43,6 +43,7 @@ const InvoicesPage = () => {
   const [emailReview, setEmailReview] = useState(null);
   const [replacementInvoice, setReplacementInvoice] = useState(null);
   const [editingInvoice, setEditingInvoice] = useState(undefined);
+  const [unlockingInvoice, setUnlockingInvoice] = useState(null), [unlockReason, setUnlockReason] = useState('');
   const [busyIds, setBusyIds] = useState([]), [actionErrors, setActionErrors] = useState({});
   const locked = useRef(new Set()), attempts = useRef(new Map()), live = useRef(false), scope = useRef(invoiceQuery.scopeId);
   scope.current = invoiceQuery.scopeId;
@@ -53,7 +54,7 @@ const InvoicesPage = () => {
 
   const load = () => invalidate(['invoices', 'invoice', 'jobs', 'job', 'payments', 'reports', 'analytics', 'invoice-preview']);
   useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
-  useEffect(() => { setPaymentInvoice(null); setHistoryInvoice(null); setLedgerInvoice(null); setReplacementInvoice(null); setEmailReview(null); setBusyIds([]); setActionErrors({}); locked.current.clear(); attempts.current.clear(); }, [invoiceQuery.scopeId]);
+  useEffect(() => { setPaymentInvoice(null); setHistoryInvoice(null); setLedgerInvoice(null); setReplacementInvoice(null); setEmailReview(null); setUnlockingInvoice(null); setUnlockReason(''); setBusyIds([]); setActionErrors({}); locked.current.clear(); attempts.current.clear(); }, [invoiceQuery.scopeId]);
   useEffect(() => () => { if (pdf?.url) URL.revokeObjectURL(pdf.url); }, [pdf]);
   useEffect(() => { if (workspaceAccessError(invoiceQuery.error)) { setPaymentInvoice(null); setHistoryInvoice(null); setReplacementInvoice(null); } }, [invoiceQuery.error]);
   useEffect(() => {
@@ -90,14 +91,15 @@ const InvoicesPage = () => {
     setEmailReview({ invoiceId: invoice.id, scopeId: submittedScope, loading: true });
     try {
       const result = await emailStatus(invoice.id);
-      if (scope.current === submittedScope) setEmailReview({ invoiceId: invoice.id, scopeId: submittedScope, ...result });
+      if (scope.current === submittedScope) setEmailReview({ invoiceId: invoice.id, scopeId: submittedScope, resendOperationId: crypto.randomUUID(), ...result });
     } catch (error) {
       if (scope.current === submittedScope) setEmailReview({ invoiceId: invoice.id, scopeId: submittedScope, error: error.message || 'Delivery details are unavailable.' });
     }
   };
   const email = async invoice => {
     if (!invoice) { setEmailReview(null); return; }
-    const result = await act(invoice, 'email', async options => ({ success: true, ...(await callWorkspace('emailInvoice', { invoiceId: invoice.id, expectedRevision: options.expectedRevision, expectedRecipient: emailReview.recipient })) }), 'Invoice email request recorded');
+    const resend = ['sent', 'failed', 'cancelled'].includes(emailReview.delivery?.status);
+    const result = await act(invoice, resend ? 'email-resend' : 'email', async options => ({ success: true, ...(await callWorkspace('emailInvoice', { ...(resend ? { action: 'resend', operationId: emailReview.resendOperationId } : {}), invoiceId: invoice.id, expectedRevision: options.expectedRevision, expectedRecipient: emailReview.recipient })) }), resend ? 'Invoice resend requested' : 'Invoice email request recorded');
     if (result?.success && scope.current === emailReview?.scopeId) await openEmailReview(invoice);
     else if (result?.error && scope.current === emailReview?.scopeId) setEmailReview(previous => ({ ...previous, error: result.error }));
   };
@@ -167,7 +169,7 @@ const InvoicesPage = () => {
                 const busy = busyIds.includes(inv.id);
                 return (
                   <tr key={inv.id} id={`invoice-${inv.id}`} tabIndex={-1} className={focusedInvoice === inv.id ? 'bg-emerald-50 outline-primary-500' : undefined}>
-                    <td className="px-4 py-3 font-medium">{inv.invoiceNumber}{inv.financialVersion !== 2 && <p className="mt-1 text-xs font-normal text-amber-800">Legacy test record</p>}</td>
+                    <td className="px-4 py-3 font-medium">{inv.invoiceNumber || 'Draft — unnumbered'}{inv.financialVersion !== 2 && <p className="mt-1 text-xs font-normal text-amber-800">Legacy test record</p>}</td>
                     <td className="px-4 py-3">{inv.customerName || '—'}</td>
                     <td className="px-4 py-3">{inv.dueDate}</td>
                     <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-semibold capitalize ${BADGE[status]}`}>{status}</span></td>
@@ -181,10 +183,11 @@ const InvoicesPage = () => {
                       {inv.financialVersion === 2 && inv.issuedSnapshot && <button className="text-primary-600 underline" onClick={() => showPdf(inv)}>View PDF</button>}
                       {manage && inv.financialVersion === 2 && !inv.issuedSnapshot && <button className="text-primary-600 underline" onClick={() => showPdf(inv, true)}>Preview PDF</button>}
                       {manage && inv.financialVersion === 2 && inv.status === 'draft' && <button className="text-primary-600 underline" onClick={() => setEditingInvoice(inv)}>Edit draft</button>}
-                      {manage && inv.financialVersion === 2 && ['issued', 'partially_paid'].includes(inv.status) && <button disabled={busy} className="text-primary-600 underline disabled:opacity-50" onClick={() => openEmailReview(inv)}>Email PDF</button>}
+                      {manage && inv.financialVersion === 2 && ['issued', 'partially_paid', 'paid'].includes(inv.status) && <button disabled={busy} className="text-primary-600 underline disabled:opacity-50" onClick={() => openEmailReview(inv)}>Email PDF</button>}
                       {manage && inv.financialVersion === 2 && inv.status === 'draft' && <button disabled={busy} className="text-primary-600 underline disabled:opacity-50" onClick={() => act(inv, 'submit', options => submitInvoiceForApproval(inv.id, options), 'Sent for management approval')}>Submit for approval</button>}
                       {manage && inv.financialVersion === 2 && inv.status === 'awaiting_approval' && <button disabled={busy} className="text-primary-600 underline disabled:opacity-50" onClick={() => act(inv, 'approve', options => approveInvoice(inv.id, options), 'Invoice approved')}>Approve</button>}
                       {manage && inv.financialVersion === 2 && inv.status === 'approved' && <button disabled={busy} className="text-primary-600 underline disabled:opacity-50" onClick={() => act(inv, 'issue', options => issueInvoice(inv.id, options), 'Invoice issued; customer delivery remains manual')}>Issue</button>}
+                      {manage && inv.financialVersion === 2 && inv.status === 'approved' && <button disabled={busy} className="text-amber-700 underline disabled:opacity-50" onClick={() => { setUnlockReason(''); setUnlockingInvoice(inv); }}>Unlock for editing</button>}
                       {manage && inv.financialVersion === 2 && ['draft','awaiting_approval','approved','issued'].includes(inv.status) && (
                         <button disabled={busy || !!inv.paymentLock} title={inv.paymentLock ? 'Cancel the payment attempt first' : undefined} className="text-red-600 hover:underline disabled:opacity-50" onClick={async () => { const submittedScope = scope.current; if (await confirm({ title: 'Void this invoice?', message: 'The invoice will be retained as void with its audit history. It can no longer be paid or edited.', confirmText: 'Void invoice' }) && submittedScope === scope.current) await act(inv, 'void', options => voidInvoice(inv.id, options), 'Invoice voided'); }}>Void</button>
                       )}
@@ -203,13 +206,14 @@ const InvoicesPage = () => {
       {historyInvoice && <div role="dialog" aria-modal="true" aria-label="Invoice payment history" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl bg-white p-6"><button className="float-right underline" onClick={() => setHistoryInvoice(null)}>Close history</button><PaymentHistory invoiceId={historyInvoice} /></div></div>}
       {ledgerInvoice && <InvoiceLedgerDialog invoice={ledgerInvoice} invoices={invoices} onClose={() => setLedgerInvoice(null)} onChanged={load} />}
       {editingInvoice !== undefined && <InvoiceEditorDialog key={editingInvoice?.id || 'manual'} invoice={editingInvoice} onClose={() => setEditingInvoice(undefined)} onSaved={() => { setEditingInvoice(undefined); toast.success('Invoice draft saved'); load(); }} />}
-      {pdf && <div role="dialog" aria-modal="true" aria-label="Invoice PDF" className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4"><div className="flex h-[90vh] w-full max-w-4xl flex-col rounded-xl bg-white p-4"><div className="mb-2 flex justify-between"><strong>{pdf.name}</strong><span><a href={pdf.url} download={pdf.name} className="mr-4 underline">Download</a><button onClick={() => setPdf(null)} className="underline">Close</button></span></div><iframe title="Invoice PDF preview" src={pdf.url} className="min-h-0 flex-1" /></div></div>}
+      {unlockingInvoice && <div role="dialog" aria-modal="true" aria-label="Unlock approved invoice" className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4"><div className="w-full max-w-md rounded-xl bg-white p-6 space-y-4 text-gray-900"><h2 className="text-lg font-semibold">Unlock approved invoice?</h2><p>This revokes approval and returns the unissued invoice to a draft. Review and approve any changes before issuing it. Issued invoices remain immutable.</p><label className="block">Reason for correction<textarea autoFocus value={unlockReason} onChange={event => setUnlockReason(event.target.value)} maxLength={500} className="mt-1 w-full rounded border p-2" /></label><div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={() => setUnlockingInvoice(null)}>Keep locked</button><button type="button" className="btn-primary" disabled={unlockReason.trim().length < 5 || busyIds.includes(unlockingInvoice.id)} onClick={async () => { const result = await act(unlockingInvoice, 'unlock', options => unlockApprovedInvoice(unlockingInvoice.id, unlockReason.trim(), options), 'Invoice approval revoked; draft unlocked'); if (result?.success) setUnlockingInvoice(null); }}>Unlock draft</button></div></div></div>}
+      {pdf && <div role="dialog" aria-modal="true" aria-label="Invoice PDF" className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4"><div className="flex h-[90vh] w-full max-w-4xl flex-col rounded-xl bg-white p-4"><div className="mb-2 flex justify-between"><strong>{pdf.name}</strong><span><button type="button" onClick={() => globalThis.document?.querySelector?.('iframe[title="Invoice PDF preview"]')?.contentWindow?.print?.()} className="mr-4 underline">Print</button><a href={pdf.url} download={pdf.name} className="mr-4 underline">Download</a><button onClick={() => setPdf(null)} className="underline">Close</button></span></div><iframe title="Invoice PDF preview" src={pdf.url} className="min-h-0 flex-1" /></div></div>}
       {emailReview && emailReview.scopeId === invoiceQuery.scopeId && <div role="dialog" aria-modal="true" aria-label="Invoice email delivery" className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4"><div className="w-full max-w-md rounded-xl bg-white p-6 space-y-4 text-gray-900">
         <div className="flex items-start justify-between gap-3"><h2 className="text-lg font-semibold">Email approved invoice PDF</h2><button type="button" onClick={() => setEmailReview(null)} className="underline">Close</button></div>
         {emailReview.loading ? <p role="status">Checking customer email and delivery status…</p> : emailReview.error ? <p role="alert" className="text-red-700">{emailReview.error}</p> : <>
           <p>The issued PDF will be attached and sent to <strong>{emailReview.recipient}</strong>. Change the customer email in Customers first if this address is incorrect.</p>
-          <p role="status">{emailReview.delivery?.status === 'sent' ? `Accepted by the email provider${emailReview.delivery.sentAt ? ` ${new Date(emailReview.delivery.sentAt).toLocaleString()}` : ''}. Inbox delivery is not confirmed.` : emailReview.delivery?.status === 'queued' || emailReview.delivery?.status === 'sending' ? 'Delivery is in progress.' : emailReview.delivery?.status === 'failed' || emailReview.delivery?.status === 'cancelled' ? 'Previous delivery needs review. Contact your administrator.' : 'No recent delivery to this address.'}</p>
-          <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={() => openEmailReview(invoices.find(row => row.id === emailReview.invoiceId))}>Refresh status</button><button type="button" className="btn-primary" disabled={busyIds.includes(emailReview.invoiceId) || ['queued','sending','sent','failed','cancelled'].includes(emailReview.delivery?.status)} onClick={() => email(invoices.find(row => row.id === emailReview.invoiceId))}>Send invoice PDF</button></div>
+          <p role="status">{emailReview.delivery?.status === 'sent' ? `Accepted by the email provider${emailReview.delivery.sentAt ? ` ${new Date(emailReview.delivery.sentAt).toLocaleString()}` : ''}. Inbox delivery is not confirmed.` : emailReview.delivery?.status === 'queued' || emailReview.delivery?.status === 'sending' ? 'Delivery is in progress.' : emailReview.delivery?.status === 'failed' || emailReview.delivery?.status === 'cancelled' ? 'The previous delivery failed or was cancelled. Review the recipient and resend only if appropriate.' : 'No recent delivery to this address.'}</p>
+          <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={() => openEmailReview(invoices.find(row => row.id === emailReview.invoiceId))}>Refresh status</button><button type="button" className="btn-primary" disabled={busyIds.includes(emailReview.invoiceId) || ['queued','sending'].includes(emailReview.delivery?.status)} onClick={() => email(invoices.find(row => row.id === emailReview.invoiceId))}>{['sent','failed','cancelled'].includes(emailReview.delivery?.status) ? 'Resend invoice PDF' : 'Send invoice PDF'}</button></div>
         </>}
       </div></div>}
       {replacementInvoice && replacementInvoice.scopeId === invoiceQuery.scopeId && <InvoiceCreationDialog key={`${replacementInvoice.scopeId}:${replacementInvoice.invoiceId}`} jobId={replacementInvoice.jobId} replacementOf={replacementInvoice.invoiceId} expectedRevision={replacementInvoice.revision}

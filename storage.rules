@@ -50,6 +50,10 @@ service firebase.storage {
     // through rlJobPhoto, which rechecks live membership, job assignment and scope.
     match /rlJobPhotos/{allPaths=**} { allow read, write: if false; }
 
+    // Company branding is retrieved by an authorized callable. No public tokens
+    // or client-side Storage reads expose logos across tenant boundaries.
+    match /rlCompanyLogos/{allPaths=**} { allow read, write: if false; }
+
     // CMS media is token-free. Admin callables and the published-content image
     // proxy recheck current platform authorization/publication before access.
     match /rlPlatformContent/{allPaths=**} { allow read, write: if false; }

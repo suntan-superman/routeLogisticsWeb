@@ -7,6 +7,7 @@ import CustomerImport from '../components/CustomerImport';
 import SelectControl from '../components/SelectControl';
 import TimeSelect from '../components/TimeSelect';
 import ServiceAreasSettings from '../components/ServiceAreasSettings';
+import CompanyLogoField from '../components/CompanyLogoField';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { previewCustomers, csvCell } from '../utils/customerCsv';
 import { mayReviewCompanySetup } from '../utils/companySetupAccess';
@@ -42,6 +43,7 @@ export default function CompanyOnboardingPage({ mode = 'new' }) {
   const [message, setMessage] = useState(reviewMode ? 'Loading current company setup…' : 'Loading saved setup…');
   const [newService, setNewService] = useState(''), [newInvite, setNewInvite] = useState(''), [inviteRole, setInviteRole] = useState('technician');
   const [csv, setCsv] = useState(null), [activeCompany, setActiveCompany] = useState(''), [team, setTeam] = useState([]), [accessDenied, setAccessDenied] = useState(false);
+  const [reviewCompanyId, setReviewCompanyId] = useState('');
   const [savedSections, setSavedSections] = useState(null);
   const timer = useRef(null), saveQueue = useRef(Promise.resolve()), state = useRef({ draft, revision, ready });
   useEffect(() => { state.current = { draft, revision, ready }; }, [draft, revision, ready]);
@@ -81,7 +83,7 @@ export default function CompanyOnboardingPage({ mode = 'new' }) {
       const loaded = reviewMode
         ? { ...base, profile: { ...base.profile, ...data.profile }, services: data.services || [], timeZone: data.timeZone || base.timeZone, businessHours: { ...blankHours, ...data.businessHours } }
         : data.draft ? { ...base, ...data.draft, profile: { ...base.profile, ...data.profile, ...data.draft.profile }, businessHours: { ...blankHours, ...data.draft.businessHours } } : { ...base, profile: { ...base.profile, ...data.profile } };
-      setDraft(loaded); setRevision(data.revision || 0); setTeam(data.team || []); setSavedSections(snapshotSections(loaded)); setReady(true);
+      setDraft(loaded); setRevision(data.revision || 0); setTeam(data.team || []); setReviewCompanyId(data.companyId || ''); setSavedSections(snapshotSections(loaded)); setReady(true);
       setMessage(reviewMode ? 'Current company setup loaded. Save only the sections you intentionally change.' : data.draft ? 'Your saved setup is ready to continue.' : 'Your setup will save automatically.');
     }).catch(error => { if (alive) { setReady(true); setMessage(error.message || 'Could not load setup.'); } });
     return () => { alive = false; clearTimeout(timer.current); };
@@ -168,7 +170,7 @@ export default function CompanyOnboardingPage({ mode = 'new' }) {
   return <main className={`space-y-6 ${reviewMode ? '' : 'mx-auto max-w-4xl p-4 sm:p-8'}`}>
     <header><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold text-primary-700">ROUTE LOGISTICS · COMPANY SETUP</p><h1 className="mt-2 text-3xl font-bold">{reviewMode ? 'Review Company Setup' : 'Set up your workspace'}</h1></div>{!reviewMode && <button type="button" className="btn-secondary" disabled={busy || !ready} onClick={saveAndSignOut}>Save &amp; sign out</button>}</div><p className="mt-2 text-gray-600">{reviewMode ? 'Review authoritative company data and save only the sections you intentionally change. Existing customers, memberships, and operations are preserved.' : 'Progress saves to your account and is available when you sign in on another device.'}</p></header>
     {!activeCompany && <><ol className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Company setup steps">{steps.map((name, i) => <li key={name}><button type="button" disabled={!reviewMode || busy} onClick={() => reviewMode && change(old => ({ ...old, currentStep: i + 1 }))} className={`h-full w-full rounded border p-2 text-left text-sm ${step === i + 1 ? 'border-primary-600 bg-primary-50 font-semibold' : ''}`}><span className="text-gray-500">{i + 1}.</span> {name}</button></li>)}</ol>
-      {step === 1 && <ProfileStep reviewMode={reviewMode} draft={draft} setProfile={setProfile} busy={busy} dirty={sectionDirty('profile')} save={() => saveReviewSection('profile')} />}
+      {step === 1 && <><ProfileStep reviewMode={reviewMode} draft={draft} setProfile={setProfile} busy={busy} dirty={sectionDirty('profile')} save={() => saveReviewSection('profile')} />{reviewMode && <section className="space-y-3 rounded-lg bg-white p-5 shadow"><h2 className="text-xl font-semibold">Company logo</h2><CompanyLogoField companyId={reviewCompanyId} currentLogo={company?.logo || ''} /></section>}</>}
       {step === 2 && <section className="space-y-4 rounded-lg bg-white p-5 shadow"><h2 className="text-xl font-semibold">{reviewMode ? 'Owner account & setup access' : 'Owner account & email verification'}</h2><p>Signed in as <strong>{currentUser?.email}</strong>.</p>{reviewMode ? <><p>Current setup role: <strong>{role}</strong>. Review mode never changes the company owner, tenant identity, or role.</p><p>Verified: {currentUser?.emailVerified ? 'Yes' : 'No'}</p></> : <><p>Email verification is required before the company can be activated or management access is granted.</p><p className="text-sm text-gray-600">Use the verification email sent at signup. If you just verified, refresh your session before continuing.</p><button className="btn-secondary" onClick={() => refreshSession().then(() => setMessage('Session refreshed.'))}>Refresh verification status</button><p>Verified: {currentUser?.emailVerified ? 'Yes' : 'No — verify to continue.'}</p></>}</section>}
       {step === 3 && <TeamStep reviewMode={reviewMode} team={team} draft={draft} newInvite={newInvite} setNewInvite={setNewInvite} inviteRole={inviteRole} setInviteRole={setInviteRole} addInvite={addInvite} change={change} />}
       {step === 4 && <ServicesStep reviewMode={reviewMode} draft={draft} newService={newService} setNewService={setNewService} addService={addService} change={change} busy={busy} dirty={sectionDirty('services')} save={() => saveReviewSection('services')} />}

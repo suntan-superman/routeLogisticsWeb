@@ -8,6 +8,7 @@ const { resolveClaims } = require('./claims');
 const { workspaceStatus } = require('./workspace');
 const { workDataHandlers } = require('./workData');
 const { companyOnboardingHandlers } = require('./companyOnboarding');
+const { companyLogoHandler } = require('./companyLogo');
 const { schedulingHandlers } = require('./scheduling');
 const { scheduleMembershipHandlers } = require('./scheduleMembership');
 const { staffAvailabilityHandlers } = require('./staffAvailability');
@@ -159,6 +160,7 @@ exports.rlGetCompanyOnboardingDraft = onCall(companyOnboarding.getDraft);
 exports.rlSaveCompanyOnboardingDraft = onCall(companyOnboarding.saveDraft);
 exports.rlActivateCompanyOnboarding = onCall({ timeoutSeconds: 60 }, companyOnboarding.activate);
 exports.rlCompanySetupReview = onCall(companyOnboarding.review);
+exports.rlCompanyLogo = onCall({ memory: '512MiB', timeoutSeconds: 60 }, companyLogoHandler(db));
 exports.rlCleanupCompanyOnboardingDrafts = onSchedule({ schedule: 'every 24 hours', maxInstances: 1, timeoutSeconds: 120 }, async () => {
   const expired = await db.collection('rlCompanyOnboardingDrafts').where('expiresAt', '<=', new Date().toISOString()).limit(400).get();
   if (expired.empty) return;

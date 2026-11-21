@@ -1,7 +1,7 @@
 const { test, before, after } = require('node:test');
 const { initializeTestEnvironment, assertFails, assertSucceeds } = require('@firebase/rules-unit-testing');
 const { doc, setDoc, updateDoc } = require('firebase/firestore');
-const { ref, uploadBytes, getMetadata } = require('firebase/storage');
+const { ref, uploadBytes, getMetadata, deleteObject } = require('firebase/storage');
 const fs = require('node:fs');
 let env;
 before(async () => {
@@ -56,4 +56,17 @@ test('active administrators retain Storage access within its two-document Firest
   await assertSucceeds(getMetadata(file));
   await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), 'rlAccountDeletions/storage-limit-admin'), { status: 'pending' }));
   await assertFails(getMetadata(file));
+});
+
+test('private company logos cannot be read, replaced or removed through client Storage APIs', async () => {
+  const path = 'rlCompanyLogos/storage-co/11111111-1111-4111-8111-111111111111.png';
+  await env.withSecurityRulesDisabled(ctx => uploadBytes(ref(ctx.storage(), path), new Uint8Array([137, 80, 78, 71]), { contentType: 'image/png' }));
+  const owner = env.authenticatedContext('storage-owner', { companyId: 'storage-co', role: 'owner', email_verified: true }).storage();
+  const tech = env.authenticatedContext('storage-tech', { companyId: 'storage-co', membershipId: 'storage-member', role: 'technician', email_verified: true }).storage();
+  const foreign = env.authenticatedContext('foreign-owner', { companyId: 'foreign', role: 'owner', email_verified: true }).storage();
+  for (const storage of [owner, tech, foreign]) {
+    await assertFails(getMetadata(ref(storage, path)));
+    await assertFails(uploadBytes(ref(storage, path), new Uint8Array([1]), { contentType: 'image/png' }));
+    await assertFails(deleteObject(ref(storage, path)));
+  }
 });

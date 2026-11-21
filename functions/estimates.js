@@ -123,7 +123,7 @@ const managed = (scope, row) => {
   if (!row.exists || !scoped(scope, row.data())) fail('permission-denied', 'Estimate is not available in your workspace.');
 };
 const printable = value => String(value || '').replace(/[^\x20-\x7e\xa0-\xff\n]/g, '?');
-async function createEstimatePdf(estimate, company, photos = []) {
+async function createEstimatePdf(estimate, company, photos = [], logo = null) {
   const pdf = await PDFDocument.create(),
     font = await pdf.embedFont(StandardFonts.Helvetica),
     bold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -133,6 +133,12 @@ async function createEstimatePdf(estimate, company, photos = []) {
     y = 750;
   };
   next();
+  if (logo?.bytes) {
+    const image = logo.contentType === 'image/png' ? await pdf.embedPng(Uint8Array.from(logo.bytes)) : await pdf.embedJpg(Uint8Array.from(logo.bytes));
+    const scaled = image.scale(Math.min(100 / image.width, 55 / image.height, 1));
+    page.drawImage(image, { x: 465, y: 735, width: scaled.width, height: scaled.height });
+    y = 720;
+  }
   const line = (value, {
     size = 11,
     strong = false,
@@ -298,7 +304,8 @@ function estimateHandlers(db, config = {}) {
   }
   async function buildPdf(scope, id, data) {
     const [company, photos] = await Promise.all([scope.companyId ? ref('companies', scope.companyId).get() : ref('users', scope.uid).get(), photosFor(scope, id, data.photoIds || [])]);
-    return createEstimatePdf(data, company.data() || {}, await Promise.all(photos.map(photoBytes)));
+    const logo = scope.companyId ? await require('./companyLogo').loadLogo(company.get('logo'), scope.companyId) : null;
+    return createEstimatePdf(data, company.data() || {}, await Promise.all(photos.map(photoBytes)), logo);
   }
   async function recipient(scope, data, tx) {
     if (data.customerId) {

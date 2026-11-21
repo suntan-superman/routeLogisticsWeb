@@ -18,6 +18,7 @@ import { functions } from '../services/firebase';
 import { useConfirm } from '../components/ConfirmProvider';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import ServiceAreasSettings from '../components/ServiceAreasSettings';
+import CompanyLogoField from '../components/CompanyLogoField';
 import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
 import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 import { formatPhone, displayPhone } from '../utils/format';
@@ -26,7 +27,7 @@ const companyForm = (company = {}) => ({
   name: company.name || '', description: company.description || '', address: company.address || '', city: company.city || '', state: company.state || '', zipCode: company.zipCode || '',
   phone: displayPhone(company.phone), email: company.email || '', website: company.website || '', logo: company.logo || '', primaryColor: company.primaryColor || '#10b981', secondaryColor: company.secondaryColor || '#6b7280', invoiceRemindersEnabled: company.invoiceRemindersEnabled === true
 });
-const companySnapshot = (data, categories) => JSON.stringify({ ...data, serviceCategories: categories });
+const companySnapshot = (data, categories) => { const { logo, ...settings } = data; void logo; return JSON.stringify({ ...settings, serviceCategories: categories }); };
 
 const CompanySetupPage = () => {
   const { currentUser, role } = useAuth();
@@ -98,6 +99,7 @@ const CompanySetupForm = () => {
     saving.current = true;
     setIsLoading(true);
     const submitted = { ...companyData, serviceCategories: [...serviceCategories] };
+    if (company) delete submitted.logo; // The logo has its own authorized save path.
     try {
       let result;
       
@@ -516,27 +518,7 @@ const CompanySetupForm = () => {
 
               <div className="mt-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Company Logo</label>
-                <div className="flex items-center space-x-4">
-                  <div className="flex-shrink-0">
-                    {companyData.logo ? (
-                      <img className="h-16 w-16 rounded-lg object-cover" src={companyData.logo} alt="Logo" />
-                    ) : (
-                      <div className="h-16 w-16 bg-gray-200 rounded-lg flex items-center justify-center">
-                        <PhotoIcon className="h-8 w-8 text-gray-400" />
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <input
-                      type="url"
-                      value={companyData.logo}
-                      onChange={(e) => handleInputChange('logo', e.target.value)}
-                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                      placeholder="Enter logo URL"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Enter a URL to your company logo</p>
-                  </div>
-                </div>
+                {company?.id ? <CompanyLogoField companyId={company.id} currentLogo={company.logo} onSaved={logo => setCompany(old => ({ ...old, logo }))} /> : <p className="text-sm text-gray-600">Save the company first, then upload its logo.</p>}
               </div>
             </div>
           </div>

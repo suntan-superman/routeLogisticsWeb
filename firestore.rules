@@ -25,7 +25,7 @@ service cloud.firestore {
     function isManager() {
       return claimRole() in ['owner', 'admin', 'manager'];
     }
-    function isFinance() { return claimRole() in ['owner', 'admin']; }
+    function isFinance() { return claimRole() in ['owner', 'admin', 'manager']; }
     function isStaff() {
       return claimRole() in ['owner', 'admin', 'manager', 'technician'];
     }
@@ -201,7 +201,7 @@ service cloud.firestore {
         && geographicUpdate()
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(schedulingFields())
         && financeAccess(resource.data);
-      allow delete: if financeAccess(resource.data) && resource.data.get('appointmentKind', 'service') != 'estimate_visit'; // Estimate visits are canceled, preserving inquiry/evidence history.
+      allow delete: if false; // rlManageJob validates management role, revision and dependent records before deletion.
     }
 
     // ---------- appointments ----------

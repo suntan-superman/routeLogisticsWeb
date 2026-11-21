@@ -7,7 +7,8 @@ test('direct URLs and navigation share explicit role capabilities', () => {
   const can = role => capability => (policy.roles[role] || []).includes(capability);
   for (const role of ['owner', 'admin', 'manager', 'technician']) {
     for (const route of ['/dispatch', '/customers', '/calendar', '/jobs', '/estimates']) assert.equal(mayOpenRoute(route, can(role)), role !== 'technician');
-    for (const route of ['/invoices', '/integrations']) assert.equal(mayOpenRoute(route, can(role)), ['owner', 'admin'].includes(role));
+    assert.equal(mayOpenRoute('/invoices', can(role)), role !== 'technician');
+    assert.equal(mayOpenRoute('/integrations', can(role)), ['owner', 'admin'].includes(role));
     assert.equal(mayOpenRoute('/my-work', can(role)), true);
     assert.equal(mayOpenRoute('/routes', can(role)), true);
     assert.equal(mayOpenRoute('/reports', can(role)), role !== 'technician');

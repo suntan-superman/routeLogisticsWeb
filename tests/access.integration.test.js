@@ -29,11 +29,12 @@ after(() => deleteApp(app));
 
 test('all four roles have explicit operational, financial and governance capabilities', async () => {
   for (const role of ['owner', 'admin', 'manager', 'technician']) {
-    assert.equal(hasCapability(role, 'invoices.manage'), ['owner', 'admin'].includes(role));
+    assert.equal(hasCapability(role, 'invoices.manage'), role !== 'technician');
     assert.equal(hasCapability(role, 'dispatch.manage'), role !== 'technician');
     assert.equal(hasCapability(role, 'team.manage'), role === 'owner');
     assert.equal(hasCapability(role, 'jobs.work'), true);
-    if (role === 'manager' || role === 'technician') await assert.rejects(requireCapability(db, request(role), 'invoices.manage'), { code: 'permission-denied' });
+    if (role === 'technician') await assert.rejects(requireCapability(db, request(role), 'invoices.manage'), { code: 'permission-denied' });
+    else await requireCapability(db, request(role), 'invoices.manage');
   }
   assert.equal(hasCapability('dispatcher', 'jobs.assign'), false);
 });
@@ -48,9 +49,9 @@ test('technician sees shared job instructions and a separate work log while priv
   await assert.rejects(work.read(request('technician', { resource: 'customers' })), { code: 'invalid-argument' });
   assert.equal((await work.read(request('technician', { resource: 'customers', jobId: 'access-job' }))).customer.name, 'Customer');
 });
-test('manager gets operational pricing but no balances, history or company accounting fields', async () => {
+test('manager gets invoice balances but no private job history or company accounting fields', async () => {
   const result = await work.read(request('manager', { resource: 'jobs', id: 'access-job' }));
-  assert.equal(result.job.totalCost, 150); assert.equal(result.job.invoiceBalance, undefined); assert.equal(result.job.revisions, undefined); assert.equal(result.customer.totalSpent, undefined);
+  assert.equal(result.job.totalCost, 150); assert.equal(result.job.invoiceBalance, 99); assert.equal(result.job.revisions, undefined); assert.equal(result.customer.totalSpent, undefined);
   const company = (await work.read(request('manager', { resource: 'company' }))).company;
   assert.equal(company.bankAccount, undefined); assert.equal(company.services[0].price, 150); assert.equal(company.services[0].qbId, undefined);
   assert.equal((await work.read(request('technician', { resource: 'company' }))).company.services[0], 'Service');

@@ -7,7 +7,6 @@ import { onAuthStateChanged, signInWithCustomToken, signOut } from 'firebase/aut
 import { httpsCallable } from 'firebase/functions';
 import { portalAuth, portalFunctions, portalReady } from '../services/portal';
 import InvoicePayment from '../components/InvoicePayment';
-import PaymentHistory from '../components/PaymentHistory';
 import { paymentsConfigured, paymentMode } from '../services/paymentConfig';
 import CustomerReviews from '../components/CustomerReviews';
 import { usePrincipalQuery } from '../hooks/usePrincipalQuery';
@@ -16,7 +15,21 @@ import { useConfirmUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { rememberedPortalEmail, rememberPortalEmail } from '../utils/rememberedEmail';
 const call = (name, data) => httpsCallable(portalFunctions, name)(data).then((result) => result.data);
 const money = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+const centsMoney = cents => money(cents / 100);
 const portalName = account => Array.isArray(account?.customerNames) && account.customerNames.length === 1 ? account.customerNames[0] : '';
+function PortalInvoice({ invoice, onPdf }) {
+  const [entries, setEntries] = useState(null), [error, setError] = useState('');
+  const loadHistory = () => call('rlInvoiceLedger', { action: 'history', invoiceId: invoice.id }).then(result => setEntries(result.entries || [])).catch(failure => setError(failure.message || 'Payment history is unavailable.'));
+  return <details className="border-t py-3" onToggle={event => { if (event.currentTarget.open && entries === null) loadHistory(); }}>
+    <summary className="cursor-pointer font-medium">{invoice.invoiceNumber} · {centsMoney(invoice.totalCents)} · {invoice.status.replaceAll('_', ' ')} · Due {invoice.dueDate}</summary>
+    <div className="mt-3 space-y-3 text-sm">
+      <p>Original total: {centsMoney(invoice.totalCents)} · Payments: {centsMoney(invoice.paidCents)} · Credits: {centsMoney(invoice.creditCents)} · <strong>Outstanding: {centsMoney(invoice.balanceCents)}</strong></p>
+      <ul>{invoice.lineItems.map((item, index) => <li key={index}>{item.description} — {item.quantity} × {centsMoney(item.unitPriceCents)} = {centsMoney(item.amountCents)}</li>)}</ul>
+      <button type="button" className="text-primary-700 underline" onClick={() => onPdf(invoice)}>View or download invoice PDF</button>
+      <div><strong>Payment activity</strong>{error && <p role="alert" className="text-red-700">{error}</p>}{entries === null && !error ? <p>Loading…</p> : entries?.length ? <ul className="mt-1 space-y-1">{entries.map(entry => <li key={entry.id}>{entry.kind.replaceAll('_', ' ')} · {centsMoney(entry.amountCents)}</li>)}</ul> : <p>No payments or credits recorded.</p>}</div>
+    </div>
+  </details>;
+}
 const today = timeZone => {
   const now = new Date();
   try {
@@ -43,9 +56,9 @@ export default function CustomerPortalPage() {
     if (pendingInvite) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
   }, [pendingInvite]);
   const [paymentInvoice, setPaymentInvoice] = useState(null);
-  const [selectedId, setSelectedId] = useState(''), [openInvoice, setOpenInvoice] = useState(null), [fileView, setFileView] = useState(null), [logoutFailed, setLogoutFailed] = useState(false);
+  const [selectedId, setSelectedId] = useState(''), [fileView, setFileView] = useState(null), [logoutFailed, setLogoutFailed] = useState(false);
   const alive = useRef(false), identity = useRef(null), selection = useRef(''), requestVersion = useRef(0), fileVersion = useRef(0), authVersion = useRef(0), submitting = useRef(false);
-  const clearDetails = () => { fileVersion.current++; setPaymentInvoice(null); setOpenInvoice(null); setFileView(null); };
+  const clearDetails = () => { fileVersion.current++; setPaymentInvoice(null); setFileView(null); };
   const portalQuery = usePrincipalQuery('rl-customer-portal', user?.uid, ['accounts'], async () => { await portalReady; return call('getCustomerPortal'); }, {
     current: uid => alive.current && identity.current?.uid === uid && portalAuth.currentUser?.uid === uid,
   });
@@ -66,7 +79,7 @@ export default function CustomerPortalPage() {
     alive.current = true;
     const unsubscribe = onAuthStateChanged(portalAuth, current => {
       identity.current = current; selection.current = ''; requestVersion.current++; fileVersion.current++; authVersion.current++;
-      setUser(current); setAccounts([]); setSelectedId(''); setPropertyKey(''); setPaymentInvoice(null); setOpenInvoice(null); setFileView(null); setHasMore(false);
+      setUser(current); setAccounts([]); setSelectedId(''); setPropertyKey(''); setPaymentInvoice(null); setFileView(null); setHasMore(false);
       setCode(''); setChallenge(null); setMessage(''); setError(''); setLogoutFailed(false);
       setBusy(!!current);
     });
@@ -140,6 +153,18 @@ export default function CustomerPortalPage() {
     } catch (failure) { if (alive.current && version === fileVersion.current && selection.current === accountId && identity.current?.uid === uid) setFileView({ accountId, item, loading: false, data: null, error: failure.message || 'This file could not be loaded. Please try again.' }); }
   };
   const currentFile = fileView?.accountId === selectedAccount?.id ? fileView : null;
+  const readInvoicePdf = async (accountId, invoice) => {
+    const version = ++fileVersion.current, uid = identity.current?.uid;
+    setFileView({ accountId, item: { name: invoice.invoiceNumber + '.pdf' }, loading: true, error: '', data: null });
+    try {
+      const result = await call('rlInvoicePdf', { invoiceId: invoice.id });
+      if (alive.current && version === fileVersion.current && selection.current === accountId && identity.current?.uid === uid)
+        setFileView({ accountId, item: { name: result.fileName }, loading: false, error: '', data: { contentType: 'application/pdf', name: result.fileName, dataUri: `data:application/pdf;base64,${result.base64}` } });
+    } catch (failure) {
+      if (alive.current && version === fileVersion.current && selection.current === accountId && identity.current?.uid === uid)
+        setFileView({ accountId, item: { name: invoice.invoiceNumber + '.pdf' }, loading: false, error: failure.message || 'Invoice PDF is unavailable.', data: null });
+    }
+  };
   const activePayment = paymentInvoice?.accountId === selectedAccount?.id && selectedAccount?.invoices?.some(invoice => invoice.id === paymentInvoice.invoiceId) ? paymentInvoice.invoiceId : null;
   return <main className="mx-auto max-w-5xl p-5 sm:p-8">
     <Helmet><title>Customer portal | Route Logistics</title><meta name="robots" content="noindex,nofollow" /></Helmet>
@@ -193,7 +218,7 @@ export default function CustomerPortalPage() {
         {sharedFiles.length ? <ul className="grid gap-3 sm:grid-cols-2">{sharedFiles.map(item => <li key={`${item.kind}:${item.id}`} className="min-w-0 rounded-lg border p-4"><p className="break-words text-sm">{item.caption || item.name || (item.kind === 'photo' ? 'Service photo' : 'Service document')}</p><button type="button" className="mt-3 text-sm font-semibold text-primary-700 underline" disabled={currentFile?.loading && currentFile.item.id === item.id} onClick={() => readFile(item)}>{item.kind === 'photo' ? 'View photo' : 'Open document'}</button></li>)}</ul> : <p className="text-gray-600">No photos or documents have been shared for this {selectedProperty ? 'property' : 'provider'} yet.</p>}
         {currentFile && <section aria-label="Shared file preview" className="mt-5 space-y-4 rounded-xl border border-primary-200 bg-primary-50 p-5"><div className="flex items-start justify-between gap-4"><h4 className="break-words font-semibold">{currentFile.item.caption || currentFile.item.name || 'Shared service file'}</h4><button type="button" className="text-sm text-primary-700 underline" onClick={() => { fileVersion.current++; setFileView(null); }}>Close file</button></div>{currentFile.loading ? <p role="status">Loading shared file…</p> : currentFile.error ? <><p role="alert" className="text-red-700">{currentFile.error}</p><button type="button" className="underline" onClick={() => readFile(currentFile.item)}>Retry file</button></> : currentFile.data?.contentType === 'application/pdf' ? <a className="font-semibold text-primary-700 underline" href={currentFile.data.dataUri} download={String(currentFile.data.name || 'Service document').replace(/[^a-zA-Z0-9 ._-]/g, '').slice(0, 160).replace(/\.pdf$/i, '') + '.pdf'}>Download PDF document</a> : currentFile.data ? <img className="max-h-[32rem] max-w-full rounded-lg object-contain" src={currentFile.data.dataUri} alt={currentFile.item.caption || currentFile.data.name || 'Shared service visit photo'} /> : null}</section>}
         <h3 className="mb-3 mt-6 font-semibold">Invoices</h3>
-        {account.invoices.length ? account.invoices.map((invoice) => <details key={`${account.id}:${invoice.id}`} className="border-t py-3" onToggle={event => setOpenInvoice(event.currentTarget.open ? invoice.id : previous => previous === invoice.id ? null : previous)}><summary className="cursor-pointer">{invoice.invoiceNumber} · {money(invoice.total)} · {invoice.status} · Due {invoice.dueDate}</summary><ul className="mt-3 text-sm">{invoice.lineItems.map((item, i) => <li key={i}>{item.description} — {item.quantity} × {money(item.unitPrice)} = {money(item.amount)}</li>)}</ul><p className="mt-3 text-sm">Contact your provider for payment arrangements.</p>{openInvoice === invoice.id && activePayment !== invoice.id && <PaymentHistory key={`${user.uid}:${account.id}:${invoice.id}`} invoiceId={invoice.id} functionClient={portalFunctions} />}</details>) : <p>No invoices yet.</p>}
+        {account.invoices.length ? account.invoices.map(invoice => <PortalInvoice key={`${account.id}:${invoice.id}`} invoice={invoice} onPdf={() => readInvoicePdf(account.id, invoice)} />) : <p>No issued invoices yet.</p>}
         {account.hasMore && <p className="mt-3 text-sm">Showing the latest 50 visits and invoices. Contact your provider for older records.</p>}
       </section>)}
       {hasMore && <p>Showing up to 25 service accounts. Contact your provider for additional records.</p>}

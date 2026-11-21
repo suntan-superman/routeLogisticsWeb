@@ -16,7 +16,8 @@ test('OTP hashes bind a six-digit code to a single challenge', () => {
 test('portal jobs and invoices expose an explicit public field whitelist', () => {
   const job = publicJob('job', { serviceType:'Pest control', date:'2026-11-14', time:'10:00', status:'completed', notes:'Private technician note', assignedTo:'staff', customerId:'customer', companyId:'private-company', storagePath:'private' });
   assert.deepEqual(Object.keys(job).sort(), ['date','id','serviceType','status','time']);
-  const invoice = publicInvoice('invoice', { invoiceNumber:'TEST-1', total:20, status:'sent', companyId:'private', stripePaymentId:'secret-reference', bankAccount:'private', notes:'Private', lineItems:[{description:'Service',quantity:1,unitPrice:20,amount:20,internalCost:2}] });
+  assert.equal(publicInvoice('legacy', { invoiceNumber:'OLD-1', status:'sent', total:20 }), null);
+  const invoice = publicInvoice('invoice', { financialVersion:2, invoiceNumber:'TEST-1', totalCents:2000, paidCents:0, creditCents:0, balanceCents:2000, status:'issued', issuedSnapshot:{invoiceNumber:'TEST-1', totalCents:2000, lineItems:[{description:'Service',quantity:1,unitPriceCents:2000,amountCents:2000,internalCost:2}]}, companyId:'private', stripePaymentId:'secret-reference', bankAccount:'private', notes:'Private' });
   assert.equal(invoice.stripePaymentId, undefined);assert.equal(invoice.companyId, undefined);assert.equal(invoice.notes, undefined);assert.equal(invoice.lineItems[0].internalCost, undefined);
 });
 

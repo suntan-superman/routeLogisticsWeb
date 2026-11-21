@@ -34,6 +34,6 @@ export const addDays = (isoDate, days) => {
 };
 
 export const isOverdue = (invoice, today = new Date().toISOString().slice(0, 10)) =>
-  invoice.status === 'sent' && !!invoice.dueDate && invoice.dueDate < today;
+  invoice.financialVersion === 2 && ['issued', 'partially_paid'].includes(invoice.status) && invoice.balanceCents > 0 && !!invoice.dueDate && invoice.dueDate < today;
 
 export { round2 };

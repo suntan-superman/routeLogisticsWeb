@@ -18,6 +18,7 @@ import { functions } from '../services/firebase';
 import { useConfirm } from '../components/ConfirmProvider';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import ServiceAreasSettings from '../components/ServiceAreasSettings';
+import BillingSettingsPanel from '../components/BillingSettingsPanel';
 import CompanyLogoField from '../components/CompanyLogoField';
 import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
 import { workspaceAccessError } from '../services/workspaceQueryPolicy';
@@ -687,6 +688,7 @@ const CompanySetupForm = () => {
         </div>
       </div>
       {company && isOwner && <ServiceAreasSettings company={company} />}
+      {company && isOwner && <BillingSettingsPanel />}
     </Motion.div>
   );
 };

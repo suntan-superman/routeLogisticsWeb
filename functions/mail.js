@@ -21,7 +21,25 @@ async function deliverMail(db, ref, transport, from, now = Date.now(), options =
     }
     if (data.invoiceId) {
       const invoice = await tx.get(db.collection('invoices').doc(data.invoiceId));
-      if (!invoice.exists || invoice.get('status') !== 'sent') { tx.update(ref, { status: 'cancelled' }); return null; }
+      const issued = invoice.exists && invoice.get('financialVersion') === 2 && invoice.get('issuedSnapshot')?.fingerprint === data.invoiceSnapshotFingerprint;
+      if (!issued || !['issued', 'partially_paid', 'paid'].includes(invoice.get('status')) || data.subject?.startsWith('Payment reminder:') && (invoice.get('balanceCents') || 0) <= 0) {
+        tx.update(ref, { status: 'cancelled' }); return null;
+      }
+    }
+    if (data.reportRunId) {
+      const run = await tx.get(db.doc(`rlBillingRuns/${data.reportRunId}`));
+      const expectedPrefix = `rlManagementReports/${data.companyId}/${data.reportRunId}/`;
+      const company = await tx.get(db.doc(`companies/${data.companyId}`));
+      const owner = company.exists ? await tx.get(db.doc(`users/${company.get('ownerId')}`)) : null;
+      const members = company.exists ? await tx.get(db.collection('teamMembers').where('companyId', '==', data.companyId)) : null;
+      const authorized = data.to === String(owner?.get('email') || '').trim().toLowerCase()
+        || company.get('billingSettings.reportRecipientOwnerUid') === company.get('ownerId') && data.to === company.get('billingSettings.reportRecipientOwnerEmail')
+        || members?.docs.some(member => member.get('status') === 'active' && ['owner','admin','manager'].includes(member.get('role')) && String(member.get('email') || '').trim().toLowerCase() === data.to);
+      if (!run.exists || run.get('companyId') !== data.companyId || run.get('kind') !== 'report' || !company.exists || company.get('isActive') === false || !authorized
+        || !(company.get('billingSettings.reportRecipients') || []).includes(data.to)
+        || run.get('status') !== 'complete' || typeof data.reportPdfPath !== 'string' || !data.reportPdfPath.startsWith(expectedPrefix)) {
+        tx.update(ref, { status: 'cancelled', failureCode: 'report-run-invalid' }); return null;
+      }
     }
     if (data.reviewInvitationId && !(await require('./reviewInvitations').reviewDeliveryEligible(tx, db, data, { now, enabled: options.reviewInvitationsEnabled ? options.reviewInvitationsEnabled() : process.env.RL_REVIEW_INVITATIONS_ENABLED === 'true' }))) {
       tx.update(ref, { status: 'cancelled', failureCode: 'review-invitation-no-longer-authorized' }); return null;
@@ -79,6 +97,22 @@ async function deliverMail(db, ref, transport, from, now = Date.now(), options =
       const [bytes] = await file.download();
       if (bytes.length > 10 * 1024 * 1024 || bytes.subarray(0,5).toString() !== '%PDF-') throw Object.assign(new Error('Unsupported estimate document.'),{code:'estimate-pdf-invalid'});
       attachments = [{ filename:`estimate-v${mail.estimateVersion}.pdf`, content:bytes, contentType:'application/pdf' }];
+    }
+    if (mail.invoiceId) {
+      const invoice = await db.doc(`invoices/${mail.invoiceId}`).get();
+      if (!invoice.exists || invoice.get('issuedSnapshot')?.fingerprint !== mail.invoiceSnapshotFingerprint) throw Object.assign(new Error('Invoice snapshot changed.'), { code: 'invoice-snapshot-changed' });
+      const { buildInvoicePdf, approvedPhotoBytes } = require('./invoicePdf');
+      const bytes = await buildInvoicePdf(invoice.get('issuedSnapshot'), { photoProvider: approvedPhotoBytes });
+      if (bytes.length > 8 * 1024 * 1024) throw Object.assign(new Error('Invoice PDF too large.'), { code: 'invoice-pdf-too-large' });
+      attachments = [{ filename: `${invoice.get('invoiceNumber') || 'invoice'}.pdf`, content: bytes, contentType: 'application/pdf' }];
+    }
+    if (mail.reportRunId) {
+      const bucket = options.bucketProvider ? options.bucketProvider() : require('firebase-admin/storage').getStorage().bucket();
+      const file = bucket.file(mail.reportPdfPath), [metadata] = await file.getMetadata();
+      if (metadata.contentType !== 'application/pdf' || Number(metadata.size) > 8 * 1024 * 1024) throw Object.assign(new Error('Unsupported report document.'), { code: 'report-pdf-invalid' });
+      const [bytes] = await file.download();
+      if (bytes.length > 8 * 1024 * 1024 || bytes.subarray(0,5).toString() !== '%PDF-') throw Object.assign(new Error('Unsupported report document.'), { code: 'report-pdf-invalid' });
+      attachments = [{ filename: `${mail.reportPdfPath.split('/').pop()}`, content: bytes, contentType: 'application/pdf' }];
     }
     const result = await transport.sendMail({ from, to: mail.to, subject: mail.subject, text: mail.text, ...(attachments ? {attachments} : {}), messageId: `<rl-${ref.id}@route-logistics.com>`, disableFileAccess: true, disableUrlAccess: true });
     accepted = result.accepted?.length > 0;

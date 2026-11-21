@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
 import { motion as Motion } from 'framer-motion';
 import ReportingService from '../services/reportingService';
+import FinancialReportsPage from './FinancialReportsPage';
 import { 
   ChartBarIcon, 
   DocumentArrowDownIcon,
@@ -489,5 +490,5 @@ const ReportsPage = () => {
 };
 
 export default function AuthorizedReportsPage() {
-  return can('reports.financial') ? <ReportsPage /> : <OperationsReportsPage />;
+  return can('reports.financial') ? <FinancialReportsPage /> : <OperationsReportsPage />;
 }

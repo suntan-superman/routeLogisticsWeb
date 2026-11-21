@@ -22,7 +22,7 @@ const call = async (name, data, functionClient) => {
   if (name === 'rlGetCustomerPortalFile') { if (pendingFile) return pendingFile; if (fileError) throw fileError; return data.kind === 'photo' ? { dataUri: 'data:image/png;base64,cGhvdG8=', contentType: 'image/png', name: 'Shared service photo' } : { dataUri: 'data:application/pdf;base64,cGRm', contentType: 'application/pdf', name: 'Service report.pdf' }; }
   if (name === 'rlClaimPortalLink') return { status: 'connected' };
   if (name === 'rlDisconnectPortalLink') return { status: 'disconnected' };
-  if (name === 'rlGetInvoicePaymentHistory') return { history: [], truncated: false };
+  if (name === 'rlInvoiceLedger') return { entries: [], truncated: false };
   throw Error('Unexpected portal API: ' + name);
 };
 const mock = name => {
@@ -229,11 +229,10 @@ test('shared files send the exact association/kind/file scope and PDFs are downl
 
 test('payment history is lazy per opened invoice and uses the isolated portal Functions client', async () => {
   accounts = [{ ...a, invoices: Array.from({ length: 50 }, (_, index) => ({ ...a.invoices[0], id: 'invoice-' + index, invoiceNumber: 'INV-' + index })) }];
-  await mount(); assert.equal(calls.filter(row => row.name === 'rlGetInvoicePaymentHistory').length, 0);
+  await mount(); assert.equal(calls.filter(row => row.name === 'rlInvoiceLedger').length, 0);
   await expandInvoice(0);
-  let history = calls.filter(row => row.name === 'rlGetInvoicePaymentHistory'); assert.equal(history.length, 1); assert.deepEqual(history[0].data, { invoiceId: 'invoice-0' }); assert.equal(history[0].client, client);
-  await expandInvoice(1); history = calls.filter(row => row.name === 'rlGetInvoicePaymentHistory'); assert.equal(history.length, 2);
-  assert.equal(tree.root.findAllByProps({ 'aria-label': 'Payment history' }).length, 1);
+  let history = calls.filter(row => row.name === 'rlInvoiceLedger'); assert.equal(history.length, 1); assert.deepEqual(history[0].data, { action: 'history', invoiceId: 'invoice-0' }); assert.equal(history[0].client, client);
+  await expandInvoice(1); history = calls.filter(row => row.name === 'rlInvoiceLedger'); assert.equal(history.length, 2);
 });
 
 test('empty and load-failure states expose a useful recovery action without stale records', async () => {

@@ -2,11 +2,14 @@ const { requireCapability } = require('./access');
 const requireFinance = (db, request, data) => requireCapability(db, request, 'invoices.manage', data);
 const { HttpsError } = require('firebase-functions/v2/https');
 const { requireAuth, rateLimit, documentId, normalizeEmail, validEmail } = require('./security');
-const { assertInvoiceActor, invoiceRevision, expectedRevision, assertInvoiceTerms, assertInvoiceRelationships } = require('./invoices');
+const { assertInvoiceActor, invoiceRevision, expectedRevision, assertInvoiceTerms } = require('./invoices');
 const { hash } = require('./security');
+const { assertCurrentInvoice } = require('./shared/invoiceV2');
 function invoiceMessage(invoice, companyName, reminder, appUrl) {
-  const amount = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(invoice.total);
-  return { subject: `${reminder ? 'Payment reminder: ' : ''}Invoice ${invoice.invoiceNumber || ''} from ${companyName}`, text: `${companyName}\nInvoice ${invoice.invoiceNumber || ''}\nTotal: ${amount}\nDue: ${invoice.dueDate || ''}\n\n${(invoice.lineItems || []).map((i) => `${i.description}: ${i.quantity} x ${i.unitPrice}`).join('\n')}\n\nView your visits and invoices: ${appUrl.replace(/\/$/, '')}/portal\nContact your service provider for payment arrangements.${reminder ? '\nIf you have already paid, please contact your provider so they can update the invoice.' : ''}` };
+  const snapshot = invoice.issuedSnapshot;
+  const total = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(snapshot.totalCents / 100);
+  const balance = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(invoice.balanceCents / 100);
+  return { subject: `${reminder ? 'Payment reminder: ' : ''}Invoice ${snapshot.invoiceNumber} from ${companyName}`, text: `${companyName}\nInvoice ${snapshot.invoiceNumber}\nTotal: ${total}\nOutstanding: ${balance}\nDue: ${snapshot.dueDate}\n\nThe approved invoice PDF is attached.\nView your visits and invoices: ${appUrl.replace(/\/$/, '')}/portal\nContact your service provider for payment arrangements.${reminder ? '\nIf you have already paid, please contact your provider so they can update the invoice.' : ''}` };
 }
 async function queueInvoiceEmail(db, id, { reminder = false, appUrl, authorize = async () => {}, revision } = {}) {
   const invoiceRef = db.collection('invoices').doc(documentId(id, 'invoice'));
@@ -16,16 +19,16 @@ async function queueInvoiceEmail(db, id, { reminder = false, appUrl, authorize =
     const invoice = invoiceSnap.data();
     const actor = await authorize(invoice);
     if (actor) await assertInvoiceActor(db, tx, actor);
-    if (!['draft', 'sent'].includes(invoice.status) || !Number.isFinite(invoice.total) || invoice.total < 0) throw new HttpsError('failed-precondition', 'Only unpaid valid invoices can be emailed.');
+    assertCurrentInvoice(invoice);
+    if (!['issued', 'partially_paid'].includes(invoice.status) || !invoice.issuedSnapshot || !Number.isSafeInteger(invoice.balanceCents) || invoice.balanceCents <= 0) throw new HttpsError('failed-precondition', 'Approve and issue this invoice before emailing it.');
     assertInvoiceTerms(invoice);
-    if (actor) await assertInvoiceRelationships(db, tx, actor, invoice);
     if (!invoice.customerId) throw new HttpsError('failed-precondition', 'Link the invoice to a customer with an email address.');
     const customer = await tx.get(db.collection('customers').doc(documentId(invoice.customerId)));
     if (!customer.exists || (invoice.companyId ? customer.get('companyId') !== invoice.companyId : customer.get('userId') !== invoice.userId || customer.get('companyId'))) throw new HttpsError('failed-precondition', 'Invoice customer does not match its company.');
     const email = normalizeEmail(customer.get('email'));
     if (!validEmail(email)) throw new HttpsError('failed-precondition', 'Add a valid customer email address.');
     const company = invoice.companyId ? await tx.get(db.collection('companies').doc(invoice.companyId)) : null;
-    if (reminder && (invoice.status !== 'sent' || !invoice.dueDate || invoice.dueDate >= new Date().toISOString().slice(0, 10) || company?.get('invoiceRemindersEnabled') !== true || customer.get('emailConsent') !== true)) return { skipped: true };
+    if (reminder && (!invoice.dueDate || invoice.dueDate >= new Date().toISOString().slice(0, 10) || company?.get('invoiceRemindersEnabled') !== true || customer.get('emailConsent') !== true)) return { skipped: true };
     const now = Date.now();
     const period = Math.floor(now / ((reminder ? 7 : 1) * 86400_000));
     const mailRef = db.collection('rlMail').doc(`invoice_${reminder ? 'reminder' : 'send'}_${id}_${period}`);
@@ -35,13 +38,9 @@ async function queueInvoiceEmail(db, id, { reminder = false, appUrl, authorize =
       return { queued: true, existing: true };
     }
     if (revision !== undefined) expectedRevision(invoice, revision);
-    if (invoice.paymentLock && invoice.status === 'draft') throw new HttpsError('failed-precondition', 'Cancel the payment attempt before issuing the invoice.');
-    tx.create(mailRef, { ...invoiceMessage(invoice, company?.get('name') || 'Your service provider', reminder, appUrl), invoiceId: id, to: email, status: 'queued', availableAt: now, createdAt: new Date(now), expiresAt: new Date(now + 86400_000) });
-    if (invoice.status === 'draft') {
-      const nextRevision = invoiceRevision(invoice) + 1;
-      tx.update(invoiceRef, { status: 'sent', revision: nextRevision, sentAt: new Date(now), updatedAt: new Date(now) });
-      tx.create(db.doc(`rlInvoiceAudit/${hash(`email:${mailRef.id}`)}`), { companyId: invoice.companyId || null, actorId: actor?.uid || 'system', invoiceId: id, action: 'invoice.sent', fromRevision: invoiceRevision(invoice), toRevision: nextRevision, fromStatus: 'draft', toStatus: 'sent', totalCents: invoice.totalCents ?? null, sourceFingerprint: invoice.sourceFingerprint || null, mailId: mailRef.id, createdAt: new Date(now) });
-    }
+    tx.create(mailRef, { ...invoiceMessage(invoice, company?.get('name') || 'Your service provider', reminder, appUrl), invoiceId: id, invoiceSnapshotFingerprint: invoice.issuedSnapshot.fingerprint,
+      to: email, status: 'queued', availableAt: now, createdAt: new Date(now), expiresAt: new Date(now + 86400_000) });
+    tx.create(db.doc(`rlInvoiceAudit/${hash(`email:${mailRef.id}`)}`), { companyId: invoice.companyId || null, actorId: actor?.uid || 'system', invoiceId: id, action: 'invoice.email.queued', fromRevision: invoiceRevision(invoice), toRevision: invoiceRevision(invoice), fromStatus: invoice.status, toStatus: invoice.status, totalCents: invoice.totalCents, mailId: mailRef.id, createdAt: new Date(now) });
     return { queued: true };
   });
 }
@@ -59,7 +58,7 @@ function invoiceEmailHandlers(db, appUrl, emailEnabled = () => true) {
       const today = new Date().toISOString().slice(0, 10);
       let cursor;
       do {
-        let query = db.collection('invoices').where('status', '==', 'sent').where('dueDate', '<', today).orderBy('dueDate').limit(200);
+        let query = db.collection('invoices').where('financialVersion', '==', 2).where('status', 'in', ['issued','partially_paid']).where('dueDate', '<', today).orderBy('dueDate').limit(200);
         if (cursor) query = query.startAfter(cursor);
         const snap = await query.get();
         for (const invoice of snap.docs) {

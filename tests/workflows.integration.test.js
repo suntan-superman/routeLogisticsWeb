@@ -177,10 +177,15 @@ test('email worker leases prevent concurrent delivery and cancel paid invoice em
 });
 test('reminders respect consent and retries deduplicate the weekly email', async () => {
   await db.doc('customers/reminder-customer').set({ companyId: 'workflow-co', email: 'reminder@workflows.test' });
-  await db.doc('invoices/reminder-test').set({ companyId: 'workflow-co', customerId: 'reminder-customer', status: 'sent', lineItems: [{ description: 'Synthetic reminder service', quantity: 1, unitPrice: 20, amount: 20 }], subtotal: 20, tax: 0, taxRate: 0, total: 20, dueDate: '2020-01-01' });
+  const { invoiceHandlers } = require('../functions/invoices');
+  const invoice = invoiceHandlers(db).handle, call = data => invoice({ auth: owner, data });
+  const created = await call({ action: 'createManual', customerId: 'reminder-customer', lineItems: [{ description: 'Synthetic reminder service', quantity: 1, unitPrice: 20 }], taxRate: 0, operationId: 'workflow-reminder-create-0001' });
+  const invoiceId = created.invoiceId;
+  let state = await call({ action: 'update', invoiceId, expectedRevision: created.invoice.revision, operationId: 'workflow-reminder-date-0001', changes: { issueDate: '2020-01-01', dueDate: '2020-01-01' } });
+  for (const status of ['awaiting_approval', 'approved', 'issued']) state = await call({ action: 'status', invoiceId, expectedRevision: state.invoice.revision, operationId: `workflow-reminder-${status}-0001`, status });
   const options = { reminder: true, appUrl: 'https://rl.test' };
-  assert.equal((await queueInvoiceEmail(db, 'reminder-test', options)).skipped, true);
+  assert.equal((await queueInvoiceEmail(db, invoiceId, options)).skipped, true);
   await db.doc('customers/reminder-customer').update({ emailConsent: true });
-  assert.equal((await queueInvoiceEmail(db, 'reminder-test', options)).queued, true);
-  assert.equal((await queueInvoiceEmail(db, 'reminder-test', options)).existing, true);
+  assert.equal((await queueInvoiceEmail(db, invoiceId, options)).queued, true);
+  assert.equal((await queueInvoiceEmail(db, invoiceId, options)).existing, true);
 });

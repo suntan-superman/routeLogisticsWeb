@@ -17,6 +17,10 @@ function stripeKeyForMode(value, mode) {
 }
 
 function amountInCents(invoice) {
+  if (invoice.financialVersion === 2) {
+    if (!invoice.issuedSnapshot || !Number.isSafeInteger(invoice.balanceCents) || invoice.balanceCents < 50 || invoice.balanceCents > 99999999) throw new HttpsError('failed-precondition', 'Outstanding invoice balance must be at least $0.50 for a test card payment.');
+    return invoice.balanceCents;
+  }
   const value = Number(invoice.total);
   if (!Number.isFinite(value) || value < 0.50 || value > 999999.99 || Math.abs(value * 100 - Math.round(value * 100)) > 0.00001) throw new HttpsError('failed-precondition', 'Invoice amount must be a valid USD amount of at least $0.50.');
   if (String(invoice.currency || 'usd').toLowerCase() !== 'usd') throw new HttpsError('failed-precondition', 'This release supports USD invoices only.');
@@ -54,7 +58,9 @@ function paymentHandlers(db, getStripe, { enabled = () => false, mode = () => 't
       const pending = await db.runTransaction(async (tx) => {
         const [invoice, payment] = await Promise.all([tx.get(db.doc(`invoices/${invoiceId}`)), tx.get(ref)]);
         if (['companyId', 'userId', 'customerId'].some((field) => invoice.get(field) !== authorized.get(field))) throw new HttpsError('aborted', 'Invoice ownership changed. Refresh and try again.');
-        if (invoice.get('status') !== 'sent') throw new HttpsError('failed-precondition', 'Only sent, unpaid invoices can be paid.');
+        if (invoice.get('financialVersion') === 2) {
+          if (mode() !== 'test' || !['issued', 'partially_paid'].includes(invoice.get('status'))) throw new HttpsError('failed-precondition', 'New invoices support test card payments only while live ledger reconciliation is disabled.');
+        } else if (invoice.get('status') !== 'sent') throw new HttpsError('failed-precondition', 'Only sent, unpaid invoices can be paid.');
         const amount = amountInCents(invoice.data());
         if (payment.exists && payment.get('status') !== 'canceled') {
           if (payment.get('invoiceId') !== invoiceId || payment.get('mode') !== mode()
@@ -143,7 +149,7 @@ async function reconcilePayment(db, stripe, event, mode) {
     const disputed = disputeStatus ? !['won', 'warning_closed'].includes(disputeStatus) : charge?.disputed;
     const status = disputed ? 'disputed' : refundedAmount >= amount ? 'refunded' : refundedAmount > 0 ? 'partially_refunded' : intent.status;
     const settled = intent.status === 'succeeded' && intent.amount_received === amount;
-    const reviewRequired = mismatch || (intent.status === 'succeeded' && !settled) || (invoice.exists && invoice.get('status') === 'void' && settled);
+    const reviewRequired = mismatch || (intent.status === 'succeeded' && !settled) || (invoice.exists && (invoice.get('status') === 'void' && settled || invoice.get('financialVersion') === 2 && mode === 'live'));
     const audit = { eventId: event.id, type: event.type, paymentId, intentId, invoiceId: payment.get('invoiceId'), companyId: payment.get('companyId'), mode, amount, refundedAmount, status, disputeStatus, reviewRequired, providerCreated: event.created, recordedAt: new Date() };
     tx.create(eventRef, audit);
     tx.update(paymentRef, { ...(mismatch ? { lastUnexpectedIntentId: intentId } : { intentId, status, refundedAmount, disputeStatus }), reviewRequired, updatedAt: new Date() });

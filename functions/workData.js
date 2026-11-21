@@ -43,13 +43,14 @@ function projectJob(id, data, role) {
   // receive their workNotes through the notes alias below.
   const dispatchNotes = typeof data.notes === 'string' ? data.notes : '';
   const operational = { reassignmentRequest: exceptionSummary(data.reassignmentRequest), ...(data.visitEvidence && typeof data.visitEvidence === 'object' ? { visitEvidence: pick(data.visitEvidence, ['arrivedAt','departedAt','accessBlockedAt','lastEventAt','lastEventType']) } : {}) };
-  if (hasCapability(role, 'reports.financial')) return { ...data, ...operational, dispatchNotes, id, updatedAt: version(data.updatedAt) };
+  if (role === 'owner' || role === 'admin') return { ...data, ...operational, dispatchNotes, id, updatedAt: version(data.updatedAt) };
   const property = data.serviceProperty && typeof data.serviceProperty === 'object' ? { serviceProperty: pick(data.serviceProperty, ['address', 'formattedAddress', 'postalCode', 'latitude', 'longitude', 'validated', 'source', 'unit', 'label', 'propertyId', 'accessInstructions']) } : {};
   const area = hasCapability(role, 'jobs.schedule') && data.serviceAreaEligibility ? { serviceAreaEligibility: pick(data.serviceAreaEligibility, ['status', 'settingsRevision', 'serviceCategory', 'purpose', 'checkedAt', 'exceptionId', 'continuedFromServicePlan']) } : {};
-  return { id, ...pick(data, JOB_FIELDS), ...operational, dispatchNotes, ...coordinates(data), ...property, ...area, ...(hasCapability(role, 'jobs.pricing') ? pick(data, PRICING_FIELDS) : { notes: typeof data.workNotes === 'string' ? data.workNotes : '' }) };
+  return { id, ...pick(data, JOB_FIELDS), ...operational, dispatchNotes, ...coordinates(data), ...property, ...area,
+    ...(hasCapability(role, 'jobs.pricing') ? pick(data, [...PRICING_FIELDS, 'invoiceBalance']) : { notes: typeof data.workNotes === 'string' ? data.workNotes : '' }) };
 }
 function projectCustomer(id, data, role) {
-  if (hasCapability(role, 'reports.financial')) return { ...data, lifecycle: lifecycleFor(data), id, updatedAt: customerVersion(data.updatedAt) };
+  if (role === 'owner' || role === 'admin') return { ...data, lifecycle: lifecycleFor(data), id, updatedAt: customerVersion(data.updatedAt) };
   const fields = role === 'technician' ? ['name', 'firstName', 'lastName', 'phone', 'phoneNumber', 'address', 'city', 'state', 'zipCode', 'postalCode', 'serviceInstructions'] : CUSTOMER_FIELDS;
   return { id, ...pick(data, fields), ...(role !== 'technician' ? { lifecycle: lifecycleFor(data), updatedAt: customerVersion(data.updatedAt) } : {}), ...(data.address && typeof data.address === 'object' ? { address: pick(data.address, ['street', 'line1', 'city', 'state', 'zipCode', 'postalCode']) } : {}), ...coordinates(data) };
 }

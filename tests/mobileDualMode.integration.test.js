@@ -101,7 +101,10 @@ for (const role of ['owner', 'manager']) {
     ];
     for (const call of calls) await assert.rejects(call(), { code: 'permission-denied' });
     assert.equal(f.uploaded.length, 0);
-    if (role === 'manager') for (const capability of ['team.manage', 'ownership.transfer', 'integrations.manage', 'reports.financial', 'invoices.manage']) await assert.rejects(requireCapability(db, f.request({}), capability), { code: 'permission-denied' });
+    if (role === 'manager') {
+      for (const capability of ['team.manage', 'ownership.transfer', 'integrations.manage']) await assert.rejects(requireCapability(db, f.request({}), capability), { code: 'permission-denied' });
+      for (const capability of ['reports.financial', 'invoices.manage']) await requireCapability(db, f.request({}), capability);
+    }
     const notePayload = { jobId: f.jobId, operationId: 'dual-revoked-note-operation-01', expectedVersion: '2030-01-03T17:00:00.000Z', patch: { notes: 'Synthetic saved note before revocation' } };
     await f.apply(f.request(notePayload));
     if (role === 'manager') await db.doc(`teamMembers/${f.memberId}`).update({ status: 'removed' });

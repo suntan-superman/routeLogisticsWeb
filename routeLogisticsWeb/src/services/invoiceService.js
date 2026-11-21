@@ -50,11 +50,13 @@ export const createInvoiceFromJob = (job, options = {}) => createInvoice({ jobId
 export const updateInvoice = (id, changes = {}, options = {}) => invoke('update', {
   invoiceId: id, changes, expectedRevision: options.expectedRevision, operationId: operationId(options),
 });
+export const createManualInvoice = (details, options = {}) => invoke('createManual', { ...details, operationId: operationId(options) });
 const setStatus = (id, status, options = {}, extra = {}) => invoke('status', {
   invoiceId: id, status, expectedRevision: options.expectedRevision, operationId: operationId(options), ...extra,
 });
-export const markInvoiceSent = (id, options = {}) => setStatus(id, 'sent', options);
-export const markInvoicePaid = (id, paymentMethod = 'other', options = {}) => setStatus(id, 'paid', options, { paymentMethod });
+export const submitInvoiceForApproval = (id, options = {}) => setStatus(id, 'awaiting_approval', options);
+export const approveInvoice = (id, options = {}) => setStatus(id, 'approved', options);
+export const issueInvoice = (id, options = {}) => setStatus(id, 'issued', options);
 export const voidInvoice = (id, options = {}) => setStatus(id, 'void', options);
 
 // Compatibility entry point: drafts are voided with an audit trail, never deleted.

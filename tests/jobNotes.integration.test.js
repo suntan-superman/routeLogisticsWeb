@@ -51,7 +51,7 @@ test('assigned technicians receive saved dispatch instructions in list and detai
   }
   assert.equal(detail.customer.serviceInstructions, 'Keep the gate closed'); assert.equal(detail.customer.notes, undefined); assert.equal(detail.customer.invoiceBalance, undefined); assert.equal(detail.customer.history, undefined);
   assert.deepEqual((await db.doc(`jobs/${f.jobId}`).get()).data(), before);
-  const manager = await f.work.read(f.request({ resource: 'jobs', id: f.jobId }, 'manager')); assert.equal(manager.job.dispatchNotes, before.notes); assert.equal(manager.job.totalCost, 150); assert.equal(manager.job.invoiceBalance, undefined); assert.equal(manager.job.privateNotes, undefined);
+  const manager = await f.work.read(f.request({ resource: 'jobs', id: f.jobId }, 'manager')); assert.equal(manager.job.dispatchNotes, before.notes); assert.equal(manager.job.totalCost, 150); assert.equal(manager.job.invoiceBalance, 500); assert.equal(manager.job.privateNotes, undefined);
 });
 test('technician work-log sync and manager dispatch-note edits remain independent and preserve private records', async () => {
   const f = await fixture(), customerBefore = (await db.doc(`customers/${f.customerId}`).get()).data();

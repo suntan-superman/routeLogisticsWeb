@@ -2,6 +2,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { requireCapability, hasCapability } = require('./access');
 const { documentId, hash, normalizeEmail, rateLimit } = require('./security');
 const { calculateTotals, approvedBillingSnapshot, canonical, fingerprint, financialReviewReasons } = require('./shared/invoiceMath');
+const { assertCurrentInvoice, publicSnapshot } = require('./shared/invoiceV2');
 const fail = (code, message, details) => { throw new HttpsError(code, message, details); };
 const scoped = (scope, data) => !!data && (scope.companyId ? data.companyId === scope.companyId : !data.companyId && data.userId === scope.uid);
 const scopeKey = scope => scope.companyId ? `company:${scope.companyId}` : `solo:${scope.uid}`;
@@ -57,12 +58,14 @@ async function assertInvoiceRelationships(db, tx, scope, invoice) {
   if (typeof invoice.customerId !== 'string' || !invoice.customerId || invoice.customerId.includes('/')) fail('failed-precondition', 'The historical invoice customer requires authorized review.');
   const customer = await tx.get(db.doc(`customers/${documentId(invoice.customerId, 'invoice customer')}`));
   if (!customer.exists || !scoped(scope, customer.data()) || customer.get('isActive') === false || customer.get('deletedAt')) fail('failed-precondition', 'The historical invoice customer is unavailable or belongs to a different workspace. Authorized review is required.');
-  if (invoice.jobId) {
-    const job = await tx.get(db.doc(`jobs/${documentId(invoice.jobId, 'invoice job')}`));
-    if (!job.exists || !scoped(scope, job.data()) || job.get('customerId') !== invoice.customerId) fail('failed-precondition', 'The historical invoice job/customer relationship requires authorized review.');
+  const jobIds = Array.isArray(invoice.jobIds) ? invoice.jobIds : invoice.jobId ? [invoice.jobId] : [];
+  for (const id of jobIds) {
+    const job = await tx.get(db.doc(`jobs/${documentId(id, 'invoice job')}`));
+    if (!job.exists || !scoped(scope, job.data()) || job.get('customerId') !== invoice.customerId || invoice.financialVersion === 2 && (job.get('status') !== 'completed' || job.get('deletedAt'))) fail('failed-precondition', 'An invoice visit changed or is unavailable. Review its billing source.');
+    if (invoice.financialVersion === 2 && invoice.sourceJobVersions && fingerprint(job.get('updatedAt') || null) !== fingerprint(invoice.sourceJobVersions[id] || null)) fail('aborted', 'A billed visit changed since this draft was created. Review the invoice source.');
   }
 }
-function invoiceHandlers(db, { now = () => Date.now() } = {}) {
+function invoiceHandlers(db, { now = () => Date.now(), trustedSystem = false } = {}) {
   const ref = (name, id) => db.doc(`${name}/${id}`);
   async function billingSource(tx, scope, jobRow) {
     const job = jobRow.data();
@@ -100,6 +103,10 @@ function invoiceHandlers(db, { now = () => Date.now() } = {}) {
     const claimId = hash(`${scopeKey(scope)}:${jobId}`), claimRef = ref('rlInvoiceClaims', claimId);
     const [claim, historical] = await Promise.all([tx.get(claimRef), tx.get(db.collection('invoices').where('jobId', '==', jobId))]);
     const invoices = historical.docs.filter(row => scoped(scope, row.data()));
+    if (claim.exists && !invoices.some(row => row.id === claim.get('invoiceId'))) {
+      const linked = await tx.get(ref('invoices', documentId(claim.get('invoiceId'), 'claimed invoice')));
+      if (linked.exists && scoped(scope, linked.data()) && Array.isArray(linked.get('jobIds')) && linked.get('jobIds').includes(jobId)) invoices.push(linked);
+    }
     const active = invoices.filter(row => row.get('status') !== 'void');
     if (active.length > 1) fail('failed-precondition', 'Multiple historical invoices exist for this job. Authorized financial review is required; no invoice was changed.');
     let existing = null;
@@ -117,7 +124,7 @@ function invoiceHandlers(db, { now = () => Date.now() } = {}) {
   }
   function recordMutation(tx, scope, operationRef, operationFingerprint, invoiceId, before, after, action, result) {
     const auditId = hash(`mutation:${scopeKey(scope)}:${scope.uid}:${operationRef.id}`);
-    const metadata = ['status', 'notes', 'issueDate', 'dueDate', 'paymentMethod', 'sentAt', 'paidAt', 'voidedAt'];
+    const metadata = ['status', 'notes', 'customerFacingSummary', 'paymentTerms', 'approvedPhotos', 'lineItems', 'taxRate', 'totalCents', 'pricingOverrideReason', 'issueDate', 'dueDate', 'approvedAt', 'issuedAt', 'voidedAt'];
     const changedFields = metadata.filter(key => fingerprint(before?.[key] ?? null) !== fingerprint(after[key] ?? null));
     tx.create(operationRef, { companyId: scope.companyId || null, userId: scope.uid, invoiceId, fingerprint: operationFingerprint, action, result, createdAt: new Date(now()) });
     tx.create(ref('rlInvoiceAudit', auditId), { companyId: scope.companyId || null, actorId: scope.uid, invoiceId, action, fromRevision: before ? invoiceRevision(before) : null, toRevision: invoiceRevision(after), fromStatus: before?.status || null, toStatus: after.status, totalCents: after.totalCents ?? null, sourceFingerprint: after.sourceFingerprint || null,
@@ -125,15 +132,85 @@ function invoiceHandlers(db, { now = () => Date.now() } = {}) {
   }
   return { handle: async request => {
     const scope = await requireCapability(db, request, 'invoices.manage'), data = request.data || {}, action = data.action;
-    if (!['preview', 'create', 'replace', 'update', 'status'].includes(action)) fail('invalid-argument', 'Choose a supported invoice action.');
-    const allowed = action === 'preview' ? ['action','jobId','replacementOf','expectedRevision'] : ['create','replace'].includes(action) ? ['action','jobId','operationId','sourceFingerprint','notes','dueInDays', ...(action === 'replace' ? ['replacementOf','expectedRevision'] : [])] : action === 'update' ? ['action','invoiceId','operationId','expectedRevision','changes'] : ['action','invoiceId','operationId','expectedRevision','status','paymentMethod'];
+    if (!['preview', 'create', 'replace', 'previewGroup', 'createGroup', 'createManual', 'update', 'status'].includes(action)) fail('invalid-argument', 'Choose a supported invoice action.');
+    const allowed = action === 'preview' ? ['action','jobId','replacementOf','expectedRevision'] : ['create','replace'].includes(action) ? ['action','jobId','operationId','sourceFingerprint','notes','dueInDays', ...(action === 'replace' ? ['replacementOf','expectedRevision'] : [])] : action === 'previewGroup' ? ['action','jobIds'] : action === 'createGroup' ? ['action','jobIds','operationId','sourceFingerprint','dueInDays'] : action === 'createManual' ? ['action','customerId','lineItems','taxRate','servicePropertyAddress','customerFacingSummary','paymentTerms','dueInDays','operationId'] : action === 'update' ? ['action','invoiceId','operationId','expectedRevision','changes'] : ['action','invoiceId','operationId','expectedRevision','status','paymentMethod'];
     knownFields(data, allowed);
-    await rateLimit(db, 'invoice-' + action, scope.uid, action === 'preview' ? 60 : 30);
+    if (!trustedSystem) await rateLimit(db, 'invoice-' + action, scope.uid, action === 'preview' ? 60 : 30);
     let operationRef, operationFingerprint;
-    if (action !== 'preview') {
+    if (!['preview', 'previewGroup'].includes(action)) {
       const operationId = documentId(data.operationId, 'operation');
       if (!/^[A-Za-z0-9_-]{16,100}$/.test(operationId)) fail('invalid-argument', 'Use a stable invoice operation ID.');
       operationRef = ref('rlInvoiceOperations', hash(`${scopeKey(scope)}:${scope.uid}:${operationId}`)); operationFingerprint = fingerprint(data);
+    }
+    if (['previewGroup','createGroup'].includes(action)) {
+      const jobIds = data.jobIds;
+      if (!Array.isArray(jobIds) || jobIds.length < 2 || jobIds.length > 20 || new Set(jobIds).size !== jobIds.length) fail('invalid-argument', 'Choose 2–20 distinct completed jobs for one customer.');
+      jobIds.forEach(id => documentId(id, 'job'));
+      const sorted = [...jobIds].sort();
+      return db.runTransaction(async tx => {
+        const prior = operationRef ? await tx.get(operationRef) : null;
+        if (prior?.exists) { if (prior.get('fingerprint') !== operationFingerprint) fail('already-exists', 'This operation ID belongs to another invoice action.'); return prior.get('result'); }
+        const contexts = [];
+        for (const id of sorted) contexts.push(await context(tx, scope, id));
+        const existing = contexts.map(item => item.existing).filter(Boolean);
+        if (existing.length) {
+          if (existing.length === sorted.length && existing.every(row => row.id === existing[0].id) && existing[0].get('status') !== 'void') return existingResult(existing[0], contexts[0].job);
+          fail('failed-precondition', 'One or more visits already have an invoice. Review those invoices before consolidating.');
+        }
+        const sources = [];
+        for (const item of contexts) sources.push(await billingSource(tx, scope, item.job));
+        if (new Set(sources.map(item => item.customer.id)).size !== 1 || new Set(sources.map(item => item.snapshot.taxRate)).size !== 1) fail('failed-precondition', 'Consolidated visits must share one customer and tax rate.');
+        const lines = sources.flatMap((source, index) => source.snapshot.lineItems.map(line => ({ ...line, description: `${line.description} — ${source.snapshot.serviceProperty?.address || contexts[index].job.get('date') || 'Service visit'}`.slice(0, 300) })));
+        const snapshot = calculateTotals(lines, sources[0].snapshot.taxRate);
+        if (sources.reduce((total, source) => total + source.snapshot.totalCents, 0) !== snapshot.totalCents) fail('failed-precondition', 'Combined tax rounding differs from individual visits. Invoice these visits separately.');
+        const sourceFingerprint = fingerprint({ jobIds: sorted, sources: sources.map(source => source.sourceFingerprint) });
+        const preview = { jobIds: sorted, customerId: sources[0].customer.id, sourceFingerprint, ...snapshot };
+        if (action === 'previewGroup') return preview;
+        if (sourceFingerprint !== data.sourceFingerprint) fail('aborted', 'Billing sources changed. Review the consolidated preview again.');
+        const dueInDays = data.dueInDays === undefined ? 14 : data.dueInDays;
+        if (!Number.isInteger(dueInDays) || dueInDays < 0 || dueInDays > 365) fail('invalid-argument', 'Invoice payment terms must be 0–365 days.');
+        const groupId = hash(`${scopeKey(scope)}:group:${sorted.join(':')}`), invoiceId = `rl_inv_${groupId}_1`, destination = ref('invoices', invoiceId);
+        if ((await tx.get(destination)).exists) fail('failed-precondition', 'This consolidated invoice already exists. Refresh before retrying.');
+        const issueDate = new Date(now()).toISOString().slice(0,10), dueDate = new Date(Date.parse(issueDate) + dueInDays * 86400000).toISOString().slice(0,10);
+        const invoice = { companyId: scope.companyId || null, userId: contexts[0].job.get('userId') || scope.uid, jobId: sorted[0], jobIds: sorted,
+          customerId: sources[0].customer.id, customerName: sources[0].customer.get('name') || '', customerEmail: normalizeEmail(sources[0].customer.get('email')),
+          customerAddress: sources[0].customer.get('address') || '', ...snapshot, billingSource: { kind: 'consolidated', jobIds: sorted, sources: sources.map(source => source.snapshot) }, sourceFingerprint,
+          sourceJobVersions: Object.fromEntries(contexts.map(item => [item.job.id, item.job.get('updatedAt') || null])),
+          invoiceNumber: invoiceNumber(groupId, 1), financialVersion: 2, status: 'draft', revision: 1, rlManaged: true, paidCents: 0, creditCents: 0, balanceCents: snapshot.totalCents,
+          notes: '', customerFacingSummary: '', issueDate, dueDate, createdAt: new Date(now()), updatedAt: new Date(now()) };
+        const result = { id: invoiceId, invoiceId, invoice: canonical({ ...invoice, id: invoiceId }), existing: false };
+        tx.create(destination, invoice);
+        contexts.forEach(item => tx.set(item.claimRef, { companyId: scope.companyId || null, userId: scope.uid, jobId: item.job.id, invoiceId, generation: 1, updatedAt: new Date(now()) }));
+        recordMutation(tx, scope, operationRef, operationFingerprint, invoiceId, null, invoice, 'invoice.createGroup', result);
+        return result;
+      });
+    }
+    if (action === 'createManual') {
+      const customerId = documentId(data.customerId, 'customer'), dueInDays = data.dueInDays === undefined ? 14 : data.dueInDays;
+      if (!Number.isInteger(dueInDays) || dueInDays < 0 || dueInDays > 365) fail('invalid-argument', 'Choose payment terms of 0–365 days.');
+      const totals = calculateTotals(data.lineItems, data.taxRate ?? 0);
+      const servicePropertyAddress = data.servicePropertyAddress === undefined ? '' : cleanText(data.servicePropertyAddress, 300, 'Service property address');
+      const customerFacingSummary = data.customerFacingSummary === undefined ? '' : cleanText(data.customerFacingSummary, 2000, 'Service summary');
+      const paymentTerms = data.paymentTerms === undefined ? '' : cleanText(data.paymentTerms, 1000, 'Payment terms');
+      return db.runTransaction(async tx => {
+        await assertInvoiceActor(db, tx, scope);
+        const prior = await tx.get(operationRef);
+        if (prior.exists) { if (prior.get('fingerprint') !== operationFingerprint) fail('already-exists', 'This operation ID belongs to another invoice action.'); return prior.get('result'); }
+        const customer = await tx.get(ref('customers', customerId));
+        if (!customer.exists || !scoped(scope, customer.data()) || customer.get('isActive') === false || customer.get('deletedAt')) fail('permission-denied', 'Choose an active customer in this workspace.');
+        const claimId = hash(`${scopeKey(scope)}:manual:${operationRef.id}`), invoiceId = `rl_inv_${claimId}_1`, destination = ref('invoices', invoiceId);
+        if ((await tx.get(destination)).exists) fail('failed-precondition', 'This invoice already exists. Refresh before retrying.');
+        const number = invoiceNumber(claimId, 1), duplicateNumber = await tx.get(db.collection('invoices').where('invoiceNumber', '==', number));
+        if (!duplicateNumber.empty) fail('failed-precondition', 'Invoice number collision. No invoice was created.');
+        const issueDate = new Date(now()).toISOString().slice(0, 10), dueDate = new Date(Date.parse(issueDate) + dueInDays * 86400000).toISOString().slice(0, 10);
+        const invoice = { companyId: scope.companyId || null, userId: scope.uid, customerId, customerName: customer.get('name') || '', customerEmail: normalizeEmail(customer.get('email')),
+          customerAddress: customer.get('address') || '', billingSource: { kind: 'manual', serviceProperty: { address: servicePropertyAddress } }, sourceFingerprint: fingerprint({ customerId, totals, servicePropertyAddress }),
+          ...totals, invoiceNumber: number, financialVersion: 2, status: 'draft', revision: 1, rlManaged: true, paidCents: 0, creditCents: 0, balanceCents: totals.totalCents,
+          notes: '', customerFacingSummary, paymentTerms, issueDate, dueDate, createdAt: new Date(now()), updatedAt: new Date(now()) };
+        const result = { id: invoiceId, invoiceId, invoice: canonical({ ...invoice, id: invoiceId }), existing: false };
+        tx.create(destination, invoice); recordMutation(tx, scope, operationRef, operationFingerprint, invoiceId, null, invoice, 'invoice.createManual', result);
+        return result;
+      });
     }
     if (['preview', 'create', 'replace'].includes(action)) {
       const jobId = documentId(data.jobId, 'job');
@@ -165,8 +242,9 @@ function invoiceHandlers(db, { now = () => Date.now() } = {}) {
         const issueDate = new Date(now()).toISOString().slice(0,10), dueDate = new Date(Date.parse(issueDate) + dueInDays * 86400000).toISOString().slice(0,10);
         const invoice = { companyId: scope.companyId || null, userId: job.get('userId') || scope.uid, jobId, customerId: source.customer.id, customerName: source.customer.get('name') || job.get('customerName') || '',
           customerEmail: normalizeEmail(source.customer.get('email')), customerAddress: snapshot.serviceProperty?.address || source.customer.get('address') || '', ...snapshot,
-          billingSource: snapshot, sourceFingerprint: source.sourceFingerprint, invoiceNumber: displayNumber,
-          status: 'draft', revision: 1, rlManaged: true, notes, issueDate, dueDate, createdAt: new Date(now()), updatedAt: new Date(now()), ...(existing ? { replacementOf: existing.id } : {}) };
+          billingSource: snapshot, sourceFingerprint: source.sourceFingerprint, sourceJobVersions: { [jobId]: job.get('updatedAt') || null }, invoiceNumber: displayNumber,
+          status: 'draft', financialVersion: 2, paidCents: 0, creditCents: 0, balanceCents: snapshot.totalCents,
+          revision: 1, rlManaged: true, notes, customerFacingSummary: '', issueDate, dueDate, createdAt: new Date(now()), updatedAt: new Date(now()), ...(existing ? { replacementOf: existing.id } : {}) };
         const result = { id: invoiceId, invoiceId, invoice: canonical({ ...invoice, id: invoiceId }), existing: false };
         tx.create(destination, invoice);
         tx.set(claimRef, { companyId: scope.companyId || null, userId: scope.uid, jobId, invoiceId, generation, ...(existing ? { previousInvoiceId: existing.id } : {}), updatedAt: new Date(now()) });
@@ -181,24 +259,58 @@ function invoiceHandlers(db, { now = () => Date.now() } = {}) {
       if (!row.exists || !scoped(scope, row.data())) fail('permission-denied', 'This invoice is not available in your workspace.');
       if (previous.exists) { if (previous.get('fingerprint') !== operationFingerprint) fail('already-exists', 'This operation ID was already used for another invoice action.'); return previous.get('result'); }
       const invoice = row.data(), revision = expectedRevision(invoice, data.expectedRevision);
+      assertCurrentInvoice(invoice);
       if (invoice.status === 'paid' || invoice.status === 'void') fail('failed-precondition', 'Paid and voided invoices are immutable. Review the financial history before taking another action.');
       if (invoice.paymentLock) fail('failed-precondition', 'Cancel or finish the payment attempt before changing this invoice.');
       const patch = { revision: revision + 1, updatedAt: new Date(now()) };
       if (action === 'update') {
         if (invoice.status !== 'draft') fail('failed-precondition', 'Issued invoice terms cannot be changed silently. Void and explicitly replace the invoice after reviewing the source.');
         if (!data.changes || typeof data.changes !== 'object' || Array.isArray(data.changes) || !Object.keys(data.changes).length) fail('invalid-argument', 'Include a permitted draft metadata change.');
-        knownFields(data.changes, ['notes','dueDate','issueDate']);
+        knownFields(data.changes, ['notes','dueDate','issueDate','customerFacingSummary','paymentTerms','approvedPhotoIds','lineItems','taxRate','pricingOverrideReason']);
         if (data.changes.notes !== undefined) patch.notes = cleanText(data.changes.notes, 4000, 'Invoice notes');
+        if (data.changes.customerFacingSummary !== undefined) patch.customerFacingSummary = cleanText(data.changes.customerFacingSummary, 2000, 'Service summary');
+        if (data.changes.paymentTerms !== undefined) patch.paymentTerms = cleanText(data.changes.paymentTerms, 1000, 'Payment terms');
+        if (data.changes.lineItems !== undefined || data.changes.taxRate !== undefined) {
+          if (invoice.billingSource?.kind === 'approved-estimate') fail('failed-precondition', 'Approved estimate pricing is immutable. Correct the source estimate through its authorized version workflow.');
+          const reason = cleanText(data.changes.pricingOverrideReason || '', 500, 'Pricing change reason');
+          if (reason.length < 5) fail('invalid-argument', 'Explain the management pricing change.');
+          Object.assign(patch, calculateTotals(data.changes.lineItems || invoice.lineItems, data.changes.taxRate ?? invoice.taxRate));
+          patch.balanceCents = patch.totalCents; patch.pricingOverrideReason = reason;
+        }
+        if (data.changes.approvedPhotoIds !== undefined) {
+          const ids = data.changes.approvedPhotoIds;
+          if (!Array.isArray(ids) || ids.length > 12 || new Set(ids).size !== ids.length || !invoice.jobId) fail('invalid-argument', 'Choose up to 12 unique photos from this job.');
+          const photos = [];
+          for (const id of ids) {
+            const photo = await tx.get(ref('photos', documentId(id, 'photo')));
+            if (!photo.exists || photo.get('jobId') !== invoice.jobId || photo.get('customerId') !== invoice.customerId || (photo.get('companyId') || null) !== (scope.companyId || null)
+              || typeof photo.get('storagePath') !== 'string' || !photo.get('storagePath').startsWith(`rlJobPhotos/${scope.companyId || scope.uid}/${invoice.jobId}/`)) fail('permission-denied', 'Selected photo does not belong to this invoice visit.');
+            photos.push({ photoId: photo.id, storagePath: photo.get('storagePath'), caption: String(photo.get('caption') || '').slice(0, 300), approved: true });
+          }
+          patch.approvedPhotos = photos;
+        }
         if (data.changes.issueDate !== undefined) patch.issueDate = day(data.changes.issueDate, 'issue date');
         if (data.changes.dueDate !== undefined) patch.dueDate = day(data.changes.dueDate, 'due date');
         if ((patch.dueDate || invoice.dueDate) < (patch.issueDate || invoice.issueDate)) fail('invalid-argument', 'Due date cannot be before the issue date.');
       } else {
-        if (!((invoice.status === 'draft' && ['sent','void'].includes(data.status)) || (invoice.status === 'sent' && ['paid','void'].includes(data.status)))) fail('failed-precondition', 'That invoice status transition is not permitted. Refresh the invoice.');
-        if (['sent','paid'].includes(data.status)) { assertInvoiceTerms(invoice); await assertInvoiceRelationships(db, tx, scope, invoice); }
+        const transitions = { draft: ['awaiting_approval', 'void'], awaiting_approval: ['draft', 'approved', 'void'], approved: ['draft', 'issued', 'void'], issued: ['void'], partially_paid: [] };
+        if (!transitions[invoice.status]?.includes(data.status)) fail('failed-precondition', 'That invoice transition is not permitted. Refresh the invoice.');
+        if (data.paymentMethod !== undefined) fail('invalid-argument', 'Record payments through the audited payment ledger.');
+        if (['approved', 'issued'].includes(data.status)) { assertInvoiceTerms(invoice); await assertInvoiceRelationships(db, tx, scope, invoice); }
         patch.status = data.status;
-        patch[data.status === 'sent' ? 'sentAt' : data.status === 'paid' ? 'paidAt' : 'voidedAt'] = new Date(now());
-        if (data.status === 'paid') patch.paymentMethod = data.paymentMethod === undefined ? 'other' : cleanText(data.paymentMethod, 100, 'Payment method');
-        else if (data.paymentMethod !== undefined) fail('invalid-argument', 'A payment method is allowed only when recording an invoice as paid.');
+        if (data.status === 'approved') { patch.approvedAt = new Date(now()); patch.approvedBy = scope.uid; }
+        if (data.status === 'draft') { patch.approvedAt = null; patch.approvedBy = null; }
+        if (data.status === 'issued') {
+          if (!invoice.approvedAt || !invoice.approvedBy) fail('failed-precondition', 'Management approval is required before issuing.');
+          const company = scope.companyId ? await tx.get(ref('companies', scope.companyId)) : null;
+          patch.issuedSnapshot = publicSnapshot(invoice, company?.data() || {});
+          patch.issuedAt = new Date(now());
+          patch.balanceCents = invoice.totalCents;
+        }
+        if (data.status === 'void') {
+          if (invoice.paidCents || invoice.creditCents) fail('failed-precondition', 'An invoice with payment activity requires an audited correction before voiding.');
+          patch.voidedAt = new Date(now());
+        }
       }
       const updated = { ...invoice, ...patch }, result = { id: invoiceId, invoiceId, invoice: canonical({ ...updated, id: invoiceId }), existing: false };
       tx.update(invoiceRef, patch);

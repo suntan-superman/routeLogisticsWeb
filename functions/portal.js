@@ -57,7 +57,11 @@ function publicJob(id, data) {
   return { id, serviceType: String(data.serviceType || 'Service').slice(0, 300), date: typeof data.date === 'string' ? data.date : iso(data.date)?.slice(0, 10) || '', time: typeof data.time === 'string' ? data.time : '', status: typeof data.status === 'string' ? data.status : 'scheduled' };
 }
 function publicInvoice(id, data) {
-  return { id, invoiceNumber: data.invoiceNumber || id, issueDate: data.issueDate || '', dueDate: data.dueDate || '', status: data.status, total: Number(data.total) || 0, currency: 'USD', lineItems: (Array.isArray(data.lineItems) ? data.lineItems : []).slice(0, 100).map((i) => ({ description: String(i.description || ''), quantity: Number(i.quantity) || 0, unitPrice: Number(i.unitPrice) || 0, amount: Number(i.amount) || 0 })) };
+  const snapshot = data.issuedSnapshot;
+  if (data.financialVersion !== 2 || !snapshot) return null;
+  return { id, invoiceNumber: snapshot.invoiceNumber || id, issueDate: snapshot.issueDate || '', dueDate: snapshot.dueDate || '', status: data.status,
+    totalCents: snapshot.totalCents, paidCents: data.paidCents || 0, creditCents: data.creditCents || 0, balanceCents: data.balanceCents ?? snapshot.totalCents,
+    currency: 'USD', lineItems: snapshot.lineItems.map(item => ({ description: item.description, quantity: item.quantity, unitPriceCents: item.unitPriceCents, amountCents: item.amountCents })) };
 }
 async function portalAssociations(db, email) {
     const links = await db.collection('rlPortalLinks').where('email', '==', normalizeEmail(email)).where('status', '==', 'active').limit(101).get();
@@ -211,12 +215,15 @@ function portalHandlers(db, auth, emailEnabled = () => true, { bucketProvider = 
           const query = collection => db.collection(collection).where(group.scopeField, '==', group.scopeValue).where('customerId', '==', customer.id);
           const [jobs, invoices, imageRows, documentRows] = await Promise.all([
             query('jobs').orderBy('date', 'desc').limit(51).get(),
-            query('invoices').where('status', 'in', ['sent', 'paid', 'void']).orderBy('createdAt', 'desc').limit(51).get(),
+            query('invoices').where('status', 'in', ['issued', 'partially_paid', 'paid', 'void']).orderBy('createdAt', 'desc').limit(51).get(),
             query('photos').limit(51).get(), query('rlPortalDocuments').limit(51).get(),
           ]);
           hasMore ||= [jobs, invoices, imageRows, documentRows].some(rows => rows.size > 50);
           for (const row of jobs.docs) if (sameScope(group, row.data())) { const propertyId = jobPropertyId(row.data(), customer); visits.set(row.id, { ...publicJob(row.id, row.data()), propertyKey: propertyId ? `${customer.id}:${propertyId}` : null }); }
-          for (const row of invoices.docs) if (sameScope(group, row.data())) bills.set(row.id, { ...publicInvoice(row.id, row.data()), sortDate: iso(row.get('createdAt')) || '' });
+          for (const row of invoices.docs) if (sameScope(group, row.data())) {
+            const visible = publicInvoice(row.id, row.data());
+            if (visible) bills.set(row.id, { ...visible, sortDate: iso(row.get('createdAt')) || '' });
+          }
           for (const row of imageRows.docs) if (row.get('customerVisible') === true && sameScope(group, row.data())) photos.set(row.id, { id: row.id, jobId: row.get('jobId'), caption: String(row.get('caption') || '').slice(0, 500), kind: 'photo', createdAt: iso(row.get('createdAt')) });
           for (const row of documentRows.docs) if (row.get('customerVisible') === true && row.get('status') === 'published' && sameScope(group, row.data())) documents.set(row.id, { id: row.id, jobId: row.get('jobId'), name: String(row.get('name') || 'Service document').slice(0, 200), kind: 'document', createdAt: iso(row.get('createdAt')) });
         }

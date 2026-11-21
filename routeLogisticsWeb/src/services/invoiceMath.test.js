@@ -32,8 +32,9 @@ test('addDays crosses month boundaries', () => {
   assert.strictEqual(addDays('2026-12-20', 90), '2027-03-20');
 });
 
-test('isOverdue only for sent invoices past due', () => {
-  assert.ok(isOverdue({ status: 'sent', dueDate: '2026-01-01' }, '2026-02-01'));
-  assert.ok(!isOverdue({ status: 'paid', dueDate: '2026-01-01' }, '2026-02-01'));
-  assert.ok(!isOverdue({ status: 'sent', dueDate: '2026-03-01' }, '2026-02-01'));
+test('isOverdue only for issued version-two invoices with a balance past due', () => {
+  assert.ok(isOverdue({ financialVersion: 2, status: 'issued', balanceCents: 100, dueDate: '2026-01-01' }, '2026-02-01'));
+  assert.ok(!isOverdue({ status: 'sent', dueDate: '2026-01-01' }, '2026-02-01'));
+  assert.ok(!isOverdue({ financialVersion: 2, status: 'paid', balanceCents: 0, dueDate: '2026-01-01' }, '2026-02-01'));
+  assert.ok(!isOverdue({ financialVersion: 2, status: 'issued', balanceCents: 100, dueDate: '2026-03-01' }, '2026-02-01'));
 });

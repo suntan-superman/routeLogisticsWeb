@@ -16,7 +16,7 @@ test('technicians work without administrative permissions; only owner can manage
   const { can, ...tech } = permission('technician');
   assert.deepEqual(tech, { canAccess: true, canManage: false, canEditCompany: false, canViewFinancial: false, isTechnician: true });
   assert.equal(can('jobs.work'), true); assert.equal(can('routes.optimize'), false);
-  assert.equal(permission('manager').can('invoices.read'), false); assert.equal(permission('admin').can('invoices.read'), true);
+  assert.equal(permission('manager').can('invoices.read'), true); assert.equal(permission('admin').can('invoices.read'), true);
   for (const role of ['manager', 'admin']) { assert.equal(permission(role).canManage, true); assert.equal(permission(role).canEditCompany, false); }
   assert.equal(permission('owner').canEditCompany, true);
   assert.equal(permission('field_tech').canAccess, false);

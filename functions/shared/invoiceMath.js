@@ -12,23 +12,27 @@ function scaled(value, places, label) {
 }
 function calculateTotals(items, taxRate = 0) {
   if (!Array.isArray(items) || !items.length || items.length > 50) fail('A valid billing source with 1–50 lines is required.');
-  let subtotal = 0n;
+  let subtotal = 0n, grossSubtotal = 0n, discounts = 0n;
   const lineItems = items.map(item => {
     const description = typeof item?.description === 'string' ? item.description.trim() : '';
     if (!description || description.length > 300) fail('Each billing line needs a description of at most 300 characters.');
     const quantity = scaled(item.quantity, 3, 'Quantity'), unitPrice = scaled(item.unitPrice, 2, 'Unit price');
     if (!quantity) fail('Billing quantities must be greater than zero.');
-    const amount = (quantity * unitPrice + 500n) / 1000n;
-    subtotal += amount;
+    const gross = (quantity * unitPrice + 500n) / 1000n;
+    const discount = scaled(item.discount ?? 0, 2, 'Discount');
+    if (discount > gross) fail('A line discount cannot exceed that line amount.');
+    const amount = gross - discount;
+    grossSubtotal += gross; discounts += discount; subtotal += amount;
     return { description, kind: ['labor', 'material', 'service'].includes(item.kind) ? item.kind : 'service', quantity: item.quantity,
-      unitPrice: Number(unitPrice) / 100, unitPriceCents: Number(unitPrice), amount: Number(amount) / 100, amountCents: Number(amount),
+      unitPrice: Number(unitPrice) / 100, unitPriceCents: Number(unitPrice), discount: Number(discount) / 100, discountCents: Number(discount),
+      amount: Number(amount) / 100, amountCents: Number(amount),
       ...(typeof item.templateId === 'string' && item.templateId.length <= 200 && !item.templateId.includes('/') ? { templateId: item.templateId } : {}) };
   });
   const rate = scaled(taxRate, 2, 'Tax rate');
   if (rate > 10000n) fail('Tax rate cannot exceed 100 percent.');
   const tax = (subtotal * rate + 5000n) / 10000n, total = subtotal + tax;
   if (total > 1000000000n) fail('The billing total exceeds the supported amount.');
-  return { lineItems, taxRate: Number(rate) / 100, subtotalCents: Number(subtotal), taxCents: Number(tax), totalCents: Number(total),
+  return { lineItems, taxRate: Number(rate) / 100, grossSubtotalCents: Number(grossSubtotal), discountCents: Number(discounts), subtotalCents: Number(subtotal), taxCents: Number(tax), totalCents: Number(total),
     subtotal: Number(subtotal) / 100, tax: Number(tax) / 100, total: Number(total) / 100, currency: 'USD',
     taxTreatment: tax > 0n || rate > 0n ? 'taxable' : 'non-taxable' };
 }
@@ -62,6 +66,7 @@ function financialReviewReasons(invoice) {
     if (['subtotal','tax','total'].some(key => invoice[key] !== totals[key]) || ['subtotalCents','taxCents','totalCents'].some(key => invoice[key] !== undefined && invoice[key] !== totals[key])) reasons.push('financial-totals-mismatch');
     if (invoice.lineItems.some((line, index) => line.amount !== totals.lineItems[index].amount
       || line.amountCents !== undefined && line.amountCents !== totals.lineItems[index].amountCents
+      || line.discountCents !== undefined && line.discountCents !== totals.lineItems[index].discountCents
       || line.unitPriceCents !== undefined && line.unitPriceCents !== totals.lineItems[index].unitPriceCents
       || line.description !== totals.lineItems[index].description
       || line.kind !== undefined && line.kind !== totals.lineItems[index].kind)) reasons.push('financial-line-mismatch');

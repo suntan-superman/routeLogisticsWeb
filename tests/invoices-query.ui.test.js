@@ -18,7 +18,7 @@ const importer=name=>{
  if(name.endsWith('/AuthContext'))return{useAuth:()=>({userProfile:{businessName:'Synthetic provider'}})};
  if(name.endsWith('/services/workspaceApi')||name==='./workspaceApi')return{callWorkspace:async()=>{throw Error('No invoice mutation is authorized in this suite.');}};
  if(name.endsWith('/paymentConfig'))return{paymentsConfigured:false,paymentMode:'test'};
- if(name.endsWith('/InvoicePayment')||name.endsWith('/PaymentHistory')||name.endsWith('/InvoiceCreationDialog'))return{__esModule:true,default:()=>null};
+ if(name.endsWith('/InvoicePayment')||name.endsWith('/PaymentHistory')||name.endsWith('/InvoiceCreationDialog')||name.endsWith('/InvoiceLedgerDialog')||name.endsWith('/InvoiceEditorDialog'))return{__esModule:true,default:()=>null};
  if(name==='./firebase')return{db:{}};
  if(name==='firebase/firestore')return{
   collection:(_db,collectionId)=>({collectionId}),query:(...parts)=>parts,orderBy:(field,direction)=>({field,direction}),limit:max=>({max}),

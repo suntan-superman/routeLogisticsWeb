@@ -15,6 +15,9 @@ const service = {
   previewInvoiceFromJob: async (jobId, options) => { env.previews.push({ jobId, options }); if (env.previewPending) await env.previewPending.promise; if (env.previewError) return { success: false, error: env.previewError, code: env.previewCode }; return typeof env.preview === 'function' ? env.preview(options) : env.preview; },
   createInvoiceFromJob: async (jobId, options) => { env.creations.push({ jobId, options }); if (env.createPending) await env.createPending.promise; if (env.createError) return { success: false, error: env.createError, code: env.createCode }; return { success: true, id: 'invoice-one', invoice: invoice(), existing: env.existingResult }; },
   listInvoices: async () => ({ success: true, invoices: env.invoices }),
+  submitInvoiceForApproval: (id, options) => mutate(id, 'awaiting_approval', options),
+  approveInvoice: (id, options) => mutate(id, 'approved', options),
+  issueInvoice: (id, options) => mutate(id, 'issued', options),
   markInvoiceSent: (id, options) => mutate(id, 'sent', options),
   markInvoicePaid: (id, method, options) => mutate(id, 'paid', options, method),
   voidInvoice: (id, options) => mutate(id, 'void', options),
@@ -33,6 +36,7 @@ function compile(relative) {
     if (name.endsWith('/workspaceQueryPolicy')) return { workspaceAccessError: error => ['functions/permission-denied', 'permission-denied'].includes(error?.code) };
     if (name.endsWith('/invoiceService')) return service;
     if (name.endsWith('/InvoiceCreationDialog')) return { __esModule: true, default: compile('components/InvoiceCreationDialog.jsx').default };
+    if (name.endsWith('/InvoiceLedgerDialog') || name.endsWith('/InvoiceEditorDialog')) return { __esModule: true, default: () => null };
     if (name.endsWith('/invoiceMath')) return { isOverdue: () => false };
     if (name.endsWith('/tenancy')) return { can: () => env.finance };
     if (name.endsWith('/ConfirmProvider')) return { useConfirm: () => async () => true };
@@ -117,19 +121,20 @@ test('an authorization error in the same workspace hides billing terms and suppr
   await act(async () => { env.createPending.resolve(); await request; });
   assert.equal(env.confirmed.length, 0); assert.doesNotMatch(content(), /Approved inspection|108.25/); assert.match(content(), /Financial access was revoked/);
 });
-test('invoice status mutation carries displayed revision, locks duplicate taps and preserves failure feedback', async () => {
-  env.mutationPending = pending(); await mount(Page, {}); const submit = button('Mark sent').props.onClick; let request;
-  await act(async () => { request = submit(); submit(); }); assert.equal(env.mutations.length, 1); assert.equal(env.mutations[0].options.expectedRevision, 1); assert.equal(button('Mark sent').props.disabled, true);
+test('invoice approval submission carries displayed revision, locks duplicate taps and preserves failure feedback', async () => {
+  env.invoices = [invoice({ financialVersion: 2 })]; env.mutationPending = pending(); await mount(Page, {}); const submit = button('Submit for approval').props.onClick; let request;
+  await act(async () => { request = submit(); submit(); }); assert.equal(env.mutations.length, 1); assert.equal(env.mutations[0].options.expectedRevision, 1); assert.equal(button('Submit for approval').props.disabled, true);
   env.mutationError = 'This invoice changed. Refresh before retrying.';
   await act(async () => { env.mutationPending.resolve(); await request; }); assert.match(content(), /This invoice changed/); assert.ok(button('Refresh invoice before retrying')); assert.equal(env.toasts.filter(value => value.kind === 'success').length, 0);
-  env.mutationError = null; env.mutationPending = null; await click('Mark sent'); assert.equal(env.mutations[0].options.operationId, env.mutations[1].options.operationId); assert.ok(button('Mark paid'));
+  env.mutationError = null; env.mutationPending = null; await click('Submit for approval'); assert.equal(env.mutations[0].options.operationId, env.mutations[1].options.operationId); assert.ok(button('Approve'));
 });
-test('historical invoice amount is displayed unchanged, source review is labelled and no destructive Delete action exists', async () => {
+test('historical test invoice amount is displayed unchanged and cannot enter new payment workflow', async () => {
   env.invoices = [invoice({ total: 17.31, subtotal: undefined, tax: undefined, billingSource: undefined, revision: undefined })];
-  await mount(Page, {}); assert.ok(content().includes('$17.31')); assert.match(content(), /Historical invoice — source needs review/); assert.equal(button('Delete'), undefined); assert.ok(button('Void')); assert.equal(env.mutations.length, 0);
+  await mount(Page, {}); assert.ok(content().includes('$17.31')); assert.match(content(), /Legacy test record/); assert.equal(button('Delete'), undefined); assert.equal(button('Payments & credits'), undefined); assert.equal(env.mutations.length, 0);
 });
 test('invoice email includes current expected revision and does not mark success before its backend response', async () => {
-  await mount(Page, {}); await click('Email invoice'); assert.deepEqual(env.email, [{ name: 'emailInvoice', data: { invoiceId: 'invoice-one', expectedRevision: 1 } }]); assert.ok(env.toasts.some(value => value.message === 'Invoice email queued'));
+  env.invoices = [invoice({ financialVersion: 2, status: 'issued', issuedSnapshot: { invoiceNumber: 'INV-ONE' } })];
+  await mount(Page, {}); await click('Email PDF'); assert.deepEqual(env.email, [{ name: 'emailInvoice', data: { invoiceId: 'invoice-one', expectedRevision: 1 } }]); assert.ok(env.toasts.some(value => value.message === 'Invoice email queued'));
 });
 
 function realService(callWorkspace) {
@@ -147,10 +152,10 @@ test('invoice client forwards identifiers and pinned source, ignoring untrusted 
   assert.equal(result.success, true); assert.equal(calls.length, 2); assert.deepEqual(calls[0], { name: 'rlManageInvoice', data: { action: 'preview', jobId: 'job-one' } });
   assert.deepEqual(calls[1], { name: 'rlManageInvoice', data: { action: 'create', jobId: 'job-one', operationId: 'stable-operation-one', sourceFingerprint: 'approved-source-one' } });
 });
-test('invoice client sends versioned metadata/status actions and draft deletion compatibility only voids', async () => {
+test('invoice client sends versioned metadata/status actions and has no mark-paid shortcut', async () => {
   const calls = [], actual = realService(async (name, data) => { calls.push({ name, data }); return { id: 'invoice-one' }; });
   const options = { expectedRevision: 7, operationId: 'stable-operation-one' };
-  await actual.updateInvoice('invoice-one', { notes: 'Reviewed metadata' }, options); await actual.markInvoicePaid('invoice-one', 'check', options); await actual.deleteDraftInvoice('invoice-one', options);
-  assert.deepEqual(calls.map(row => row.data.action), ['update', 'status', 'status']); assert.deepEqual(calls[0].data.changes, { notes: 'Reviewed metadata' }); assert.equal(calls[1].data.paymentMethod, 'check'); assert.equal(calls[2].data.status, 'void');
+  await actual.updateInvoice('invoice-one', { notes: 'Reviewed metadata' }, options); await actual.submitInvoiceForApproval('invoice-one', options); await actual.deleteDraftInvoice('invoice-one', options);
+  assert.equal(actual.markInvoicePaid, undefined); assert.deepEqual(calls.map(row => row.data.action), ['update', 'status', 'status']); assert.deepEqual(calls[0].data.changes, { notes: 'Reviewed metadata' }); assert.equal(calls[1].data.status, 'awaiting_approval'); assert.equal(calls[2].data.status, 'void');
   for (const row of calls) { assert.equal(row.name, 'rlManageInvoice'); assert.equal(row.data.expectedRevision, 7); assert.equal(row.data.operationId, options.operationId); }
 });

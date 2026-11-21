@@ -286,13 +286,13 @@ test('unknown collections are denied', async () => {
 
 
 // ---- P1: invoices, service plans, service logs ----
-test('invoices: owner reads but all financial writes require the callable, manager and technician reads denied', async () => {
+test('invoices: authorized management reads but all financial writes require the callable', async () => {
   await env.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), 'invoices/i1'), { userId: 'owner1', companyId: 'c1', status: 'draft', total: 100 });
     await setDoc(doc(ctx.firestore(), 'invoices/iPaid'), { userId: 'owner1', companyId: 'c1', status: 'paid', total: 100 });
   });
   await assertFails(getDoc(doc(tech(), 'invoices/i1')))
-  await assertFails(getDoc(doc(manager(), 'invoices/i1'))) ;
+  await assertSucceeds(getDoc(doc(manager(), 'invoices/i1')));
   await assertFails(updateDoc(doc(tech(), 'invoices/i1'), { status: 'paid' }));
   await assertFails(setDoc(doc(tech(), 'invoices/iNew'), { userId: 'tech1', companyId: 'c1', status: 'draft', total: 5 }));
   await assertSucceeds(getDoc(doc(owner(), 'invoices/i1')));

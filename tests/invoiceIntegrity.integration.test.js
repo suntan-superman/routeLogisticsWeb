@@ -34,6 +34,11 @@ async function fixture({ amount = 100, missingAmount = false } = {}) {
   };
   f.stored = async result => (await db.doc(`invoices/${result.id || result.invoiceId}`).get()).data();
   f.status = (invoice, status, extra = {}, role = 'owner') => f.call({ action: 'status', invoiceId: invoice.id || invoice.invoiceId, expectedRevision: invoice.invoice?.revision ?? invoice.revision ?? 0, operationId: f.op(status), status, ...extra }, role);
+  f.issue = async invoice => {
+    let state = await f.status(invoice, 'awaiting_approval');
+    state = await f.status(state, 'approved');
+    return f.status(state, 'issued');
+  };
   return f;
 }
 async function approvedConvertedJob(f) {
@@ -171,11 +176,10 @@ test('incomplete jobs, explicit nonbillable visits and unavailable canonical cus
   }
 });
 
-test('owner and active admin may create while manager, technician, revoked and unverified identities are denied', async () => {
+test('owner, active admin and manager may create while technician, revoked and unverified identities are denied', async () => {
   const admin = await fixture(); assert.ok((await admin.create({ role: 'admin' })).id);
-  for (const role of ['manager', 'technician']) {
-    const f = await fixture(); await assert.rejects(f.preview({}, role), { code: 'permission-denied' });
-  }
+  const manager = await fixture(); assert.ok((await manager.create({ role: 'manager' })).id);
+  const technician = await fixture(); await assert.rejects(technician.preview({}, 'technician'), { code: 'permission-denied' });
   const removed = await fixture(); await db.doc(`teamMembers/${removed.id}-admin`).update({ status: 'removed' });
   await assert.rejects(removed.preview({}, 'admin'), { code: 'permission-denied' });
   const f = await fixture(), unverified = f.request({ action: 'preview', jobId: f.jobId }); unverified.auth.token.email_verified = false;
@@ -246,17 +250,16 @@ test('draft metadata updates are revisioned and audited; stale or monetary chang
   assert.equal((await db.collection('rlInvoiceAudit').where('companyId', '==', f.id).get()).size, 2);
 });
 
-test('historical invoice revision zero is explicit and stale mutations preserve its number, terms and history', async () => {
+test('historical invoice revision zero cannot enter the new financial lifecycle', async () => {
   const f = await fixture(), id = `${f.id}-legacy-revision-zero`, historical = { companyId: f.id, userId: f.uid, customerId: f.customerId, jobId: f.jobId, invoiceNumber: 'ORIGINAL-LEGACY-NUMBER', status: 'draft', lineItems: [{ description: 'Historical service', quantity: 1, unitPrice: 100, amount: 100 }], subtotal: 100, tax: 0, taxRate: 0, total: 100, issueDate: '2026-11-16', dueDate: '2026-11-30' };
   await db.doc(`invoices/${id}`).set(historical);
   await assert.rejects(f.call({ action: 'update', invoiceId: id, operationId: f.op('missing-revision'), changes: { notes: 'Missing displayed revision' } }), { code: 'invalid-argument' });
-  const updated = await f.call({ action: 'update', invoiceId: id, expectedRevision: 0, operationId: f.op('legacy-revision'), changes: { notes: 'Explicit reviewed metadata only' } });
-  assert.equal(updated.invoice.revision, 1); assert.equal(updated.invoice.invoiceNumber, historical.invoiceNumber); assert.deepEqual(updated.invoice.lineItems, historical.lineItems); assert.equal(updated.invoice.total, 100);
-  await assert.rejects(f.call({ action: 'status', invoiceId: id, expectedRevision: 0, operationId: f.op('legacy-stale'), status: 'sent' }), { code: 'aborted' });
-  assert.equal((await db.doc(`invoices/${id}`).get()).get('status'), 'draft');
+  await assert.rejects(f.call({ action: 'update', invoiceId: id, expectedRevision: 0, operationId: f.op('legacy-revision'), changes: { notes: 'Forbidden legacy edit' } }), { code: 'failed-precondition' });
+  await assert.rejects(f.call({ action: 'status', invoiceId: id, expectedRevision: 0, operationId: f.op('legacy-status'), status: 'issued' }), { code: 'failed-precondition' });
+  assert.deepEqual((await db.doc(`invoices/${id}`).get()).data(), historical);
 });
 
-test('malformed historical line amounts, aggregates and currency block issuance, payment marking and email without rewriting records', async () => {
+test('all historical invoices block issuance and email without rewriting records', async () => {
   const { invoiceEmailHandlers } = require('../functions/invoiceEmail');
   const changes = [
     { lineItems: [{ description: 'Legacy service', quantity: 1, unitPrice: 100 }] },
@@ -266,28 +269,23 @@ test('malformed historical line amounts, aggregates and currency block issuance,
   for (const patch of changes) for (const status of ['draft', 'sent']) {
     const f = await fixture(), id = `${f.id}-malformed-historical`, original = { companyId: f.id, userId: f.uid, jobId: f.jobId, customerId: f.customerId, invoiceNumber: 'LEGACY-UNCHANGED', status, lineItems: [{ description: 'Legacy service', quantity: 1, unitPrice: 100, amount: 100 }], subtotal: 100, tax: 0, taxRate: 0, total: 100, ...patch };
     await db.doc(`invoices/${id}`).set(original); const before = (await db.doc(`invoices/${id}`).get()).data();
-    await assert.rejects(f.call({ action: 'status', invoiceId: id, expectedRevision: 0, operationId: f.op('malformed-status'), status: status === 'draft' ? 'sent' : 'paid' }), error => error.code === 'failed-precondition' && /review/i.test(error.message));
-    await assert.rejects(invoiceEmailHandlers(db, () => 'https://example.invalid', () => true).emailInvoice(f.request({ invoiceId: id, expectedRevision: 0 })), error => error.code === 'failed-precondition' && /review/i.test(error.message));
+    await assert.rejects(f.call({ action: 'status', invoiceId: id, expectedRevision: 0, operationId: f.op('malformed-status'), status: 'issued' }), { code: 'failed-precondition' });
+    await assert.rejects(invoiceEmailHandlers(db, () => 'https://example.invalid', () => true).emailInvoice(f.request({ invoiceId: id, expectedRevision: 0 })), { code: 'failed-precondition' });
     assert.deepEqual((await db.doc(`invoices/${id}`).get()).data(), before);
     assert.equal((await db.collection('rlMail').where('invoiceId', '==', id).get()).size, 0);
     assert.equal((await db.collection('rlInvoiceAudit').where('companyId', '==', f.id).get()).size, 0);
   }
 });
 
-test('valid legacy terms retain revision-zero compatibility for explicit issuance, payment marking and deduplicated email', async () => {
+test('valid historical test terms also remain untouched and cannot be emailed or marked paid', async () => {
   const { invoiceEmailHandlers } = require('../functions/invoiceEmail');
   const f = await fixture(), id = `${f.id}-valid-historical`, terms = { companyId: f.id, userId: f.uid, jobId: f.jobId, customerId: f.customerId, invoiceNumber: 'ORIGINAL-LEGACY-BILL', status: 'draft', lineItems: [{ description: 'Legacy service', quantity: 1, unitPrice: 100, amount: 100 }], subtotal: 100, tax: 0, taxRate: 0, total: 100, issueDate: '2026-11-16', dueDate: '2026-11-30' };
   await db.doc(`invoices/${id}`).set(terms);
-  const issued = await f.call({ action: 'status', invoiceId: id, expectedRevision: 0, operationId: f.op('legacy-issue'), status: 'sent' });
-  assert.equal(issued.invoice.revision, 1); assert.equal(issued.invoice.status, 'sent');
-  const paid = await f.status(issued, 'paid', { paymentMethod: 'check' });
-  assert.equal(paid.invoice.revision, 2); assert.equal(paid.invoice.status, 'paid'); assert.equal(paid.invoice.invoiceNumber, terms.invoiceNumber); assert.deepEqual(paid.invoice.lineItems, terms.lineItems); assert.equal(paid.invoice.total, 100);
-  const emailFixture = await fixture(), emailId = `${emailFixture.id}-email-valid-legacy`;
-  await db.doc(`invoices/${emailId}`).set({ ...terms, companyId: emailFixture.id, userId: emailFixture.uid, jobId: emailFixture.jobId, customerId: emailFixture.customerId });
-  const email = invoiceEmailHandlers(db, () => 'https://example.invalid', () => true), request = emailFixture.request({ invoiceId: emailId, expectedRevision: 0 });
-  assert.equal((await email.emailInvoice(request)).queued, true); assert.equal((await email.emailInvoice(request)).existing, true);
-  const emailed = (await db.doc(`invoices/${emailId}`).get()).data(); assert.equal(emailed.revision, 1); assert.equal(emailed.status, 'sent'); assert.equal(emailed.total, 100); assert.equal(emailed.invoiceNumber, terms.invoiceNumber);
-  assert.equal((await db.collection('rlMail').where('invoiceId', '==', emailId).get()).size, 1); assert.equal((await db.collection('rlInvoiceAudit').where('invoiceId', '==', emailId).get()).size, 1);
+  await assert.rejects(f.call({ action: 'status', invoiceId: id, expectedRevision: 0, operationId: f.op('legacy-issue'), status: 'issued' }), { code: 'failed-precondition' });
+  await assert.rejects(f.call({ action: 'status', invoiceId: id, expectedRevision: 0, operationId: f.op('legacy-paid'), status: 'paid' }), { code: 'failed-precondition' });
+  await assert.rejects(invoiceEmailHandlers(db, () => 'https://example.invalid', () => true).emailInvoice(f.request({ invoiceId: id, expectedRevision: 0 })), { code: 'failed-precondition' });
+  assert.deepEqual((await db.doc(`invoices/${id}`).get()).data(), terms);
+  assert.equal((await db.collection('rlMail').where('invoiceId', '==', id).get()).size, 0);
 });
 
 test('invalid immutable approved line kind or noncanonical description cannot be silently normalized into billing', async () => {
@@ -300,15 +298,19 @@ test('invalid immutable approved line kind or noncanonical description cannot be
   }
 });
 
-test('sent financial terms, paid invoices, void invoices and payment-locked mutations are protected', async () => {
-  const f = await fixture(), created = await f.create(), sent = await f.status(created, 'sent');
-  await assert.rejects(f.call({ action: 'update', invoiceId: created.id, operationId: f.op('sent-price'), expectedRevision: sent.invoice.revision, changes: { taxRate: 0, total: 1 } }), { code: 'failed-precondition' });
-  await assert.rejects(f.status(sent, 'draft'), error => ['invalid-argument', 'failed-precondition'].includes(error.code));
-  const paid = await f.status(sent, 'paid', { paymentMethod: 'check' });
-  await assert.rejects(f.call({ action: 'update', invoiceId: created.id, operationId: f.op('paid-edit'), expectedRevision: paid.invoice.revision, changes: { notes: 'Cannot change paid invoice' } }), { code: 'failed-precondition' });
-  await assert.rejects(f.status(paid, 'void'), { code: 'failed-precondition' });
+test('issued terms, ledger-paid invoices, void invoices and payment-locked mutations are protected', async () => {
+  const { invoiceLedgerHandlers } = require('../functions/invoiceLedger');
+  const f = await fixture(), created = await f.create();
+  let state = await f.status(created, 'awaiting_approval'); state = await f.status(state, 'approved'); state = await f.status(state, 'issued');
+  await assert.rejects(f.call({ action: 'update', invoiceId: created.id, operationId: f.op('issued-price'), expectedRevision: state.invoice.revision, changes: { taxRate: 0, total: 1 } }), { code: 'failed-precondition' });
+  await assert.rejects(f.status(state, 'draft'), { code: 'failed-precondition' });
+  await assert.rejects(f.status(state, 'paid', { paymentMethod: 'check' }), { code: 'failed-precondition' });
+  await invoiceLedgerHandlers(db).handle(f.request({ action: 'record', operationId: f.op('payment'), method: 'check', allocations: [{ invoiceId: created.id, amountCents: 10000 }] }));
+  const paid = await f.stored(created); assert.equal(paid.status, 'paid');
+  await assert.rejects(f.call({ action: 'update', invoiceId: created.id, operationId: f.op('paid-edit'), expectedRevision: paid.revision, changes: { notes: 'Cannot change paid invoice' } }), { code: 'failed-precondition' });
+  await assert.rejects(f.status({ ...paid, id: created.id }, 'void'), { code: 'failed-precondition' });
   const locked = await fixture(), lockedInvoice = await locked.create(); await db.doc(`invoices/${lockedInvoice.id}`).update({ paymentLock: 'synthetic-payment-lock' });
-  for (const action of ['sent', 'void', 'paid']) await assert.rejects(locked.status(lockedInvoice, action), { code: 'failed-precondition' });
+  for (const action of ['awaiting_approval', 'void']) await assert.rejects(locked.status(lockedInvoice, action), { code: 'failed-precondition' });
   await assert.rejects(locked.call({ action: 'update', invoiceId: lockedInvoice.id, expectedRevision: 1, operationId: locked.op('locked-meta'), changes: { notes: 'Blocked' } }), { code: 'failed-precondition' });
 });
 
@@ -328,7 +330,7 @@ test('generated invoice identities and display numbers differ across source jobs
 test('authoritative quote invoice remains compatible with Stripe signed test reconciliation, portal projection and email queue', async () => {
   const { paymentHandlers } = require('../functions/payments'), { paymentLifecycleHandlers } = require('../functions/paymentLifecycle');
   const { portalHandlers } = require('../functions/portal'), { invoiceEmailHandlers } = require('../functions/invoiceEmail');
-  const f = await fixture(); await approvedConvertedJob(f); const created = await f.create(), sent = await f.status(created, 'sent');
+  const f = await fixture(); await approvedConvertedJob(f); const created = await f.create(), issued = await f.issue(created);
   const customerEmail = `${f.id}@example.invalid`;
   let intent, providerCreates = 0;
   const stripe = {
@@ -338,32 +340,32 @@ test('authoritative quote invoice remains compatible with Stripe signed test rec
   const payment = paymentHandlers(db, () => stripe, { enabled: () => true, mode: () => 'test', liveApproved: () => false });
   const request = f.request({ invoiceId: created.id, amount: 1, currency: 'eur' });
   await payment.create(request); assert.equal(intent.amount, 10825); assert.equal(intent.currency, 'usd'); assert.equal(providerCreates, 1);
-  await assert.rejects(f.status(sent, 'void'), { code: 'failed-precondition' });
+  await assert.rejects(f.status(issued, 'void'), { code: 'failed-precondition' });
   intent.status = 'succeeded'; intent.amount_received = 10825;
   const event = { id: `${f.id}-stripe-event`, type: 'payment_intent.succeeded', livemode: false, created: 10, data: { object: { id: intent.id } } }, body = JSON.stringify(event), secret = 'whsec_synthetic_invoice_fixture';
   const signature = stripe.webhooks.generateTestHeaderString({ payload: body, secret });
   const webhook = async () => { const response = { statusCode: 200, status(code) { this.statusCode = code; return this; }, send(value) { this.body = value; return this; }, json(value) { this.body = value; return this; } }; await payment.webhook({ rawBody: Buffer.from(body), headers: { 'stripe-signature': signature } }, response, secret); return response; };
   const responses = await Promise.all([webhook(), webhook()]); assert.ok(responses.every(response => response.statusCode === 200));
-  const stored = await f.stored(created); assert.equal(stored.total, 108.25); assert.equal(stored.status, 'sent'); assert.equal(stored.testPaymentStatus, 'succeeded'); assert.equal(stored.paymentLock, null);
+  const stored = await f.stored(created); assert.equal(stored.total, 108.25); assert.equal(stored.status, 'issued'); assert.equal(stored.testPaymentStatus, 'succeeded'); assert.equal(stored.paymentLock, null);
   assert.equal((await db.collection('rlPaymentEvents').where('invoiceId', '==', created.id).get()).size, 1);
   const portalAuth = { uid: `rl_customer_${hash(customerEmail)}`, token: { portal: true, portalEmail: customerEmail } };
   const { linkId } = require('../functions/portal');
   await db.doc(`rlPortalLinks/${linkId(f.customerId,customerEmail)}`).set({customerId:f.customerId,scopeId:`company:${f.id}`,email:customerEmail,status:'active',portalUid:portalAuth.uid});
   const portal = portalHandlers(db, { createCustomToken: async () => { throw Error('No OTP delivery/token mint occurs in invoice compatibility.'); } });
   const portalResult = await portal.getCustomerPortal({ auth: portalAuth, data: { accountId: `company:${f.id}` } });
-  const visible = portalResult.accounts[0].invoices.find(invoice => invoice.id === created.id); assert.equal(visible.total, 108.25); assert.equal(visible.lineItems.length, 2);
+  const visible = portalResult.accounts[0].invoices.find(invoice => invoice.id === created.id); assert.equal(visible.totalCents, 10825); assert.equal(visible.lineItems.length, 2);
   const history = await paymentLifecycleHandlers(db, { enabled: () => true, mode: () => 'test', liveApproved: () => false }).history({ auth: portalAuth, data: { invoiceId: created.id } });
   assert.equal(history.history.length, 1); assert.equal(history.history[0].amount, 10825);
   const email = invoiceEmailHandlers(db, () => 'https://example.invalid', () => true);
   const emailRequest = f.request({ invoiceId: created.id, expectedRevision: stored.revision });
   assert.equal((await email.emailInvoice(emailRequest)).queued, true); assert.equal((await email.emailInvoice(emailRequest)).existing, true);
   const queued = await db.collection('rlMail').where('invoiceId', '==', created.id).get(); assert.equal(queued.size, 1); assert.match(queued.docs[0].get('text'), /108\.25/);
-  assert.equal((await f.stored(created)).status, 'sent');
+  assert.equal((await f.stored(created)).status, 'issued');
 });
 
 test('corrected invoice supports read-only QuickBooks sandbox preview while writes and unsupported tax fail safely', async () => {
   const { quickBooksHandlers, mappingId } = require('../functions/quickbooks');
-  const f = await fixture(), created = await f.create(); await f.status(created, 'sent');
+  const f = await fixture(), created = await f.create(); await f.issue(created);
   const realm = `8${String(process.pid)}${String(sequence)}`, clientId = 'synthetic-invoice-qb-client', connection = db.doc(`rlQuickBooksConnections/${mappingId(f.id, 'sandbox', 'connection', 'current')}`);
   await connection.set({ companyId: f.id, environment: 'sandbox', credentialEnvironment: 'sandbox', realmId: realm, credentialHash: hash('sandbox:' + clientId), connected: true, connectionId: `${f.id}-connection`, accessToken: 'synthetic-access-only', refreshToken: 'synthetic-refresh-only', accessExpiresAt: Date.now() + 3600000, refreshExpiresAt: Date.now() + 86400000, refreshLeaseUntil: 0, incomeAccountId: '400', defaultItemId: '500' });
   await db.doc(`rlQbMappings/${mappingId(f.id, 'sandbox', 'Customer', f.customerId)}`).set({ companyId: f.id, environment: 'sandbox', realmId: realm, type: 'Customer', localId: f.customerId, remoteId: '600', status: 'adopted' });
@@ -377,7 +379,7 @@ test('corrected invoice supports read-only QuickBooks sandbox preview while writ
   const preview = await qb.preview(f.request({ type: 'Invoice', localId: created.id }));
   assert.equal(preview.payload.Line.reduce((sum, line) => sum + line.Amount, 0), 100); assert.equal(preview.payload.CustomerRef.value, '600'); assert.equal(preview.payload.CurrencyRef.value, 'USD'); assert.equal(preview.writesEnabled, false); assert.ok(calls.length >= 2);
   await assert.rejects(qb.sync(f.request({ type: 'Invoice', localId: created.id, fingerprint: preview.fingerprint })), error => error.code === 'failed-precondition' && /disabled/i.test(error.message));
-  const taxed = await fixture(); await approvedConvertedJob(taxed); const taxedInvoice = await taxed.create(); await taxed.status(taxedInvoice, 'sent');
+  const taxed = await fixture(); await approvedConvertedJob(taxed); const taxedInvoice = await taxed.create(); await taxed.issue(taxedInvoice);
   const taxedRealm = `${realm}2`;
   await db.doc(`rlQuickBooksConnections/${mappingId(taxed.id, 'sandbox', 'connection', 'current')}`).set({ ...(await connection.get()).data(), companyId: taxed.id, realmId: taxedRealm, connectionId: `${taxed.id}-connection` });
   await db.doc(`rlQbMappings/${mappingId(taxed.id, 'sandbox', 'Customer', taxed.customerId)}`).set({ companyId: taxed.id, environment: 'sandbox', realmId: taxedRealm, type: 'Customer', localId: taxed.customerId, remoteId: '600', status: 'adopted' });

@@ -270,7 +270,7 @@ test('all historical invoices block issuance and email without rewriting records
     const f = await fixture(), id = `${f.id}-malformed-historical`, original = { companyId: f.id, userId: f.uid, jobId: f.jobId, customerId: f.customerId, invoiceNumber: 'LEGACY-UNCHANGED', status, lineItems: [{ description: 'Legacy service', quantity: 1, unitPrice: 100, amount: 100 }], subtotal: 100, tax: 0, taxRate: 0, total: 100, ...patch };
     await db.doc(`invoices/${id}`).set(original); const before = (await db.doc(`invoices/${id}`).get()).data();
     await assert.rejects(f.call({ action: 'status', invoiceId: id, expectedRevision: 0, operationId: f.op('malformed-status'), status: 'issued' }), { code: 'failed-precondition' });
-    await assert.rejects(invoiceEmailHandlers(db, () => 'https://example.invalid', () => true).emailInvoice(f.request({ invoiceId: id, expectedRevision: 0 })), { code: 'failed-precondition' });
+    await assert.rejects(invoiceEmailHandlers(db, () => 'https://example.invalid', () => true).emailInvoice(f.request({ invoiceId: id, expectedRevision: 0, expectedRecipient: `${f.id}@example.invalid` })), { code: 'failed-precondition' });
     assert.deepEqual((await db.doc(`invoices/${id}`).get()).data(), before);
     assert.equal((await db.collection('rlMail').where('invoiceId', '==', id).get()).size, 0);
     assert.equal((await db.collection('rlInvoiceAudit').where('companyId', '==', f.id).get()).size, 0);
@@ -283,7 +283,7 @@ test('valid historical test terms also remain untouched and cannot be emailed or
   await db.doc(`invoices/${id}`).set(terms);
   await assert.rejects(f.call({ action: 'status', invoiceId: id, expectedRevision: 0, operationId: f.op('legacy-issue'), status: 'issued' }), { code: 'failed-precondition' });
   await assert.rejects(f.call({ action: 'status', invoiceId: id, expectedRevision: 0, operationId: f.op('legacy-paid'), status: 'paid' }), { code: 'failed-precondition' });
-  await assert.rejects(invoiceEmailHandlers(db, () => 'https://example.invalid', () => true).emailInvoice(f.request({ invoiceId: id, expectedRevision: 0 })), { code: 'failed-precondition' });
+  await assert.rejects(invoiceEmailHandlers(db, () => 'https://example.invalid', () => true).emailInvoice(f.request({ invoiceId: id, expectedRevision: 0, expectedRecipient: `${f.id}@example.invalid` })), { code: 'failed-precondition' });
   assert.deepEqual((await db.doc(`invoices/${id}`).get()).data(), terms);
   assert.equal((await db.collection('rlMail').where('invoiceId', '==', id).get()).size, 0);
 });
@@ -357,7 +357,7 @@ test('authoritative quote invoice remains compatible with Stripe signed test rec
   const history = await paymentLifecycleHandlers(db, { enabled: () => true, mode: () => 'test', liveApproved: () => false }).history({ auth: portalAuth, data: { invoiceId: created.id } });
   assert.equal(history.history.length, 1); assert.equal(history.history[0].amount, 10825);
   const email = invoiceEmailHandlers(db, () => 'https://example.invalid', () => true);
-  const emailRequest = f.request({ invoiceId: created.id, expectedRevision: stored.revision });
+  const emailRequest = f.request({ invoiceId: created.id, expectedRevision: stored.revision, expectedRecipient: customerEmail });
   assert.equal((await email.emailInvoice(emailRequest)).queued, true); assert.equal((await email.emailInvoice(emailRequest)).existing, true);
   const queued = await db.collection('rlMail').where('invoiceId', '==', created.id).get(); assert.equal(queued.size, 1); assert.match(queued.docs[0].get('text'), /108\.25/);
   assert.equal((await f.stored(created)).status, 'issued');

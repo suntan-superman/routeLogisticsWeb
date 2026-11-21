@@ -69,8 +69,8 @@ function invoiceEmailHandlers(db, appUrl, emailEnabled = () => true) {
         return { recipient, delivery: latest ? { status: latest.get('status'), sentAt: latest.get('sentAt')?.toDate?.()?.toISOString() || null, failureCode: latest.get('failureCode') || null } : null };
       }
       if (!Number.isInteger(request.data?.expectedRevision) || request.data.expectedRevision < 0) throw new HttpsError('invalid-argument', 'The displayed invoice revision is required. Refresh the invoice before emailing.');
-      if (!validEmail(normalizeEmail(request.data?.expectedRecipient))) throw new HttpsError('invalid-argument', 'Review the current customer email before sending.');
       if (!emailEnabled()) throw new HttpsError('failed-precondition', 'Email delivery is disabled. Download the invoice to share it directly.');
+      if (!validEmail(normalizeEmail(request.data?.expectedRecipient))) throw new HttpsError('invalid-argument', 'Review the current customer email before sending.');
       await rateLimit(db, 'email-invoice', request.auth.uid, 20, 60 * 60_000);
       return queueInvoiceEmail(db, request.data?.invoiceId, { appUrl: appUrl(), revision: request.data.expectedRevision, expectedRecipient: request.data.expectedRecipient, authorize: (invoice) => requireFinance(db, request, invoice) });
     },

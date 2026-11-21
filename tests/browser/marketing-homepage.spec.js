@@ -4,6 +4,7 @@ test('PW-MARKETING-01 @smoke public homepage presents verified workflows and sta
   await page.goto('/');
   await expect(page.getByRole('heading', { level: 1, name: 'Run your field operations from one place.' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Log In', exact: true }).first()).toHaveAttribute('href', '/login');
+  await expect(page.getByRole('link', { name: 'Customer Portal', exact: true }).first()).toHaveAttribute('href', '/portal');
   await expect(page.getByRole('link', { name: 'Add Your Company', exact: true }).first()).toHaveAttribute('href', '/signup?intent=company');
   await expect(page.getByRole('link', { name: 'Explore Features', exact: true })).toHaveAttribute('href', '#features');
   for (const id of ['dispatch-preview-title','mobile-preview-title','history-preview-title','estimate-preview-title','attention-preview-title']) await expect(page.locator(`#${id}`)).toBeVisible();
@@ -22,6 +23,7 @@ test('PW-MARKETING-02 mobile navigation is accessible and common viewports do no
   await page.setViewportSize({ width: 390, height: 844 }); await page.goto('/');
   const menu = page.getByRole('button', { name: 'Open navigation' }); await expect(menu).toBeVisible(); await menu.click();
   await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Mobile navigation' }).getByRole('link', { name: 'Customer Portal' })).toHaveAttribute('href', '/portal');
   await expect(page.getByRole('link', { name: 'How It Works', exact: true }).last()).toBeVisible();
   await page.keyboard.press('Escape'); await expect(page.getByRole('button', { name: 'Open navigation' })).toBeVisible();
 

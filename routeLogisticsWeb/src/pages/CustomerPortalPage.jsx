@@ -13,6 +13,7 @@ import CustomerReviews from '../components/CustomerReviews';
 import { usePrincipalQuery } from '../hooks/usePrincipalQuery';
 import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 import { useConfirmUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { rememberedPortalEmail, rememberPortalEmail } from '../utils/rememberedEmail';
 const call = (name, data) => httpsCallable(portalFunctions, name)(data).then((result) => result.data);
 const money = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
 const portalName = account => Array.isArray(account?.customerNames) && account.customerNames.length === 1 ? account.customerNames[0] : '';
@@ -28,7 +29,7 @@ const today = timeZone => {
 export default function CustomerPortalPage() {
   const confirmDiscard = useConfirmUnsavedChanges();
   const [user, setUser] = useState(null), [accounts, setAccounts] = useState([]);
-  const [email, setEmail] = useState(''), [code, setCode] = useState(''), [challenge, setChallenge] = useState(null);
+  const [email, setEmail] = useState(rememberedPortalEmail), [remember, setRemember] = useState(() => Boolean(email)), [code, setCode] = useState(''), [challenge, setChallenge] = useState(null);
   const [busy, setBusy] = useState(true), [message, setMessage] = useState(''), [error, setError] = useState('');
   const [hasMore, setHasMore] = useState(false);
   const [propertyKey, setPropertyKey] = useState(''), [inviteLink, setInviteLink] = useState('');
@@ -114,6 +115,7 @@ export default function CustomerPortalPage() {
     try {
       await portalReady;
       if (!challenge) {
+        rememberPortalEmail(email, remember);
         const data = await call('rlRequestCustomerOTP', { email: email.trim() });
         if (alive.current && version === authVersion.current && !identity.current) { setChallenge(data.challengeId); setMessage(data.message); setCode(''); }
       } else {
@@ -146,6 +148,7 @@ export default function CustomerPortalPage() {
     {!user ? <form onSubmit={submit} aria-label="Customer email sign-in" className="max-w-md space-y-4 rounded-xl border bg-white p-6">
       <p>Use the email your provider invited. Sign in, then connect the provider with its invitation link.</p>
       <label className="block">Email address<input className="mt-1 block w-full rounded border-gray-300" type="email" autoComplete="email" required disabled={!!challenge || busy || logoutFailed} value={email} onChange={(e) => setEmail(e.target.value)} /></label>
+      <label className="flex items-start gap-3 text-sm"><input type="checkbox" checked={remember} onChange={event => { setRemember(event.target.checked); rememberPortalEmail(email, event.target.checked); }} className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" /><span>Remember me<span className="block text-xs text-gray-500">Save my email on this device. A new code is still required to sign in.</span></span></label>
       {challenge && <><label className="block">Six-digit code<input className="mt-1 block w-full rounded border-gray-300" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required disabled={busy || logoutFailed} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} /></label><p className="text-sm text-gray-500">Codes expire after 10 minutes and can be used once.</p></>}
       <button disabled={busy || logoutFailed} className="rounded bg-primary-700 px-4 py-2 text-white hover:bg-primary-800 disabled:opacity-50">{busy ? 'Please wait…' : challenge ? 'Sign in' : 'Email a sign-in code'}</button>
       {challenge && <button type="button" disabled={busy || logoutFailed} className="block underline" onClick={() => { authVersion.current++; setChallenge(null); setCode(''); setMessage(''); setError(''); }}>Request a new code or change email</button>}

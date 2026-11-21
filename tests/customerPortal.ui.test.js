@@ -9,7 +9,7 @@ const {createPrincipalQueryMock}=require('./support/principalQueryMock.cjs');
 const principalHooks=createPrincipalQueryMock(React);
 global.IS_REACT_ACT_ENVIRONMENT = true;
 const client = { name: 'isolated-customer-functions' };
-let tree, user = { uid: 'synthetic-portal-user' }, listener, calls = [], accounts, pendingPortal = null, pendingFile = null, fileError = null, portalError = null, otpError = null, requestNumber = 0, paymentProps = [], allowDiscard = true, legacyPortalResponse = false;
+let tree, user = { uid: 'synthetic-portal-user' }, listener, calls = [], accounts, pendingPortal = null, pendingFile = null, fileError = null, portalError = null, otpError = null, requestNumber = 0, paymentProps = [], allowDiscard = true, legacyPortalResponse = false, portalStoredEmail = '';
 const portalAuth = { get currentUser() { return user; } };
 const a = { id: 'company:provider-a', companyName: 'Provider A', contactEmail: 'a@example.invalid', customerNames: ['Alex Customer'], duplicateCustomerCount: 1, jobs: [{ id: 'visit-a', serviceType: 'Provider A service visit', date: '2026-11-14', time: '10:00', status: 'completed' }], invoices: [{ id: 'invoice-a', invoiceNumber: 'INV-A', total: 35, dueDate: '2026-11-20', status: 'sent', lineItems: [{ description: 'Service A', quantity: 1, unitPrice: 35, amount: 35 }] }], photos: [{ id: 'photo-a', jobId: 'visit-a', kind: 'photo', caption: 'Shared provider A visit photo' }], documents: [{ id: 'document-a', jobId: 'visit-a', kind: 'document', name: 'Provider A service report' }], hasMore: false };
 const b = { id: 'company:provider-b', companyName: 'Provider B', contactEmail: 'b@example.invalid', customerNames: ['Alexander Client'], jobs: [{ id: 'visit-b', serviceType: 'Provider B service visit', date: '2026-11-15', time: '11:00', status: 'scheduled' }], invoices: [{ id: 'invoice-b', invoiceNumber: 'INV-B', total: 80, dueDate: '2026-11-25', status: 'sent', lineItems: [] }], photos: [], documents: [], hasMore: false };
@@ -32,6 +32,7 @@ const mock = name => {
     if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
     if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found','user-changed'].includes(String(error?.code||'').split('/').pop())};
     if(name.endsWith('/usePrincipalQuery'))return principalHooks;
+  if (name.endsWith('/utils/rememberedEmail')) return { rememberedPortalEmail: () => portalStoredEmail, rememberPortalEmail: (value, remember) => { portalStoredEmail = remember && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()) ? value.trim().toLowerCase() : ''; } };
   if (name === 'react-router-dom') return { Link: ({ children, to, ...props }) => React.createElement('a', { ...props, href: to }, children) };
   if (name === 'react-helmet-async') return { Helmet: props => React.createElement(React.Fragment, null, props.children) };
   if (name === 'firebase/auth') return {
@@ -60,7 +61,7 @@ const choose = async id => act(async () => tree.root.findAllByType('select')[0].
 const expandInvoice = async index => act(async () => tree.root.findAllByType('details')[index].props.onToggle({ currentTarget: { open: true } }));
 afterEach(async () => {
   if (tree) await act(async () => tree.unmount());
-  tree = null; user = { uid: 'synthetic-portal-user' }; listener = null; calls = []; accounts = [a, b]; pendingPortal = null; pendingFile = null; fileError = null; portalError = null; otpError = null; requestNumber = 0; paymentProps = []; allowDiscard = true; legacyPortalResponse = false;
+  tree = null; user = { uid: 'synthetic-portal-user' }; listener = null; calls = []; accounts = [a, b]; pendingPortal = null; pendingFile = null; fileError = null; portalError = null; otpError = null; requestNumber = 0; paymentProps = []; allowDiscard = true; legacyPortalResponse = false; portalStoredEmail = '';
 });
 
 test('review scope follows the selected provider and unsaved review protection blocks switching, refresh and sign-out', async () => {
@@ -115,6 +116,28 @@ test('an older portal response does not leave the identity loading indefinitely'
   assert.match(text(), /Welcome to your portal/);
   assert.doesNotMatch(text(), /Verified sign-in email: Loading|Welcome, Alex Customer/);
   assert.match(text(), /Provider A service visit/);
+});
+
+test('customer portal remembers the email on this device but still requests an OTP', async () => {
+  user = null;
+  await mount();
+  const field = () => tree.root.findByProps({ type: 'email' });
+  const checkbox = () => tree.root.findByProps({ type: 'checkbox' });
+  assert.equal(field().props.value, '');
+  assert.equal(checkbox().props.checked, false);
+  await act(async () => field().props.onChange({ target: { value: ' Customer@Example.com ' } }));
+  await act(async () => checkbox().props.onChange({ target: { checked: true } }));
+  assert.equal(portalStoredEmail, 'customer@example.com');
+  await act(async () => tree.root.findByType('form').props.onSubmit({ preventDefault() {} }));
+  assert.equal(calls.filter(row => row.name === 'rlRequestCustomerOTP').length, 1);
+  assert.equal(tree.root.findByProps({ inputMode: 'numeric' }).props.value, '');
+  await act(async () => tree.unmount()); tree = null;
+  await mount();
+  assert.equal(field().props.value, 'customer@example.com');
+  assert.equal(checkbox().props.checked, true);
+  await act(async () => checkbox().props.onChange({ target: { checked: false } }));
+  assert.equal(portalStoredEmail, '');
+  assert.equal(field().props.value, 'customer@example.com');
 });
 
 test('provider switching closes payment/file context and old payment refresh callbacks cannot reload another provider', async () => {

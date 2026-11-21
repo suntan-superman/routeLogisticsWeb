@@ -183,12 +183,12 @@ function LandingPage() {
       <div className="marketing-nav-shell">
         <Link className="marketing-logo" to="/" aria-label="Route Logistics home"><BrandMark /><span>Route Logistics</span></Link>
         <nav className="marketing-desktop-nav" aria-label="Primary navigation"><a href="#features">Features</a><a href="#how-it-works">How It Works</a><a href="#industries">Industries</a></nav>
-        <div className="marketing-desktop-actions"><Link className="marketing-login-link" to="/login">Log In</Link><Link className="marketing-nav-cta" to="/signup?intent=company">Add Your Company</Link></div>
+        <div className="marketing-desktop-actions"><Link className="marketing-login-link" to="/login">Log In</Link><Link className="marketing-login-link" to="/portal">Customer Portal</Link><Link className="marketing-nav-cta" to="/signup?intent=company">Add Your Company</Link></div>
         <button className="marketing-menu-button" type="button" aria-expanded={menuOpen} aria-controls="marketing-mobile-menu" aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} onClick={() => setMenuOpen(open => !open)}>{menuOpen ? <XMarkIcon /> : <Bars3Icon />}</button>
       </div>
       <nav id="marketing-mobile-menu" className={`marketing-mobile-menu ${menuOpen ? 'is-open' : ''}`} aria-label="Mobile navigation" hidden={!menuOpen}>
         <a href="#features" onClick={closeMenu}>Features</a><a href="#how-it-works" onClick={closeMenu}>How It Works</a><a href="#industries" onClick={closeMenu}>Industries</a>
-        <Link to="/login" onClick={closeMenu}>Log In</Link><Link className="marketing-mobile-cta" to="/signup?intent=company" onClick={closeMenu}>Add Your Company</Link>
+        <Link to="/login" onClick={closeMenu}>Log In</Link><Link to="/portal" onClick={closeMenu}>Customer Portal</Link><Link className="marketing-mobile-cta" to="/signup?intent=company" onClick={closeMenu}>Add Your Company</Link>
       </nav>
     </header>
 

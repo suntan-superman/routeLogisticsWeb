@@ -317,14 +317,24 @@ test('issued terms, ledger-paid invoices, void invoices and payment-locked mutat
 test('generated invoice identities and display numbers differ across source jobs without renumbering history', async () => {
   const f = await fixture(), olderId = `${f.id}-older-timestamp-invoice`;
   await db.doc(`invoices/${olderId}`).set({ companyId: f.id, userId: f.uid, customerId: f.customerId, invoiceNumber: 'OLDER-TIMESTAMP-INVOICE', status: 'paid', total: 10, createdAt: new Date('2020-01-01T00:00:00.000Z') });
-  const first = await f.create(), firstStored = await f.stored(first), firstNumber = firstStored.invoiceNumber;
+  const first = await f.create(), firstStored = await f.stored(first);
+  assert.equal(firstStored.invoiceNumber, null, 'draft invoices remain unnumbered');
   assert.equal(typeof firstStored.createdAt.toDate, 'function'); assert.equal(typeof firstStored.createdAt.toMillis, 'function'); assert.equal(typeof first.invoice.createdAt, 'string');
   const ordered = await db.collection('invoices').where('companyId', '==', f.id).orderBy('createdAt', 'desc').get();
   assert.deepEqual(ordered.docs.map(row => row.id), [first.id, olderId]);
   const secondJob = `${f.id}-second-job`, data = await f.job(); delete data.id;
   await db.doc(`jobs/${secondJob}`).set({ ...data, totalCost: 50 });
   f.jobId = secondJob; const second = await f.create();
-  assert.notEqual(first.id, second.id); assert.notEqual(firstNumber, (await f.stored(second)).invoiceNumber); assert.equal((await f.stored(first)).invoiceNumber, firstNumber);
+  assert.notEqual(first.id, second.id);
+  assert.equal((await f.stored(second)).invoiceNumber, null, 'a second draft does not consume an issued number');
+  const firstIssued = await f.issue(first), secondIssued = await f.issue(second);
+  const firstNumber = firstIssued.invoice.invoiceNumber;
+  const secondNumber = secondIssued.invoice.invoiceNumber;
+  assert.match(firstNumber, /^\d{8}-I\d{3}$/);
+  assert.match(secondNumber, /^\d{8}-I\d{3}$/);
+  assert.notEqual(firstNumber, secondNumber);
+  assert.equal((await f.stored(first)).invoiceNumber, firstNumber);
+  assert.equal((await db.doc(`invoices/${olderId}`).get()).get('invoiceNumber'), 'OLDER-TIMESTAMP-INVOICE');
 });
 
 test('authoritative quote invoice remains compatible with Stripe signed test reconciliation, portal projection and email queue', async () => {

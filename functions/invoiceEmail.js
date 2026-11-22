@@ -5,6 +5,11 @@ const { requireAuth, rateLimit, documentId, normalizeEmail, validEmail } = requi
 const { assertInvoiceActor, invoiceRevision, expectedRevision, assertInvoiceTerms } = require('./invoices');
 const { hash } = require('./security');
 const { assertCurrentInvoice } = require('./shared/invoiceV2');
+const { localDocumentDay } = require('./shared/documentNumbers');
+const reminderLocalDay = (date, timeZone) => {
+  const value = localDocumentDay(date, timeZone || 'America/Los_Angeles');
+  return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6)}`;
+};
 const invoiceMailId = (id, period, email, reminder = false) => `invoice_${reminder ? 'reminder' : 'send'}_${id}_${period}_${hash(email).slice(0, 12)}`;
 function invoiceMessage(invoice, companyName, reminder, appUrl) {
   const snapshot = invoice.issuedSnapshot;
@@ -30,7 +35,7 @@ async function queueInvoiceEmail(db, id, { reminder = false, appUrl, authorize =
     if (!validEmail(email)) throw new HttpsError('failed-precondition', 'Add a valid customer email address.');
     if (expectedRecipient !== undefined && email !== normalizeEmail(expectedRecipient)) throw new HttpsError('aborted', 'The customer email changed. Review the current recipient before sending.');
     const company = invoice.companyId ? await tx.get(db.collection('companies').doc(invoice.companyId)) : null;
-    if (reminder && (!invoice.dueDate || invoice.dueDate >= new Date().toISOString().slice(0, 10) || company?.get('invoiceRemindersEnabled') !== true || customer.get('emailConsent') !== true)) return { skipped: true };
+    if (reminder && (!invoice.dueDate || invoice.dueDate >= reminderLocalDay(new Date(), company?.get('timeZone')) || company?.get('invoiceRemindersEnabled') !== true || customer.get('emailConsent') !== true)) return { skipped: true };
     const now = Date.now();
     const period = Math.floor(now / ((reminder ? 7 : 1) * 86400_000));
     const mailRef = db.collection('rlMail').doc(invoiceMailId(id, period, email, reminder));
@@ -105,10 +110,12 @@ function invoiceEmailHandlers(db, appUrl, emailEnabled = () => true) {
     },
     reminders: async () => {
       if (!emailEnabled()) return { skipped: true };
-      const today = new Date().toISOString().slice(0, 10);
+      // Include the UTC day in the candidate query; the per-invoice check
+      // above applies each company's local day before any email is queued.
+      const tomorrowUtc = new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
       let cursor;
       do {
-        let query = db.collection('invoices').where('financialVersion', '==', 2).where('status', 'in', ['issued','partially_paid']).where('dueDate', '<', today).orderBy('dueDate').limit(200);
+        let query = db.collection('invoices').where('financialVersion', '==', 2).where('status', 'in', ['issued','partially_paid']).where('dueDate', '<', tomorrowUtc).orderBy('dueDate').limit(200);
         if (cursor) query = query.startAfter(cursor);
         const snap = await query.get();
         for (const invoice of snap.docs) {
@@ -120,4 +127,4 @@ function invoiceEmailHandlers(db, appUrl, emailEnabled = () => true) {
     },
   };
 }
-module.exports = { invoiceEmailHandlers, queueInvoiceEmail, invoiceMessage, invoiceMailId };
+module.exports = { invoiceEmailHandlers, queueInvoiceEmail, invoiceMessage, invoiceMailId, reminderLocalDay };

@@ -302,7 +302,9 @@ test('PW-OPS-04 @smoke technician sees only assigned work and cannot open custom
   await expect(page.getByText(scenario.jobPrivateNotes)).toHaveCount(0);
   expect(await scenario.read('jobs', scenario.ids.jobId)).toEqual(assignedBefore);
   await page.goto('/customers');
-  await expect(page.getByRole('heading', { name: 'Access unavailable', exact: true })).toBeVisible();
+  // CI's Functions emulator can still be resolving the signed-in workspace
+  // after a full navigation. Require the denied state, never a blank page.
+  await expect(page.getByRole('heading', { name: 'Access unavailable', exact: true })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole('button', { name: 'Add Customer', exact: true })).toHaveCount(0);
 });
 

@@ -73,8 +73,8 @@ exports.rlAssistant = onCall({ timeoutSeconds: 30, maxInstances: 20 }, assistant
 const TENANT_COLLECTIONS = ['customers', 'jobs', 'appointments', 'photos', 'estimates', 'estimateTemplates', 'invoices', 'servicePlans', 'serviceLogs'];
 const appUrl = defineString('RL_APP_URL', { default: 'https://route-logistics.com' });
 const emailFrom = defineString('RL_EMAIL_FROM', { default: '' });
-// Deployment dotenv controls both delivery and secret binding. Enabling email requires
-// redeploying after RL_SMTP_URL is configured; disabled deployments need no SMTP access.
+// Keep the secret bound regardless of when Firebase loads dotenv during deployment.
+// The runtime flag still controls whether queued mail is delivered.
 const emailEnabled = () => process.env.RL_EMAIL_ENABLED === 'true';
 
 async function loadTenancyData(uid, email) {
@@ -200,7 +200,7 @@ exports.rlReadPublicContent = onCall(platformCms.publicRead);
 exports.rlPlatformContentImage = onCall({ memory: '256MiB', timeoutSeconds: 60 }, platformCms.image);
 exports.rlPublicContentImage = onRequest(platformCms.publicImage);
 exports.rlPublicContent = onRequest({ timeoutSeconds: 60 }, publicContentHandler(db));
-exports.rlDeliverEmail = onSchedule({ schedule: 'every 1 minutes', secrets: emailEnabled() ? ['RL_SMTP_URL'] : [], timeoutSeconds: 120, maxInstances: 1 }, () => emailEnabled() ? drainMail(db, process.env.RL_SMTP_URL, emailFrom.value()) : undefined);
+exports.rlDeliverEmail = onSchedule({ schedule: 'every 1 minutes', secrets: ['RL_SMTP_URL'], timeoutSeconds: 120, maxInstances: 1 }, () => emailEnabled() ? drainMail(db, process.env.RL_SMTP_URL, emailFrom.value()) : undefined);
 const invoiceEmails = invoiceEmailHandlers(db, () => appUrl.value(), emailEnabled);
 exports.emailInvoice = onCall(invoiceEmails.emailInvoice);
 exports.rlManageInvoice = onCall({ timeoutSeconds: 60 }, invoiceHandlers(db).handle);

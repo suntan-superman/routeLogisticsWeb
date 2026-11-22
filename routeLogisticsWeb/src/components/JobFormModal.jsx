@@ -18,22 +18,6 @@ import { customerAddress, customerView, legacyDate } from '../utils/legacyCustom
 import ServicePropertyDirectory from './ServicePropertyDirectory';
 import { estimateOutcomes } from '../utils/appointmentKind';
 
-const SERVICE_TYPES = [
-  'General Pest Control',
-  'Termite Inspection',
-  'Termite Treatment',
-  'Rodent Control',
-  'Ant Treatment',
-  'Cockroach Treatment',
-  'Bed Bug Treatment',
-  'Mosquito Treatment',
-  'Wildlife Removal',
-  'Lawn Care',
-  'Cleaning',
-  'Maintenance',
-  'Inspection'
-];
-
 const todayStr = () => {
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
@@ -112,6 +96,19 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
   const currentAddress = company?.id ? property.address : form.address;
   const estimateVisit = form.appointmentKind === 'estimate_visit';
   const inquiryLinked = !!form.inquiryId;
+  const serviceCatalog = useMemo(() => [...new Map(
+    (company?.serviceCategories?.length ? company.serviceCategories : company?.services || [])
+      .map(service => typeof service === 'string' ? service.trim() : service?.name?.trim())
+      .filter(Boolean)
+      .map(service => [service.toLocaleLowerCase(), service])
+  ).values()], [company?.serviceCategories, company?.services]);
+  const serviceTypeOptions = useMemo(() => {
+    const options = serviceCatalog.map(service => ({ value: service, label: service }));
+    if (form.serviceType && !serviceCatalog.some(service => service.toLocaleLowerCase() === form.serviceType.toLocaleLowerCase()) && (isEdit || estimateVisit && inquiryLinked)) {
+      options.unshift({ value: form.serviceType, label: `${form.serviceType} (existing request)` });
+    }
+    return options;
+  }, [serviceCatalog, form.serviceType, isEdit, estimateVisit, inquiryLinked]);
   const compactInquirySchedule = !isEdit && inquiryLinked && estimateVisit;
   const canSaveCustomerAddress = !!can?.('customers.manage') && !!selectedCustomer && !!currentAddress.trim() && currentAddress.trim() !== selectedCustomerAddress.trim();
   const alive = useRef(false), savingRef = useRef(false), closing = useRef(false);
@@ -189,6 +186,7 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
     const customer = customers.find((c) => c.id === form.customerId);
     if (!customer) return toast.error('Select a customer');
     if (!form.serviceType.trim()) return toast.error('Enter a service type');
+    if (company?.id && !isEdit && !estimateVisit && !serviceCatalog.some(service => service.toLocaleLowerCase() === form.serviceType.trim().toLocaleLowerCase())) return toast.error('Choose a service from this company’s catalog.');
     if (!form.date || !form.time) return toast.error('Date and time are required');
     if (repeatSelection && !recurrence) return toast.error('Choose a valid first service date for this recurring appointment.');
     if (company?.id && (!isEdit || locationChanged) && !serviceAreaPolicy) return toast.error('Wait for the service-area settings to load, or retry the property check.');
@@ -286,17 +284,8 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
           {isEdit && estimateVisit && <label className={label}>Estimate outcome<SelectControl aria-label="Estimate outcome" className={input} value={form.estimateOutcome} disabled={saving} onChange={event => set('estimateOutcome', event.target.value)}>{estimateOutcomes.map(row => <option key={row.value} value={row.value}>{row.label}</option>)}</SelectControl></label>}
 
           {!compactInquirySchedule && <div>
-            <label className={label}>Service type *</label>
-            <input
-              list="job-service-types"
-              value={form.serviceType}
-              onChange={(e) => set('serviceType', e.target.value)}
-              className={input}
-              placeholder="e.g. General Pest Control"
-            />
-            <datalist id="job-service-types">
-              {SERVICE_TYPES.map((t) => <option key={t} value={t} />)}
-            </datalist>
+            <ThemedSelect label="Service type" required value={form.serviceType} options={serviceTypeOptions} onChange={value => set('serviceType', value)} disabled={saving || !serviceTypeOptions.length} placeholder={serviceTypeOptions.length ? 'Choose a company service…' : 'No company services configured'} />
+            {!serviceCatalog.length && <p className="mt-1 text-sm text-amber-700">Add services in Company Settings before scheduling a service job.</p>}
           </div>}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

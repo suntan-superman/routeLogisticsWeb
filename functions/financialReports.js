@@ -5,6 +5,20 @@ const { rateLimit } = require('./security');
 
 const TYPES = ['daily_operations', 'technician_productivity', 'revenue_invoicing', 'payments_received', 'ar_aging', 'customer_activity', 'service_performance', 'unbilled_work'];
 const LABELS = { daily_operations: 'Daily Operations', technician_productivity: 'Technician Productivity', revenue_invoicing: 'Revenue and Invoicing', payments_received: 'Payments Received', ar_aging: 'Accounts Receivable Aging', customer_activity: 'Customer Activity', service_performance: 'Service Performance', unbilled_work: 'Unbilled Completed Work' };
+const REPORT_COLUMNS = {
+  daily_operations: [['date', 'Date', 1.4], ['scheduled', 'Scheduled', 1], ['completed', 'Completed', 1], ['inProgress', 'In progress', 1], ['cancelled', 'Cancelled', 1]],
+  technician_productivity: [['technicianId', 'Technician', 2], ['jobs', 'Jobs', 1], ['completed', 'Completed', 1], ['durationMinutes', 'Work duration', 1.4]],
+  revenue_invoicing: [['invoiceNumber', 'Invoice', 1.2], ['customerName', 'Customer', 1.6], ['issueDate', 'Issued', 1], ['invoicedCents', 'Invoiced', 1], ['collectedThroughEndCents', 'Collected', 1], ['outstandingAtEndCents', 'Outstanding', 1.2]],
+  payments_received: [['date', 'Date', 1], ['invoiceId', 'Invoice ID', 2.2], ['type', 'Entry', 1], ['amountCents', 'Amount', 1]],
+  ar_aging: [['invoiceNumber', 'Invoice', 1.2], ['customerName', 'Customer', 1.6], ['dueDate', 'Due date', 1], ['daysLate', 'Days late', .75], ['bucket', 'Age', .9], ['outstandingCents', 'Balance', 1.1]],
+  customer_activity: [['customerId', 'Customer ID', 1.4], ['customerName', 'Customer', 2], ['visits', 'Visits', 1], ['completed', 'Completed', 1]],
+  service_performance: [['service', 'Service', 2.4], ['visits', 'Visits', 1], ['completed', 'Completed', 1]],
+  unbilled_work: [['jobId', 'Job ID', 1.2], ['date', 'Date', 1], ['customerName', 'Customer', 1.6], ['service', 'Service', 1.6], ['priceCents', 'Known price', 1]],
+};
+const reportColumns = type => (REPORT_COLUMNS[type] || []).map(([key, label, weight]) => ({ key, label, weight }));
+const summaryLabel = key => key.replace(/Cents$/, '').replace(/([A-Z])/g, ' $1').replace(/^./, letter => letter.toUpperCase()).trim();
+const readableDate = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? new Date(`${value}T00:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric' }) : String(value || '');
+const reportValue = (key, value) => value === null || value === undefined || value === '' ? '—' : key.endsWith('Cents') ? money(value) : /(?:^date$|Date$)/.test(key) ? readableDate(value) : key === 'durationMinutes' ? `${value} min` : key === 'bucket' ? value === 'current' ? 'Current' : `${value} days` : key === 'type' ? value === 'reverse' ? 'Reversal' : value === 'record' ? 'Payment' : String(value) : String(value);
 const money = cents => `$${(cents / 100).toFixed(2)}`;
 const day = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
 function localDay(value, zone) {
@@ -71,7 +85,7 @@ function reportData(type, { jobs, invoices, ledger, start, end, zone, filters = 
     rows = work.filter(job => billable(job) && !invoicedJobs.has(job.id)).map(job => ({ jobId: job.id, date: jobDay(job), customerName: clean(job.customerName), service: clean(job.serviceType), priceCents: Number.isFinite(job.totalCost) ? Math.round(job.totalCost * 100) : null }));
     totals = { jobs: rows.length, knownPriceCents: sum(rows, 'priceCents') };
   }
-  return { type, title: LABELS[type], startDate: start, endDate: end, timeZone: zone, rows, totals, generatedAt: new Date().toISOString(), legacyFinancialRecordsExcluded: true };
+  return { type, title: LABELS[type], startDate: start, endDate: end, timeZone: zone, columns: reportColumns(type), rows, totals, generatedAt: new Date().toISOString(), legacyFinancialRecordsExcluded: true };
 }
 function csvFor(report) {
   const keys = Object.keys(report.rows[0] || {});
@@ -79,33 +93,102 @@ function csvFor(report) {
   return [keys.join(','), ...report.rows.map(row => keys.map(key => cell(row[key])).join(','))].join('\r\n');
 }
 async function pdfFor(report, companyName, logo = null) {
-  const pdf = await PDFDocument.create(), regular = await pdf.embedFont(StandardFonts.Helvetica), bold = await pdf.embedFont(StandardFonts.HelveticaBold), green = rgb(0.04, 0.35, 0.26);
-  let page = pdf.addPage([612,792]), y = 740;
-  if (logo?.bytes) {
-    const image = logo.contentType === 'image/png' ? await pdf.embedPng(Uint8Array.from(logo.bytes)) : await pdf.embedJpg(Uint8Array.from(logo.bytes));
-    const scaled = image.scale(Math.min(100 / image.width, 55 / image.height, 1));
-    page.drawImage(image, { x: 465, y: 730, width: scaled.width, height: scaled.height });
-    y = 715;
-  }
-  const next = () => { page = pdf.addPage([612,792]); y = 740; };
-  const draw = (value, strong = false) => {
-    const font = strong ? bold : regular, size = strong ? 11 : 9;
-    const safe = String(value ?? '').replace(/[\r\n\t]+/g, ' ').normalize('NFKD').replace(/[^\x20-\x7e]/g, '?');
-    let line = '';
-    const flush = () => { if (y < 55) next(); page.drawText(line, { x: 45, y, size, font, color: strong ? green : rgb(0.12,0.2,0.18) }); y -= size + 6; line = ''; };
-    for (const word of safe.split(/\s+/)) {
+  const pdf = await PDFDocument.create(), regular = await pdf.embedFont(StandardFonts.Helvetica), bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const green = rgb(0.04, 0.35, 0.26), dark = rgb(0.12, 0.19, 0.18), muted = rgb(0.39, 0.45, 0.43), pale = rgb(0.92, 0.97, 0.94), stripe = rgb(0.97, 0.98, 0.97);
+  const left = 44, right = 568, tableWidth = right - left, bottom = 60;
+  const columns = report.columns?.length ? report.columns : reportColumns(report.type);
+  const totalWeight = columns.reduce((total, column) => total + column.weight, 0);
+  const widths = columns.map(column => tableWidth * column.weight / totalWeight);
+  const safe = value => String(value ?? '').replace(/[\r\n\t]+/g, ' ').normalize('NFKD').replace(/[^\x20-\x7e]/g, '-');
+  const wrap = (value, font, size, width) => {
+    const lines = []; let line = '';
+    for (const word of safe(value).split(/\s+/)) {
       if (!word) continue;
-      if (font.widthOfTextAtSize((line ? line + ' ' : '') + word, size) <= 520) { line += (line ? ' ' : '') + word; continue; }
-      if (line) flush();
-      for (const char of word) { if (font.widthOfTextAtSize(line + char, size) > 520 && line) flush(); line += char; }
+      let part = '';
+      const pieces = [];
+      for (const char of word) {
+        if (font.widthOfTextAtSize(part + char, size) > width && part) { pieces.push(part); part = ''; }
+        part += char;
+      }
+      if (part) pieces.push(part);
+      for (const piece of pieces) {
+        const candidate = line ? `${line} ${piece}` : piece;
+        if (font.widthOfTextAtSize(candidate, size) > width && line) { lines.push(line); line = piece; }
+        else line = candidate;
+      }
     }
-    if (line) flush();
-    if (strong) y -= 8;
+    if (line) lines.push(line);
+    return lines.length ? lines : ['-'];
   };
-  draw(companyName || 'Route Logistics', true); draw(report.title, true); draw(`${report.startDate} to ${report.endDate} · ${report.timeZone}`); y -= 12;
-  for (const [key, value] of Object.entries(report.totals)) draw(`${key}: ${key.endsWith('Cents') ? money(value) : value}`, true);
-  y -= 15; for (const row of report.rows) draw(Object.entries(row).map(([key, value]) => `${key}: ${key.endsWith('Cents') && value !== null ? money(value) : value}`).join('  |  '));
-  pdf.getPages().forEach((sheet, i) => sheet.drawText(`Page ${i+1} of ${pdf.getPageCount()}`, { x: 500, y: 25, size: 9, font: regular }));
+  let image = null;
+  if (logo?.bytes) image = logo.contentType === 'image/png' ? await pdf.embedPng(Uint8Array.from(logo.bytes)) : await pdf.embedJpg(Uint8Array.from(logo.bytes));
+  let page, y;
+  const newPage = (continued = false) => {
+    page = pdf.addPage([612, 792]);
+    const companyLines = wrap(companyName || 'Route Logistics', bold, 13, 405).slice(0, 2);
+    companyLines.forEach((line, index) => page.drawText(line, { x: left, y: 748 - index * 16, size: 13, font: bold, color: green }));
+    if (image) {
+      const scaled = image.scale(Math.min(90 / image.width, 52 / image.height, 1));
+      page.drawImage(image, { x: right - scaled.width, y: 727, width: scaled.width, height: scaled.height });
+    }
+    page.drawLine({ start: { x: left, y: 710 }, end: { x: right, y: 710 }, thickness: 1, color: green });
+    page.drawText(safe(`${report.title}${continued ? ' (continued)' : ''}`), { x: left, y: 681, size: continued ? 14 : 18, font: bold, color: dark });
+    y = 659;
+    page.drawText(safe(`${readableDate(report.startDate)} - ${readableDate(report.endDate)}  |  ${report.timeZone}`), { x: left, y, size: 9, font: regular, color: muted });
+    y -= 20;
+    if (report.type === 'ar_aging' && !continued) {
+      page.drawText(safe(`Aging as of ${readableDate(report.endDate)}.`), { x: left, y, size: 9, font: regular, color: muted }); y -= 16;
+      if (report.endDate > localDay(new Date(), report.timeZone)) {
+        page.drawText('Future dates project aging from payments currently recorded.', { x: left, y, size: 9, font: regular, color: muted }); y -= 16;
+      }
+    }
+    if (!continued) {
+      y -= 7;
+      const entries = Object.entries(report.totals), gap = 10, cardWidth = (tableWidth - gap * (entries.length - 1)) / entries.length;
+      entries.forEach(([key, value], index) => {
+        const x = left + index * (cardWidth + gap);
+        page.drawRectangle({ x, y: y - 54, width: cardWidth, height: 54, color: pale });
+        page.drawText(safe(summaryLabel(key)), { x: x + 10, y: y - 17, size: 8, font: bold, color: muted });
+        page.drawText(safe(key.endsWith('Cents') ? money(value) : value), { x: x + 10, y: y - 40, size: 15, font: bold, color: green });
+      });
+      y -= 77;
+    } else y -= 14;
+  };
+  const tableHeader = () => {
+    page.drawRectangle({ x: left, y: y - 27, width: tableWidth, height: 27, color: green });
+    let x = left;
+    columns.forEach((column, index) => {
+      const lines = wrap(column.label, bold, 8, widths[index] - 12).slice(0, 2);
+      lines.forEach((line, lineIndex) => page.drawText(line, { x: x + 6, y: y - 12 - lineIndex * 9, size: 8, font: bold, color: rgb(1, 1, 1) }));
+      x += widths[index];
+    });
+    y -= 27;
+  };
+  newPage(); tableHeader();
+  if (!report.rows.length) page.drawText('No authorized records match this report period.', { x: left + 8, y: y - 24, size: 10, font: regular, color: muted });
+  report.rows.forEach((row, rowIndex) => {
+    const cells = columns.map((column, index) => wrap(reportValue(column.key, row[column.key]), regular, 8, widths[index] - 12));
+    const height = Math.max(28, 12 + Math.max(...cells.map(lines => lines.length)) * 11);
+    if (y - height < bottom) { newPage(true); tableHeader(); }
+    if (rowIndex % 2 === 0) page.drawRectangle({ x: left, y: y - height, width: tableWidth, height, color: stripe });
+    let x = left;
+    cells.forEach((lines, index) => {
+      const numeric = columns[index].key.endsWith('Cents') || ['jobs', 'completed', 'scheduled', 'inProgress', 'cancelled', 'visits', 'daysLate', 'durationMinutes'].includes(columns[index].key);
+      lines.forEach((line, lineIndex) => {
+        const offset = numeric ? widths[index] - 6 - regular.widthOfTextAtSize(line, 8) : 6;
+        page.drawText(line, { x: x + offset, y: y - 14 - lineIndex * 11, size: 8, font: regular, color: dark });
+      });
+      x += widths[index];
+    });
+    page.drawLine({ start: { x: left, y: y - height }, end: { x: right, y: y - height }, thickness: .5, color: rgb(.86, .9, .88) });
+    y -= height;
+  });
+  pdf.getPages().forEach((sheet, index) => {
+    sheet.drawLine({ start: { x: left, y: 47 }, end: { x: right, y: 47 }, thickness: .5, color: rgb(.8, .84, .82) });
+    sheet.drawText('Route Logistics financial report', { x: left, y: 30, size: 8, font: regular, color: muted });
+    const number = `Page ${index + 1} of ${pdf.getPageCount()}`;
+    sheet.drawText(number, { x: right - regular.widthOfTextAtSize(number, 8), y: 30, size: 8, font: regular, color: muted });
+  });
   return Buffer.from(await pdf.save());
 }
 async function allScoped(query, limit = 10000) {
@@ -143,4 +226,4 @@ function financialReportHandler(db, { trustedSystem = false } = {}) {
     return report;
   };
 }
-module.exports = { TYPES, LABELS, localDay, reportData, csvFor, pdfFor, allScoped, financialReportHandler };
+module.exports = { TYPES, LABELS, REPORT_COLUMNS, reportColumns, reportValue, summaryLabel, localDay, reportData, csvFor, pdfFor, allScoped, financialReportHandler };

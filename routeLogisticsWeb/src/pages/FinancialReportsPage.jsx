@@ -11,6 +11,10 @@ const reports = [
 ];
 const iso = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const save = (name, type, value) => { const url = URL.createObjectURL(new Blob([value], { type })); const link = document.createElement('a'); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
+const labelFor = key => key.replace(/Cents$/, '').replace(/([A-Z])/g, ' $1').replace(/^./, letter => letter.toUpperCase()).trim();
+const displayDate = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? new Date(`${value}T00:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric' }) : value;
+const displayValue = (key, value) => value === null || value === undefined || value === '' ? '—' : key.endsWith('Cents') ? `$${(value / 100).toFixed(2)}` : /(?:^date$|Date$)/.test(key) ? displayDate(value) : key === 'durationMinutes' ? `${value} min` : key === 'bucket' ? value === 'current' ? 'Current' : `${value} days` : key === 'type' ? value === 'record' ? 'Payment' : value === 'reverse' ? 'Reversal' : value : value;
+const numericColumn = key => key.endsWith('Cents') || ['jobs', 'completed', 'scheduled', 'inProgress', 'cancelled', 'visits', 'daysLate', 'durationMinutes'].includes(key);
 
 export default function FinancialReportsPage() {
   const [type, setType] = useState('daily_operations'), [startDate, setStartDate] = useState(() => iso(new Date(new Date().getFullYear(), new Date().getMonth(), 1))), [endDate, setEndDate] = useState(() => iso(new Date()));
@@ -28,6 +32,7 @@ export default function FinancialReportsPage() {
     } catch (failure) { setError(failure.message || 'Report could not be generated.'); }
     finally { setBusy(false); }
   };
+  const columns = report?.columns?.length ? report.columns : Object.keys(report?.rows?.[0] || {}).map(key => ({ key, label: labelFor(key) }));
   return <main className="space-y-5 p-6">
     <div><h1 className="text-2xl font-bold">Management reports</h1><p className="text-sm text-gray-600">Issued invoice revenue and money actually collected are shown separately. Legacy test invoices are excluded.</p></div>
     <section className="rounded-xl border bg-white p-5">
@@ -43,6 +48,26 @@ export default function FinancialReportsPage() {
       <div className="mt-4 flex flex-wrap gap-2"><button type="button" disabled={busy} onClick={() => run('data')} className="btn-primary">{busy ? 'Preparing…' : 'Generate report'}</button><button type="button" disabled={busy} onClick={() => run('csv')} className="btn-secondary">Download CSV</button><button type="button" disabled={busy} onClick={() => run('pdf')} className="btn-secondary">Download PDF</button></div>
       {error && <p role="alert" className="mt-3 text-red-700">{error}</p>}
     </section>
-    {report && <section className="overflow-x-auto rounded-xl border bg-white p-5"><h2 className="text-lg font-semibold">{report.title}</h2><p className="text-sm text-gray-600">{report.startDate} to {report.endDate} · {report.timeZone}</p><div className="mt-3 flex flex-wrap gap-4">{Object.entries(report.totals).map(([key, value]) => <span key={key}><strong>{key.replaceAll(/([A-Z])/g, ' $1')}:</strong> {key.endsWith('Cents') ? `$${(value / 100).toFixed(2)}` : value}</span>)}</div>{report.rows.length ? <table className="mt-4 w-full text-left text-sm"><thead><tr>{Object.keys(report.rows[0]).map(key => <th className="border-b p-2" key={key}>{key}</th>)}</tr></thead><tbody>{report.rows.map((row, index) => <tr key={index}>{Object.values(row).map((value, cell) => <td className="border-b p-2" key={cell}>{String(value ?? '—')}</td>)}</tr>)}</tbody></table> : <p className="mt-4 text-gray-600">No authorized records match this report period.</p>}</section>}
+    {report && <section className="overflow-hidden rounded-xl border bg-white shadow-sm" aria-label={`${report.title} report`}>
+      <div className="border-b border-gray-200 p-5 sm:p-6">
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Financial report</p>
+        <h2 className="mt-1 text-xl font-semibold">{report.title}</h2>
+        <p className="mt-1 text-sm text-gray-600">{displayDate(report.startDate)} – {displayDate(report.endDate)} · {report.timeZone}</p>
+        {report.type === 'ar_aging' && <p className="mt-2 text-sm text-gray-600">Aging as of {displayDate(report.endDate)}. Future end dates project aging from payments currently recorded.</p>}
+      </div>
+      <dl className="grid gap-3 p-5 sm:grid-cols-3 sm:p-6">
+        {Object.entries(report.totals).map(([key, value]) => <div key={key} className="rounded-lg border border-primary-100 bg-primary-50 p-4">
+          <dt className="text-sm font-medium text-gray-600">{labelFor(key)}</dt>
+          <dd className="mt-1 text-xl font-semibold text-primary-800">{displayValue(key, value)}</dd>
+        </div>)}
+      </dl>
+      <div className="overflow-x-auto border-t border-gray-200">
+        {report.rows.length ? <table className="w-full min-w-[620px] text-left text-sm">
+          <caption className="sr-only">{report.title}, {report.rows.length} rows</caption>
+          <thead className="bg-primary-50 text-xs font-semibold uppercase tracking-wide text-gray-700"><tr>{columns.map(column => <th scope="col" className={`border-b border-gray-200 px-4 py-3 ${numericColumn(column.key) ? 'text-right' : ''}`} key={column.key}>{column.label}</th>)}</tr></thead>
+          <tbody>{report.rows.map((row, index) => <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>{columns.map(column => <td className={`border-b border-gray-100 px-4 py-3 align-top ${numericColumn(column.key) ? 'whitespace-nowrap text-right tabular-nums' : ''}`} key={column.key}>{displayValue(column.key, row[column.key])}</td>)}</tr>)}</tbody>
+        </table> : <p className="p-5 text-sm text-gray-600">No authorized records match this report period.</p>}
+      </div>
+    </section>}
   </main>;
 }

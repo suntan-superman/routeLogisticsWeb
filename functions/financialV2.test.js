@@ -4,7 +4,7 @@ const { PDFDocument } = require('pdf-lib');
 const { calculateTotals } = require('./shared/invoiceMath');
 const { publicSnapshot, balanceFor } = require('./shared/invoiceV2');
 const { buildInvoicePdf } = require('./invoicePdf');
-const { reportData, csvFor, pdfFor } = require('./financialReports');
+const { reportData, reportValue, csvFor, pdfFor } = require('./financialReports');
 const { dueOn, previousWorkday, scheduledDates } = require('./billingScheduler');
 const { cleanBillingSettings, DEFAULTS } = require('./billingSettings');
 
@@ -72,6 +72,10 @@ test('financial reports exclude legacy test invoices and separate invoice value 
   assert.equal(revenue.totals.collectedThroughEndCents, 3000);
   assert.equal(received.totals.collectedCents, 3000);
   assert.equal(ar.totals.outstandingCents, 7000);
+  assert.deepEqual(ar.columns.map(column => column.label), ['Invoice', 'Customer', 'Due date', 'Days late', 'Age', 'Balance']);
+  assert.equal(reportValue('outstandingCents', 2500), '$25.00');
+  assert.equal(reportValue('dueDate', '2026-12-06'), 'Dec 6, 2026');
+  assert.equal(reportValue('bucket', '1-30'), '1-30 days');
   assert.equal(reportData('revenue_invoicing', { ...args, filters: { technicianId: 'other' } }).rows.length, 0);
   assert.equal(csvFor({ rows: [{ customerName: '=HYPERLINK("https://example.invalid")' }] }).includes('"\'=HYPERLINK'), true);
   assert.equal((await pdfFor(revenue, 'Synthetic Services LLC')).subarray(0,5).toString(), '%PDF-');

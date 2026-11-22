@@ -4,15 +4,15 @@ import { retryWorkspaceRead, workspaceAccessError } from '../services/workspaceQ
 
 // Customer OTP and platform administration have independent authorities. They
 // must never inherit a staff/company query scope or share its cached records.
-export function usePrincipalQuery(namespace, principal, resource, loader, { enabled = true, intervalMs = 30_000, current = () => true } = {}) {
+export function usePrincipalQuery(namespace, principal, resource, loader, { enabled = true, intervalMs = 30_000, current = () => true, staleTime = 10_000, refetchOnFocus = true } = {}) {
   const client = useQueryClient(), load = useRef(loader), valid = useRef(current);
   load.current = loader; valid.current = current;
   const key = [namespace, principal || '', ...resource], keyId = JSON.stringify(key), readable = !!principal && enabled;
-  const query = useQuery({ queryKey: key, enabled: readable, staleTime: 10_000, gcTime: 60_000, retry: retryWorkspaceRead,
+  const query = useQuery({ queryKey: key, enabled: readable, staleTime, gcTime: 60_000, retry: retryWorkspaceRead,
     refetchInterval: state => readable && intervalMs && focusManager.isFocused() && onlineManager.isOnline() && !workspaceAccessError(state.state.error) ? intervalMs : false,
     refetchIntervalInBackground: false,
-    refetchOnWindowFocus: state => !workspaceAccessError(state.state.error) && 'always',
-    refetchOnReconnect: state => !workspaceAccessError(state.state.error) && 'always',
+    refetchOnWindowFocus: state => refetchOnFocus && !workspaceAccessError(state.state.error) && 'always',
+    refetchOnReconnect: state => refetchOnFocus && !workspaceAccessError(state.state.error) && 'always',
     queryFn: async ({ signal }) => {
       const check = valid.current;
       const assertCurrent = () => { if (signal.aborted || !check(principal)) throw Object.assign(new Error('Your sign-in changed. Reopen this page.'), { code: 'auth/user-changed' }); };
@@ -25,10 +25,10 @@ export function usePrincipalQuery(namespace, principal, resource, loader, { enab
   const queryRefetch = query.refetch;
   const refetch = useCallback(() => readable && valid.current(principal) ? queryRefetch({ cancelRefetch: false }) : Promise.resolve({ data: undefined }), [readable, principal, queryRefetch]);
   useEffect(() => {
-    const focus = () => { if (document.visibilityState !== 'hidden' && onlineManager.isOnline() && !workspaceAccessError(query.error)) void refetch(); };
+    const focus = () => { if (refetchOnFocus && document.visibilityState !== 'hidden' && onlineManager.isOnline() && !workspaceAccessError(query.error)) void refetch(); };
     window.addEventListener('focus', focus);
     return () => window.removeEventListener('focus', focus);
-  }, [refetch, query.error]);
+  }, [refetch, query.error, refetchOnFocus]);
   useEffect(() => () => { client.removeQueries({ queryKey: JSON.parse(keyId), exact: true }); }, [client, keyId]);
   const setData = useCallback(update => { if (readable && valid.current(principal)) { void client.cancelQueries({ queryKey: JSON.parse(keyId), exact: true }, { silent: true }); client.setQueryData(JSON.parse(keyId), update); } }, [client, keyId, principal, readable]);
   return { ...query, refetch, setData, data: readable && valid.current(principal) && !workspaceAccessError(query.error) ? query.data : undefined };

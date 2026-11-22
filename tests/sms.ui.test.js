@@ -44,7 +44,8 @@ test('SMS settings cannot activate live delivery and managers cannot edit owner 
 test('customer consent starts unselected and requires disclosure, purpose and evidence rather than phone presence',async()=>{
   data=status();await act(async()=>{tree=create(React.createElement(Consent,{customer:{id:'customer',phone:'+16615550101'}}));});
   const inputs=tree.root.findAllByType('input');assert.ok(inputs.filter(node=>node.props.type==='checkbox').every(node=>node.props.checked===false));
-  const record=()=>tree.root.findAll(node=>node.type==='button'&&node.children.includes('Record customer consent'))[0];assert.equal(record().props.disabled,true);
+  const record=()=>tree.root.findAll(node=>node.type==='button'&&node.children.includes('Record customer consent'))[0];assert.equal(record().props.disabled,false);
+  await act(async()=>record().props.onClick());assert.match(tree.root.findAllByProps({role:'alert'}).map(node=>node.children.join(' ')).join(' '),/Before recording consent:.*select at least one message purpose; enter an evidence reference; confirm the customer agreed/);assert.equal(calls.some(call=>call.params.action==='grant'),false);
   await act(async()=>inputs[0].props.onChange({target:{checked:true}}));
   await act(async()=>tree.root.findByProps({'aria-label':'SMS consent evidence reference'}).props.onChange({target:{value:'Signed form reference'}}));
   await act(async()=>tree.root.findAllByType('input').filter(node=>node.props.type==='checkbox').at(-1).props.onChange({target:{checked:true}}));assert.equal(record().props.disabled,false);

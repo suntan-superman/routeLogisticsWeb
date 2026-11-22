@@ -44,6 +44,12 @@ test('platform admin signs in with an email code and saves a subscription withou
   await expect(form.getByRole('status')).toHaveText('Subscription saved.');
   await expect(page.getByRole('region', { name: 'Recent changes' })).toContainText('Approved for an emulator-only pilot');
   expect(await scenario.readDoc(companyPath)).toEqual(original);
+  await page.getByRole('button', { name: 'Company usage', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Company usage', exact: true })).toBeVisible();
+  const usageTable = page.getByRole('table');
+  await expect(usageTable).toContainText(original.businessName || original.name);
+  await usageTable.getByRole('button', { name: original.businessName || original.name }).click();
+  await expect(page.getByRole('region', { name: 'Selected company usage' })).toContainText('Completed service visits by month');
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
 });

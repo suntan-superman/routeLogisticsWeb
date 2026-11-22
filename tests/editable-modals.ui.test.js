@@ -69,5 +69,5 @@ test('job duplicate submission and repeated Escape cannot bypass the outstanding
 
 test('an empty new job draft does not enable Schedule until the user enters a change',async()=>{
   await render(Job,{customers:[],onClose:()=>closed++,onCreated:value=>created.push(value)});assert.equal(button('Schedule Job').props.disabled,true);assert.equal(dirty,false);
-  await act(async()=>tree.root.findByProps({placeholder:'e.g. General Pest Control'}).props.onChange({target:{value:'Pest treatment'}}));assert.equal(button('Schedule Job').props.disabled,false);assert.equal(dirty,true);
+  await act(async()=>tree.root.findByProps({placeholder:'Gate code, pets, areas of concern…'}).props.onChange({target:{value:'Gate code provided'}}));assert.equal(button('Schedule Job').props.disabled,false);assert.equal(dirty,true);
 });

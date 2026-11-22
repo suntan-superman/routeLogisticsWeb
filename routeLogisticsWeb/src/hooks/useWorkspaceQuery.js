@@ -18,14 +18,14 @@ function useScope() {
   const scope = workspaceScope(context.currentUser, getClaims(), context.workspace || getWorkspace(), auth.app?.options?.projectId);
   return { ...scope, readable: !context.loading && scope.readable };
 }
-export function useWorkspaceQuery(resourceKey, loader, { enabled = true, intervalMs = WORKSPACE_POLL_MS, staleTime = 10_000 } = {}) {
+export function useWorkspaceQuery(resourceKey, loader, { enabled = true, intervalMs = WORKSPACE_POLL_MS, staleTime = 10_000, refetchOnFocus = true } = {}) {
   const scope = useScope(), client = useQueryClient(), load = useRef(loader); load.current = loader;
   const key = [...scope.key, ...resourceKey], keyId = JSON.stringify(key), readable = scope.readable;
   const query = useQuery({ queryKey: key, enabled: enabled && readable, staleTime,
-    meta: { workspace: true, scopeId: scope.id, resource: resourceKey[0] }, retry: retryWorkspaceRead,
+    meta: { workspace: true, scopeId: scope.id, resource: resourceKey[0], refetchOnFocus }, retry: retryWorkspaceRead,
     refetchInterval: state => enabled && readable && intervalMs && focusManager.isFocused() && onlineManager.isOnline() && !workspaceAccessError(state.state.error) ? intervalMs : false,
-    refetchIntervalInBackground: false, refetchOnWindowFocus: state => !workspaceAccessError(state.state.error) && 'always',
-    refetchOnReconnect: state => !workspaceAccessError(state.state.error) && 'always',
+    refetchIntervalInBackground: false, refetchOnWindowFocus: state => refetchOnFocus && !workspaceAccessError(state.state.error) && 'always',
+    refetchOnReconnect: state => refetchOnFocus && !workspaceAccessError(state.state.error) && 'always',
     queryFn: async ({ signal }) => {
       if (signal.aborted || runtimeScope().id !== scope.id || !runtimeScope().readable) throw changed();
       const result = workspaceResult(await load.current({ signal }));
@@ -67,7 +67,7 @@ export function WorkspaceQueryBoundary({ children }) {
     });
     const focus = () => {
       const active = current.current;
-      if (active.readable && document.visibilityState !== 'hidden' && onlineManager.isOnline()) void client.refetchQueries({ queryKey: active.key, type: 'active', predicate: query => !workspaceAccessError(query.state.error) }, { cancelRefetch: false });
+      if (active.readable && document.visibilityState !== 'hidden' && onlineManager.isOnline()) void client.refetchQueries({ queryKey: active.key, type: 'active', predicate: query => query.meta?.refetchOnFocus !== false && !workspaceAccessError(query.state.error) }, { cancelRefetch: false });
     };
     window.addEventListener('focus', focus);
     return () => { unsubscribe(); window.removeEventListener('focus', focus); };

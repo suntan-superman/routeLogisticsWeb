@@ -10,6 +10,8 @@ import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
 import { summarizeJobs, calendarDay } from '../utils/jobSummary';
 import { callEstimate } from '../services/estimateService';
 import { readWorkspace } from '../services/workspaceApi';
+import { callWorkspace } from '../services/workspaceApi';
+import { UsageMetrics } from '../components/CompanyUsage';
 import { 
   BuildingOfficeIcon, 
   UsersIcon, 
@@ -23,12 +25,14 @@ const formatMoney = (n) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n || 0);
 
 const HomePage = () => {
-  const { userProfile } = useAuth();
+  const { userProfile, role } = useAuth();
+  const canViewUsage=role==='owner'||role==='admin';
   const customersQuery=useWorkspaceQuery(['customer-stats'],()=>CustomerService.getCustomerStats());
   const jobsQuery=useWorkspaceQuery(['jobs',500],()=>JobManagementService.getJobs(500));
   const templatesQuery=useWorkspaceQuery(['template-stats'],()=>EstimateTemplateService.getTemplateStats());
   const estimateAttentionQuery=useWorkspaceQuery(['estimates','management-attention'],()=>callEstimate('list'),{enabled:can('estimates.manage')});
   const operationsAttentionQuery=useWorkspaceQuery(['management-attention'],()=>readWorkspace('managementAttention'),{enabled:can('dispatch.manage')});
+  const usageQuery=useWorkspaceQuery(['company-usage'],()=>callWorkspace('rlCompanyUsage',{action:'company'}),{enabled:canViewUsage,intervalMs:false,staleTime:300000,refetchOnFocus:false});
   const todayKey=new Date().toLocaleDateString('en-CA');
   const counts=useMemo(()=>{const summary=jobsQuery.data?summarizeJobs(jobsQuery.data.jobs,calendarDay(todayKey)||new Date()):null;return{
     customers:customersQuery.data?.stats?.totalCustomers??null,activeJobs:summary?.activeJobs??null,
@@ -83,6 +87,7 @@ const HomePage = () => {
         <button type="button" className="mt-2 underline" onClick={()=>Promise.all([customersQuery.refetch(),jobsQuery.refetch(),templatesQuery.refetch()])}>Retry dashboard refresh</button>
       </div>}
       {jobsQuery.data?.hasMore&&<p role="status" className="text-sm text-amber-900">Job summaries cover the first 500 loaded jobs.</p>}
+      {canViewUsage && <section className="space-y-3" aria-label="Company usage summary"><div className="flex items-center justify-between"><h2 className="text-lg font-semibold">Company usage</h2><button type="button" className="text-sm text-primary-700 underline" onClick={() => usageQuery.refetch()}>Refresh usage</button></div>{usageQuery.isPending && <p role="status">Calculating usage…</p>}{usageQuery.error && <p role="alert">{usageQuery.error.message}</p>}<UsageMetrics metrics={usageQuery.data?.metrics} compact /></section>}
       {/* Welcome Section */}
       <Motion.div
         initial={{ opacity: 0, y: 20 }}

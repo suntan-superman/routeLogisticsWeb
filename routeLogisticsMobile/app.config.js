@@ -34,7 +34,8 @@ export default ({ config }) => ({
     bundleIdentifier: "com.worksidesoftware.routelogisticsapp",
     appleTeamId: "AXCZ2G99P6",
     infoPlist: {
-      "ITSAppUsesNonExemptEncryption": false
+      "ITSAppUsesNonExemptEncryption": false,
+      "NSLocationAlwaysUsageDescription": "Share your work location during an active shift, including when the app is in the background. End your shift to stop tracking."
     }
   },
   android: {

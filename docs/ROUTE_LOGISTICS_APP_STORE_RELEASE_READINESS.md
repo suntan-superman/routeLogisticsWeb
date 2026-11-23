@@ -1,5 +1,7 @@
 # Route Logistics Mobile — App Store release readiness
 
+> This is the November 22 local predeployment review. The authorization, Functions, rules, policy, and web release was completed later that day. See [the production deployment report](./ROUTE_LOGISTICS_APP_STORE_PRODUCTION_DEPLOYMENT.md) for the current status and remaining App Store work.
+
 **Local review:** November 22, 2026. **Status:** implementation and local checks complete; production release and Apple submission await approval. This report describes the local `main` working tree, including the earlier uncommitted onboarding implementation. It does not certify deployed production behavior. No production accounts, customer records, or settings were changed.
 
 ## Executive summary

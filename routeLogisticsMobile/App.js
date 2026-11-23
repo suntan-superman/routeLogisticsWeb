@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Text, ActivityIndicator, View } from 'react-native';
+import { Text, ActivityIndicator, View, BackHandler } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -9,6 +9,7 @@ import { ThemeProvider, useTheme } from './theme/ThemeProvider';
 import { GlassScreen, GlassCard, GlassButton } from './components/Glass';
 import LoginScreen from './screens/LoginScreen';
 import SignUpScreen from './screens/SignUpScreen';
+import SignUpOptionsScreen from './screens/SignUpOptionsScreen';
 import EmailVerificationScreen from './screens/EmailVerificationScreen';
 import WorkspaceAccessScreen from './screens/WorkspaceAccessScreen';
 import WorkspaceScreen from './screens/WorkspaceScreen';
@@ -17,14 +18,20 @@ function AppContent() {
   const { ready, palette, isDark } = useTheme();
   const [screen, setScreen] = useState('login');
   useEffect(() => { if (isAuthenticated) setScreen('home'); }, [isAuthenticated, user?.id]);
-  const navigation = { navigate: setScreen, goBack: () => setScreen('home') };
+  const goBack = () => setScreen(previous => previous === 'signup' ? 'signup-options' : 'login');
+  useEffect(() => {
+    if (isAuthenticated || !['signup', 'signup-options'].includes(screen)) return undefined;
+    const listener = BackHandler.addEventListener('hardwareBackPress', () => { goBack(); return true; });
+    return () => listener.remove();
+  }, [isAuthenticated, screen]);
+  const navigation = { navigate: setScreen, goBack };
   let content;
   if (!ready || isLoading) content = <GlassScreen><View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 }}><ActivityIndicator color={palette.accent} /><Text style={{ color: palette.text }}>Loading your workspace…</Text></View></GlassScreen>;
   else if (sessionError && !isAuthenticated) content = <GlassScreen><View style={{ flex: 1, justifyContent: 'center', padding: 24 }}><GlassCard><Text style={{ color: palette.text, lineHeight: 23 }}>{sessionError}</Text><GlassButton title="Retry" onPress={refreshUser} /><GlassButton secondary title="Sign out" onPress={signOut} /></GlassCard></View></GlassScreen>;
   else if (isAuthenticated && !user.emailVerified) content = <EmailVerificationScreen />;
   else if (isAuthenticated && !permissions.canAccess) content = <WorkspaceAccessScreen />;
   else if (isAuthenticated) content = <WorkspaceScreen key={`${user.id}:${user.companyId || 'solo'}:${user.role || 'solo'}:${user.membershipId || ''}`} />;
-  else content = screen === 'signup' ? <SignUpScreen navigation={navigation} /> : <LoginScreen navigation={navigation} />;
+  else content = screen === 'signup' ? <SignUpScreen navigation={navigation} /> : screen === 'signup-options' ? <SignUpOptionsScreen navigation={navigation} /> : <LoginScreen navigation={navigation} />;
   return <><StatusBar style={isDark ? 'light' : 'dark'} />{content}</>;
 }
 export default function App() {

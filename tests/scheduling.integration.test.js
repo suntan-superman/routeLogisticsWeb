@@ -153,12 +153,10 @@ test('completed-job notes remain editable but reassignment still validates techn
   assert.equal((await f.api.handle(f.request({ memberId: f.tech2, date: '2030-01-03', time: '10:00' }))).available, true);
 });
 
-test('solo owners can check and reserve themselves but cannot select a foreign identity or retain solo access after joining', async () => {
+test('an unassociated account cannot check or reserve staff availability', async () => {
   const f = await fixture({ solo: true });
-  const roster = await f.api.handle(f.request({ action: 'roster', companyId: null })); assert.equal(roster.technicians[0].id, f.uid);
-  await f.book(`${f.id}-own-work`); await assert.rejects(f.book(`${f.id}-foreign`, { assignedTo: 'foreign' }), { code: 'failed-precondition' });
-  await db.doc(`users/${f.uid}`).update({ rlCompanyId: 'joined-company' });
-  await assert.rejects(db.runTransaction(tx => f.api.prepare(tx, f.scope, f.job({ time: '11:00' }))), { code: 'permission-denied' });
+  await assert.rejects(f.api.handle(f.request({ action: 'roster', companyId: null })), { code: 'permission-denied' });
+  await assert.rejects(f.api.handle(f.request({ memberId: f.uid, date: '2030-01-03', time: '09:00' })), { code: 'permission-denied' });
 });
 
 test('future recurring Thursday reservations block bookings before jobs are materialized', async () => {
@@ -170,7 +168,7 @@ test('future recurring Thursday reservations block bookings before jobs are mate
 });
 
 test('plan-edit previews exclude only a tenant-authorized own plan and reject foreign or unrelated exclusions', async () => {
-  for (const solo of [false, true]) {
+  for (const solo of [false]) {
     const f = await fixture({ solo }), planId = await f.plan('editing'), memberId = solo ? f.uid : f.tech;
     const data = { memberId, date: '2030-01-10', time: '09:00', estimatedDuration: 1 };
     assert.equal((await f.api.handle(f.request(data))).available, false);

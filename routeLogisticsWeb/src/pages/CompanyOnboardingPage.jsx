@@ -12,6 +12,7 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { previewCustomers, csvCell } from '../utils/customerCsv';
 import { mayReviewCompanySetup } from '../utils/companySetupAccess';
 import { formatPhone, displayPhone } from '../utils/format';
+import { companyAuthorization, clearCompanyAuthorization } from '../utils/companyRegistrationIntent';
 
 const days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
 const usStates = [
@@ -44,6 +45,8 @@ export default function CompanyOnboardingPage({ mode = 'new' }) {
   const [newService, setNewService] = useState(''), [newInvite, setNewInvite] = useState(''), [inviteRole, setInviteRole] = useState('technician');
   const [csv, setCsv] = useState(null), [activeCompany, setActiveCompany] = useState(''), [team, setTeam] = useState([]), [accessDenied, setAccessDenied] = useState(false);
   const [reviewCompanyId, setReviewCompanyId] = useState('');
+  const [authorizationCode, setAuthorizationCode] = useState(() => companyAuthorization());
+  const [registrationPolicy, setRegistrationPolicy] = useState({ mode: 'closed', configured: false });
   const [savedSections, setSavedSections] = useState(null);
   const timer = useRef(null), saveQueue = useRef(Promise.resolve()), state = useRef({ draft, revision, ready });
   useEffect(() => { state.current = { draft, revision, ready }; }, [draft, revision, ready]);
@@ -67,6 +70,10 @@ export default function CompanyOnboardingPage({ mode = 'new' }) {
     const pending = saveQueue.current.then(save, save);
     saveQueue.current = pending.then(() => undefined, () => undefined);
     return pending;
+  }, [reviewMode]);
+
+  useEffect(() => {
+    if (!reviewMode) callable('rlCompanyRegistration')({ action: 'status' }).then(({ data }) => setRegistrationPolicy(data)).catch(() => setRegistrationPolicy({ mode: 'closed', configured: false }));
   }, [reviewMode]);
 
   useEffect(() => {
@@ -137,7 +144,8 @@ export default function CompanyOnboardingPage({ mode = 'new' }) {
     setBusy(true); setMessage('Activating your company…');
     try {
       clearTimeout(timer.current); if (!(await persist({ ...draft, currentStep: 7 }))) throw new Error('Save the latest setup before activation.');
-      const { data } = await callable('rlActivateCompanyOnboarding')();
+      const { data } = await callable('rlActivateCompanyOnboarding')({ authorizationCode: authorizationCode.trim() });
+      clearCompanyAuthorization();
       setActiveCompany(data.companyId); await refreshSession();
       const issues = [], area = draft.serviceArea;
       const invitationSummary = `${data.invitationCount || 0} team invitation(s) created${data.invitationEmailStatus === 'queued' ? ' and queued for email' : ''}.`;
@@ -176,7 +184,7 @@ export default function CompanyOnboardingPage({ mode = 'new' }) {
       {step === 4 && <ServicesStep reviewMode={reviewMode} draft={draft} newService={newService} setNewService={setNewService} addService={addService} change={change} busy={busy} dirty={sectionDirty('services')} save={() => saveReviewSection('services')} />}
       {step === 5 && <HoursStep reviewMode={reviewMode} draft={draft} change={change} busy={busy} dirty={sectionDirty('hours')} save={() => saveReviewSection('hours')} company={reviewCompany} />}
       {step === 6 && <ImportStep reviewMode={reviewMode} csv={csv} readCsv={readCsv} downloadTemplate={downloadTemplate} completed={() => { setCsv(null); setMessage('Customer import completed. Existing customer records were preserved.'); }} />}
-      {step === 7 && <section className="space-y-3 rounded-lg bg-white p-5 shadow"><h2 className="text-xl font-semibold">{reviewMode ? 'Review company setup' : 'Review & activate'}</h2><p><strong>{draft.profile.businessName || 'Company name missing'}</strong>{!reviewMode && ` · owner ${draft.profile.name || 'name missing'}`}</p><p>Services: {draft.services.join(', ') || 'No services configured'}</p><p>{reviewMode ? `${team.length} team record(s)` : `Team invitations: ${draft.invites.length}`}; time zone: {draft.timeZone}; customer CSV: {csv ? `${csv.customers.length} validated rows` : 'not selected'}</p>{reviewMode ? <><p className="text-sm text-gray-600">Review mode never activates a new company. Unchanged sections are not written, and unrelated company fields remain untouched.</p>{reviewDirty && <p role="alert" className="rounded bg-amber-50 p-3 text-amber-900">Save the changed company information, services, or business hours before leaving.</p>}<button type="button" className="btn-primary disabled:opacity-50" disabled={reviewDirty} onClick={() => navigate('/company-setup')}>Finish review</button></> : <><p className="text-sm text-gray-600">Activating creates one company for this verified owner. Retrying activation returns the same company instead of creating a duplicate.</p><button disabled={busy || !currentUser?.emailVerified} className="btn-primary disabled:opacity-50" onClick={activate}>{busy ? 'Activating…' : 'Activate company'}</button></>}</section>}
+      {step === 7 && <section className="space-y-3 rounded-lg bg-white p-5 shadow"><h2 className="text-xl font-semibold">{reviewMode ? 'Review company setup' : 'Review & activate'}</h2><p><strong>{draft.profile.businessName || 'Company name missing'}</strong>{!reviewMode && ` · owner ${draft.profile.name || 'name missing'}`}</p><p>Services: {draft.services.join(', ') || 'No services configured'}</p><p>{reviewMode ? `${team.length} team record(s)` : `Team invitations: ${draft.invites.length}`}; time zone: {draft.timeZone}; customer CSV: {csv ? `${csv.customers.length} validated rows` : 'not selected'}</p>{reviewMode ? <><p className="text-sm text-gray-600">Review mode never activates a new company. Unchanged sections are not written, and unrelated company fields remain untouched.</p>{reviewDirty && <p role="alert" className="rounded bg-amber-50 p-3 text-amber-900">Save the changed company information, services, or business hours before leaving.</p>}<button type="button" className="btn-primary disabled:opacity-50" disabled={reviewDirty} onClick={() => navigate('/company-setup')}>Finish review</button></> : <><p className="text-sm text-gray-600">Activating creates one company for this verified owner. Retrying activation returns the same company instead of creating a duplicate.</p><p>Registration policy: {registrationPolicy.mode.replace('_', ' ')}.</p>{registrationPolicy.mode === 'approval_required' && <label className="block">Workside authorization code<input className="input-field mt-1 block w-full" autoComplete="off" value={authorizationCode} onChange={e => setAuthorizationCode(e.target.value)} placeholder="Paste the code from your private authorization link" /></label>}{registrationPolicy.mode === 'closed' && <p role="alert">New company registration is currently unavailable. Contact Workside Software for access.</p>}<button disabled={busy || !currentUser?.emailVerified || registrationPolicy.mode === 'closed' || registrationPolicy.mode === 'approval_required' && !authorizationCode.trim()} className="btn-primary disabled:opacity-50" onClick={activate}>{busy ? 'Activating…' : 'Activate company'}</button></>}</section>}
       <div className="flex justify-between"><button className="btn-secondary" disabled={step === 1 || busy} onClick={previous}>Back</button><button className="btn-primary" disabled={step === 7 || busy || !ready} onClick={nextStep}>{reviewMode ? 'Next section' : 'Save & continue'}</button></div></>}
     {activeCompany && <section className="space-y-4 rounded-lg bg-white p-5 shadow"><h2 className="text-xl font-semibold">Workspace activated</h2><p>{message}</p>{csv && <CustomerImport initialPreview={csv} openInitially onComplete={() => { setCsv(null); navigate('/', { replace: true }); }}/>}<button className="btn-primary" onClick={() => navigate('/', { replace: true })}>Open Route Logistics</button></section>}
     <p role="status" className="text-sm text-gray-600">{message}</p>

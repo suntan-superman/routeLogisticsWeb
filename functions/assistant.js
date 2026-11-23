@@ -9,7 +9,6 @@ const {
   rateLimit,
   validEmail,
 } = require('./security');
-const { workspaceStatus } = require('./workspace');
 const capabilityPolicy = require('./shared/capabilities.json');
 
 const PRODUCT = 'route-logistics';
@@ -221,30 +220,14 @@ async function resolvePrincipal(db, request) {
   const { uid, token } = requireAuth(request, true);
   await requireAccountActive(db, uid);
   const tokenCompanyId = safeText(token.companyId, 200);
-  if (tokenCompanyId) {
-    const staff = await requireStaff(db, request, tokenCompanyId);
-    const role = staff.role;
-    return {
-      uid,
-      role,
-      companyId: tokenCompanyId,
-      workspaceReference: tokenCompanyId,
-      capabilities: capabilitiesForRole(role),
-      verifiedEmail: normalizeEmail(token.email),
-    };
-  }
-  const workspace = await workspaceStatus(db, {
-    uid,
-    email: normalizeEmail(token.email),
-    emailVerified: token.email_verified === true,
-  }, null);
-  if (workspace.status !== 'solo') throw new HttpsError('permission-denied', 'An active Route Logistics workspace is required.');
+  const staff = await requireStaff(db, request, tokenCompanyId);
+  const role = staff.role;
   return {
     uid,
-    role: 'owner',
-    companyId: null,
-    workspaceReference: `solo_${createHash('sha256').update(uid).digest('hex').slice(0, 20)}`,
-    capabilities: capabilitiesForRole('owner'),
+    role,
+    companyId: tokenCompanyId,
+    workspaceReference: tokenCompanyId,
+    capabilities: capabilitiesForRole(role),
     verifiedEmail: normalizeEmail(token.email),
   };
 }

@@ -169,9 +169,11 @@ test('forged claims cannot be used: unauthenticated and claimless users get noth
   await assertFails(getDoc(doc(as('stranger'), 'jobs/j1')));
 });
 
-test('solo users keep access to their own legacy docs', async () => {
-  await assertSucceeds(getDoc(doc(as('solo1'), 'jobs/jSolo')));
-  await assertSucceeds(updateDoc(doc(as('solo1'), 'jobs/jSolo'), { title: 'x' }));
+test('unassociated personal accounts cannot access even old solo work documents', async () => {
+  await assertFails(getDoc(doc(as('solo1'), 'jobs/jSolo')));
+  await assertFails(updateDoc(doc(as('solo1'), 'jobs/jSolo'), { title: 'x' }));
+  await assertFails(setDoc(doc(as('solo1'), 'jobs/new-personal-job'), { userId: 'solo1', status: 'scheduled' }));
+  await assertFails(setDoc(doc(as('solo1'), 'customers/new-personal-customer'), { userId: 'solo1', name: 'No company' }));
 });
 
 // ---- creation integrity ----
@@ -319,7 +321,7 @@ test('all client roles including owner, admin and solo owner cannot bypass invoi
   const clients = [owner(), admin, manager(), tech(), as('solo1'), as('portal', { portal: true, portalEmail: 'synthetic@example.test' }), env.unauthenticatedContext().firestore()];
   await assertSucceeds(getDoc(doc(admin, 'invoices/server-draft')));
   await assertSucceeds(getDocs(query(collection(owner(), 'invoices'), where('companyId', '==', 'c1'))));
-  await assertSucceeds(getDoc(doc(as('solo1'), 'invoices/legacy-solo')));
+  await assertFails(getDoc(doc(as('solo1'), 'invoices/legacy-solo')));
   for (let index = 0; index < clients.length; index++) {
     const client = clients[index];
     await assertFails(setDoc(doc(client, `invoices/forged-${index}`), { userId: 'owner1', companyId: 'c1', customerId: 'cu1', jobId: 'jDone', status: 'draft', total: 1, revision: 1 }));

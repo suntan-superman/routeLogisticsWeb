@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { returnPath } from '../utils/returnPath';
 import { motion as Motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import ThemeControl from '../components/ThemeControl';
 import { isInvitationReturn } from '../utils/companySetupAccess';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../services/firebase';
 
 const SignupPage = () => {
   const { signup, currentUser } = useAuth();
@@ -14,6 +16,11 @@ const SignupPage = () => {
   const navigate = useNavigate();
   const [form, setForm] = useState({ name: '', businessName: '', email: '', password: '' });
   const [isLoading, setIsLoading] = useState(false);
+  const [registrationPolicy, setRegistrationPolicy] = useState({ mode: 'closed' });
+  useEffect(() => {
+    if (invitation) return;
+    httpsCallable(functions, 'rlCompanyRegistration')({ action: 'status' }).then(({ data }) => setRegistrationPolicy(data)).catch(() => setRegistrationPolicy({ mode: 'closed' }));
+  }, [invitation]);
 
   if (currentUser) return <Navigate to={next || '/onboarding'} replace />;
 
@@ -50,7 +57,8 @@ const SignupPage = () => {
             <span className="text-white font-bold text-xl">RL</span>
           </Link>
           <h2 className="mt-6 text-center text-3xl font-bold text-gray-900">Create your account</h2>
-          <p className="mt-2 text-center text-sm text-gray-600">{invitation ? 'Create your personal login to accept your company invitation. Your company and role are already selected.' : 'Create your owner login, verify your email, then continue the existing company setup wizard.'}</p>
+          <p className="mt-2 text-center text-sm text-gray-600">{invitation ? 'Create your personal login to accept your company invitation. Your company and role are already selected.' : 'Create your personal login and verify your email. Company access requires an invitation or an approved company authorization.'}</p>
+          {!invitation && <p className="mt-3 text-center text-sm text-gray-600">New company registration: <strong>{registrationPolicy.mode.replace('_', ' ')}</strong>. {registrationPolicy.mode === 'approval_required' ? 'Workside Software issues private single-use authorization links.' : registrationPolicy.mode === 'closed' ? 'You may create a personal login, but new company creation is unavailable.' : 'Verified accounts may set up a new company.'}</p>}
         </div>
 
         <form className="mt-8 space-y-4" onSubmit={handleSubmit}>
@@ -69,12 +77,12 @@ const SignupPage = () => {
             <label htmlFor="businessName" className="block text-sm font-medium text-gray-700">Company name</label>
             <input
               id="businessName"
-              required={!invitation}
+              required={false}
               disabled={invitation}
               value={form.businessName}
               onChange={set('businessName')}
               className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-              placeholder="Acme Pest Control"
+              placeholder="Optional; complete company setup after verification"
             />
           </div>}
           <div>

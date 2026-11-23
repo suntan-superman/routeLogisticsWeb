@@ -9,7 +9,7 @@ export default function PrivacyPage() {
     <p>Updated November 19, 2026. Route Logistics is provided by Workside Software LLC.</p>
     <p>Route Logistics stores account details and the service information entered by your provider, including customer contact details, appointments, job notes, service records, photos, and invoices. Your provider manages the records for its business.</p>
     <h2 className="text-xl font-semibold">How information is used</h2>
-    <p>Information supports scheduling, job documentation, team access, invoicing, and customer portal access. Job photos are shared with the provider’s authorized team. Customer portal access is limited to records associated with the email address you verify.</p>
+    <p>Information supports scheduling, job documentation, team access, invoicing, and customer portal access. Job photos are shared with the provider’s authorized team. Customer portal access requires a provider invitation linked to your verified email and is limited to that provider’s authorized records.</p>
     <h2 className="text-xl font-semibold">Service providers and device storage</h2>
     <p>The app uses Google Firebase for authentication, database storage, photo storage, and notifications. Transactional emails are sent through the configured email provider. Error reporting and performance monitoring may be enabled by the app operator. The web app caches service data on the device for offline use; use a trusted device and sign out when you finish.</p>
     <h2 className="text-xl font-semibold">Your choices</h2>

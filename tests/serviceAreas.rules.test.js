@@ -81,9 +81,9 @@ test('customer physical addresses and Google proofs are server-owned even when c
     await assertFails(setDoc(doc(db, `customers/geo-rules-addressless-${companyId}`), { userId: ownerUid, companyId, name: 'Contact only', address: '' })); // Duplicate-aware creation is callable-only, including addressless prospects.
   }
 });
-test('solo customers and jobs cannot bypass mandatory address verification while historical non-address edits remain valid', async () => {
+test('unassociated users cannot edit legacy personal records or bypass address verification', async () => {
   const db = env.authenticatedContext('geo-rules-solo', { email_verified: true }).firestore();
-  await assertSucceeds(updateDoc(doc(db, 'customers/geo-rules-solo-customer'), { phone: '555-0101' }));
+  await assertFails(updateDoc(doc(db, 'customers/geo-rules-solo-customer'), { phone: '555-0101' }));
   await assertFails(updateDoc(doc(db, 'customers/geo-rules-solo-customer'), { address: '200 Unverified Solo Street' }));
   for (const name of ['customers', 'jobs', 'servicePlans']) await assertFails(setDoc(doc(db, `${name}/geo-rules-solo-forged-${name}`), { userId: 'geo-rules-solo', name: 'Unverified', status: 'scheduled', address: '200 Unverified Solo Street' }));
 });

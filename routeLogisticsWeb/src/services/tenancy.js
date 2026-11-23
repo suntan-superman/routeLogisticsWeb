@@ -5,8 +5,8 @@ import policy from '../../../functions/shared/capabilities.json';
 let claims = null, workspace = null, sessionUid = null;
 export const getClaims = () => auth.currentUser?.uid === sessionUid ? claims : null;
 export const getWorkspace = () => auth.currentUser?.uid === sessionUid ? workspace : null;
-export const can = capability => auth.currentUser?.emailVerified === true && ['company', 'solo'].includes(getWorkspace()?.status)
-  && (policy.roles[getClaims()?.role || (getWorkspace()?.status === 'solo' ? 'owner' : '')] || []).includes(capability);
+export const can = capability => auth.currentUser?.emailVerified === true && getWorkspace()?.status === 'company'
+  && (policy.roles[getClaims()?.role || ''] || []).includes(capability);
 export const canManage = () => can('jobs.schedule');
 export const isTechnician = () => getClaims()?.role === 'technician';
 export async function loadClaims(user) {
@@ -35,7 +35,7 @@ export async function syncTenancy() {
 export function getScope() {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('Company management requires an internet connection. Saved field-work updates remain available in My Work.');
   const uid = auth.currentUser?.uid;
-  if (!uid || !['company', 'solo'].includes(getWorkspace()?.status) || !auth.currentUser.emailVerified) throw new Error('Refresh your workspace or accept your invitation before continuing.');
+  if (!uid || getWorkspace()?.status !== 'company' || !auth.currentUser.emailVerified) throw new Error('Refresh your workspace or accept your invitation before continuing.');
   return claims ? { field: 'companyId', value: claims.companyId } : { field: 'userId', value: uid };
 }
 export const scopeWhere = () => { const { field, value } = getScope(); return where(field, '==', value); };

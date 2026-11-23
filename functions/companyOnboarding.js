@@ -3,6 +3,7 @@ const { randomUUID } = require('node:crypto');
 const { requireAuth, requireStaff, normalizeEmail, rateLimit } = require('./security');
 const { createOnboardingInvitation } = require('./invitations');
 const { DEFAULTS: DEFAULT_BILLING, cleanBillingSettings } = require('./billingSettings');
+const { checkCompanyCreation, recordCompanyCreation } = require('./companyRegistration');
 
 const clean = (value, max = 500) => String(value || '').trim().slice(0, max);
 const validZone = value => {
@@ -134,6 +135,7 @@ function companyOnboardingHandlers(db, { appUrl = () => 'https://route-logistics
         const draft = draftSnap.exists ? cleanDraft(draftSnap.get('draft')) : null;
         if (!draft || !draft.profile.name || !draft.profile.businessName || !draft.services.length) throw new HttpsError('failed-precondition', 'Complete your company profile and add at least one service before activation.');
         if (draft.invites.some(row => row.email === normalizeEmail(request.auth.token.email || ''))) throw new HttpsError('invalid-argument', 'The company owner is already a member and cannot be invited again.');
+        const checked = await checkCompanyCreation(tx, db, request, request.data?.authorizationCode);
         const now = new Date().toISOString();
         tx.create(companyRef, { ownerId: uid, ownerName: draft.profile.name, name: draft.profile.businessName, businessName: draft.profile.businessName, phone: draft.profile.phone, address: draft.profile.address, city: draft.profile.city, state: draft.profile.state, zipCode: draft.profile.zipCode, description: draft.profile.description, services: draft.services, serviceCategories: draft.services, businessHours: draft.businessHours, timeZone: draft.timeZone, onboardingServiceArea: draft.serviceArea,
           billingSettings: { ...draft.billingSettings, reportRecipientOwnerEmail: normalizeEmail(request.auth.token.email || ''), reportRecipientOwnerUid: uid,
@@ -141,6 +143,7 @@ function companyOnboardingHandlers(db, { appUrl = () => 'https://route-logistics
           isActive: true, status: 'active', createdAt: now, updatedAt: now });
         tx.set(profileRef, { companyId: companyRef.id, rlCompanyId: companyRef.id, businessName: draft.profile.businessName, updatedAt: now }, { merge: true });
         tx.set(ref, { ownerId: uid, revision: (draftSnap.get('revision') || 0) + 1, draft, activatedCompanyId: companyRef.id, activatedAt: now, updatedAt: now }, { merge: true });
+        recordCompanyCreation(tx, db, checked, companyRef.id);
         for (const invite of draft.invites) createOnboardingInvitation(tx, db, { companyId: companyRef.id, email: invite.email, role: invite.role, invitedBy: uid, companyName: draft.profile.businessName, appUrl: appUrl(), queueEmail: emailEnabled() });
         return { companyId: companyRef.id, alreadyActivated: false, invitationCount: draft.invites.length, invitationEmailStatus: emailEnabled() ? 'queued' : 'disabled' };
       });

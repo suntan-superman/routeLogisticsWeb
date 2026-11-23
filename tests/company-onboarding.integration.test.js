@@ -7,7 +7,7 @@ const { companyOnboardingHandlers } = require('../functions/companyOnboarding');
 const { invitationHandlers } = require('../functions/invitations');
 const { customerHandlers } = require('../functions/customers');
 let app, db, sequence = 0;
-before(() => { if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('Firestore emulator required; production data must never be used.'); app = initializeApp({ projectId: 'demo-routelogistics' }, 'onboarding-tests'); db = getFirestore(app); });
+before(async () => { if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('Firestore emulator required; production data must never be used.'); app = initializeApp({ projectId: 'demo-routelogistics' }, 'onboarding-tests'); db = getFirestore(app); await db.doc('rlCompanyRegistration/policy').set({ mode: 'open', revision: 1 }); });
 after(() => deleteApp(app));
 
 test('verified owner drafts resume, isolate by uid, and activation retries never duplicate the company', async () => {

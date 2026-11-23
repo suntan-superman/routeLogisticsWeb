@@ -57,6 +57,11 @@ test('current member, verified identity and company isolation are rechecked on e
  await db.doc(`teamMembers/${f.memberId}`).update({status:'removed'});await assert.rejects(f.handlers.visit(f.request(data)),{code:'permission-denied'});
  assert.equal((await db.collection('rlJobVisits').where('companyId','==',f.companyId).get()).size,0);
 });
+test('a verified personal account without a company cannot submit offline job operations',async()=>{
+ const f=await fixture(),apply=offlineHandler(db),data={jobId:f.jobId,operationId:`${f.companyId}-personal-operation`,expectedVersion:f.version,patch:{notes:'Should not reach the company job'}};
+ await assert.rejects(apply(f.request(data,{uid:`${f.companyId}-personal`,token:{email_verified:true}})),{code:'permission-denied'});
+ assert.equal((await f.job.get()).get('workNotes'),undefined);
+});
 test('the visit transaction rejects membership revocation occurring after the initial authorization read',async()=>{
  const f=await fixture();let transactions=0;
  const proxy=new Proxy(db,{get(target,property){if(property==='runTransaction')return async(...args)=>{transactions++;if(transactions===2)await db.doc(`teamMembers/${f.memberId}`).update({status:'removed'});return target.runTransaction(...args);};const value=target[property];return typeof value==='function'?value.bind(target):value;}});

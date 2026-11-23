@@ -56,16 +56,19 @@ test('dates, duration, technician identity, plan links and geographic proof cann
   }
 });
 
-test('terminal jobs cannot be reactivated directly while owner and independent notes/completion still work', async () => {
+test('terminal jobs cannot be reactivated directly; company owner retains supported notes and completion', async () => {
   for (const role of ['owner', 'admin', 'manager', 'solo']) for (const terminal of ['completed', 'cancelled']) for (const status of ['scheduled', 'en-route', 'in-progress']) {
     await assertFails(updateDoc(ref(client(role), history('jobs', role === 'solo' ? 'solo' : 'owner', terminal)), { status }));
   }
-  for (const role of ['owner', 'solo']) {
+  for (const role of ['owner']) {
     const target = ref(client(role), history('jobs', role));
     await assertSucceeds(updateDoc(target, { notes: 'An ordinary authorized note' }));
     await assertSucceeds(updateDoc(target, { status: 'completed', completedAt: '2035-01-04T18:00:00.000Z' }));
     await assertSucceeds(updateDoc(target, { notes: 'Completed visit history remains editable' }));
   }
+  const personal = ref(client('solo'), history('jobs', 'solo'));
+  await assertFails(updateDoc(personal, { notes: 'Blocked personal note' }));
+  await assertFails(updateDoc(personal, { status: 'completed', completedAt: '2035-01-04T18:00:00.000Z' }));
 });
 
 test('service-plan creation and updates are server owned for company and independent clients', async () => {

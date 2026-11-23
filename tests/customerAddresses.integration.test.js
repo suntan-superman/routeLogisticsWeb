@@ -60,13 +60,18 @@ async function fixture({ solo = false, geocode } = {}) {
   const update = (customer, extra = {}) => ({ action: 'update', id: customerId, expectedVersion: VERSION, customer, ...extra });
   return { id, uid, customerId, original, areas, api, work, request, update, calls: () => calls, onGeocode: callback => { hook = callback; } };
 }
-test('new customer addresses are verified in company and solo workspaces; client coordinates and financial fields cannot be asserted', async () => {
-  for (const solo of [false, true]) {
+test('new company customer addresses are verified; client coordinates and financial fields cannot be asserted', async () => {
+  for (const solo of [false]) {
     const f = await fixture({ solo }), result = await f.api.handle(f.request({ action: 'create', customer: { name: 'New synthetic customer', address: VALID, latitude: 0, longitude: 0, totalSpent: 999, addressValidation: { validated: true } } }));
     const saved = (await db.doc(`customers/${result.id}`).get()).data();
     assert.equal(f.calls(), 1); assert.equal(saved.address, VALID); assert.equal(saved.latitude, 35); assert.equal(saved.totalSpent, 0); assert.equal(saved.addressValidation.source, 'google-address-validation'); assert.equal(saved.userId, f.uid);
     assert.equal(result.customer.updatedAt, result.updatedAt);
   }
+});
+test('an unassociated personal account cannot create a customer or invoke address validation', async () => {
+  const f = await fixture({ solo: true });
+  await assert.rejects(f.api.handle(f.request({ action: 'create', customer: { name: 'Blocked personal customer', address: VALID } })), { code: 'permission-denied' });
+  assert.equal(f.calls(), 0);
 });
 test('contact-only creates and non-address updates preserve historical unverified addresses without a lookup', async () => {
   const f = await fixture();
@@ -139,9 +144,9 @@ test('internal job scheduling returns a nonblocking Google suggestion while pres
   assert.deepEqual((await db.doc(`customers/${f.customerId}`).get()).data(), f.original);
 });
 
-test('one job Save accepts a Google-confirmed property with inferred ZIP details without changing customer or historical records', async () => {
+test('one company job Save accepts a Google-confirmed property with inferred ZIP details without changing customer or historical records', async () => {
   const entered = '200 Synthetic Service St, Example, CA', formatted = `${VALID}-1234, USA`;
-  for (const solo of [false, true]) {
+  for (const solo of [false]) {
     let requests = 0;
     const geocode = createGoogleGeocoder({ getAccessToken: async () => 'synthetic-only', fetchImpl: async (url, options) => {
       requests++; assert.equal(url, 'https://addressvalidation.googleapis.com/v1:validateAddress');

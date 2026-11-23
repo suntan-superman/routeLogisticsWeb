@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ScrollView, KeyboardAvoidingView, Platform, StyleSheet, Linking } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
@@ -64,10 +64,11 @@ export default function LoginScreen({ navigation }) {
         {!!error && <Text accessibilityRole="alert" style={[styles.hint, { color: palette.danger }]}>{error}</Text>}
         {!!notice && <Text accessibilityLiveRegion="polite" style={[styles.hint, { color: palette.accent }]}>{notice}</Text>}
         <GlassButton title={mode === 'reset' ? 'Send reset link' : mode === 'code' && !challenge ? 'Email a sign-in code' : 'Sign in'} busy={busy} onPress={() => run()} icon="arrow-forward" />
+        {mode !== 'reset' && <Pressable accessibilityRole="link" accessibilityLabel="Sign up" disabled={busy} onPress={() => navigation.navigate('signup-options')} style={{ alignItems: 'center', padding: 5 }}><Text style={{ color: palette.secondary }}>Don't have an account? <Text style={{ color: palette.accent, fontWeight: '700' }}>Sign up</Text></Text></Pressable>}
         {mode === 'code' && challenge && <View style={{ gap: 10 }}><GlassButton secondary title={remaining ? `Resend in ${remaining}s` : 'Resend code'} disabled={busy || remaining > 0} onPress={() => run(true)} /><GlassButton secondary title="Use a different email" disabled={busy} onPress={() => { setChallenge(null); setCode(''); setNotice(''); }} /></View>}
         <Pressable disabled={busy} onPress={() => switchMode(mode === 'reset' ? 'password' : 'reset')} style={{ alignItems: 'center', padding: 5 }}><Text style={{ color: palette.accent, fontWeight: '600' }}>{mode === 'reset' ? 'Back to sign in' : 'Forgot password?'}</Text></Pressable>
       </GlassCard>
-      <Pressable disabled={busy} onPress={() => navigation.navigate('signup')} style={{ paddingVertical: 22 }}><Text style={{ color: palette.secondary, textAlign: 'center' }}>New to Route Logistics? <Text style={{ color: palette.accent, fontWeight: '700' }}>Create an account</Text></Text></Pressable>
+      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 20, flexWrap: 'wrap' }}><Pressable onPress={() => Linking.openURL('https://route-logistics.com/privacy')}><Text style={{ color: palette.accent }}>Privacy</Text></Pressable><Pressable onPress={() => Linking.openURL('https://route-logistics.com/terms')}><Text style={{ color: palette.accent }}>Terms</Text></Pressable><Pressable onPress={() => Linking.openURL('https://route-logistics.com/support')}><Text style={{ color: palette.accent }}>Support</Text></Pressable></View>
     </ScrollView>
   </KeyboardAvoidingView></GlassScreen>;
 }

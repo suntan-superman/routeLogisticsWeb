@@ -2,7 +2,7 @@ rules_version = '2';
 
 // Single source of truth for Firestore security. Deploy with `firebase deploy --only firestore`.
 // Tenancy model:
-//  - Solo/legacy docs: owned by `userId` and have no `companyId`.
+//  - Solo/legacy docs remain stored but are not available to new personal accounts.
 //  - Company docs: carry `companyId`; access comes from the `companyId` and `role`
 //    custom claims, which are minted only by the `syncClaims` Cloud Function.
 // Clients can never write `role`, `companyId` claims, or change `companyId` on data docs.
@@ -42,9 +42,7 @@ service cloud.firestore {
 
     // Data doc helpers (d = resource.data or request.resource.data)
     function isSolo(d) {
-      return d.get('companyId', null) == null && d.get('userId', null) == uid()
-        && claimCompany() == null
-        && get(/databases/$(database)/documents/users/$(uid())).data.get('rlCompanyId', null) == null;
+      return false;
     }
     function inCompany(d) {
       return signedIn() && claimCompany() != null && d.get('companyId', null) == claimCompany() && activeCompanyAccess();
@@ -72,10 +70,8 @@ service cloud.firestore {
     function validCreate(allowTechnician) {
       return signedIn()
         && request.resource.data.get('userId', null) == uid()
-        && ((request.resource.data.get('companyId', null) == null && claimCompany() == null
-              && get(/databases/$(database)/documents/users/$(uid())).data.get('rlCompanyId', null) == null)
-            || (inCompany(request.resource.data)
-                && (isManager() || (allowTechnician && isStaff()))));
+        && inCompany(request.resource.data)
+        && (isManager() || (allowTechnician && isStaff()));
     }
 
     // Geographic decisions and their proof are server-owned. Historical records

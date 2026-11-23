@@ -1,7 +1,7 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { createHash } = require('node:crypto');
 const { FieldPath } = require('firebase-admin/firestore');
-const { documentId, rateLimit } = require('./security');
+const { documentId, rateLimit, requireAuth } = require('./security');
 const { accessScope, requireCapability, hasCapability, checkJob } = require('./access');
 const { version } = require('./offline');
 const { serviceAreaWorkflow, servicePropertySite, propertyAddress } = require('./serviceAreaWorkflows');
@@ -12,6 +12,7 @@ const { appointmentPatch, isEstimateVisit } = require('./shared/appointments');
 const { propertyFor, lifecycleFor, customerArchived } = require('./shared/customerLifecycle');
 const { prepareAppointmentLinks, commitAppointmentLinks } = require('./appointmentLinks');
 const { summarizeManagementAttention } = require('./shared/managementAttention');
+const { checkCompanyCreation, recordCompanyCreation } = require('./companyRegistration');
 
 const JOB_FIELDS = ['userId', 'companyId', 'customerId', 'customerName', 'customerPhone', 'serviceType', 'serviceCategory', 'title', 'address', 'city', 'state', 'zipCode', 'serviceArea', 'date', 'time', 'windowStart', 'windowEnd', 'estimatedDuration', 'duration', 'priority', 'status', 'assignedTo', 'assignedToUid', 'assignedToName', 'assignmentNeedsAttention', 'assignmentReview', 'rescheduleRequired', 'servicePlanId', 'servicePlanDate', 'workNotes', 'actualWorkDone', 'actualHours', 'completionNotes', 'departureExceptionReason', 'completedAt', 'cancelledAt', 'cancellationReason', 'cancelledBy', 'createdAt', 'updatedAt', 'appointmentKind', 'billable', 'estimateOutcome', 'inquiryId', 'servicePropertyId', 'propertyAccessInstructions'];
 const PRICING_FIELDS = ['totalCost', 'estimatedCost', 'laborRate', 'laborHours', 'materialCost', 'materials', 'scopeOfWork', 'notes', 'description', 'servicePlanId'];
@@ -358,24 +359,26 @@ function workDataHandlers(db, config = {}) {
       });
     },
     createCompany: async request => {
-      const scope = await accessScope(db, request);
-      if (!scope.solo) throw new HttpsError('permission-denied', 'Your account already belongs to a company.');
+      const { uid } = requireAuth(request, true);
       const name = String(request.data?.name || '').trim();
       if (!name || name.length > 200) throw new HttpsError('invalid-argument', 'Enter your company name.');
-      const ref = db.collection('companies').doc(), profile = db.doc(`users/${scope.uid}`);
-      await db.runTransaction(async tx => {
+      const ref = db.collection('companies').doc(), profile = db.doc(`users/${uid}`);
+      return db.runTransaction(async tx => {
         const [user, owned, memberships, invitations, deletion] = await Promise.all([
-          tx.get(profile), tx.get(db.collection('companies').where('ownerId', '==', scope.uid).limit(1)),
-          tx.get(db.collection('teamMembers').where('uid', '==', scope.uid).limit(1)),
+          tx.get(profile), tx.get(db.collection('companies').where('ownerId', '==', uid).limit(1)),
+          tx.get(db.collection('teamMembers').where('uid', '==', uid).limit(1)),
           tx.get(db.collection('teamMembers').where('email', '==', String(request.auth.token.email || '').trim().toLowerCase()).limit(1)),
-          tx.get(db.collection('rlAccountDeletions').doc(scope.uid)),
+          tx.get(db.collection('rlAccountDeletions').doc(uid)),
         ]);
         if (deletion.exists) throw new HttpsError('permission-denied', 'This Route Logistics account has been deleted.');
+        if (!owned.empty && owned.docs[0].get('name') === name && owned.docs[0].get('ownerId') === uid) return { companyId: owned.docs[0].id, alreadyCreated: true };
         if (user.get('companyId') || user.get('rlCompanyId') || !owned.empty || !memberships.empty || !invitations.empty) throw new HttpsError('permission-denied', 'Use your existing company or invitation.');
-        tx.create(ref, { ownerId: scope.uid, name, services: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+        const checked = await checkCompanyCreation(tx, db, request, request.data?.authorizationCode);
+        tx.create(ref, { ownerId: uid, name, services: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
         tx.set(profile, { companyId: ref.id, rlCompanyId: ref.id }, { merge: true });
+        recordCompanyCreation(tx, db, checked, ref.id);
+        return { companyId: ref.id };
       });
-      return { companyId: ref.id };
     },
   };
 }

@@ -138,9 +138,9 @@ test('authenticated company field Home exposes duty status in the header before 
   }
 });
 
-test('only authoritative revocation says access was removed; pending and unavailable states keep their distinct guidance', async () => {
-  for (const status of ['pending', 'unavailable', 'revoked']) {
-    account('technician', status === 'pending' ? 'pending' : 'unavailable');
+test('only authoritative revocation says access was removed; pending, unassociated and unavailable states keep distinct guidance', async () => {
+  for (const status of ['pending', 'unassociated', 'unavailable', 'revoked']) {
+    account('technician', ['pending', 'unassociated'].includes(status) ? status : 'unavailable');
     currentAuth.accessStatus = status;
     const tree = await render('screens/WorkspaceAccessScreen.js');
     if (status === 'revoked') {
@@ -148,7 +148,7 @@ test('only authoritative revocation says access was removed; pending and unavail
       assert.match(textOf(tree), /saved work and photos remain on this device/);
     } else {
       assert.doesNotMatch(textOf(tree), /Company access removed|checked online and no longer grants access/);
-      assert.match(textOf(tree), status === 'pending' ? /Join your company/ : /Company access needed/);
+      assert.match(textOf(tree), status === 'pending' ? /Join your company/ : status === 'unassociated' ? /aren't connected to a company yet/ : /Company access needed/);
     }
     await unmount(tree);
   }
@@ -220,6 +220,28 @@ test('mobile code sign-in calls the existing challenge flow and never saves code
   await act(async () => code.props.onChangeText('123456'));
   await press(tree, 'Sign in');
   assert.deepEqual(verified, [['c'.repeat(48), '123456']]); assert.equal(stored.size, 0);
+  await unmount(tree);
+});
+
+test('mobile signup link routes through choices, preserves legal links, and Android Back returns through the signup stack', async () => {
+  account(); currentAuth.isAuthenticated = false; currentAuth.permissions = { canAccess: false };
+  native.Platform.OS = 'android';
+  const tree = await render('App.js');
+  assert.match(textOf(tree), /Privacy|Terms/);
+  await press(tree, 'Sign up');
+  assert.match(textOf(tree), /Get started|How would you like to use Route Logistics/);
+  await press(tree, 'Create a Personal Account');
+  assert.match(textOf(tree), /Full Name|Confirm Password/);
+  assert.equal(backListeners.size, 1);
+  await act(async () => assert.equal([...backListeners][0](), true));
+  assert.match(textOf(tree), /Get started/);
+  let opened;
+  native.Linking.openURL = async url => { opened = url; };
+  await press(tree, 'Register a Company');
+  assert.equal(opened, 'https://route-logistics.com/onboarding');
+  await press(tree, 'Back to Sign In');
+  assert.match(textOf(tree), /Welcome back|Forgot password/);
+  assert.equal(backListeners.size, 0);
   await unmount(tree);
 });
 

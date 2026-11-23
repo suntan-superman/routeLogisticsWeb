@@ -133,10 +133,10 @@ test('generation never recreates the initial job and retrying the next occurrenc
   assert.equal((await f.rows('jobs')).length, 2); assert.equal((await get(`servicePlans/${created.servicePlanId}`)).nextServiceDate, '2035-01-18');
 });
 
-test('independent owners retain the same atomic recurring-booking and assignment protections', async () => {
-  const f = await fixture({ solo: true }), data = f.booking(), created = await f.api.manageJob(f.request(data)), replay = await f.api.manageJob(f.request(data));
-  assert.equal(replay.id, created.id); assert.equal(replay.replayed, true); assert.equal((await f.rows('jobs')).length, 1); assert.equal((await f.rows('servicePlans')).length, 1);
-  assert.equal((await get(`jobs/${created.id}`)).assignedTo, f.uid); assert.equal((await get(`jobs/${created.id}`)).companyId, undefined);
+test('an unassociated personal account cannot create a recurring booking', async () => {
+  const f = await fixture({ solo: true }), data = f.booking();
+  await assert.rejects(f.api.manageJob(f.request(data)), { code: 'permission-denied' });
+  assert.equal((await f.rows('jobs')).length, 0); assert.equal((await f.rows('servicePlans')).length, 0);
   assert.deepEqual(await get(`customers/${f.customerId}`), f.customerBefore);
 });
 

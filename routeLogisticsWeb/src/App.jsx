@@ -39,6 +39,7 @@ const PublicContentPage = lazy(() => import('./pages/PublicContentPage'));
 const NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
 const TermsPage = lazy(() => import('./pages/TermsPage'));
+const SupportPage = lazy(() => import('./pages/SupportPage'));
 const RoutesPage = lazy(() => import('./pages/RoutesPage'));
 const TeamLocationsPage = lazy(() => import('./pages/TeamLocationsPage'));
 const LocationHistoryPage = lazy(() => import('./pages/LocationHistoryPage'));
@@ -51,6 +52,7 @@ import { ConfirmProvider } from './components/ConfirmProvider';
 import { UnsavedChangesProvider } from './components/UnsavedChangesProvider';
 import KeyboardFocusVisibility from './components/KeyboardFocusVisibility';
 import { isChunkLoadError } from './services/chunkRecovery';
+import { captureCompanyAuthorization } from './utils/companyRegistrationIntent';
 
 // Create a client
 // Register Syncfusion license
@@ -59,6 +61,11 @@ if (import.meta.env.VITE_SYNCFUSION_LICENSE_KEY) {
 }
 
 const queryClient = createWorkspaceQueryClient();
+
+function CompanyAuthorizationRoute() {
+  captureCompanyAuthorization();
+  return <ProtectedRoute><CompanyOnboardingPage /></ProtectedRoute>;
+}
 
 // Shows the marketing landing page to signed-out visitors, and the dashboard
 // to signed-in users, without changing either route's own loading/redirect logic.
@@ -72,7 +79,7 @@ const HomeOrLanding = () => {
     );
   }
   if (!currentUser) return <LandingPage />;
-  if (currentUser.emailVerified && workspace?.status === 'solo') return <Navigate to="/onboarding" replace />;
+  if (currentUser.emailVerified && workspace?.status === 'unassociated') return <Navigate to="/onboarding" replace />;
   return (
     <ProtectedRoute><Layout>
       {role === 'technician' ? <MyWorkPage /> : <HomePage />}
@@ -82,7 +89,7 @@ const HomeOrLanding = () => {
 
 function PrivateRouteMetadata() {
   const { pathname } = useLocation();
-  const publicPage = pathname === '/' || pathname === '/privacy' || pathname === '/terms' || /^\/(faqs|testimonials|success-stories)(\/|$)/.test(pathname);
+  const publicPage = pathname === '/' || pathname === '/privacy' || pathname === '/terms' || pathname === '/support' || /^\/(faqs|testimonials|success-stories)(\/|$)/.test(pathname);
   return publicPage ? null : <Helmet><meta name="robots" content="noindex, nofollow" /></Helmet>;
 }
 function AppContent() {
@@ -101,7 +108,7 @@ function AppContent() {
                 <Route path="/my-work" element={<ProtectedRoute><Layout><MyWorkPage /></Layout></ProtectedRoute>} />
                 <Route path="/dispatch" element={<ProtectedRoute><Layout><DispatchPage /></Layout></ProtectedRoute>} />
                 <Route path="/signup" element={<SignupPage />} />
-                <Route path="/onboarding" element={<ProtectedRoute><CompanyOnboardingPage /></ProtectedRoute>} />
+                <Route path="/onboarding" element={<CompanyAuthorizationRoute />} />
                 <Route path="/accept-invite" element={<AcceptInvitePage />} />
                 <Route path="/portal" element={<CustomerPortalPage />} />
                 <Route path="/review" element={<ReviewInvitationPage />} />
@@ -117,6 +124,7 @@ function AppContent() {
                 <Route path="/estimates" element={<ProtectedRoute><Layout><EstimatesPage /></Layout></ProtectedRoute>} />
                 <Route path="/privacy" element={<PrivacyPage />} />
                 <Route path="/terms" element={<TermsPage />} />
+                <Route path="/support" element={<SupportPage />} />
                 <Route path="/notifications" element={<ProtectedRoute><Layout><NotificationsPage /></Layout></ProtectedRoute>} />
                 <Route path="/routes" element={<ProtectedRoute><Layout><RoutesPage /></Layout></ProtectedRoute>} />
                 <Route path="/location-history" element={<ProtectedRoute><Layout><LocationHistoryPage /></Layout></ProtectedRoute>} />

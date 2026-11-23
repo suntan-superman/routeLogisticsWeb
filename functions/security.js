@@ -40,13 +40,7 @@ async function requireCompanyOwner(db, request, companyId) {
 async function requireManager(db, request, data) {
   const { uid, token } = requireAuth(request, true);
   await requireAccountActive(db, uid);
-  if (!data.companyId) {
-    if (data.userId === uid && !token.companyId) {
-      const user = await db.collection('users').doc(uid).get();
-      const { workspaceStatus } = require('./workspace');
-      if (!user.get('rlCompanyId') && (await workspaceStatus(db, { uid, email: token.email, emailVerified: true }, null)).status === 'solo') return;
-    }
-  } else if (token.companyId === data.companyId) {
+  if (data.companyId && token.companyId === data.companyId) {
     const company = await db.collection('companies').doc(data.companyId).get();
     if (company.get('ownerId') === uid) return;
     if (token.membershipId) {

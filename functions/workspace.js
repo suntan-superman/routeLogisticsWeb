@@ -21,6 +21,6 @@ async function workspaceStatus(db, caller, claims, now = Date.now()) {
   if (memberships.docs.length || profile.get('rlCompanyId') || profile.get('companyId') || ['field_tech', 'supervisor'].includes(profile.get('role'))) {
     return { status: 'unavailable' };
   }
-  return { status: 'solo' };
+  return { status: 'unassociated' };
 }
 module.exports = { workspaceStatus };

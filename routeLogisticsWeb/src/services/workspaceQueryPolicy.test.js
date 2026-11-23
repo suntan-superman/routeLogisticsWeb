@@ -10,7 +10,7 @@ test('query authority includes project, account, tenant, role, membership, verif
   assert.equal(configured.key[1], 'demo-routelogistics'); assert.notEqual(configured.id, first.id);
   for (const next of [workspaceScope({ ...user, uid: 'another' }, { companyId: 'one', role: 'owner' }, { status: 'company' }), workspaceScope(user, { companyId: 'two', role: 'owner' }, { status: 'company' }), workspaceScope(user, { companyId: 'one', role: 'manager', membershipId: 'member' }, { status: 'company' })]) assert.notEqual(first.id, next.id);
   for (const next of [workspaceScope(null, null, null), workspaceScope({ ...user, emailVerified: false }, { companyId: 'one', role: 'owner' }, { status: 'company' }), workspaceScope(user, { companyId: 'one', role: 'manager' }, { status: 'company' }), workspaceScope(user, null, { status: 'pending' })]) assert.equal(next.readable, false);
-  assert.equal(workspaceScope(user, null, { status: 'solo' }).readable, true);
+  assert.equal(workspaceScope(user, null, { status: 'unassociated' }).readable, false);
 });
 test('authorization errors stop retrying while transient reads get at most one retry', () => {
   for (const code of ['functions/permission-denied', 'unauthenticated', 'not-found', 'workspace-changed']) { assert.equal(workspaceAccessError({ code }), true); assert.equal(retryWorkspaceRead(0, { code }), false); }

@@ -92,8 +92,8 @@ test('owners, administrators and managers explicitly save validated customer and
   }
 });
 
-test('permanent address changes replace prior Google validation metadata and audit both versions', async () => {
-  for (const solo of [false, true]) {
+test('company permanent address changes replace prior Google validation metadata and audit both versions', async () => {
+  for (const solo of [false]) {
     const f = await fixture({ solo });
     const originalValidation = { source: 'google-address-validation', validatedAt: OLD_VERSION, postalCode: '93301', placeId: 'synthetic-original-place' };
     await db.doc(`customers/${f.customerId}`).update({ addressValidation: originalValidation });
@@ -148,8 +148,8 @@ test('known outside and unsafe properties cannot update customer records or crea
   assert.deepEqual(await get(`customers/${f.customerId}`), before);
   assert.equal((await db.collection('jobs').where('companyId', '==', f.id).get()).size, 0);
 });
-test('explicit permanent operator-entered addresses save with the job and remove stale Google coordinates and provenance', async () => {
-  for (const solo of [false, true]) {
+test('company permanent operator-entered addresses save with the job and remove stale Google coordinates and provenance', async () => {
+  for (const solo of [false]) {
     const f = await fixture({ solo }), address = '999 Unresolved Property, Example, CA 93312';
     await db.doc(`customers/${f.customerId}`).update({ addressValidation: { source: 'google-address-validation', validatedAt: OLD_VERSION, placeId: 'old-place', postalCode: '93301' } });
     const result = await f.work.manageJob(f.request(f.save({ job: f.job({ serviceProperty: { address, validated: true, latitude: 0, longitude: 0 }, latitude: 0, longitude: 0 }) })));
@@ -214,39 +214,20 @@ test('unconfigured coverage still verifies the new address and replaces spoofed 
   assert.equal(job.serviceProperty.validated, true); assert.equal(job.latitude, 35); assert.equal(job.serviceAreaEligibility.status, 'unconfigured');
 });
 
-test('a solo owner can atomically update their own saved customer address through the callable', async () => {
+test('an unassociated account cannot update a legacy personal customer address through the callable', async () => {
   const f = await fixture({ solo: true });
-  const saved = await f.work.manageJob(f.request(f.save()));
-  assert.equal((await get(`customers/${f.customerId}`)).address, PROPERTY);
-  assert.equal((await get(`jobs/${saved.id}`)).userId, f.uid); assert.equal(saved.customerAddressUpdated, true);
+  await assert.rejects(f.work.manageJob(f.request(f.save())), { code: 'permission-denied' });
+  assert.equal((await get(`customers/${f.customerId}`)).address, f.original.address);
 });
 
-test('a concurrent solo job customer change cannot redirect a permanent update to the previous customer', async () => {
+test('a legacy personal job cannot be updated by an unassociated account', async () => {
   const f = await fixture({ solo: true }), jobId = `${f.id}-changing-job`, secondCustomer = `${f.id}-replacement-customer`;
-  const jobRef = db.doc(`jobs/${jobId}`);
   await set(`customers/${secondCustomer}`, { userId: f.uid, address: 'Replacement customer address', updatedAt: OLD_VERSION });
   await set(`jobs/${jobId}`, { userId: f.uid, customerId: f.customerId, address: 'Original job address', updatedAt: OLD_VERSION });
-  let change = true;
-  const changingDb = new Proxy(db, { get(target, key) {
-    if (key === 'doc') return path => {
-      const ref = target.doc(path);
-      if (path === `jobs/${jobId}`) {
-        const read = ref.get.bind(ref);
-        ref.get = async () => {
-          const snapshot = await read();
-          if (change) { change = false; await jobRef.update({ customerId: secondCustomer, updatedAt: '2026-11-15T01:00:00.000Z' }); }
-          return snapshot;
-        };
-      }
-      return ref;
-    };
-    const value = Reflect.get(target, key, target); return typeof value === 'function' ? value.bind(target) : value;
-  } });
-  const api = workDataHandlers(changingDb, { serviceAreas: f.area });
-  await assert.rejects(api.manageJob(f.request(f.save({ action: 'update', id: jobId, job: { serviceProperty: { address: PROPERTY } } }))), { code: 'aborted' });
+  await assert.rejects(f.work.manageJob(f.request(f.save({ action: 'update', id: jobId, job: { serviceProperty: { address: PROPERTY } } }))), { code: 'permission-denied' });
   assert.equal((await get(`customers/${f.customerId}`)).address, f.original.address);
   assert.equal((await get(`customers/${secondCustomer}`)).address, 'Replacement customer address');
-  assert.equal((await get(`jobs/${jobId}`)).customerId, secondCustomer);
+  assert.equal((await get(`jobs/${jobId}`)).customerId, f.customerId);
 });
 
 test('customer projections expose stable optimistic versions for legacy timestamps and dates', async () => {

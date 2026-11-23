@@ -15,6 +15,7 @@ import { CONTENT_TYPES, CONTENT_STATUSES, contentPath, contentSlug, contentSnaps
 import { PlatformContentArticle } from '../components/PlatformContentView';
 import PlatformSubscriptions from '../components/PlatformSubscriptions';
 import CompanyUsage from '../components/CompanyUsage';
+import CompanyRegistrationAdmin from '../components/CompanyRegistrationAdmin';
 
 const emptyDashboard = { counts: {}, recentAudit: [] };
 const inputClass = 'mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-200';
@@ -69,13 +70,14 @@ function PlatformAdminSections({ uid, accountEmail }) {
         <button type="button" aria-pressed={section === 'content'} className={section === 'content' ? primaryActionClass : 'btn-secondary'} onClick={() => choose('content')}>Website content</button>
         <button type="button" aria-pressed={section === 'subscriptions'} className={section === 'subscriptions' ? primaryActionClass : 'btn-secondary'} onClick={() => choose('subscriptions')}>Company subscriptions</button>
         <button type="button" aria-pressed={section === 'usage'} className={section === 'usage' ? primaryActionClass : 'btn-secondary'} onClick={() => choose('usage')}>Company usage</button>
+        <button type="button" aria-pressed={section === 'registration'} className={section === 'registration' ? primaryActionClass : 'btn-secondary'} onClick={() => choose('registration')}>Company registration</button>
       </nav>
       <div className="flex flex-wrap items-center gap-3">
         <p className="break-all text-sm text-gray-600">{accountEmail}</p>
         <button type="button" className="btn-secondary" onClick={async () => { if (await confirmDiscard()) await logout(); }}>Sign out</button>
       </div>
     </div>
-    {section === 'content' ? <PlatformAdminWorkspace /> : section === 'subscriptions' ? <PlatformSubscriptions uid={uid} /> : <CompanyUsage uid={uid} />}
+    {section === 'content' ? <PlatformAdminWorkspace /> : section === 'subscriptions' ? <PlatformSubscriptions uid={uid} /> : section === 'registration' ? <CompanyRegistrationAdmin /> : <CompanyUsage uid={uid} />}
   </div>;
 }
 

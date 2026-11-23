@@ -29,7 +29,7 @@ test('removed, legacy, and previously associated members cannot become solo by l
   for (const profile of [{ rlCompanyId: 'acme' }, { companyId: 'acme' }, { role: 'field_tech' }, { role: 'supervisor' }]) assert.equal((await workspaceStatus(database(profile), caller, null)).status, 'unavailable');
   assert.equal((await workspaceStatus(database({}, [{ uid: caller.uid, status: 'removed' }]), caller, null)).status, 'unavailable');
 });
-test('resolved active members and genuinely independent users keep their appropriate workspace', async () => {
+test('resolved active members have company access; independent verified users remain unassociated', async () => {
   assert.equal((await workspaceStatus(database(), caller, { companyId: 'acme', role: 'technician' })).status, 'company');
-  assert.equal((await workspaceStatus(database(), caller, null)).status, 'solo');
+  assert.equal((await workspaceStatus(database(), caller, null)).status, 'unassociated');
 });

@@ -48,7 +48,7 @@ function WorkspaceQueries({ user, canAccess, refreshUser, authStatus, authError,
     const task = Promise.resolve().then(() => refresh.current()).then(result => {
       if (!live.current || expected !== identity.current) return result;
       if (result?.success && result.authoritative && result.user) {
-        const next = result.accessStatus || (result.user.workspace?.status === 'company' || result.user.workspace?.status === 'solo' ? 'ready' : result.user.workspace?.status || 'unavailable');
+        const next = result.accessStatus || (result.user.workspace?.status === 'company' ? 'ready' : result.user.workspace?.status || 'unavailable');
         if (JSON.stringify(workScopeKey(result.user)) !== expected) {
           if (!available(next)) setValidationStatus(next);
           return result;

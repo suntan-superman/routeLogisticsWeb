@@ -4,6 +4,10 @@ test('PW-ONBOARD-01 @onboarding public owner registration verifies, resumes and 
   const email = `${scenario.prefix}-new-owner@example.test`;
   const password = 'Onboarding!123';
   const companyName = `${scenario.prefix} New Company`;
+  const authorizationLink = await scenario.authorizeCompanyRegistration(email);
+
+  await page.goto(authorizationLink);
+  await expect(page).toHaveURL(/\/login/);
 
   await page.goto('/');
   await expect(page.getByRole('link', { name: /Log in/i, exact: true }).first()).toBeVisible();
@@ -40,6 +44,7 @@ test('PW-ONBOARD-01 @onboarding public owner registration verifies, resumes and 
   await page.getByRole('button', { name: 'Save & continue' }).click();
   await expect(page.getByRole('heading', { name: /Import customers/ })).toBeVisible();
   await page.getByRole('button', { name: 'Save & continue' }).click();
+  await expect(page.getByLabel('Workside authorization code')).toHaveValue(/^[A-Za-z0-9_-]{43}$/);
   await page.getByRole('button', { name: 'Activate company' }).click();
   await expect(page).toHaveURL('http://127.0.0.1:4173/');
   await expect(page.getByText(companyName).first()).toBeVisible();

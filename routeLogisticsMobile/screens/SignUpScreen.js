@@ -10,12 +10,12 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
+  Linking,
 } from 'react-native';
 import { MaterialIcons, AntDesign } from '@expo/vector-icons';
 import { COLORS } from '../constants/colors';
 import { AuthContext } from '../contexts/AuthContext';
 import { FONT_SIZES, SPACING, BUTTON_SIZES, BORDER_RADIUS, ICON_SIZES, CARD_SIZES, WIDTHS, HEIGHTS, hp, wp, rf } from '../constants/responsiveSizes';
-import ServiceSelectionScreen from './ServiceSelectionScreen';
 
 const SignUpScreen = ({ navigation }) => {
   const [name, setName] = useState('');
@@ -23,8 +23,6 @@ const SignUpScreen = ({ navigation }) => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [showServiceSelection, setShowServiceSelection] = useState(false);
-  const [selectedServices, setSelectedServices] = useState([]);
 
   const { signUp } = useContext(AuthContext);
 
@@ -44,26 +42,13 @@ const SignUpScreen = ({ navigation }) => {
       return;
     }
 
-    // Create a personal login first. Company services come from the accepted
-    // invitation; independent users configure services later in Settings.
-    await performSignUp([]);
+    await performSignUp();
   };
 
-  const handleServiceSelection = (services) => {
-    setSelectedServices(services);
-    setShowServiceSelection(false);
-    // Now proceed with actual sign up
-    performSignUp(services);
-  };
-
-  const performSignUp = async (services) => {
+  const performSignUp = async () => {
     setIsLoading(true);
     try {
-      const result = await signUp(email, password, { 
-        name, 
-        services: services,
-        serviceCategories: getServiceCategories(services)
-      });
+      const result = await signUp(email, password, { name });
       if (result.success) {
         if (result.needsEmailVerification) {
           // Email verification is required - the app will automatically show the verification screen
@@ -81,25 +66,9 @@ const SignUpScreen = ({ navigation }) => {
     }
   };
 
-  const getServiceCategories = (services) => {
-    // This would map services back to categories for easier filtering
-    // For now, return the services as-is
-    return services;
-  };
-
   const handleLoginNavigation = () => {
     navigation.navigate('login');
   };
-
-  // Show service selection screen if needed
-  if (showServiceSelection) {
-    return (
-      <ServiceSelectionScreen
-        navigation={navigation}
-        onServicesSelected={handleServiceSelection}
-      />
-    );
-  }
 
   return (
     <KeyboardAvoidingView
@@ -111,11 +80,8 @@ const SignUpScreen = ({ navigation }) => {
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.logoText}>
-            <Text style={styles.factotumText}>mi</Text>
-            <Text style={styles.factotumText}>Factotum</Text>
-          </Text>
-          <Text style={styles.clientText}>Join the field service revolution</Text>
+          <Text style={styles.logoText}>Route Logistics</Text>
+          <Text style={styles.clientText}>Create a personal login. Join with a company invitation or request authorization to start a company on the web.</Text>
         </View>
 
         {/* Form */}
@@ -226,11 +192,9 @@ const SignUpScreen = ({ navigation }) => {
 
         {/* Footer */}
         <View style={styles.footerContainer}>
-          <Text style={styles.termsText}>
-            By signing up, you agree to our Terms of Service and Privacy Policy
-          </Text>
+          <Text style={styles.termsText}>Review our <Text onPress={() => Linking.openURL('https://route-logistics.com/terms')} style={styles.loginTextBold}>Terms of Service</Text> and <Text onPress={() => Linking.openURL('https://route-logistics.com/privacy')} style={styles.loginTextBold}>Privacy Policy</Text>.</Text>
           <Text style={styles.copyrightText}>
-            Route Logisitcs Copyright 2025
+            Route Logistics
           </Text>
         </View>
       </ScrollView>

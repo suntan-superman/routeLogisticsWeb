@@ -22,8 +22,9 @@ test('technicians work without administrative permissions; only owner can manage
   assert.equal(permission('field_tech').canAccess, false);
   assert.equal(workspacePermissions({ status: 'company' }, { companyId: 'acme', role: 'admin' }).canManage, false);
 });
-test('personal management requires an explicit resolved solo workspace', () => {
-  assert.equal(workspacePermissions({ status: 'solo' }, null).canManage, true);
+test('personal accounts have no implicit company management access', () => {
+  assert.equal(workspacePermissions({ status: 'unassociated' }, null).canManage, false);
+  assert.equal(workspacePermissions({ status: 'unassociated' }, null).canAccess, false);
   assert.equal(workspacePermissions({ status: 'solo' }, { companyId: 'acme', role: 'technician' }).canManage, false);
 });
 test('company object services and business information are displayed without mutating accounting metadata', () => {

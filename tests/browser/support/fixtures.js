@@ -7,6 +7,8 @@ const { initializeApp, getApps } = req('firebase-admin/app');
 const { getFirestore } = req('firebase-admin/firestore');
 const { getAuth } = req('firebase-admin/auth');
 const { getStorage } = req('firebase-admin/storage');
+const { companyRegistrationHandler } = require('../../../functions/companyRegistration');
+const { platformCmsHandlers } = require('../../../functions/platformCms');
 const hash = value => createHash('sha256').update(value).digest('hex');
 const PROJECT = 'demo-routelogistics';
 
@@ -87,6 +89,14 @@ async function seed(info) {
       const account = await auth.getUserByEmail(email);
       await auth.updateUser(account.uid, { emailVerified: true });
       return account.uid;
+    },
+    authorizeCompanyRegistration: async email => {
+      const handler = companyRegistrationHandler(db, platformCmsHandlers(db).requireAdmin, { appUrl: () => 'http://127.0.0.1:4173' });
+      const request = { auth: { uid: accounts.platformAdmin.uid, token: { email: accounts.platformAdmin.email, email_verified: true } } };
+      const current = await handler({ ...request, data: { action: 'admin' } });
+      await handler({ ...request, data: { action: 'policy', mode: 'approval_required', confirm: 'approval_required', expectedRevision: current.revision } });
+      const issued = await handler({ ...request, data: { action: 'issue', email } });
+      return issued.link;
     },
     setSchedulingIdentity: async (accountKey, { name } = {}) => {
       localAdmin();

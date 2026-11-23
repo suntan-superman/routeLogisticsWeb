@@ -245,7 +245,7 @@ function LandingPage() {
       <nav aria-label="Product links"><strong>Product</strong><a href="#features">Features</a><a href="#how-it-works">How It Works</a><a href="#industries">Industries</a></nav>
       <nav aria-label="Account links"><strong>Account</strong><Link to="/login">Log In</Link><Link to="/signup?intent=company">Add Your Company</Link><Link to="/portal">Customer Portal</Link></nav>
       <nav aria-label="Resource links"><strong>Resources</strong><Link to="/faqs">FAQs</Link><Link to="/testimonials">Testimonials</Link><Link to="/success-stories">Success Stories</Link></nav>
-      <nav aria-label="Legal links"><strong>Legal</strong><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link></nav>
+      <nav aria-label="Legal links"><strong>Legal</strong><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link><Link to="/support">Support</Link></nav>
     </div><div className="marketing-section-shell marketing-footer-bottom"><span>© {new Date().getFullYear()} Route Logistics</span><span>Field service operations, connected.</span></div></footer>
   </div>;
 }

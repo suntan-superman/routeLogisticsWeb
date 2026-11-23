@@ -3,10 +3,10 @@ export const WORKSPACE_QUERY_ROOT = 'rl-workspace';
 
 export function workspaceScope(user, claims, workspace, projectId = null) {
   const status = workspace?.status || null;
-  const role = claims?.role || (status === 'solo' ? 'owner' : null);
+  const role = claims?.role || null;
   const companyId = claims?.companyId || null, membershipId = claims?.membershipId || null;
   const readable = !!user?.uid && user.emailVerified === true && (
-    status === 'solo' && !companyId || status === 'company' && !!companyId
+    status === 'company' && !!companyId
       && ['owner', 'admin', 'manager', 'technician'].includes(role) && (role === 'owner' || !!membershipId)
   );
   const key = [WORKSPACE_QUERY_ROOT, projectId, user?.uid || null, companyId, role, membershipId, user?.emailVerified === true, status];

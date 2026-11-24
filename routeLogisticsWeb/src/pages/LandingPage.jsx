@@ -5,7 +5,8 @@ import {
   Bars3Icon, BellAlertIcon, CalendarDaysIcon, CameraIcon, CheckCircleIcon,
   ClipboardDocumentCheckIcon, CloudArrowUpIcon, DevicePhoneMobileIcon,
   DocumentMagnifyingGlassIcon, MapIcon, MapPinIcon, SignalIcon, TruckIcon,
-  UserGroupIcon, UsersIcon, XMarkIcon,
+  UserGroupIcon, UsersIcon, XMarkIcon, ShieldCheckIcon, BoltIcon,
+  BanknotesIcon, TagIcon,
 } from '@heroicons/react/24/outline';
 import './LandingPage.css';
 
@@ -18,6 +19,14 @@ const FEATURES = [
   { icon: CameraIcon, title: 'Photo evidence and completion', description: 'Attach supporting photos, complete guided visit steps, and preserve an auditable service record.' },
   { icon: ClipboardDocumentCheckIcon, title: 'Managed estimate review', description: 'Let field teams capture scope while authorized management reviews pricing and controls customer delivery.' },
   { icon: BellAlertIcon, title: 'Management attention', description: 'Surface missed visits, quote-needed work, unassigned jobs, and other unresolved operational priorities.' },
+];
+
+const PILLARS = [
+  { icon: ShieldCheckIcon, title: 'Reliability', promise: 'Your work matters. Protect it.', description: 'Capture visit notes, photos, and evidence offline, then see when saved work reaches the server.' },
+  { icon: BoltIcon, title: 'Simplicity', promise: 'Less clicking. More working.', description: 'Use focused management screens, guided technician steps, and straightforward company setup.' },
+  { icon: CalendarDaysIcon, title: 'Scheduling Intelligence', promise: 'Make every service day count.', description: 'Plan recurring visits, check staff availability, dispatch work, and sequence daily routes.' },
+  { icon: BanknotesIcon, title: 'Revenue Protection', promise: 'Keep completed work from going unbilled.', description: 'Review unbilled completed visits, control invoice approval, track payments, and inspect receivables.' },
+  { icon: TagIcon, title: 'Transparent Pricing', promise: "Know what you're paying for.", description: 'We are committed to clear subscription terms before you choose a plan. Pricing is not yet published.' },
 ];
 
 const INDUSTRIES = [
@@ -203,6 +212,11 @@ function LandingPage() {
           <HeroWorkspacePreview />
         </div>
       </section>
+
+      <section className="marketing-pillars" aria-labelledby="pillars-heading"><div className="marketing-section-shell">
+        <div className="marketing-pillars-intro"><p className="marketing-kicker">FIVE WAYS TO WORK BETTER</p><h2 id="pillars-heading">Field service software built around the work that matters.</h2></div>
+        <div className="marketing-pillars-grid">{PILLARS.map(({ icon: Icon, title, promise, description }) => <article className="marketing-pillar-card" key={title}><span className="marketing-pillar-icon"><Icon aria-hidden="true" /></span><h3>{title}</h3><strong>{promise}</strong><p>{description}</p></article>)}</div>
+      </div></section>
 
       <section id="features" className="marketing-section marketing-feature-section"><div className="marketing-section-shell">
         <div className="marketing-section-intro"><p className="marketing-kicker">ONE OPERATING PICTURE</p><h2>Keep the office and field team working from the same plan.</h2><p>Route Logistics connects the work before, during, and after a service visit without presenting unfinished integrations as generally available.</p></div>

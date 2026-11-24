@@ -40,6 +40,19 @@
 .marketing-proof-list{display:flex;flex-wrap:wrap;justify-content:center;gap:10px 24px;margin:28px 0 0;padding:0;color:#b9d8cd;font-size:.9rem;list-style:none}.marketing-proof-list li{display:inline-flex;align-items:center;gap:7px}.marketing-proof-list svg{width:18px;color:var(--mk-mint)}
 
 .marketing-hero-preview{position:relative;margin:72px auto -34px;overflow:hidden;border:1px solid #ffffff29;border-radius:24px 24px 0 0;background:#f4f8f6;color:var(--mk-ink);text-align:left;box-shadow:0 40px 90px #0000006b}
+.marketing-pillars{padding:94px 0 76px;background:#f2f8f5}
+.marketing-pillars-intro{max-width:760px;margin-bottom:28px}
+.marketing-pillars-intro h2{margin:8px 0 0;font-size:clamp(1.8rem,3vw,2.65rem);line-height:1.15;letter-spacing:-.035em;text-wrap:balance}
+.marketing-pillars-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.marketing-pillar-card{min-width:0;border:1px solid var(--mk-border);border-radius:17px;background:#fff;padding:21px 18px 19px;box-shadow:0 9px 28px #063d2d0b}
+.marketing-pillar-icon{display:grid;width:40px;height:40px;place-items:center;border-radius:11px;background:#e2f8ee;color:#087858}
+.marketing-pillar-icon svg{width:22px;height:22px}
+.marketing-pillar-card h3{margin:16px 0 4px;font-size:1rem;line-height:1.25}
+.marketing-pillar-card strong{display:block;color:#087858;font-size:.84rem;line-height:1.35}
+.marketing-pillar-card p{margin:10px 0 0;color:var(--mk-muted);font-size:.81rem;line-height:1.5}
+@media(max-width:1050px){.marketing-pillars-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:650px){.marketing-pillars{padding:72px 0 56px}.marketing-pillars-grid{grid-template-columns:1fr 1fr;gap:10px}.marketing-pillar-card{padding:16px}.marketing-pillar-card h3{margin-top:12px}.marketing-pillar-card p{font-size:.78rem}}
+@media(max-width:420px){.marketing-pillars-grid{grid-template-columns:1fr}.marketing-pillar-card{display:grid;grid-template-columns:40px 1fr;column-gap:13px}.marketing-pillar-card h3{margin:0}.marketing-pillar-card strong,.marketing-pillar-card p{grid-column:2}.marketing-pillar-icon{grid-row:1/4}}
 .marketing-preview-topbar{min-height:69px;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:14px 20px;border-bottom:1px solid #d8e8e1;background:#fff}
 .marketing-preview-brand{display:flex;align-items:center;gap:10px}.marketing-preview-brand .marketing-brand-mark{width:32px;height:32px;border-radius:9px;font-size:.7rem}
 .marketing-preview-brand span,.marketing-preview-heading span,.marketing-frame-heading span{display:flex;flex-direction:column}.marketing-preview-brand small,.marketing-preview-heading small{color:#6e817a;font-size:.72rem}

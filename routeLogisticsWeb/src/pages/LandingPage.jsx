@@ -215,7 +215,7 @@ function LandingPage() {
 
       <section className="marketing-pillars" aria-labelledby="pillars-heading"><div className="marketing-section-shell">
         <div className="marketing-pillars-intro"><p className="marketing-kicker">FIVE WAYS TO WORK BETTER</p><h2 id="pillars-heading">Field service software built around the work that matters.</h2></div>
-        <div className="marketing-pillars-grid">{PILLARS.map(({ icon: Icon, title, promise, description }) => <article className="marketing-pillar-card" key={title}><span className="marketing-pillar-icon"><Icon aria-hidden="true" /></span><h3>{title}</h3><strong>{promise}</strong><p>{description}</p></article>)}</div>
+        <div className="marketing-pillars-grid">{PILLARS.map(pillar => <article className="marketing-pillar-card" key={pillar.title}><span className="marketing-pillar-icon"><pillar.icon aria-hidden="true" /></span><h3>{pillar.title}</h3><strong>{pillar.promise}</strong><p>{pillar.description}</p></article>)}</div>
       </div></section>
 
       <section id="features" className="marketing-section marketing-feature-section"><div className="marketing-section-shell">

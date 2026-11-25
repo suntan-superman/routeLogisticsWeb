@@ -4,7 +4,7 @@ const JPEG_QUALITY = 0.8;
 const MAX_INPUT_BYTES = 25 * 1024 * 1024;
 
 // Downscales and re-encodes in the browser so field photos stay well under the 10MB Storage limit.
-async function compressImage(file) {
+export async function compressImage(file) {
   if (!file.type.startsWith('image/')) throw new Error('Only image files can be uploaded');
   if (file.size > MAX_INPUT_BYTES) throw new Error('Image is too large (max 25MB)');
   const bitmap = await createImageBitmap(file);

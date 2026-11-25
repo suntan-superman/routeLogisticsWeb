@@ -11,11 +11,11 @@ const validDate = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.te
 const dateLabel = value => validDate(value) ? new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`)) : 'Date unavailable';
 const actionClass = 'rounded-lg border border-primary-200 bg-white px-3 py-2 text-sm font-medium text-primary-800 hover:bg-primary-50 disabled:cursor-not-allowed disabled:opacity-50';
 
-export default function TechnicianAvailability({ companyId, memberId = '', memberName = '', date, time, estimatedDuration, jobId, servicePlanId, disabled = false, allowedWeekdays, isAlternativeAllowed, schedulingError, onMemberChange, onSelectAlternative }) {
+export default function TechnicianAvailability({ companyId, memberId = '', memberName = '', date, time, estimatedDuration, jobId, servicePlanId, serviceCategory = '', serviceType = '', disabled = false, allowedWeekdays, isAlternativeAllowed, schedulingError, onMemberChange, onSelectAlternative }) {
   const scope = companyId || 'solo';
   const [ignoredSaveError, setIgnoredSaveError] = useState(null);
   const runtime = useRef({ mounted: false, key: '', scope }), labels = useRef({ scope, values: new Map() });
-  const fingerprint = schedulingFingerprint({ companyId, memberId, date, time, estimatedDuration, jobId, servicePlanId });
+  const fingerprint = schedulingFingerprint({ companyId, memberId, date, time, estimatedDuration, jobId, servicePlanId, serviceCategory, serviceType });
   const weekdays = Array.isArray(allowedWeekdays) ? [...new Set(allowedWeekdays.map(Number).filter(value => Number.isInteger(value) && value >= 0 && value <= 6))].sort() : undefined;
   const weekdaysKey = JSON.stringify(weekdays || null), requestKey = JSON.stringify([fingerprint, weekdaysKey]);
   runtime.current.key = requestKey;
@@ -44,7 +44,7 @@ export default function TechnicianAvailability({ companyId, memberId = '', membe
   const mayCheck = !!memberId && !!selected && slotValid && !rosterLoading && !roster.error && !disabled;
   const availabilityQuery = useWorkspaceQuery(['availability', requestKey], async () => {
     const requestedWeekdays = JSON.parse(weekdaysKey);
-    const result = await checkSchedulingAvailability({ companyId, memberId, date, time, estimatedDuration, jobId, servicePlanId, ...(requestedWeekdays ? { allowedWeekdays: requestedWeekdays } : {}) });
+    const result = await checkSchedulingAvailability({ companyId, memberId, date, time, estimatedDuration, jobId, servicePlanId, serviceCategory, serviceType, ...(requestedWeekdays ? { allowedWeekdays: requestedWeekdays } : {}) });
     if (typeof result?.available !== 'boolean') throw Error('Availability could not be confirmed. Try again.');
     return result;
   }, { enabled: mayCheck });

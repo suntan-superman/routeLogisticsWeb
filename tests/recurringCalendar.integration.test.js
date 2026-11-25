@@ -55,6 +55,54 @@ test('concurrent recurring generation creates one preferred-technician visit and
   assert.equal((await plan.get()).get('nextServiceDate'), '2030-01-10'); assert.deepEqual(await get(`customers/${f.customer}`), customerBefore);
 });
 
+test('closed-day weekly, biweekly, monthly and quarterly occurrences remain dated, unique and visible for management', async () => {
+  const f = await fixture(), sunday = '2030-01-06';
+  await db.doc(`companies/${f.id}`).update({ businessHours: { sunday: { closed: true, open: '09:00', close: '17:00' }, monday: { closed: false, open: '08:00', close: '17:00' } } });
+  for (const [frequency, interval] of [['weekly', 1], ['weekly', 2], ['monthly', 1], ['quarterly', 1]]) {
+    const plan = await f.save(`${frequency}-${interval}`, { nextServiceDate: sunday, recurrence: normalizeRecurrence({ frequency, interval }, sunday) });
+    const first = await generateVisit(db, plan.id, sunday), job = await get(`jobs/${first.jobId}`);
+    assert.equal(first.jobId, `rl_plan_${plan.id}_${sunday}`);
+    assert.equal(job.date, sunday); assert.equal(job.servicePlanDate, sunday); assert.equal(job.assignedTo, null);
+    assert.equal(job.assignmentNeedsAttention, true); assert.equal(job.rescheduleRequired, true);
+    assert.equal(job.schedulingAttention.code, 'closed-day'); assert.equal(job.schedulingAttention.suggestedDate, '2030-01-07');
+    assert.match(job.assignmentReview, /original date.*management rescheduling/i);
+    assert.equal((await generateVisit(db, plan.id, sunday)).skipped, true);
+    assert.equal((await db.collection('jobs').where('servicePlanId', '==', plan.id).get()).size, 1);
+    assert.equal((await plan.get()).get('nextServiceDate'), frequency === 'weekly' ? plusDays(sunday, interval * 7) : frequency === 'monthly' ? '2030-02-06' : '2030-04-06');
+  }
+  const other = await fixture(), open = await other.save('same-date-open', { nextServiceDate: sunday, recurrence: normalizeRecurrence({ frequency: 'weekly' }, sunday) });
+  const generated = await generateVisit(db, open.id, sunday);
+  assert.equal((await get(`jobs/${generated.jobId}`)).assignedTo, other.tech1);
+});
+
+test('exceptional closure retains the obligation; an existing confirmed occurrence is never shifted or overwritten', async () => {
+  const f = await fixture();
+  await db.doc(`companies/${f.id}`).update({ businessHours: { thursday: { closed: false, open: '08:00', close: '17:00' }, closedDates: [DATE] } });
+  const plan = await f.save('holiday');
+  const generated = await generateVisit(db, plan.id, DATE), job = await get(`jobs/${generated.jobId}`);
+  assert.equal(job.schedulingAttention.code, 'closed-date'); assert.equal(job.assignedTo, null);
+  const existingPlan = await f.save('already-confirmed');
+  const existingId = `rl_plan_${existingPlan.id}_${DATE}`;
+  const confirmed = { companyId: f.id, userId: f.owner, customerId: f.customer, date: DATE, status: 'scheduled', assignedTo: f.tech1, confirmation: 'Customer-confirmed synthetic visit' };
+  await db.doc(`jobs/${existingId}`).set(confirmed);
+  await generateVisit(db, existingPlan.id, DATE);
+  assert.deepEqual(await get(`jobs/${existingId}`), confirmed);
+  assert.equal((await existingPlan.get()).get('nextServiceDate'), '2030-01-10');
+});
+
+test('closed-day assignment checks reject manual moves but permit a reviewed unassigned occurrence to move to an open date', async () => {
+  const f = await fixture(), sunday = '2030-01-06', open = '2030-01-07';
+  await db.doc(`companies/${f.id}`).update({ businessHours: { sunday: { closed: true, open: '09:00', close: '17:00' }, monday: { closed: false, open: '08:00', close: '17:00' } } });
+  const scheduling = schedulingHandlers(db), scope = { uid: f.owner, role: 'owner', companyId: f.id };
+  await assert.rejects(db.runTransaction(tx => scheduling.prepare(tx, scope, { date: sunday, time: '09:00', estimatedDuration: 1, assignedTo: f.tech1, status: 'scheduled' }, { before: {}, jobId: `${f.id}-manual` })), { code: 'failed-precondition' });
+  await assert.rejects(db.runTransaction(tx => scheduling.prepare(tx, scope, { date: sunday, time: '09:00', estimatedDuration: 1, assignedTo: null, status: 'scheduled' }, { before: { date: open, time: '09:00', estimatedDuration: 1, assignedTo: null, status: 'scheduled' }, jobId: `${f.id}-unassigned` })), { code: 'failed-precondition' });
+  const check = await scheduling.handle(f.request({ action: 'check', memberId: f.tech1, date: sunday, time: '09:00', estimatedDuration: 1 }));
+  assert.equal(check.available, false); assert.equal(check.schedulingAttention.suggestedDate, open);
+  const before = { date: sunday, time: '09:00', estimatedDuration: 1, assignedTo: null, status: 'scheduled', schedulingAttention: { code: 'closed-day' } };
+  const result = await db.runTransaction(tx => scheduling.prepare(tx, scope, { ...before, date: open }, { before, jobId: `${f.id}-held` }));
+  assert.equal(result.skipped, undefined); assert.equal(result.assignedTo, null);
+});
+
 test('busy preferred visits remain on their appointment date for dispatcher review unless an automatic fallback was explicitly selected', async () => {
   const f = await fixture();
   await db.doc(`jobs/${f.id}-busy`).set({ companyId: f.id, userId: f.owner, customerId: f.customer, date: DATE, time: '08:30', estimatedDuration: 2, assignedTo: f.tech1, status: 'scheduled' });

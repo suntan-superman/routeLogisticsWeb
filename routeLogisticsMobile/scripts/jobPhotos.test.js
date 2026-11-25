@@ -73,6 +73,23 @@ test('an existing retained or uploaded photo restores the completed evidence ste
   assert.deepEqual(progressEvents.at(-1), { hasPhotos: true, count: 1 });
 });
 
+test('property proposal distinguishes local, uploaded, attention, and submitted states without duplicating job photos', async () => {
+  rows = [{ id: 'photo-1', kind: 'photo', jobId: 'job-one', localUri: 'file:///saved.jpg', attribution: { userId: 'tech' }, metadata: { referenceCategory: 'exterior' }, state: 'pending' }];
+  await render();
+  assert.match(text(), /Exterior|exterior/);
+  assert.match(text(), /Saved locally · upload pending/);
+  rows[0].uploadedAt = Date.now(); rows[0].state = 'failed'; rows[0].error = 'Proposal could not synchronize.';
+  await act(async () => { for (const listener of listeners) listener(); }); await settle();
+  assert.match(text(), /Uploaded · proposal needs attention/);
+  assert.match(text(), /Proposal could not synchronize/);
+  rows[0].state = 'synced'; rows[0].error = '';
+  remote = [{ id: 'tech_photo-1', jobId: 'job-one' }];
+  await act(async () => { for (const listener of listeners) listener(); }); await settle();
+  assert.match(text(), /Reference proposal submitted · check Property Profile/);
+  assert.equal(tree.root.findAll(node => node.type === 'Image' && node.props.accessibilityLabel === 'Selected job photo').length, 0);
+  assert.equal(progressEvents.at(-1).count, 1);
+});
+
 test('camera permission denial is actionable and never launches the native camera', async () => {
   permission = { granted: false }; await render(); await press('Take photo');
   assert.equal(calls.length, 0); assert.equal(saves.length, 0);

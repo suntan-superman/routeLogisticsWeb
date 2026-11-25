@@ -9,6 +9,7 @@ import { getClaims } from '../services/tenancy';
 import { useTheme } from '../theme/ThemeProvider';
 import { Card, SectionHeader, PrimaryButton, SecondaryButton, FormField, InlineNotice, StatusBadge } from './MobileUI';
 import { useJobResourceRefresh } from '../services/useJobResources';
+import NoteAudience from './NoteAudience';
 
 const applicationFields = { product: 'Product', targetPest: 'Target pest', amount: 'Quantity', unit: 'Unit', epaRegNo: 'EPA registration', areaTreated: 'Area treated', method: 'Method', applicatorLicense: 'Applicator license', notes: 'Application notes' };
 const emptyApplication = () => Object.fromEntries(Object.keys(applicationFields).map(key => [key, '']));
@@ -41,7 +42,7 @@ const noteDraftForJob = (draft, job) => {
   return Number.isFinite(server) && Number.isFinite(saved) && server > saved ? null : draft;
 };
 
-export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyChange, onLocalSave, onProgressChange, draftActionsRef, showNavigation = true, readOnly = false, active = true, onVisitSectionLayout, onVisitEditorOpened, section = 'all' }) {
+export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyChange, onLocalSave, onProgressChange, draftActionsRef, showNavigation = true, readOnly = false, criticalPending = false, active = true, onVisitSectionLayout, onVisitEditorOpened, section = 'all' }) {
   const { palette } = useTheme();
   const [notes, setNotes] = useState(() => workNotes(job)), [dirty, setDirty] = useState(false), [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
@@ -213,12 +214,14 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
   };
   const openVisit = type => {
     if (lock.current || !allowWork || visitDraft) return;
+    if (criticalPending && type !== 'access-blocked') { reportError('Acknowledge the current critical alert before recording normal work.', true); return; }
     visitAttempt.current = null; setVisitAttempted(false); setError('');setVisitSaveError(''); setNotice('');
     const draft={ type, note: '', includeLocation: false, operationId: Crypto.randomUUID(), occurredAt:new Date().toISOString() };draftState.current.visitDraft=draft;setVisitDraft(draft);
   };
   const saveVisit = () => {
     const draft=draftState.current.visitDraft;
     if (!draft) return Promise.resolve(false);
+    if (criticalPending && draft.type !== 'access-blocked') { reportError('Acknowledge the current critical alert before recording normal work.', true); return Promise.resolve(false); }
     const note = draft.note.trim();
     if (note.length > 1000 || (draft.type === 'access-blocked' && !note)) { reportError(draft.type === 'access-blocked' && !note ? 'Describe why the property could not be accessed before recording this visit.' : 'Visit notes must be at most 1,000 characters.',true); return Promise.resolve(false); }
     return perform(async (selected, ticket) => {
@@ -323,8 +326,8 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
     {!!notice && <InlineNotice tone={noticeTone} message={notice} />}
     {showNavigation && !!destination && <SecondaryButton title="Navigate to job" icon="navigate-outline" onPress={() => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`).catch(failure => setError(failure.message || 'Navigation could not open. Check your map application.'))} />}
     {(section === 'all' || section === 'arrival') && allowWork && ['scheduled', 'en-route'].includes(job.status) && <Card><SectionHeader title="Work progress" subtitle="Update your progress as you travel and begin the visit." />
-      {job.status === 'scheduled' && <PrimaryButton title="Mark en route" busy={busy} onPress={() => save({ status: 'en-route' })} />}
-      <SecondaryButton title="Start work" busy={busy} onPress={() => save({ status: 'in-progress' })} />
+      {job.status === 'scheduled' && <PrimaryButton title="Mark en route" busy={busy} disabled={criticalPending} onPress={() => save({ status: 'en-route' })} />}
+      <SecondaryButton title="Start work" busy={busy} disabled={criticalPending} onPress={() => save({ status: 'in-progress' })} />
     </Card>}
     {(section === 'all' || section === 'arrival' || section === 'departure') && <View onLayout={onVisitSectionLayout}><Card><SectionHeader title={section === 'arrival' ? 'Arrival' : section === 'departure' ? 'Departure' : 'Visit record'} subtitle="Arrival and departure reports are separate from job status. GPS evidence does not verify property access." />
       {visitsLoading && <Text accessibilityLiveRegion="polite" style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Refreshing visit record…</Text>}
@@ -343,13 +346,13 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
       <SecondaryButton title="Refresh visit record" disabled={busy || visitsLoading} onPress={loadVisits} />
       {!!visitSaveError&&<InlineNotice tone="error" message={visitSaveError}/>}
       {allowWork && (!visitDraft ? <View style={{ gap: 14 }}>
-        {(section === 'arrival' ? ['arrived'] : section === 'departure' ? ['departed'] : ['arrived','departed']).map(type=><VisitAction key={type} type={type} event={type==='arrived'?arrivalRecord:departureRecord} awaitingDeparture={type==='departed'&&!!arrivalRecord&&!departureRecord} busy={busy} loading={visitsLoading} historyError={visitsError} cached={visitsCached}
+        {(section === 'arrival' ? ['arrived'] : section === 'departure' ? ['departed'] : ['arrived','departed']).map(type=><VisitAction key={type} type={type} event={type==='arrived'?arrivalRecord:departureRecord} awaitingDeparture={type==='departed'&&!!arrivalRecord&&!departureRecord} busy={busy || criticalPending} loading={visitsLoading} historyError={visitsError} cached={visitsCached}
           onPress={()=>openVisit(type)} onRepeat={()=>openVisit(type)}/>)}
         {section !== 'departure' && <SecondaryButton title="Couldn't access property" disabled={busy} onPress={() => openVisit('access-blocked')} />}
       </View> : <View style={{ gap: 12 }}>
         <SectionHeader title={visitLabels[visitDraft.type]} subtitle={visitDraft.type === 'access-blocked' ? 'A reason is required. Describe what prevented access.' : 'Add an optional note about this visit.'} />
         {['arrived','departed'].includes(visitDraft.type)&&<VisitAction type={visitDraft.type} pending busy={busy} readOnly/>}
-        <FormField label="Visit note" value={visitDraft.note} maxLength={1000} onChangeText={value => {const draft={...draftState.current.visitDraft,note:value};draftState.current.visitDraft=draft;setVisitDraft(draft);}} editable={!busy && !visitAttempted} multiline />
+        <NoteAudience /><FormField label="Visit note" value={visitDraft.note} maxLength={1000} onChangeText={value => {const draft={...draftState.current.visitDraft,note:value};draftState.current.visitDraft=draft;setVisitDraft(draft);}} editable={!busy && !visitAttempted} multiline />
         <Pressable accessibilityRole="checkbox" accessibilityLabel="Include current GPS" accessibilityState={{ checked: visitDraft.includeLocation, disabled: busy || visitAttempted }} disabled={busy || visitAttempted}
           onPress={() => {const draft={...draftState.current.visitDraft,includeLocation:!draftState.current.visitDraft.includeLocation};draftState.current.visitDraft=draft;setVisitDraft(draft);}}
           style={{ minHeight: 48, paddingVertical: 12, flexDirection: 'row', gap: 10, alignItems: 'center' }}>
@@ -365,7 +368,7 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
       {!!noteStorageError&&<InlineNotice tone="error" message={noteStorageError}/>}
       <Text accessibilityLiveRegion="polite" style={{color:['failed','conflict','storage-failed'].includes(noteState?.state)?palette.danger:palette.secondary,fontSize:13,lineHeight:21}}>{notesLoading?'Restoring saved work notes…':({saving:'Saving on device…',draft:'Saved on device — draft retained. Select Save work notes to queue synchronization.',pending:'Saved on device — waiting to sync',syncing:'Synchronizing work notes',synced:'Saved to server',failed:'Synchronization failed — retry required',conflict:'Conflict — management attention required. Your work notes are retained.','storage-failed':'Work notes are not saved on device. Retry before leaving.'}[noteState?.state]||'Work notes are separate from dispatcher job instructions.')}</Text>
       {!!noteState?.error&&<InlineNotice tone="error" message={noteState.error}/>}
-      {allowWork ? <><FormField label="Work notes" value={notes} maxLength={10000} onChangeText={value=>{void persistNotes(value).catch(()=>{});}} editable={!busy} multiline />
+      {allowWork ? <><NoteAudience /><FormField label="Work notes" value={notes} maxLength={10000} onChangeText={value=>{void persistNotes(value).catch(()=>{});}} editable={!busy} multiline />
         {noteStorageError&&<SecondaryButton title="Retry saving notes on device" disabled={busy} onPress={()=>{const draft=noteRetry.current;if(draft)void persistNotes(draft.text,{editedAt:draft.editedAt,increment:false}).catch(()=>{});else void restoreNotes();}}/>}
         <SecondaryButton title="Save work notes" disabled={!dirty} busy={busy} onPress={saveNotes} />
         {noteState?.state==='failed'&&noteState.operationId&&<SecondaryButton title="Retry work-note synchronization" disabled={busy} onPress={()=>perform(async()=>{await resolveOffline(noteState.operationId,'retry');await restoreNotes();})}/>}
@@ -380,7 +383,7 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
         {!!record.syncState && <StatusBadge syncState={record.syncState} />}{!!record.error && <InlineNotice tone="error" message={record.error} />}
       </View>)}
       {allowWork && (!form ? <SecondaryButton title="Record product application" icon="add-outline" disabled={busy} onPress={() => { setError('');const application=emptyApplication();draftState.current.form=application;setForm(application); }} /> : <View style={{ gap: 12 }}>
-        {Object.entries(applicationFields).map(([key, label]) => <FormField key={key} label={label} value={form[key]} onChangeText={value => {const application={...draftState.current.form,[key]:value};draftState.current.form=application;setForm(application);}} editable={!busy} multiline={key === 'notes'} keyboardType={key === 'amount' ? 'decimal-pad' : 'default'} />)}
+        {Object.entries(applicationFields).map(([key, label]) => <React.Fragment key={key}>{key === 'notes' && <NoteAudience />}<FormField label={label} value={form[key]} onChangeText={value => {const application={...draftState.current.form,[key]:value};draftState.current.form=application;setForm(application);}} editable={!busy} multiline={key === 'notes'} keyboardType={key === 'amount' ? 'decimal-pad' : 'default'} /></React.Fragment>)}
         <PrimaryButton title="Save application" busy={busy} onPress={()=>saveApplication()} /><SecondaryButton title="Cancel application" disabled={busy} onPress={() => {draftState.current.form=null;setForm(null); setError('');}} />
       </View>)}
     </Card>}

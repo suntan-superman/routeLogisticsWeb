@@ -8,7 +8,7 @@ const { propertyProfileHandler } = require('../functions/propertyProfile');
 const { jobPhotoHandler } = require('../functions/jobPhotos');
 
 let app, db;
-const id = `property-profile-${process.pid}`, owner = `${id}-owner`, tech = `${id}-tech`, manager = `${id}-manager`;
+const id = `property-profile-${process.pid}`, owner = `${id}-owner`, tech = `${id}-tech`, otherTech = `${id}-other-tech`, manager = `${id}-manager`;
 const customerId = `${id}-customer`, otherCustomerId = `${id}-other`, jobId = `${id}-job`;
 const files = new Map(), bucket = { file: path => ({ save: async bytes => { files.set(path, bytes); }, getMetadata: async () => [{ size: files.get(path)?.length || 4, contentType: 'image/jpeg' }], download: async () => [files.get(path) || Buffer.from([0xff, 0xd8, 0xff, 0xd9])] }) };
 const api = () => propertyProfileHandler(db, () => bucket);
@@ -18,11 +18,13 @@ before(async () => {
   app = initializeApp({ projectId: 'demo-routelogistics' }, `property-profile-${process.pid}`); db = getFirestore(app);
   await db.doc(`companies/${id}`).set({ ownerId: owner, name: 'Synthetic only' });
   await db.doc(`teamMembers/${tech}`).set({ uid: tech, companyId: id, role: 'technician', status: 'active' });
+  await db.doc(`teamMembers/${otherTech}`).set({ uid: otherTech, companyId: id, role: 'technician', status: 'active' });
   await db.doc(`teamMembers/${manager}`).set({ uid: manager, companyId: id, role: 'manager', status: 'active' });
   await db.doc(`customers/${customerId}`).set({ companyId: id, name: 'Synthetic person', serviceProperties: [{ id: 'home', label: 'Home', address: '10 Example Street', accessInstructions: 'Gate A', alerts: [{ id: 'alert-1', version: 1, active: true, severity: 'critical', title: 'Gate', description: 'Check lock' }] }, { id: 'office', label: 'Office', address: '20 Example Street', alerts: [] }] });
   await db.doc(`customers/${otherCustomerId}`).set({ companyId: 'other-company', name: 'Other', serviceProperties: [{ id: 'home', address: '30 Example Street' }] });
   await db.doc(`jobs/${jobId}`).set({ companyId: id, customerId, servicePropertyId: 'home', assignedTo: tech, status: 'completed', serviceType: 'Synthetic service', date: '2030-01-02', actualWorkDone: 'Internal completed work' });
   await db.doc(`jobs/${id}-office`).set({ companyId: id, customerId, servicePropertyId: 'office', assignedTo: tech, status: 'completed', date: '2030-01-03' });
+  await db.doc(`jobs/${id}-other-tech`).set({ companyId: id, customerId, servicePropertyId: 'home', assignedTo: otherTech, status: 'scheduled', date: '2030-01-05' });
   await db.doc(`jobs/${id}-ambiguous`).set({ companyId: id, customerId, address: '10 Example Street', assignedTo: tech, status: 'completed', date: '2030-01-04' });
   await db.doc(`photos/${id}-job-photo`).set({ companyId: id, jobId, customerId, storagePath: `rlJobPhotos/${id}/${jobId}/evidence.jpg` });
   await db.doc(`serviceLogs/${id}-material`).set({ companyId: id, jobId, customerId, product: 'Synthetic material', amount: 2, unit: 'oz', areaTreated: 'Rear yard', method: 'Spot', applicationDate: '2030-01-02' });
@@ -31,7 +33,7 @@ after(async () => {
   const cleanup = async collection => { const rows = await db.collection(collection).get(); for (const row of rows.docs) if (row.id.startsWith(id)) await row.ref.delete(); };
   for (const collection of ['customers', 'jobs', 'photos', 'serviceLogs', 'rlAudit', 'rlRateLimits']) await cleanup(collection);
   const refs = await db.collection(`customers/${customerId}/rlPropertyReferences`).get(); for (const row of refs.docs) await row.ref.delete();
-  await db.doc(`teamMembers/${tech}`).delete(); await db.doc(`teamMembers/${manager}`).delete(); await db.doc(`companies/${id}`).delete();
+  await db.doc(`teamMembers/${tech}`).delete(); await db.doc(`teamMembers/${otherTech}`).delete(); await db.doc(`teamMembers/${manager}`).delete(); await db.doc(`companies/${id}`).delete();
   await deleteApp(app);
 });
 
@@ -59,6 +61,9 @@ test('job evidence reuse is proposed, approved by management, and retained after
   const handler = api(), operationId = 'property-photo-proposal-01';
   const proposed = await handler(request({ action: 'propose', jobId, photoId: `${id}-job-photo`, operationId, category: 'entrance', caption: 'Gate', }, 'technician'));
   assert.equal(proposed.photo.status, 'proposed');
+  assert.equal((await handler(request({ action: 'listPhotos', jobId }, 'technician'))).photos.some(row => row.id === proposed.photo.id && row.status === 'proposed'), true);
+  const otherRequest = data => ({ ...request({ action: 'listPhotos', jobId: `${id}-other-tech`, ...data }, 'technician'), auth: { uid: otherTech, token: { companyId: id, role: 'technician', membershipId: otherTech, email_verified: true, email: 'other@example.test' } } });
+  assert.equal((await handler(otherRequest())).photos.some(row => row.id === proposed.photo.id), false);
   const deletePhoto = jobPhotoHandler(db, () => ({ file: () => ({ delete: async () => { throw Error('Referenced evidence must not be deleted.'); } }) }));
   await assert.rejects(deletePhoto(request({ action: 'delete', photoId: `${id}-job-photo` })), /also a property reference/i);
   assert.equal((await handler(request({ action: 'propose', jobId, photoId: `${id}-job-photo`, operationId, category: 'entrance' }, 'technician'))).photo.id, proposed.photo.id);
@@ -67,11 +72,17 @@ test('job evidence reuse is proposed, approved by management, and retained after
   assert.match((await handler(request({ action: 'readPhoto', photoId: proposed.photo.id }, 'manager'))).dataUri, /^data:image\/jpeg;base64,/);
   await assert.rejects(handler(request({ action: 'approve', jobId, photoId: proposed.photo.id }, 'technician')), /role does not allow/i);
   await handler(request({ action: 'approve', photoId: proposed.photo.id }, 'manager'));
+  assert.equal((await handler(otherRequest())).photos.some(row => row.id === proposed.photo.id && row.status === 'approved'), true);
   assert.match((await handler(request({ action: 'readPhoto', jobId, photoId: proposed.photo.id }, 'technician'))).dataUri, /^data:image\/jpeg;base64,/);
   await handler(request({ action: 'archive', photoId: proposed.photo.id }, 'manager'));
   await assert.rejects(deletePhoto(request({ action: 'delete', photoId: `${id}-job-photo` })), /also a property reference/i);
   assert.equal((await db.doc(`photos/${id}-job-photo`).get()).exists, true);
   assert.equal((await handler(request({ action: 'listPhotos' }))).photos[0].status, 'archived');
+  const rejected = await handler(request({ action: 'propose', jobId, photoId: `${id}-job-photo`, operationId: 'property-photo-proposal-02', category: 'exterior' }, 'technician'));
+  assert.equal((await handler(request({ action: 'archive', photoId: rejected.photo.id }, 'manager'))).status, 'rejected');
+  assert.equal((await handler(request({ action: 'archive', photoId: rejected.photo.id }, 'manager'))).status, 'rejected');
+  assert.equal((await handler(request({ action: 'listPhotos', jobId }, 'technician'))).photos.some(row => row.id === rejected.photo.id && row.status === 'rejected'), true);
+  assert.equal((await handler(otherRequest())).photos.some(row => row.id === rejected.photo.id), false);
 });
 
 test('management upload uses private tenant path and cannot be read across properties', async () => {

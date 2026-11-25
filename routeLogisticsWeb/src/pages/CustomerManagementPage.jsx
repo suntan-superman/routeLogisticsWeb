@@ -20,12 +20,14 @@ import toast from 'react-hot-toast';
 import CustomerImport from '../components/CustomerImport';
 import CustomerSmsConsent from '../components/CustomerSmsConsent';
 import AddressValidationNotice from '../components/AddressValidationNotice';
+import NoteVisibilityBadge from '../components/NoteVisibilityBadge';
 import { canManage, can } from '../services/tenancy';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useWorkspaceQuery, useInvalidateWorkspace } from '../hooks/useWorkspaceQuery';
 import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 import InquiryWorkspace from '../components/InquiryWorkspace';
 import CustomerLifecycleControl from '../components/CustomerLifecycleControl';
+import PropertyProfile from '../components/PropertyProfile';
 import { lifecycleLabel } from '../services/inquiryService';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../services/firebase';
@@ -723,7 +725,7 @@ const CustomerManagementPage = () => {
                 
                 <div>
                   <label className="mb-4 flex gap-2 text-sm"><input type="checkbox" checked={customerData.emailConsent === true} onChange={(e) => handleInputChange('emailConsent', e.target.checked)} />Customer has consented to invoice reminder emails</label>
-                  <label className="block text-sm font-medium text-gray-700">Notes</label>
+                  <label className="block text-sm font-medium text-gray-700">Notes <NoteVisibilityBadge audience="management" /></label>
                   <textarea
                     value={customerData.notes}
                     onChange={(e) => handleInputChange('notes', e.target.value)}
@@ -855,7 +857,7 @@ const CustomerManagementPage = () => {
                 
                 <div>
                   <label className="mb-4 flex gap-2 text-sm"><input type="checkbox" checked={customerData.emailConsent === true} onChange={(e) => handleInputChange('emailConsent', e.target.checked)} />Customer has consented to invoice reminder emails</label>
-                  <label className="block text-sm font-medium text-gray-700">Notes</label>
+                  <label className="block text-sm font-medium text-gray-700">Notes <NoteVisibilityBadge audience="management" /></label>
                   <textarea
                     value={customerData.notes}
                     onChange={(e) => handleInputChange('notes', e.target.value)}
@@ -903,7 +905,7 @@ const CustomerManagementPage = () => {
       {/* View Customer Modal */}
       {showViewModal && selectedCustomer && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+          <div className="relative top-20 mx-auto w-full max-w-2xl rounded-md border bg-white p-5 shadow-lg">
             <div className="mt-3">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium text-gray-900">Customer Details</h3>
@@ -975,13 +977,14 @@ const CustomerManagementPage = () => {
                     </div>
                     {selectedCustomer.notes && (
                       <div>
-                        <dt className="text-sm font-medium text-gray-500">Notes</dt>
+                        <dt className="text-sm font-medium text-gray-500">Notes <NoteVisibilityBadge audience="management" /></dt>
                         <dd className="text-sm text-gray-900">{selectedCustomer.notes}</dd>
                       </div>
                     )}
                   </dl>
                 </div>
               </div>
+              <PropertyProfile customerId={selectedCustomer.id} canManage={can('customers.manage')} />
               {canManage() && <CustomerSmsConsent key={selectedCustomer.id} customer={selectedCustomer} />}
               {canManage() && <CustomerPortalAccess key={`portal-${selectedCustomer.id}`} customer={selectedCustomer} />}
               {can('customers.manage') && <CustomerLifecycleControl key={selectedCustomer.id} customer={selectedCustomer} onSaved={retainCustomer} />}

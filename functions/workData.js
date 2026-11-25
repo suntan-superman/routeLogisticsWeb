@@ -10,6 +10,7 @@ const { buildInitialPlan } = require('./recurring');
 const { prepareAssignmentException, commitAssignmentException, summary: exceptionSummary } = require('./jobExceptions');
 const { appointmentPatch, isEstimateVisit } = require('./shared/appointments');
 const { propertyFor, lifecycleFor, customerArchived } = require('./shared/customerLifecycle');
+const { alertsForJob, propertyIdForJob, missingCriticalAcknowledgments } = require('./shared/operationalAlerts');
 const { prepareAppointmentLinks, commitAppointmentLinks } = require('./appointmentLinks');
 const { summarizeManagementAttention } = require('./shared/managementAttention');
 const { checkCompanyCreation, recordCompanyCreation } = require('./companyRegistration');
@@ -43,7 +44,7 @@ function projectJob(id, data, role) {
   // Keep the editable technician work log separate; legacy mobile clients still
   // receive their workNotes through the notes alias below.
   const dispatchNotes = typeof data.notes === 'string' ? data.notes : '';
-  const operational = { reassignmentRequest: exceptionSummary(data.reassignmentRequest), ...(data.visitEvidence && typeof data.visitEvidence === 'object' ? { visitEvidence: pick(data.visitEvidence, ['arrivedAt','departedAt','accessBlockedAt','lastEventAt','lastEventType']) } : {}) };
+  const operational = { operationalAlerts: Array.isArray(data.operationalAlerts) ? data.operationalAlerts : [], reassignmentRequest: exceptionSummary(data.reassignmentRequest), ...(data.visitEvidence && typeof data.visitEvidence === 'object' ? { visitEvidence: pick(data.visitEvidence, ['arrivedAt','departedAt','accessBlockedAt','lastEventAt','lastEventType']) } : {}), ...(hasCapability(role, 'dispatch.manage') && data.schedulingAttention ? { schedulingAttention: pick(data.schedulingAttention, ['code', 'reason', 'suggestedDate']) } : {}) };
   if (role === 'owner' || role === 'admin') return { ...data, ...operational, dispatchNotes, id, updatedAt: version(data.updatedAt) };
   const property = data.serviceProperty && typeof data.serviceProperty === 'object' ? { serviceProperty: pick(data.serviceProperty, ['address', 'formattedAddress', 'postalCode', 'latitude', 'longitude', 'validated', 'source', 'unit', 'label', 'propertyId', 'accessInstructions']) } : {};
   const area = hasCapability(role, 'jobs.schedule') && data.serviceAreaEligibility ? { serviceAreaEligibility: pick(data.serviceAreaEligibility, ['status', 'settingsRevision', 'serviceCategory', 'purpose', 'checkedAt', 'exceptionId', 'continuedFromServicePlan']) } : {};
@@ -71,9 +72,10 @@ async function jobFor(db, scope, id) {
 function withCustomerLocation(data, customer) {
   const property = servicePropertySite(data);
   if (property) data = { ...data, ...property };
-  if (!customer) return data;
+  if (!customer) return { ...data, operationalAlerts: alertsForJob({ id: data.id, ...data }, null) };
   const address = typeof customer.address === 'string' ? customer.address : customer.address?.street || customer.address?.line1;
   return { ...data, customerName: data.customerName || customer.name || [customer.firstName, customer.lastName].filter(Boolean).join(' '), customerPhone: data.customerPhone || customer.phone || customer.phoneNumber || '',
+    operationalAlerts: alertsForJob({ id: data.id, ...data }, customer),
     ...(!property && !data.address ? { address: address || '', city: customer.city || customer.address?.city || '', state: customer.state || customer.address?.state || '', zipCode: customer.zipCode || customer.address?.zipCode || '', ...coordinates(customer) } : {}) };
 }
 function workDataHandlers(db, config = {}) {
@@ -128,7 +130,7 @@ function workDataHandlers(db, config = {}) {
           if (!ownJob(job.data())) throw new HttpsError('permission-denied', 'This job is not assigned to you.');
           const customer = job.get('customerId') ? await db.doc(`customers/${documentId(job.get('customerId'))}`).get() : null;
           const sameCustomer = customer?.exists && (scope.companyId ? customer.get('companyId') === scope.companyId : !customer.get('companyId') && customer.get('userId') === scope.uid);
-          return { job: projectJob(job.id, personalIdentity(withCustomerLocation(job.data(), sameCustomer ? customer.data() : null)), scope.role), customer: sameCustomer ? projectCustomer(customer.id, customer.data(), scope.role) : null };
+          return { job: projectJob(job.id, personalIdentity(withCustomerLocation({ id: job.id, ...job.data() }, sameCustomer ? customer.data() : null)), scope.role), customer: sameCustomer ? projectCustomer(customer.id, customer.data(), scope.role) : null };
         }
         let query = scoped(db, resource, scope);
         if (scope.role === 'technician') query = query.where('assignedTo', '==', scope.memberId);
@@ -148,13 +150,13 @@ function workDataHandlers(db, config = {}) {
           else query = query.startAfter(documentId(data.after));
         }
         const rows = await query.limit(maximum + 1).get();
-        const scanned = rows.docs.slice(0, maximum), page = scanned.filter(row => ownJob(row.data())), customerIds = [...new Set(page.filter(row => !row.get('address') && typeof row.get('customerId') === 'string').map(row => row.get('customerId')))];
+        const scanned = rows.docs.slice(0, maximum), page = scanned.filter(row => ownJob(row.data())), customerIds = [...new Set(page.filter(row => typeof row.get('customerId') === 'string').map(row => row.get('customerId')))];
         const customers = new Map();
         for (let offset = 0; offset < customerIds.length; offset += 100) {
           const records = await db.getAll(...customerIds.slice(offset, offset + 100).map(id => db.doc(`customers/${documentId(id)}`)));
           records.filter(row => row.exists && (scope.companyId ? row.get('companyId') === scope.companyId : !row.get('companyId') && row.get('userId') === scope.uid)).forEach(row => customers.set(row.id, row.data()));
         }
-        return { jobs: page.map(row => projectJob(row.id, personalIdentity(withCustomerLocation(row.data(), customers.get(row.get('customerId')))), scope.role)), hasMore: rows.size > maximum, lastDoc: scanned.at(-1)?.id || null };
+        return { jobs: page.map(row => projectJob(row.id, personalIdentity(withCustomerLocation({ id: row.id, ...row.data() }, customers.get(row.get('customerId')))), scope.role)), hasMore: rows.size > maximum, lastDoc: scanned.at(-1)?.id || null };
       }
       if (resource === 'customers') {
         if (scope.role === 'technician') {
@@ -272,12 +274,17 @@ function workDataHandlers(db, config = {}) {
           customer = await tx.get(db.doc(`customers/${documentId(patch.customerId || customerId)}`));
           if (!customerInScope(customer, scope)) throw new HttpsError('permission-denied', 'Choose a customer in this workspace.');
         }
+        if (patch.status === 'completed' && !customer && (patch.customerId || existing.get('customerId')) && propertyIdForJob({ ...existing.data(), ...patch })) {
+          customer = await tx.get(db.doc(`customers/${documentId(patch.customerId || existing.get('customerId'), 'customer')}`));
+          if (!customerInScope(customer, scope)) throw new HttpsError('permission-denied', 'The service property is unavailable.');
+        }
         if (saveCustomerAddress) {
           await assertAddressActor(tx, scope);
           if (customerVersion(customer.get('updatedAt')) !== customerVersion(data.expectedCustomerVersion)) throw new HttpsError('aborted', 'The customer changed. Refresh it before saving the permanent address change.');
         }
         await serviceAreas.assertCurrent(tx, area);
         const before = existing.data() || {};
+        if (patch.status === 'completed' && before.status !== 'completed') patch.operationalAlertSnapshot = alertsForJob({ id: ref.id, ...before, ...patch, status: before.status || 'scheduled' }, customer?.data());
         if (before.status === 'cancelled' && patch.status && patch.status !== 'cancelled') throw new HttpsError('failed-precondition', 'A cancelled appointment remains in history. Schedule a new appointment instead of reactivating it.');
         if (action === 'delete') {
           if (isEstimateVisit(before)) throw new HttpsError('failed-precondition', 'Cancel the estimate appointment to preserve its inquiry and visit history.');
@@ -288,6 +295,7 @@ function workDataHandlers(db, config = {}) {
         if ((action === 'cancel' || patch.status === 'cancelled') && ['in-progress', 'completed'].includes(before.status)) throw new HttpsError('failed-precondition', `A ${before.status} appointment cannot be cancelled.`);
         const slot = await scheduling.prepare(tx, scope, action === 'delete' ? null : { ...before, ...patch }, { before, jobId: ref.id, reviewStartedWork: data.reviewStartedWork === true });
         if (action !== 'delete' && (!slot.skipped || action === 'create' || action === 'assign')) Object.assign(patch, { assignedTo: slot.assignedTo || null, assignedToName: slot.assignedToName || null, assignedToUid: slot.assignedToUid || null, assignmentNeedsAttention: !slot.assignedTo, assignmentReview: slot.assignedTo ? null : 'This visit needs a technician assignment.' });
+        if (before.schedulingAttention && !slot.skipped && (patch.date && patch.date !== before.date || patch.time && patch.time !== before.time || patch.estimatedDuration != null && String(patch.estimatedDuration) !== String(before.estimatedDuration ?? before.duration ?? 1))) Object.assign(patch, { schedulingAttention: null, rescheduleRequired: false });
         const exceptionChange = action !== 'delete' ? await prepareAssignmentException(tx, db, scope, ref.id, before, { ...before, ...patch }) : null;
         if (exceptionChange) patch.reassignmentRequest = null;
         const links = action === 'delete' ? null : await prepareAppointmentLinks(db, tx, scope, { jobId: ref.id, before, next: { ...before, ...patch }, create: action === 'create', directoryVersion: directoryCustomer?.updateTime });
@@ -351,10 +359,11 @@ function workDataHandlers(db, config = {}) {
           if (previous.get('fingerprint') !== fingerprint) throw new HttpsError('already-exists', 'This operation ID was already used for different application details.');
           return { id: ref.id };
         }
+        if ((await missingCriticalAcknowledgments(db, tx, job.id, job.data(), scope.companyId, scope.uid)).length) throw new HttpsError('failed-precondition', 'Acknowledge the current critical property or job alert before recording normal work.');
         const customer = job.get('customerId') ? await tx.get(db.doc(`customers/${documentId(job.get('customerId'))}`)) : null;
         const customerInScope = customer?.exists && (scope.companyId ? customer.get('companyId') === scope.companyId : !customer.get('companyId') && customer.get('userId') === scope.uid);
         const site = withCustomerLocation(job.data(), customerInScope ? customer.data() : null);
-        tx.create(ref, { ...fields, fingerprint, userId: scope.uid, ...(scope.companyId ? { companyId: scope.companyId } : {}), jobId: job.id, customerId: job.get('customerId') || null, customerName: site.customerName || '', siteAddress: [site.address, site.city, site.state, site.zipCode].filter(value => typeof value === 'string' && value).join(', '), applicationDate: job.get('date') || '', applicatorName: request.auth.token.name || request.auth.token.email || '', createdAt: new Date().toISOString() });
+        tx.create(ref, { ...fields, fingerprint, userId: scope.uid, ...(scope.companyId ? { companyId: scope.companyId } : {}), jobId: job.id, customerId: job.get('customerId') || null, servicePropertyId: job.get('servicePropertyId') || job.get('serviceProperty')?.propertyId || null, customerName: site.customerName || '', siteAddress: [site.address, site.city, site.state, site.zipCode].filter(value => typeof value === 'string' && value).join(', '), applicationDate: job.get('date') || '', applicatorName: request.auth.token.name || request.auth.token.email || '', createdAt: new Date().toISOString() });
         return { id: ref.id };
       });
     },

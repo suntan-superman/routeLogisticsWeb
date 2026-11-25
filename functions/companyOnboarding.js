@@ -12,14 +12,16 @@ const validZone = value => {
 const allowedDays = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
 function cleanBusinessHours(input) {
   const businessHours = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
-  return Object.fromEntries(allowedDays.map(day => {
+  const closedDates = businessHours.closedDates === undefined ? [] : businessHours.closedDates;
+  if (!Array.isArray(closedDates) || closedDates.length > 100 || closedDates.some(value => typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T12:00:00Z`)) || new Date(`${value}T12:00:00Z`).toISOString().slice(0, 10) !== value)) throw new HttpsError('invalid-argument', 'Choose up to 100 valid company closed dates.');
+  return { ...Object.fromEntries(allowedDays.map(day => {
     const value = businessHours[day] || { closed: ['saturday', 'sunday'].includes(day), open: '09:00', close: '17:00' };
     const validTime = time => typeof time === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time);
     const open = validTime(value.open) ? value.open : '';
     const close = validTime(value.close) ? value.close : '';
     if (!value.closed && (!open || !close || open >= close)) throw new HttpsError('invalid-argument', `Choose valid opening and closing times for ${day}.`);
     return [day, { closed: value.closed === true, open, close }];
-  }));
+  })), closedDates: [...new Set(closedDates)].sort() };
 }
 function cleanInvites(input) {
   if (!Array.isArray(input)) return [];

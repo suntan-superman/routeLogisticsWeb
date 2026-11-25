@@ -18,6 +18,7 @@ const {
 const { FieldValue } = require('firebase-admin/firestore');
 const { availabilityRef, availabilityView, assertAvailable } = require('./staffAvailability');
 const { servicePropertySite } = require('./serviceAreaWorkflows');
+const { missingCriticalAcknowledgments } = require('./shared/operationalAlerts');
 const { staffIdentity } = require('./scheduling');
 const ms = value => value?.toMillis ? value.toMillis() : value instanceof Date ? value.getTime() : typeof value === 'string' ? Date.parse(value) : NaN;
 const iso = value => Number.isFinite(ms(value)) ? new Date(ms(value)).toISOString() : null;
@@ -678,6 +679,10 @@ function workTrackingHandlers(db, legacy, {
           };
         }
         if (['completed', 'cancelled','canceled'].includes(job.get('status'))) fail('job-closed', 'This job is closed. Its history is available, but new events cannot be added.');
+        if (type === 'arrived' || type === 'departed') {
+          const missing = await missingCriticalAcknowledgments(db, tx, jobId, job.data(), staff.company.id, staff.uid);
+          if (missing.length) throw new HttpsError('failed-precondition', 'Acknowledge the current critical property or job alert before recording normal work.');
+        }
         const currentVersion=iso(job.get('updatedAt')) || job.get('updatedAt') || null;
         const assignmentChanged = durable && (job.get('assignedTo') || null) !== payload.expectedAssignee,
           revisionChanged = durable && currentVersion !== expectedVersion,

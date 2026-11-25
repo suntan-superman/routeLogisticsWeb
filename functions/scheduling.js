@@ -2,6 +2,8 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { documentId, hash, rateLimit, normalizeEmail, validEmail } = require('./security');
 const { requireCapability, checkJob, hasCapability } = require('./access');
 const { availabilityRef, availabilityView, unavailableIntervals } = require('./staffAvailability');
+const { checkAssignment } = require('./qualifications');
+const { operatingSlot, nextOpenSlot } = require('./companyOperatingHours');
 
 const DAY = 1440, MAX_ROWS = 5000, MAX_PLANS = 5000;
 const TERMINAL = new Set(['completed', 'cancelled', 'canceled', 'deleted', 'archived']);
@@ -47,7 +49,7 @@ function changedSchedule(before, next) {
   if (!next || !busy(next)) return !!before.assignedTo && busy(before);
   if (!next.assignedTo) return !!before.assignedTo;
   const durationKey = value => { const raw = value.estimatedDuration ?? value.duration ?? 1; return Number.isFinite(Number(raw)) ? Number(raw) : String(raw); };
-  return !busy(before) || ['date', 'time', 'assignedTo'].some(key => String(before[key] ?? '') !== String(next[key] ?? '')) || durationKey(before) !== durationKey(next);
+  return !busy(before) || ['date', 'time', 'assignedTo', 'serviceCategory', 'serviceType'].some(key => String(before[key] ?? '') !== String(next[key] ?? '')) || durationKey(before) !== durationKey(next);
 }
 function conflictRows(rows, assignee, candidate, excludeJobId) {
   if (!assignee) return [];
@@ -60,7 +62,7 @@ function conflictRows(rows, assignee, candidate, excludeJobId) {
     return [{ jobId: row.id, date: row.date, time: typeof row.time === 'string' ? row.time : '', endTime: clock(occupied.end), endDate: dayDate(Math.floor(occupied.end / DAY)), ...(row.kind ? { kind: row.kind } : {}), ...(unknown ? { unknown: true } : {}) }];
   }).slice(0, 20);
 }
-function alternatives(rows, assignee, candidate, { searchDays = 14, window = DEFAULT_WINDOW, allowedWeekdays, excludeJobId, limit = 6, unavailable = [] } = {}) {
+function alternatives(rows, assignee, candidate, { searchDays = 14, window = DEFAULT_WINDOW, allowedWeekdays, excludeJobId, limit = 6, unavailable = [], company } = {}) {
   const startDay = Math.floor(candidate.start / DAY), startMinute = clockMinutes(window.start), endMinute = clockMinutes(window.end), permitted = new Set(allowedWeekdays || window.days);
   const result = [];
   for (let day = startDay; day < startDay + searchDays && result.length < limit; day++) {
@@ -68,6 +70,7 @@ function alternatives(rows, assignee, candidate, { searchDays = 14, window = DEF
     const first = Math.ceil(Math.max(startMinute, day === startDay ? candidate.start - day * DAY : 0) / 15) * 15;
     for (let minute = first; minute + candidate.durationMinutes <= endMinute && result.length < limit; minute += 15) {
       const possible = { start: day * DAY + minute, end: day * DAY + minute + candidate.durationMinutes };
+      if (!operatingSlot(company, { date: dayDate(day), time: clock(minute), estimatedDuration: candidate.durationMinutes / 60 }).open) continue;
       if (possible.start === candidate.start || conflictRows(rows, assignee, possible, excludeJobId).length || unavailable.some(span => overlaps(possible, span))) continue;
       result.push({ date: dayDate(day), time: clock(minute) });
     }
@@ -201,7 +204,7 @@ function schedulingHandlers(db) {
     const rows = withReservations(loaded, person, options), unavailable = unavailableIntervals(person?.availability, environment(context).timeZone);
     const periods = unavailable.filter(span => overlaps(candidate, span));
     const conflicts = [...periods.map(span => ({ kind: 'availability', date: dayDate(Math.floor(span.start / DAY)), time: clock(span.start), endTime: clock(span.end), endDate: dayDate(Math.floor(span.end / DAY)), reason: span.reason })), ...conflictRows(rows, person, candidate, options.jobId)].slice(0, 20);
-    return { memberId: person?.id || null, available: !conflicts.length, reason: periods.length ? `This staff member is marked unavailable (${periods[0].reason}) during this appointment.` : conflicts.some(row => row.unknown) ? 'An existing appointment has incomplete time or duration. Review it before assigning this technician.' : conflicts.length ? 'The technician already has scheduled work at that time.' : 'The technician has no overlapping scheduled work or unavailable periods.', conflicts, alternatives: conflicts.length ? alternatives(rows, person, candidate, { ...options, unavailable, window: environment(context).workWindow, excludeJobId: options.jobId }) : [], ...environment(context) };
+    return { memberId: person?.id || null, available: !conflicts.length, reason: periods.length ? `This staff member is marked unavailable (${periods[0].reason}) during this appointment.` : conflicts.some(row => row.unknown) ? 'An existing appointment has incomplete time or duration. Review it before assigning this technician.' : conflicts.length ? 'The technician already has scheduled work at that time.' : 'The technician has no overlapping scheduled work or unavailable periods.', conflicts, alternatives: conflicts.length ? alternatives(rows, person, candidate, { ...options, unavailable, company: context.company, window: environment(context).workWindow, excludeJobId: options.jobId }) : [], ...environment(context) };
   }
   async function withAvailability(tx, scope, person) {
     if (!person || !scope.companyId) return person;
@@ -209,9 +212,15 @@ function schedulingHandlers(db) {
     return { ...person, availability: (await read(tx, availabilityRef(db, scope.companyId, person.uid))).data() };
   }
   async function prepare(tx, scope, next, options = {}) {
-    const before = options.before || {}, context = await actor(tx, scope), changed = options.force === true || changedSchedule(before, next);
+    const before = options.before || {}, context = await actor(tx, scope);
+    const calendarChanged = !!next && Object.keys(before).length > 0 && busy(next) && (before.date !== next.date || before.time !== next.time || String(before.estimatedDuration ?? before.duration ?? 1) !== String(next.estimatedDuration ?? next.duration ?? 1));
+    const changed = options.force === true || changedSchedule(before, next) || calendarChanged;
     if (next && before.status === 'in-progress' && String(before.assignedTo || '') !== String(next.assignedTo || '') && options.reviewStartedWork !== true) throw new HttpsError('failed-precondition', 'Review the work already started and explicitly acknowledge it before changing this assignment.', { reviewStartedWorkRequired: true });
-    if (!changed) return { assignedTo: next?.assignedTo || null, assignedToUid: next?.assignedTo ? before.assignedToUid || null : null, assignedToName: next?.assignedTo ? before.assignedToName || '' : '', available: true, locks: [], skipped: true, scope };
+    if (!changed && Object.keys(before).length) return { assignedTo: next?.assignedTo || null, assignedToUid: next?.assignedTo ? before.assignedToUid || null : null, assignedToName: next?.assignedTo ? before.assignedToName || '' : '', available: true, locks: [], skipped: true, scope };
+    if (next && busy(next)) {
+      const operating = operatingSlot(context.company, next);
+      if (!operating.open) throw failure(`${operating.reason} Choose an open service date and time before assigning or rescheduling.`, { schedulingAttention: { code: operating.code, suggestedDate: nextOpenSlot(context.company, next) } });
+    }
     let old;
     if (before.assignedTo) try { old = await resolve(tx, scope, before.assignedTo, { ...context, allowLegacy: true, relaxed: true }); } catch { old = { uid: before.assignedTo }; }
     if (!next?.assignedTo || !busy(next)) {
@@ -219,6 +228,8 @@ function schedulingHandlers(db) {
       return { assignedTo: target?.id || next?.assignedTo || null, assignedToUid: next?.assignedTo ? target?.uid || before.assignedToUid || old?.uid || null : null, assignedToName: target?.name || (next?.assignedTo ? before.assignedToName || old?.name || '' : ''), available: true, locks: await locks(tx, scope, [old]), scope };
     }
     const person = await withAvailability(tx, scope, await resolve(tx, scope, next.assignedTo, { ...context, allowLegacy: before.assignedTo === next.assignedTo }));
+    const qualification = await checkAssignment(db, tx, scope, person, next, context.company);
+    if (!qualification.eligible) throw failure(`Qualification required: ${qualification.missing.join('; ')}.`, { missingQualifications: qualification.missing });
     const candidate = interval(next), lockRows = await locks(tx, scope, [old, person]);
     const settings = reservationOptions(next, before, { ...searchOptions(options), ...options });
     const loaded = await loadRows(tx, scope, candidate, settings), result = resultFor(loaded, person, candidate, context, settings);
@@ -228,6 +239,15 @@ function schedulingHandlers(db) {
   async function choose(tx, scope, job, options = {}) {
     const context = await actor(tx, scope), fallback = options.assignmentFallback || 'unassigned';
     if (!['unassigned', 'auto'].includes(fallback)) throw new HttpsError('invalid-argument', 'Choose a valid technician fallback.');
+    const operating = operatingSlot(context.company, job);
+    if (!operating.open) {
+      const suggestedDate = nextOpenSlot(context.company, job);
+      return { assignedTo: null, assignedToUid: null, assignedToName: '', available: false,
+        assignmentNeedsAttention: true, rescheduleRequired: true, locks: [], scope,
+        schedulingAttention: { code: operating.code, reason: operating.reason, suggestedDate },
+        assignmentReview: `${operating.reason} This recurring visit remains on its original date and needs management rescheduling.`,
+      };
+    }
     let preferred, old, unavailable = false;
     if (options.preferredTechnicianId) try { preferred = await resolve(tx, scope, options.preferredTechnicianId, context); } catch (error) { if (error.code !== 'failed-precondition') throw error; unavailable = true; }
     if (preferred && options.preferredTechnicianUid && options.preferredTechnicianUid !== preferred.uid) { preferred = null; unavailable = true; }
@@ -240,10 +260,12 @@ function schedulingHandlers(db) {
     let last;
     for (const person of candidates) {
       const current = await withAvailability(tx, scope, person);
+      const qualification = await checkAssignment(db, tx, scope, current, job, context.company);
+      if (!qualification.eligible) { last = { reason: `Qualification required: ${qualification.missing.join('; ')}.`, missingQualifications: qualification.missing }; continue; }
       const result = resultFor(loaded, current, candidate, context, settings); last = result;
       if (result.available) return { ...result, assignedTo: person.id, assignedToUid: person.uid, assignedToName: person.name, memberUnavailable: unavailable, assignmentReview: null, assignmentNeedsAttention: false, assignmentFallbackUsed: !preferred || person.uid !== preferred.uid, locks: allLocks.filter(row => [old?.uid, person.uid].includes(row.uid)), scope };
     }
-    return { ...(last || {}), assignedTo: null, assignedToUid: null, assignedToName: '', available: false, memberUnavailable: unavailable, assignmentReview: 'No eligible technician is available at this time. Dispatcher assignment is needed.', assignmentNeedsAttention: true, locks: allLocks.filter(row => row.uid === old?.uid), scope };
+    return { ...(last || {}), assignedTo: null, assignedToUid: null, assignedToName: '', available: false, memberUnavailable: unavailable, assignmentReview: last?.missingQualifications?.length ? `Qualification required: ${last.missingQualifications.join('; ')}. Choose a qualified technician.` : 'No eligible technician is available at this time. Dispatcher assignment is needed.', assignmentNeedsAttention: true, locks: allLocks.filter(row => row.uid === old?.uid), scope };
   }
   function commit(tx, prepared) {
     for (const lock of prepared?.locks || []) tx.set(lock.ref, { ...(prepared.scope.companyId ? { companyId: prepared.scope.companyId } : { userId: prepared.scope.uid }), technicianUid: lock.uid, revision: lock.revision + 1, updatedAt: new Date().toISOString() });
@@ -258,18 +280,22 @@ function schedulingHandlers(db) {
       const context = await actor(null, scope), action = data.action || 'check';
       if (action === 'roster') return { technicians: await Promise.all((await roster(null, scope, context)).map(async person => ({ id: person.id, name: person.name, email: person.email, role: person.role, fieldWorkEnabled: person.fieldWorkEnabled !== false, availability: availabilityView((await withAvailability(null, scope, person))?.availability) }))), ...environment(context) };
       if (action !== 'check') throw new HttpsError('invalid-argument', 'Choose an availability check or technician roster.');
-      const options = searchOptions(data), job = { date: data.date, time: data.time, estimatedDuration: data.estimatedDuration, assignedTo: data.memberId || null };
+      const options = searchOptions(data), job = { date: data.date, time: data.time, estimatedDuration: data.estimatedDuration, assignedTo: data.memberId || null, serviceCategory: data.serviceCategory || '', serviceType: data.serviceType || '' };
       const candidate = interval(job); let before;
-      if (data.jobId) { const snap = await db.doc(`jobs/${documentId(data.jobId, 'job')}`).get(); checkJob(scope, snap.data()); before = snap.data(); options.jobId = snap.id; }
+      if (data.jobId) { const snap = await db.doc(`jobs/${documentId(data.jobId, 'job')}`).get(); checkJob(scope, snap.data()); before = snap.data(); options.jobId = snap.id; job.serviceCategory ||= before.serviceCategory || ''; job.serviceType ||= before.serviceType || ''; }
       if (data.servicePlanId) {
         const plan = await db.doc(`servicePlans/${documentId(data.servicePlanId, 'service plan')}`).get();
         if (!plan.exists || (scope.companyId ? plan.get('companyId') !== scope.companyId : plan.get('companyId') || plan.get('userId') !== scope.uid) || before && before.servicePlanId !== plan.id) throw new HttpsError('permission-denied', 'Choose a service plan from this appointment’s workspace.');
         options.excludeServicePlanId = plan.id;
       }
+      const operating = operatingSlot(context.company, job);
+      if (!operating.open) return { memberId: job.assignedTo, available: false, reason: operating.reason, conflicts: [{ kind: operating.code, date: job.date, time: job.time, reason: operating.reason }], alternatives: [], schedulingAttention: { code: operating.code, suggestedDate: nextOpenSlot(context.company, job) }, ...environment(context) };
       if (!job.assignedTo) return { memberId: null, available: true, reason: 'No technician selected. The appointment will remain unassigned.', conflicts: [], alternatives: [], ...environment(context) };
       let person;
       try { person = await resolve(null, scope, job.assignedTo, { ...context, allowLegacy: before?.assignedTo === job.assignedTo }); }
       catch (error) { if (error.code !== 'failed-precondition') throw error; return { memberId: job.assignedTo, ...error.details.scheduling, ...environment(context) }; }
+      const qualification = await checkAssignment(db, null, scope, person, job, context.company);
+      if (!qualification.eligible) return { memberId: person.id, available: false, reason: `Qualification required: ${qualification.missing.join('; ')}.`, missingQualifications: qualification.missing, conflicts: [], alternatives: [], ...environment(context) };
       const loaded = await loadRows(null, scope, candidate, options);
       return resultFor(loaded, await withAvailability(null, scope, person), candidate, context, reservationOptions(job, before, options));
     },

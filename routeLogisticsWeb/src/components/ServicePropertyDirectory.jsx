@@ -3,6 +3,8 @@ import toast from 'react-hot-toast';
 import SelectControl from './SelectControl';
 import AddressValidationNotice from './AddressValidationNotice';
 import ServicePropertyEligibility from './ServicePropertyEligibility';
+import OperationalAlerts from './OperationalAlerts';
+import NoteVisibilityBadge from './NoteVisibilityBadge';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspaceQuery, useInvalidateWorkspace } from '../hooks/useWorkspaceQuery';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
@@ -47,6 +49,7 @@ export default function ServicePropertyDirectory({ customerId, value = '', onSel
     {query.error && <p role="alert" className="text-sm text-red-800">{query.error.message} <button type="button" className="underline" onClick={() => query.refetch()}>Retry properties</button></p>}
     {selected?.accessInstructions && <p className="whitespace-pre-wrap text-sm text-gray-700"><strong>Property access:</strong> {selected.accessInstructions}</p>}
     {selected?.validationWarning && <p role="status" className="rounded bg-amber-50 p-3 text-sm text-amber-900">{selected.validationWarning}</p>}
+    {selected && <OperationalAlerts key={`${customerId}:${selected.id}`} target="property" customerId={customerId} propertyId={selected.id} initialAlerts={selected.alerts || []} canManage={allowEditing && !locked && !disabled} />}
     {query.data && !rows.length && <p className="text-sm text-gray-600">No service property is saved yet. Add the location where work will take place.</p>}
     {locked && <p className="text-xs text-gray-600">This appointment uses the inquiry’s saved customer and property. Update the inquiry first to choose a different property.</p>}
     {allowEditing && !locked && query.data && !editor && <div className="flex flex-wrap gap-3"><button type="button" disabled={disabled} className="text-sm text-primary-700 underline" onClick={() => start(null)}>Add service property</button>{selected && <button type="button" disabled={disabled} className="text-sm text-primary-700 underline" onClick={() => start(selected)}>Edit selected property</button>}</div>}
@@ -55,7 +58,7 @@ export default function ServicePropertyDirectory({ customerId, value = '', onSel
       {!addressEditing && <button type="button" disabled={busy} className="text-sm text-primary-700 underline" onClick={() => setAddressEditing(true)}>Enable Editing</button>}
       <label className="block text-sm font-medium">Property address<input aria-label="Property address" className={field} value={draft.address} disabled={busy || !addressEditing} maxLength={278} onChange={event => change('address', event.target.value)} /></label>
       <label className="block text-sm font-medium">Unit / suite<input aria-label="Property unit" className={field} value={draft.unit} disabled={busy} maxLength={100} onChange={event => change('unit', event.target.value)} /></label>
-      <label className="block text-sm font-medium">Access instructions<textarea aria-label="Property access instructions" className={field} value={draft.accessInstructions} disabled={busy} maxLength={2000} rows={2} onChange={event => change('accessInstructions', event.target.value)} /></label>
+      <label className="block text-sm font-medium">Access instructions <NoteVisibilityBadge audience="internal" /><textarea aria-label="Property access instructions" className={field} value={draft.accessInstructions} disabled={busy} maxLength={2000} rows={2} onChange={event => change('accessInstructions', event.target.value)} /></label>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.isPrimary} disabled={busy} onChange={event => change('isPrimary', event.target.checked)} />Primary service property</label>
       <p className="text-xs text-gray-600">Google checks new or changed addresses when saving. Existing appointments retain their recorded property.</p>
       {company?.id && <div className="space-y-3"><button type="button" className="text-sm text-primary-700 underline" disabled={busy} aria-expanded={coverageOpen} onClick={() => setCoverageOpen(value => !value)}>Check coverage / owner exception</button>{coverageOpen && <ServicePropertyEligibility companyId={company.id} serviceCategories={company.serviceCategories || []} fixedProperty purpose="scheduling" disabled={busy} value={{ address: draft.address, serviceCategory: draft.serviceCategory, exceptionId: draft.exceptionId }} onChange={next => { if (!saving.current) setDraft(previous => ({ ...previous, serviceCategory: next.serviceCategory, exceptionId: next.exceptionId || null })); }} />}</div>}

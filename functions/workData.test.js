@@ -25,6 +25,16 @@ test('customer service instructions remain available while private customer note
   assert.equal(view.serviceInstructions, 'Keep the gate closed'); assert.equal(view.notes, undefined); assert.equal(view.invoiceBalance, undefined); assert.equal(view.history, undefined);
 });
 
+test('closed-day scheduling reason reaches management without leaking private metadata to technicians', () => {
+  const job = { status: 'scheduled', date: '2030-01-06', rescheduleRequired: true, schedulingAttention: { code: 'closed-day', reason: 'Company closed on Sunday', suggestedDate: '2030-01-07', privateNote: 'PRIVATE' } };
+  for (const role of ['owner', 'admin', 'manager']) {
+    const view = projectJob('held-job', job, role);
+    assert.equal(view.schedulingAttention.suggestedDate, '2030-01-07');
+    if (role === 'manager') assert.equal(view.schedulingAttention.privateNote, undefined);
+  }
+  assert.equal(projectJob('held-job', job, 'technician').schedulingAttention, undefined);
+});
+
 
 test('safe reassignment and original visit-time summaries reach field and management without private metadata',()=>{
   const data={departureExceptionReason:'Customer requested an immediate departure.',reassignmentRequest:{id:'request',status:'pending',revision:1,reason:'vehicle',notes:'Cannot travel',requestedAt:'2030-01-01T00:00:00Z',requestedBy:'tech',assignmentUid:'private-identity'},visitEvidence:{arrivedAt:'2030-01-01T00:00:00Z',lastEventType:'arrival',latitude:35,privateNote:'PRIVATE'}};

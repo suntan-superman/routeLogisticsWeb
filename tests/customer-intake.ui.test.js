@@ -54,6 +54,7 @@ function load(relative) {
     if (name.endsWith('/workspaceApi')) return { callWorkspace: rpc };
     if (name.endsWith('/customerService')) return { __esModule: true, default: { getCustomer: async () => ({ success: true, customer }) } };
     if (name.endsWith('/JobFormModal')) return { __esModule: true, default: props => { env.schedule = props; return React.createElement('aside', null, 'Estimate scheduler'); } };
+    if (name.endsWith('/OperationalAlerts')) return { __esModule: true, default: () => null };
     if (name.startsWith('.')) { const next = path.resolve(path.dirname(file), name); return load(path.relative(path.resolve(__dirname, '../routeLogisticsWeb/src'), path.extname(next) ? next : fs.existsSync(next + '.jsx') ? next + '.jsx' : next + '.js')); }
     throw Error('Unexpected intake dependency ' + name);
   };

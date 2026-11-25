@@ -13,6 +13,7 @@ const team = [{ id: 'tech-one', name: 'First technician' }, { id: 'tech-two', na
 const importer = name => {
   if (name === 'react') return React;
   if (name.endsWith('/AppointmentKindBadge')) return { __esModule: true, default: () => null };
+  if (name.endsWith('/NoteVisibilityBadge')) return { __esModule: true, default: ({ audience }) => React.createElement('span', { 'aria-label': audience === 'management' ? 'Management only' : audience === 'customer' ? 'Customer-facing' : 'Internal — management and assigned technicians' }) };
   if (name.endsWith('/appointmentKind')) return { isEstimateVisit: job => job?.appointmentKind === 'estimate_visit', estimateOutcomeLabel: () => '' };
   if (name.endsWith('/JobWorkDetails')) { const value = { exports: {} }; new Function('React', 'require', 'module', 'exports', transformSync(fs.readFileSync(path.resolve(__dirname, '../routeLogisticsWeb/src/components/JobWorkDetails.jsx'), 'utf8'), { loader: 'jsx', format: 'cjs' }).code)(React, importer, value, value.exports); return value.exports; }
   if (name.endsWith('/useWorkspaceQuery')) return hooks;
@@ -28,7 +29,7 @@ const importer = name => {
   if (name.endsWith('/utils/routePlanning')) return { googleNavigation: () => '' };
   if (name.endsWith('/utils/dispatchMap')) return { addressKey: String, mapPoint: () => null, createDispatchAddressResolver: () => ({ snapshot: () => ({ pending: 0, failed: 0 }) }) };
   if (name.endsWith('/services/maps')) return { loadMaps: async () => { throw Error('No provider calls are allowed.'); } };
-  if (['/JobPhotos', '/ServiceChecklist', '/TeamLocationStatus', '/StaffAvailabilityEditor'].some(suffix => name.endsWith(suffix)) || name === './RoutesPage') return { __esModule: true, default: () => null };
+  if (['/JobPhotos', '/ServiceChecklist', '/TeamLocationStatus', '/StaffAvailabilityEditor', '/OperationalAlerts', '/PropertyProfile'].some(suffix => name.endsWith(suffix)) || name === './RoutesPage') return { __esModule: true, default: () => null };
   if (name.endsWith('/workspaceApi')) return {
     readWorkspace: async () => ({ jobs: env.jobs, hasMore: false }),
     callWorkspace: async (name, data) => {
@@ -67,6 +68,14 @@ test('dispatch exception counts and filters are derived without changing any can
   await click('Overdue (1)'); assert.equal(cards().length, 1); assert.match(cards()[0], /Overdue/);
   await click('Reassignment requested (1)'); assert.equal(cards().length, 1); assert.match(cards()[0], /Requested/);
   assert.match(content(), /No arrival confirmed does not prove absence/); assert.deepEqual(env.jobs, before); assert.equal(env.calls.length, 0);
+});
+test('closed recurring visit shows its original obligation and a nonautomatic management suggestion', async () => {
+  env.jobs[0] = base('Closed visit', { assignedTo: null, assignmentNeedsAttention: true, rescheduleRequired: true, assignmentReview: 'The company is closed on Sunday. This recurring visit remains on its original date and needs management rescheduling.', schedulingAttention: { code: 'closed-day', suggestedDate: '2026-11-17' } });
+  await mount();
+  assert.match(content(), /The company is closed on Sunday/);
+  assert.match(content(), /Possible company-open date: 2026-11-17/);
+  assert.match(content(), /Check the customer, technician and property before rescheduling/);
+  assert.equal(env.calls.length, 0);
 });
 test('manager resolution sends the current request/job revisions and explanation without changing assignment or status', async () => {
   await mount(); await click('Requested · Synthetic service'); assert.match(content(), /Vehicle problem/); assert.match(content(), /service vehicle needs assistance/);

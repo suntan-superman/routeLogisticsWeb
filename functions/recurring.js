@@ -40,7 +40,7 @@ function buildInitialPlan(scope, job, settings = {}) {
     userId: scope.uid, ...(scope.companyId ? { companyId: scope.companyId } : {}),
     customerId: documentId(job.customerId, 'customer'),
     customerName: String(job.customerName || '').trim().slice(0, 200), customerPhone: String(job.customerPhone || '').trim().slice(0, 100),
-    serviceType: String(job.serviceType || 'Service').trim().slice(0, 200), notes: String(job.notes || '').trim().slice(0, 3000),
+    serviceType: String(job.serviceType || 'Service').trim().slice(0, 200), serviceCategory: String(job.serviceCategory || '').trim().slice(0, 200), notes: String(job.notes || '').trim().slice(0, 3000),
     address: job.serviceProperty?.address || job.address || '', ...storedGeometry(job), ...(servicePropertySite(job) || {}),
     time, estimatedDuration: planDuration(job.estimatedDuration ?? job.duration), price, active: true,
     recurrence, frequencyDays: frequencyDaysForRule(recurrence), nextServiceDate: nextRecurrenceDate(recurrence, job.date),
@@ -111,7 +111,7 @@ async function generateVisit(db, id, expectedDate, authorize = async () => {}, o
     const job = {
       userId: plan.userId, ...(plan.companyId ? { companyId: plan.companyId } : {}),
       customerId: plan.customerId, customerName: plan.customerName || customer.get('name') || '',
-      customerPhone: plan.customerPhone || '', address: plan.serviceProperty?.address || plan.address || '', serviceType: plan.serviceType || 'Service',
+      customerPhone: plan.customerPhone || '', address: plan.serviceProperty?.address || plan.address || '', serviceType: plan.serviceType || 'Service', serviceCategory: plan.serviceCategory || '',
       ...storedGeometry(plan),
       ...(servicePropertySite(plan) || {}),
       ...(plan.serviceAreaEligibility ? { serviceAreaEligibility: { ...plan.serviceAreaEligibility, continuedFromServicePlan: id } } : {}),
@@ -127,7 +127,7 @@ async function generateVisit(db, id, expectedDate, authorize = async () => {}, o
         scope = { companyId: plan.companyId || null, uid: company ? company.get('ownerId') : plan.userId, role: 'owner', ...(company ? { company } : {}) };
       }
       selected = await scheduling.choose(tx, scope, job, { ...assignmentSettings(plan), preferredTechnicianUid: plan.preferredTechnicianUid || null, system: !options.scope, jobId: jobRef.id, servicePlanId: id, occurrenceDate: date });
-      Object.assign(job, { assignedTo: selected.assignedTo || null, assignedToName: selected.assignedToName || '', assignedToUid: selected.assignedToUid || null, assignmentNeedsAttention: selected.assignmentNeedsAttention === true, ...(selected.assignmentReview ? { assignmentReview: selected.assignmentReview } : {}) });
+      Object.assign(job, { assignedTo: selected.assignedTo || null, assignedToName: selected.assignedToName || '', assignedToUid: selected.assignedToUid || null, assignmentNeedsAttention: selected.assignmentNeedsAttention === true, ...(selected.assignmentReview ? { assignmentReview: selected.assignmentReview } : {}), ...(selected.schedulingAttention ? { schedulingAttention: selected.schedulingAttention, rescheduleRequired: true } : {}) });
       scheduling.commit(tx, selected);
       tx.create(jobRef, job);
     }

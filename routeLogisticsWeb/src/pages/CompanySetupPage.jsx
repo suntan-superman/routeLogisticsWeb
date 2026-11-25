@@ -18,6 +18,7 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import ServiceAreasSettings from '../components/ServiceAreasSettings';
 import BillingSettingsPanel from '../components/BillingSettingsPanel';
 import CompanyLogoField from '../components/CompanyLogoField';
+import QualificationSettings from '../components/QualificationSettings';
 import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
 import { workspaceAccessError } from '../services/workspaceQueryPolicy';
 import { formatPhone, displayPhone } from '../utils/format';
@@ -421,6 +422,7 @@ const CompanySetupForm = () => {
                 )}
               </div>
             </div>
+            <QualificationSettings company={company} mode="services" />
           </div>
         );
 
@@ -510,6 +512,7 @@ const CompanySetupForm = () => {
                 )}
               </div>
             </div>
+            <QualificationSettings company={company} mode="team" />
           </div>
         );
 
@@ -584,7 +587,7 @@ const CompanySetupForm = () => {
 
   if (companyId && !company && loadError) return <section className="rounded border bg-white p-6"><p role="alert">{loadError}</p><button type="button" className="btn-secondary mt-3" onClick={loadCompanyData}>Retry company settings</button></section>;
 
-  if (company && !isOwner) return <div className="space-y-6"><div className="rounded-lg border bg-white p-6"><h1 className="text-2xl font-bold">{company.businessName || company.name}</h1><p className="mt-3">{role === 'admin' ? 'Administrators can review validated company setup sections. Team invitations and ownership remain owner-managed.' : 'Company settings and invitations are managed by the owner.'}</p>{role === 'admin' && <a className="btn-primary mt-4 inline-flex" href="/company-setup/review">Review Company Setup</a>}</div>{['admin', 'manager'].includes(role) && <ServiceAreasSettings company={company} />}</div>;
+  if (company && !isOwner) return <div className="space-y-6"><div className="rounded-lg border bg-white p-6"><h1 className="text-2xl font-bold">{company.businessName || company.name}</h1><p className="mt-3">{role === 'admin' ? 'Administrators can review validated company setup sections. Team invitations and ownership remain owner-managed.' : 'Company settings and invitations are managed by the owner.'}</p>{role === 'admin' && <a className="btn-primary mt-4 inline-flex" href="/company-setup/review">Review Company Setup</a>}</div>{['admin', 'manager'].includes(role) && <><ServiceAreasSettings company={company} /><QualificationSettings company={company} mode="all" /></>}</div>;
 
   return (
     <Motion.div

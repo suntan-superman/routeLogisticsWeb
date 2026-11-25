@@ -27,6 +27,7 @@ function compile(relative) {
   const module = { exports: {} };
   const mock = name => {
     if (name === 'react') return React;
+    if (name.endsWith('/NoteVisibilityBadge')) return { __esModule: true, default: ({ audience }) => React.createElement('span', { 'aria-label': audience === 'management' ? 'Management only' : audience === 'customer' ? 'Customer-facing' : 'Internal — management and assigned technicians' }) };
     if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
     if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
     if(name.endsWith('/workspaceQueryPolicy'))return{workspaceAccessError:error=>['permission-denied','unauthenticated','not-found','workspace-changed'].includes(String(error?.code||'').split('/').pop())};

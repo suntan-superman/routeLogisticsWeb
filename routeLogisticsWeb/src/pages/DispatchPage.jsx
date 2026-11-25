@@ -7,8 +7,10 @@ import { STATUS_COLORS, scheduleWarning, jobPosition, jobAddress } from '../util
 import { googleNavigation } from '../utils/routePlanning';
 import RoutesPage from './RoutesPage';
 import JobPhotos from '../components/JobPhotos';
+import PropertyProfile from '../components/PropertyProfile';
 import ServiceChecklist from '../components/ServiceChecklist';
 import JobWorkDetails from '../components/JobWorkDetails';
+import OperationalAlerts from '../components/OperationalAlerts';
 import AppointmentKindBadge from '../components/AppointmentKindBadge';
 import TeamLocationStatus from '../components/TeamLocationStatus';
 import StaffAvailabilityEditor from '../components/StaffAvailabilityEditor';
@@ -177,8 +179,10 @@ export default function DispatchPage() {
         <button className="font-semibold underline" onClick={event => openDetails(job, event.currentTarget)}>{job.customerName || 'Customer'} · {job.serviceType}</button><div><AppointmentKindBadge job={job} outcome /></div><p>{job.time || 'Time not set'} · {job.status} · {jobAddress(job) || 'Service address not set'}</p>
         {scheduleWarning(job, now, company?.timeZone) && <p className="text-amber-800">{scheduleWarning(job, now, company?.timeZone)} · schedule-based, not a traffic prediction</p>}
         <ExceptionIndicators value={exceptions.get(job.id)} />
+        {!!job.operationalAlerts?.filter(alert => alert.active && ['critical', 'important'].includes(alert.severity)).length && <p role="status" className="text-sm font-semibold text-amber-800">⚠ {job.operationalAlerts.filter(alert => alert.active && ['critical', 'important'].includes(alert.severity)).length} important or critical alert(s) · Open job details to review</p>}
         <label>Assigned to <SelectControl aria-label={`Assign ${job.customerName || job.id}`} className="rounded border-gray-300" value={job.assignedTo || ''} disabled={busy || !can('jobs.assign')} onChange={e => assign(job, e.target.value)}><option value="">Unassigned</option>{job.assignedTo && !assignableTeam.some(row => row.id === job.assignedTo) && <option value={job.assignedTo} disabled>{job.assignedToName || team.find(row => row.id === job.assignedTo)?.name || 'Previously assigned technician'} (review assignment)</option>}{assignableTeam.map(row => <option value={row.id} key={row.id}>{row.name}</option>)}</SelectControl></label>
         {job.assignmentNeedsAttention && <p role="status" className="text-sm font-medium text-amber-800">{job.assignmentReview || 'A dispatcher needs to assign this visit.'}</p>}
+        {job.schedulingAttention?.suggestedDate && <p className="text-xs text-amber-800">Possible company-open date: {job.schedulingAttention.suggestedDate}. Check the customer, technician and property before rescheduling.</p>}
         {(jobAddress(job) || position(job)) && <a className="ml-3 underline" href={googleNavigation([{ ...job, address: jobAddress(job), location: position(job) }])} target="_blank" rel="noreferrer">Navigate</a>}
         <button className="ml-3 underline" onClick={() => setNearbyJob(job)}>Find nearby on-duty staff</button>
         {nearbyJob?.id === job.id && <section className="space-y-2 rounded bg-emerald-50 p-3" aria-label="Nearby on-duty staff"><strong>Nearby on-duty staff</strong><p className="text-xs">Approximate straight-line distances from current GPS fixes, not driving time. Office-only, off-duty, overdue and low-accuracy positions are excluded.</p>
@@ -260,6 +264,8 @@ function DispatchJobDetails({ job, onClose, returnFocus, fallbackFocus, destinat
       <div className="mb-5 flex items-start justify-between gap-4"><div><p className="text-sm text-gray-500">Job details</p><h2 id="dispatch-job-title" className="text-xl font-bold">{job.customerName || 'Customer'} · {job.serviceType || 'Service visit'}</h2></div><button ref={close} className="min-h-11 rounded border px-3 py-2" onClick={onClose}>Close details</button></div>
       <div className="space-y-5"><div className="space-y-2 rounded border p-4"><p className="font-semibold" style={{ color: STATUS_COLORS[job.status] || '#374151' }}>Status: {job.status || 'Not set'}</p><p>{job.date} · {job.time || 'Time not set'}</p><p>{jobAddress(job) || 'Service address not set'}</p>{(destination || jobAddress(job)) && <a className="inline-block underline" href={googleNavigation([{ ...job, address: jobAddress(job), location: destination }])} target="_blank" rel="noreferrer">Navigate to service location</a>}</div>
         <JobExceptionReview key={'exception-' + job.id} job={job} value={exceptionState} allowed={canManageRequests} onChanged={onExceptionChanged} onAssign={onAssign} assignmentTeam={assignmentTeam} assigning={assigning} />
+        <OperationalAlerts key={'alerts-' + job.id} target="job" jobId={job.id} initialAlerts={job.operationalAlerts || []} canManage={canManageRequests} />
+        {job.customerId && (job.servicePropertyId || job.serviceProperty?.propertyId) && <PropertyProfile customerId={job.customerId} propertyId={job.servicePropertyId || job.serviceProperty.propertyId} jobId={job.id} canManage={canManageRequests} />}
         <JobWorkDetails key={'work-' + job.id} job={job} allowInquiryLink={canManageRequests} />
         <JobPhotos key={job.id} job={job} /><ServiceChecklist key={'form-' + job.id} job={job} />
       </div>

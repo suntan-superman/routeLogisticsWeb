@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
 import { workspaceAccessError } from '../services/workspaceQueryPolicy';
+import NoteVisibilityBadge from './NoteVisibilityBadge';
 
 const blank = { product: '', epaRegNo: '', activeIngredient: '', amount: '', unit: 'fl oz', targetPest: '', areaTreated: '', method: '', applicatorLicense: '', notes: '' };
 
@@ -87,7 +88,7 @@ const JobApplicationLog = ({ job }) => {
           <label className="text-xs text-gray-600">Area treated<input className={field} value={form.areaTreated} onChange={set('areaTreated')} /></label>
           <label className="text-xs text-gray-600">Method<input className={field} placeholder="spray, bait, dust…" value={form.method} onChange={set('method')} /></label>
           <label className="text-xs text-gray-600">Applicator license no.<input className={field} value={form.applicatorLicense} onChange={set('applicatorLicense')} /></label>
-          <label className="col-span-2 text-xs text-gray-600">Notes<textarea rows={2} className={field} value={form.notes} onChange={set('notes')} /></label>
+          <label className="col-span-2 text-xs text-gray-600">Application notes <NoteVisibilityBadge audience="internal" /><textarea rows={2} className={field} value={form.notes} onChange={set('notes')} /></label>
           <div className="col-span-2 flex justify-end">
             <button disabled={saving || !changed} className="px-4 py-1.5 text-sm bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:opacity-50">
               {saving ? 'Saving…' : 'Save record'}

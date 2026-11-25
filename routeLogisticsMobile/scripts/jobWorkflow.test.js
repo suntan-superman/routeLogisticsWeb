@@ -43,6 +43,8 @@ function load() {
       return { Card: panel, ScreenHeader: panel, SectionHeader: panel, InlineNotice: panel, ConfirmationPanel: panel, ActionDialog: panel, KeyboardAwareScrollView, StatusBadge: ({ status, syncState }) => React.createElement('Text', null, status || syncState) };
     }
     if (specifier === './JobPhotos') return Photos;
+    if (specifier === './PropertyProfileMobile') return props => React.createElement('PropertyProfilePanel', { jobId: props.job.id });
+    if (specifier === './NoteAudience') return () => React.createElement('Text', null, 'Internal — management and assigned technicians');
     if (specifier === './JobReassignmentRequest') return props => {requestProps=props;return null;};
     if (specifier.endsWith('/services/estimateVisitPolicy')) return require('../services/estimateVisitPolicy');
     if (specifier.endsWith('/services/workPresentation')) return require('../services/workPresentation');
@@ -57,7 +59,7 @@ function load() {
       return React.createElement('ServiceChecklist');
     };
     if (specifier.endsWith('/services/jobCompletion')) return { completeJob: async (job, draft, options) => { calls.push({ job, draft, options }); return loader(job, draft, options); } };
-    if (specifier.endsWith('/services/offline')) return { getQueuedOperation: async id => { reads.push(id); return savedRead(id); }, resolveOffline: async (id, action) => { discarded.push({ id, action }); saved.delete(id); } };
+    if (specifier.endsWith('/services/offline')) return { getQueuedOperation: async id => { reads.push(id); return savedRead(id); }, resolveOffline: async (id, action) => { discarded.push({ id, action }); saved.delete(id); }, alertKey: alert => `${alert.source}:${alert.id}:${alert.version}`, readJobAlerts: async (_id, alerts) => ({ alerts, acknowledgments: [], local: [] }), saveAlertAcknowledgmentOffline: async () => ({ state: 'pending' }), subscribeOffline: () => () => {} };
     throw new Error(`Unexpected dependency ${specifier}`);
   };
   const transformed = babel.transformSync(fs.readFileSync(filename, 'utf8'), { filename, configFile: false, babelrc: false, presets: [[require.resolve('babel-preset-expo'), { jsxRuntime: 'classic' }]], plugins: [require.resolve('@babel/plugin-transform-modules-commonjs')] }).code;
@@ -108,6 +110,16 @@ test('guided workflow shows one focused stage, returns after durable saves and r
  await press('Departure');await act(async()=>workProps.onLocalSave('departed',{state:'pending'}));assert.ok(control('Departure, completed, Departure saved'));
  await press('Review and completion');assert.ok(control('Complete Visit'));await press('Back to Visit Workflow');
  await press('Arrival, completed, Arrival saved');assert.equal(workProps.section,'arrival');assert.equal(photoMounts,1);assert.equal(photoUnmounts,0);
+});
+
+test('current critical alert blocks normal stages until a durable local acknowledgment is saved', async () => {
+  const critical = { id: 'gate', source: 'property', version: 2, active: true, severity: 'critical', title: 'Hazard at entry', description: 'Review the full access warning before work.' };
+  await render(job({ operationalAlerts: [critical] }));
+  assert.match(text(), /Hazard at entry/);
+  assert.equal(control('Work details').props.disabled, true);
+  await press('I have read this critical alert');
+  assert.equal(!!control('Work details').props.disabled, false);
+  assert.match(text(), /Acknowledged on device/);
 });
 
 test('workflow view changes use measured stage positions and resume at the active stage',async()=>{
@@ -498,4 +510,14 @@ test('required completion validation stays visible outside the scroll view and p
   await press('Keep editing');
   assert.equal(tree.root.findByProps({ accessibilityLabel: 'Work completed' }).props.value.length, 10001);
   assert.equal(calls.length, 0);
+});
+
+test('assigned property profile returns to the same guided workflow without losing the job', async () => {
+  await render(job({ customerId: 'customer-one', servicePropertyId: 'home' }));
+  await press('Open Property Profile');
+  assert.equal(tree.root.findByProps({ testID: 'job-property-profile' }).type, 'View');
+  assert.equal(tree.root.findByType('PropertyProfilePanel').props.jobId, 'assigned');
+  await press('Back to Visit Workflow');
+  assert.ok(control('Open Property Profile'));
+  assert.equal(tree.root.findAllByType('PropertyProfilePanel').length, 0);
 });

@@ -42,6 +42,7 @@ function load(relative) {
     if (specifier.endsWith('/useUnsavedChanges')) return {useUnsavedChanges:value=>{dirty=value;return {confirmDiscard:async()=>{discardCalls++;return discard;}};}};
     if (specifier.endsWith('/CustomerImport')) return () => React.createElement('aside', null, 'Import customers');
     if (specifier.endsWith('/CustomerSmsConsent')) return () => React.createElement('aside', null, 'SMS consent controls');
+    if (specifier.endsWith('/PropertyProfile')) return () => React.createElement('aside', null, 'Property profile');
     if (specifier === 'firebase/firestore') return { where() {} };
     if (specifier === 'firebase/functions') return { httpsCallable: () => async () => ({ data: { workspace: { status: 'company' } } }) };
     if (specifier.endsWith('/services/firebase')) return { auth: { currentUser: user }, functions: {} };

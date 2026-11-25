@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createManualInvoice, updateInvoice } from '../services/invoiceService';
 import CustomerService from '../services/customerService';
 import { listJobPhotos } from '../services/photoService';
+import NoteVisibilityBadge from './NoteVisibilityBadge';
 
 const blankLine = () => ({ description: '', quantity: 1, unitPrice: 0, discount: 0, kind: 'service' });
 export default function InvoiceEditorDialog({ invoice, onClose, onSaved }) {
@@ -49,8 +50,8 @@ export default function InvoiceEditorDialog({ invoice, onClose, onSaved }) {
         <label className="mt-3 block">Tax rate (%)<input className="input-field mt-1 w-32" type="number" min="0" max="100" step="0.01" disabled={lockedPricing} value={taxRate} onChange={event => setTaxRate(event.target.value)}/></label>
         {pricingChanged && <label className="mt-3 block">Reason for management pricing change<input className="input-field mt-1 w-full" value={reason} onChange={event => setReason(event.target.value)}/></label>}
       </section>
-      <label className="block">Customer-facing service summary<textarea className="input-field mt-1 w-full" value={summary} onChange={event => setSummary(event.target.value)} rows={3}/></label>
-      <label className="block">Payment terms<textarea className="input-field mt-1 w-full" value={terms} onChange={event => setTerms(event.target.value)} rows={2}/></label>
+      <label className="block">Service summary <NoteVisibilityBadge audience="customer" /><textarea className="input-field mt-1 w-full" value={summary} onChange={event => setSummary(event.target.value)} rows={3}/></label>
+      <label className="block">Payment terms <NoteVisibilityBadge audience="customer" /><textarea className="input-field mt-1 w-full" value={terms} onChange={event => setTerms(event.target.value)} rows={2}/></label>
       {!editing && <label className="block">Payment due in days<input className="input-field mt-1 w-32" type="number" min="0" max="365" value={days} onChange={event => setDays(event.target.value)}/></label>}
       {!!photos.length && <fieldset><legend className="font-medium">Optional approved service photos</legend>{photos.map(photo => <label key={photo.id} className="mt-1 flex gap-2"><input type="checkbox" checked={photoIds.includes(photo.id)} onChange={event => setPhotoIds(old => event.target.checked ? [...old, photo.id] : old.filter(id => id !== photo.id))}/>{photo.caption || `Photo recorded ${new Date(photo.createdAt?.seconds * 1000 || Date.now()).toLocaleDateString()}`}</label>)}</fieldset>}
       {error && <p role="alert" className="rounded bg-red-50 p-3 text-red-800">{error}</p>}

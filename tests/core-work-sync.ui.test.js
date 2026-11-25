@@ -33,7 +33,9 @@ function load(relative){
   if(name.endsWith('/components/JobFormModal'))return{__esModule:true,default:JobForm};
   if(name.endsWith('/components/ServiceChecklist'))return{__esModule:true,default:DraftChild};
   if(name.endsWith('/components/JobPhotos')||name.endsWith('/components/JobApplicationLog'))return{__esModule:true,default:()=>null};
+  if(name.endsWith('/components/OperationalAlerts'))return{__esModule:true,default:()=>null};
   if(name.endsWith('/components/JobChangeHistory'))return{__esModule:true,default:()=>null,ModifiedBadge:()=>null};
+  if(name.endsWith('/components/PropertyProfile'))return{__esModule:true,default:()=>null};
   if(name.endsWith('/components/ConfirmProvider'))return{useConfirm:()=>async()=>true};
   if(name.endsWith('/hooks/useUnsavedChanges'))return{useUnsavedChanges:()=>({confirmDiscard:async()=>true})};
   if(name.endsWith('/services/invoiceService'))return{createInvoiceFromJob:async()=>({success:true})};

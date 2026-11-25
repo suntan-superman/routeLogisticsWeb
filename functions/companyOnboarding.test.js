@@ -28,3 +28,10 @@ test('existing-company review accepts only bounded section updates', () => {
   assert.throws(() => reviewSection('services', []), { code: 'invalid-argument' });
   assert.throws(() => reviewSection('unknown', {}), { code: 'invalid-argument' });
 });
+
+test('company closed dates are validated, deduplicated and retained in onboarding and review', () => {
+  const hours = { ...valid.businessHours, closedDates: ['2030-01-06', '2030-01-06', '2030-01-01'] };
+  assert.deepEqual(cleanDraft({ ...valid, businessHours: hours }).businessHours.closedDates, ['2030-01-01', '2030-01-06']);
+  assert.deepEqual(reviewSection('hours', { timeZone: 'America/Los_Angeles', businessHours: hours }).businessHours.closedDates, ['2030-01-01', '2030-01-06']);
+  for (const bad of [['2030-02-30'], ['not-a-date'], Array(101).fill('2030-01-01')]) assert.throws(() => reviewSection('hours', { timeZone: 'America/Los_Angeles', businessHours: { ...hours, closedDates: bad } }), { code: 'invalid-argument' });
+});

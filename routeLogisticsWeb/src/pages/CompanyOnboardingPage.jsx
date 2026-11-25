@@ -23,7 +23,7 @@ const usStates = [
   ['SC','South Carolina'],['SD','South Dakota'],['TN','Tennessee'],['TX','Texas'],['UT','Utah'],['VT','Vermont'],['VA','Virginia'],['WA','Washington'],['WV','West Virginia'],['WI','Wisconsin'],['WY','Wyoming'],
   ['AS','American Samoa'],['GU','Guam'],['MP','Northern Mariana Islands'],['PR','Puerto Rico'],['VI','U.S. Virgin Islands'],
 ];
-const blankHours = Object.fromEntries(days.map(day => [day, { closed: ['saturday','sunday'].includes(day), open: '09:00', close: '17:00' }]));
+const blankHours = { ...Object.fromEntries(days.map(day => [day, { closed: ['saturday','sunday'].includes(day), open: '09:00', close: '17:00' }])), closedDates: [] };
 const freshDraft = user => ({ currentStep: 1, profile: { name: user?.displayName || '', businessName: '', phone: '', address: '', city: '', state: '', zipCode: '', description: '' }, services: [], timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Los_Angeles', businessHours: blankHours, serviceArea: { method: 'zip', radiusMiles: 25, zipCodes: [] }, invites: [], billingSettings: { invoiceCadence: 'manual', reportCadence: 'manual', invoiceAnchorDate: '', reportAnchorDate: '', grouping: 'per_visit', paymentTermsDays: 14, managementApprovalRequired: true, includeApprovedPhotos: false, reportRecipients: [], reportTypes: ['daily_operations','revenue_invoicing'], holidays: [] } });
 const onboardingSteps = ['Company information', 'Owner & verification', 'Team invitations', 'Services provided', 'Hours & service areas', 'Customer import', 'Review & activate'];
 const reviewSteps = ['Company information', 'Owner & access', 'Team', 'Services provided', 'Hours & service areas', 'Customer import', 'Review setup'];
@@ -206,6 +206,7 @@ function ServicesStep({ reviewMode, draft, newService, setNewService, addService
 }
 
 function HoursStep({ reviewMode, draft, change, busy, dirty, save, company }) {
+  const [closedDate, setClosedDate] = useState('');
   const updateDay = (day, field, value) => change(old => ({
     ...old,
     businessHours: {
@@ -231,7 +232,7 @@ function HoursStep({ reviewMode, draft, change, busy, dirty, save, company }) {
           {[draft.timeZone,'America/Los_Angeles','America/Denver','America/Chicago','America/New_York','Pacific/Honolulu','America/Anchorage'].filter((v,i,a) => a.indexOf(v)===i).map(zone => <option key={zone}>{zone}</option>)}
         </SelectControl>
       </label>
-      <p className="text-sm text-gray-600">These hours describe the business. Existing scheduling continues to use technician availability.</p>
+      <p className="text-sm text-gray-600">Recurring visits on closed days or outside these hours stay on their original date for management review. Technician availability is checked separately.</p>
       <button type="button" className="btn-secondary" disabled={busy} onClick={copyMonday}>Copy Monday to weekdays</button>
       <div className="space-y-2">{days.map(day => <div key={day} className="flex flex-wrap items-center gap-3">
         <span className="w-24 capitalize">{day}</span>
@@ -242,6 +243,7 @@ function HoursStep({ reviewMode, draft, change, busy, dirty, save, company }) {
           <TimeSelect label={day + ' closes'} hideLabel className="w-36" value={draft.businessHours[day]?.close || '17:00'} onChange={time => updateDay(day, 'close', time)} />
         </>}
       </div>)}</div>
+      <div className="space-y-2 border-t pt-4"><label className="block text-sm font-medium">Exceptional closed dates</label><div className="flex flex-wrap gap-2"><input aria-label="Add company closed date" type="date" className="input-field" value={closedDate} onChange={event => setClosedDate(event.target.value)} /><button type="button" className="btn-secondary" disabled={!closedDate || busy} onClick={() => { change(old => ({ ...old, businessHours: { ...old.businessHours, closedDates: [...new Set([...(old.businessHours.closedDates || []), closedDate])].sort() } }), true); setClosedDate(''); }}>Add closed date</button></div><div className="flex flex-wrap gap-2">{(draft.businessHours.closedDates || []).map(date => <span key={date} className="rounded border px-2 py-1 text-sm">{date} <button type="button" className="ml-1 text-red-700 underline" aria-label={`Remove closed date ${date}`} onClick={() => change(old => ({ ...old, businessHours: { ...old.businessHours, closedDates: old.businessHours.closedDates.filter(value => value !== date) } }), true)}>Remove</button></span>)}</div></div>
       {reviewMode && <button type="button" className="btn-primary disabled:opacity-50" disabled={busy || !dirty} onClick={save}>Save business hours</button>}
       {!reviewMode && <fieldset className="space-y-3 border-t pt-4">
         <legend className="font-medium">Service area (optional)</legend>

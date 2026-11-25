@@ -27,9 +27,11 @@ import {
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import JobPhotos from '../components/JobPhotos';
+import PropertyProfile from '../components/PropertyProfile';
 import ServiceChecklist from '../components/ServiceChecklist';
 import JobApplicationLog from '../components/JobApplicationLog';
 import JobWorkDetails from '../components/JobWorkDetails';
+import OperationalAlerts from '../components/OperationalAlerts';
 import InvoiceCreationDialog from '../components/InvoiceCreationDialog';
 import AppointmentKindBadge from '../components/AppointmentKindBadge';
 import { isEstimateVisit, estimateOutcomes } from '../utils/appointmentKind';
@@ -642,6 +644,7 @@ const JobManagementPage = () => {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{job.assignedToName || (job.assignedTo ? 'Assigned technician' : 'Unassigned')}</div>
                       {job.assignmentNeedsAttention && <div className="text-xs text-amber-800">Dispatcher review needed</div>}
+                      {job.schedulingAttention?.reason && <div className="text-xs text-amber-800">{job.schedulingAttention.reason}</div>}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {formatCurrency(job.totalCost)}
@@ -749,6 +752,7 @@ const JobManagementPage = () => {
                     <h5 className="text-sm font-medium text-gray-700">Assigned To</h5>
                     <p className="text-sm text-gray-900">{selectedJob.assignedToName || (selectedJob.assignedTo ? 'Assigned technician' : 'Unassigned')}</p>
                     {selectedJob.assignmentNeedsAttention && <p className="text-sm text-amber-800">{selectedJob.assignmentReview || 'Dispatcher review needed'}</p>}
+                    {selectedJob.schedulingAttention?.suggestedDate && <p className="text-sm text-amber-800">Possible company-open date: {selectedJob.schedulingAttention.suggestedDate}. Confirm customer and technician availability before changing the appointment.</p>}
                   </div>
                 </div>
                 
@@ -773,6 +777,8 @@ const JobManagementPage = () => {
                   <p className="text-lg font-semibold text-gray-900">{formatCurrency(selectedJob.totalCost)}</p>
                 </div>}
                 
+                <OperationalAlerts key={`alerts-${selectedJob.id}`} target="job" jobId={selectedJob.id} initialAlerts={selectedJob.operationalAlerts || []} canManage={can('jobs.schedule')} />
+                {selectedJob.customerId && (selectedJob.servicePropertyId || selectedJob.serviceProperty?.propertyId) && <PropertyProfile customerId={selectedJob.customerId} propertyId={selectedJob.servicePropertyId || selectedJob.serviceProperty.propertyId} jobId={selectedJob.id} canManage={can('customers.manage')} />}
                 <JobWorkDetails key={selectedJob.id} job={selectedJob} allowInquiryLink={can('customers.manage')} />
 
                 <JobChangeHistory job={selectedJob} />

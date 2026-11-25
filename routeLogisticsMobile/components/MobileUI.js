@@ -141,6 +141,8 @@ export function JobCard({ job, onPress, featured = false, compact = false }) {
   const title = job.customerName || 'Assigned customer';
   const address = typeof job.serviceProperty?.address === 'string' && job.serviceProperty.address.trim() ? job.serviceProperty.address : [job.address, job.city, job.state, job.zipCode].filter(value => typeof value === 'string' && value.trim()).join(', ');
   const appointment = [job.date, job.time || 'Time not set'].filter(Boolean).join(' · ');
+  const importantAlerts = (job.operationalAlerts || []).filter(alert => alert.active && ['important', 'critical'].includes(alert.severity));
+  const criticalCount = importantAlerts.filter(alert => alert.severity === 'critical').length;
   return <Pressable testID={`job-card-${job.id}`} accessibilityRole="button" accessibilityLabel={`Open job for ${title}, ${job.serviceType || 'Service'}, ${appointment}, ${statusLabels[job.status] || job.status || 'Status not set'}${isEstimateVisit(job) ? ', Estimate Visit, ' + estimateOutcomeLabel(job) : ''}`}
     accessibilityHint="Opens the work order and job actions" onPress={onPress}
     style={({ pressed }) => ({ minHeight: 100, padding: featured ? 20 : 16, gap: 12, borderRadius: 20, borderWidth: 1, borderColor: featured ? palette.accent : palette.border, backgroundColor: palette.surface, opacity: pressed ? 0.86 : 1 })}>
@@ -153,6 +155,7 @@ export function JobCard({ job, onPress, featured = false, compact = false }) {
     <Text style={{ color: palette.text, fontSize: 14, lineHeight: 21, fontWeight: '600' }}>{appointment}</Text>
     {!compact && !!address && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{address}</Text>}
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><AppointmentBadge job={job} /><StatusBadge status={job.localCompletionPending ? job.serverStatus || job.status : job.status} />{!!job.syncState && <StatusBadge syncState={job.syncState} />}</View>
+    {!!importantAlerts.length && <Text accessibilityRole="text" style={{ color: criticalCount ? palette.danger : palette.secondary, fontSize: 13, fontWeight: '700' }}>{criticalCount ? `⚠ ${criticalCount} critical alert${criticalCount === 1 ? '' : 's'}` : `${importantAlerts.length} important alert${importantAlerts.length === 1 ? '' : 's'}`} · Open job to review</Text>}
     {job.localCompletionPending && <Text accessibilityLiveRegion="polite" style={{ color: palette.secondary, fontSize: 13, lineHeight: 20 }}>Completion saved on this device — the server has not confirmed the completed status yet.</Text>}
     {isEstimateVisit(job) && <Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 20 }}>{estimateOutcomeLabel(job)}</Text>}
     {!!job.syncError && <Text accessibilityRole="alert" style={{ color: palette.danger, fontSize: 13, lineHeight: 20 }}>{job.syncError}</Text>}

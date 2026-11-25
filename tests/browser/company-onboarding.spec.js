@@ -41,6 +41,9 @@ test('PW-ONBOARD-01 @onboarding public owner registration verifies, resumes and 
   await page.getByRole('button', { name: 'Add service' }).click();
   await page.getByRole('button', { name: 'Save & continue' }).click();
   await expect(page.getByRole('heading', { name: 'Business hours' })).toBeVisible();
+  await page.getByLabel('Add company closed date').fill('2030-01-08');
+  await page.getByRole('button', { name: 'Add closed date' }).click();
+  await expect(page.getByRole('button', { name: 'Remove closed date 2030-01-08' })).toBeVisible();
   await page.getByRole('button', { name: 'Save & continue' }).click();
   await expect(page.getByRole('heading', { name: /Import customers/ })).toBeVisible();
   await page.getByRole('button', { name: 'Save & continue' }).click();
@@ -53,6 +56,7 @@ test('PW-ONBOARD-01 @onboarding public owner registration verifies, resumes and 
   expect(owned).toHaveLength(1);
   expect(owned[0].businessName).toBe(companyName);
   expect(owned[0].services).toEqual(['Synthetic inspection']);
+  expect(owned[0].businessHours.closedDates).toEqual(['2030-01-08']);
 });
 
 test('PW-ONBOARD-02 @onboarding existing owner reviews an explicit section while manager access remains denied', async ({ page, scenario }) => {

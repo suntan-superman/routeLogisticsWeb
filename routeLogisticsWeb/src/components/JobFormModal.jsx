@@ -17,6 +17,7 @@ import { appointmentRecurrence, isDateOnAppointmentRecurrence } from '../utils/a
 import { customerAddress, customerView, legacyDate } from '../utils/legacyCustomer';
 import ServicePropertyDirectory from './ServicePropertyDirectory';
 import { estimateOutcomes } from '../utils/appointmentKind';
+import NoteVisibilityBadge from './NoteVisibilityBadge';
 
 const todayStr = () => {
   const d = new Date();
@@ -222,7 +223,7 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
 
     if (!isEdit && !bookingOperation.current) bookingOperation.current = globalThis.crypto.randomUUID();
     const options = saveCustomerAddress || !isEdit ? { ...(saveCustomerAddress ? { saveCustomerAddress: true, expectedCustomerVersion: addressEditCustomer.current?.version ?? null } : {}), ...(!isEdit ? { operationId: bookingOperation.current } : {}), ...(!isEdit && repeatSelection ? { recurring: { recurrence, preferredTechnicianId: form.assignedTo || null, assignmentFallback } } : {}) } : undefined;
-    const requestedSchedule = schedulingFingerprint({ companyId: company?.id, memberId: form.assignedTo, date: form.date, time: form.time, estimatedDuration: duration, jobId: job?.id });
+    const requestedSchedule = schedulingFingerprint({ companyId: company?.id, memberId: form.assignedTo, date: form.date, time: form.time, estimatedDuration: duration, jobId: job?.id, serviceCategory: property.serviceCategory, serviceType: form.serviceType });
     setSchedulingError(null);
     if (saveCustomerAddress && (!addressEditing || addressEditCustomer.current?.id !== customer.id || !canSaveCustomerAddress)) { savingRef.current = false; setSaving(false); return toast.error('Review the customer address before saving it permanently.'); }
     if (saveCustomerAddress) { details.serviceProperty = { address: currentAddress.trim() }; if (company?.id) { details.serviceCategory = property.serviceCategory.trim(); details.serviceAreaExceptionId = property.exceptionId || null; } }
@@ -305,7 +306,7 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
             </div>
           </div>
 
-          <TechnicianAvailability companyId={company?.id} memberId={form.assignedTo} memberName={job?.assignedToName} date={form.date} time={form.time} estimatedDuration={form.estimatedDuration} jobId={job?.id} disabled={saving} allowedWeekdays={allowedWeekdays} isAlternativeAllowed={allowAlternative} schedulingError={schedulingError} onMemberChange={id => set('assignedTo', id)} onSelectAlternative={slot => { if (savingRef.current) return; setSchedulingError(null); setPastAck(false); setForm(previous => ({ ...previous, date: slot.date, time: slot.time })); }} />
+          <TechnicianAvailability companyId={company?.id} memberId={form.assignedTo} memberName={job?.assignedToName} date={form.date} time={form.time} estimatedDuration={form.estimatedDuration} jobId={job?.id} serviceCategory={property.serviceCategory} serviceType={form.serviceType} disabled={saving} allowedWeekdays={allowedWeekdays} isAlternativeAllowed={allowAlternative} schedulingError={schedulingError} onMemberChange={id => set('assignedTo', id)} onSelectAlternative={slot => { if (savingRef.current) return; setSchedulingError(null); setPastAck(false); setForm(previous => ({ ...previous, date: slot.date, time: slot.time })); }} />
           {!isEdit && !estimateVisit && <AppointmentRepeatOptions value={repeatSelection} onChange={value => { if (!savingRef.current) { setRepeatSelection(value); setSchedulingError(null); } }} date={form.date} assignmentFallback={assignmentFallback} onFallbackChange={setAssignmentFallback} disabled={saving} company={!!company?.id} />}
           {isEdit && job.servicePlanId && <p className="text-sm text-gray-600">This is a recurring visit. Changes here apply to this visit only; the service plan controls later visits.</p>}
 
@@ -363,7 +364,7 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
           </div>}
 
           {!compactInquirySchedule && <div>
-            <label htmlFor="job-notes" className={label}>Notes</label>
+            <label htmlFor="job-notes" className={label}>Job instructions <NoteVisibilityBadge audience="internal" /></label>
             <textarea
               id="job-notes"
               aria-describedby="job-notes-help"

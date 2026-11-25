@@ -14,6 +14,9 @@ function createQueue(storage, key, notify = () => {}) {
 }
 const retryDelay = (attempt) => Math.min(300000, 2000 * 2 ** Math.max(0, attempt - 1));
 const revisionOperation = row => ['job', 'visit'].includes(row.kind);
+const blockedByAlertAcknowledgment = (row, rows) => row.kind !== 'alert-ack'
+  && !(row.kind === 'visit' && row.record?.type === 'access-blocked')
+  && rows.some(other => other.kind === 'alert-ack' && other.jobId === row.jobId && !['synced', 'discarded'].includes(other.state));
 const compatibleJobState = job => {
   if (!job || typeof job !== 'object') return null;
   const address = job.address && typeof job.address === 'object' ? job.address : {};
@@ -141,4 +144,4 @@ function prepareAutomaticRecovery(rows, idFactory, recoveryVersion = 2) {
   }
   return repaired;
 }
-module.exports = { createQueue, retryDelay, revisionOperation, compatibleJobState, linkRevision, advanceRevision, restoreLegacyDependencies, repairCompletionAfterDeparture, prepareAutomaticRecovery };
+module.exports = { createQueue, retryDelay, revisionOperation, blockedByAlertAcknowledgment, compatibleJobState, linkRevision, advanceRevision, restoreLegacyDependencies, repairCompletionAfterDeparture, prepareAutomaticRecovery };

@@ -2,6 +2,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { requireAuth, requireStaff, documentId, hash, rateLimit } = require('./security');
 const { ESTIMATE_OUTCOMES, appointmentPatch, isEstimateVisit } = require('./shared/appointments');
 const { prepareAppointmentLinks, commitAppointmentLinks } = require('./appointmentLinks');
+const { missingCriticalAcknowledgments, alertsForJob } = require('./shared/operationalAlerts');
 const version = (value) => value?.toDate ? value.toDate().toISOString() : value?.seconds != null ? new Date(value.seconds * 1000 + (value.nanoseconds || 0) / 1e6).toISOString() : value?._seconds != null ? new Date(value._seconds * 1000 + (value._nanoseconds || 0) / 1e6).toISOString() : value || null;
 const fields = ['status', 'notes', 'actualWorkDone', 'actualHours', 'completionNotes', 'completedAt', 'estimateOutcome', 'departureExceptionReason'];
 function validatePatch(patch) {
@@ -39,6 +40,10 @@ function offlineHandler(db) {
       if (currentVersion !== expectedVersion) return { status: 'conflict', version: currentVersion, server: Object.fromEntries(fields.map((key) => [key, job.get(key === 'notes' ? 'workNotes' : key) ?? null])) };
       if (staff?.role === 'technician' && (job.get('status') === 'cancelled' || (job.get('status') === 'completed' && patch.status && patch.status !== 'completed'))) throw new HttpsError('failed-precondition', 'A manager must reopen this job.');
       if (['completed', 'cancelled'].includes(job.get('status')) && patch.status && !['completed', 'cancelled'].includes(patch.status)) throw new HttpsError('failed-precondition', 'Reopen this appointment from scheduling so technician availability can be checked.');
+      if (['en-route', 'in-progress', 'completed'].includes(patch.status) || Object.hasOwn(patch, 'notes') || Object.hasOwn(patch, 'actualWorkDone')) {
+        const missing = await missingCriticalAcknowledgments(db, tx, jobId, job.data(), token.companyId, uid);
+        if (missing.length) throw new HttpsError('failed-precondition', 'Acknowledge the current critical property or job alert before recording normal work.');
+      }
       const evidence = job.get('visitEvidence') || {}, arrived = Date.parse(evidence.arrivedAt), departed = Date.parse(evidence.departedAt), missingDeparture = Number.isFinite(arrived) && (!Number.isFinite(departed) || departed < arrived);
       if (patch.status === 'completed' && missingDeparture && !String(patch.departureExceptionReason || '').trim()) throw new HttpsError('failed-precondition', 'Record departure, or document a departure exception reason before completing this visit.');
       // A strictly increasing timestamp also distinguishes operations in the same millisecond.
@@ -46,6 +51,11 @@ function offlineHandler(db) {
       const kindPatch = isEstimateVisit(job.data()) || patch.estimateOutcome !== undefined ? appointmentPatch(patch, job.data()) : {};
       const safePatch = { ...patch, ...kindPatch };
       if ('notes' in safePatch) { safePatch.workNotes = safePatch.notes; delete safePatch.notes; }
+      if (safePatch.status === 'completed' && !job.get('operationalAlertSnapshot')) {
+        const customer = job.get('customerId') ? await tx.get(db.doc(`customers/${job.get('customerId')}`)) : null;
+        if (customer?.exists && customer.get('companyId') !== token.companyId) throw new HttpsError('permission-denied', 'The service property is unavailable.');
+        safePatch.operationalAlertSnapshot = alertsForJob({ id: jobId, ...job.data() }, customer?.data());
+      }
       const scope = { uid, companyId: token.companyId, role: staff.role, ...(staff.memberId ? { memberId: staff.memberId } : {}) };
       const links = isEstimateVisit(job.data()) ? await prepareAppointmentLinks(db, tx, scope, { jobId, before: job.data(), next: { ...job.data(), ...safePatch } }) : null;
       const result = { status: 'synced', version: updatedAt, ...(isEstimateVisit(job.data()) ? { estimateOutcome: safePatch.estimateOutcome } : {}) };

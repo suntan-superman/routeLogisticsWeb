@@ -1,7 +1,14 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {phoneE164,signature,verifySignature,createTwilioTransport}=require('./smsProvider');
-const {smsHandlers,DEFAULT_SETTINGS,cleanSettings,renderMessage,appointmentTime}=require('./sms');
+const {smsHandlers,DEFAULT_SETTINGS,cleanSettings,renderMessage,appointmentTime,appointmentNotificationEligible}=require('./sms');
+test('held recurring occurrences never qualify for appointment confirmation or reminder',()=>{
+  assert.equal(appointmentNotificationEligible({status:'scheduled',rescheduleRequired:true,schedulingAttention:{code:'closed-day'}}),false);
+  assert.equal(appointmentNotificationEligible({status:'scheduled',schedulingAttention:{code:'holiday'}}),false);
+  assert.equal(appointmentNotificationEligible({status:'scheduled',rescheduleRequired:true}),false);
+  assert.equal(appointmentNotificationEligible({status:'scheduled'}),true);
+  assert.equal(appointmentNotificationEligible({status:'completed'}),false);
+});
 const accountSid='AC'+'1'.repeat(32),messagingServiceSid='MG'+'2'.repeat(32),authToken='synthetic-provider-token-no-real-sends';
 test('customer SMS is disabled without both explicit global gates and makes no provider calls',async()=>{
   for(const config of [{},{enabled:()=>true},{liveApproved:()=>true}]){const sms=smsHandlers(null,config);assert.deepEqual(await sms.schedule(),{skipped:true});assert.deepEqual(await sms.drain({send:()=>{throw Error('must not send');}}),{skipped:true});assert.deepEqual(await sms.onJob(null,{companyId:'co'},'job'),{skipped:true});}

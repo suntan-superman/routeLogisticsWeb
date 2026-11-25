@@ -205,7 +205,7 @@ function customerIntakeHandlers(db, config = {}) {
         await areas.assertCurrent(tx, prepared);
         const propertyId = data.propertyId ? documentId(data.propertyId, 'property') : `property_${hash(data.operationId).slice(0,32)}`, before = propertyFor(customer.data(), propertyId);
         if (data.propertyId && !before) fail('failed-precondition', 'Select a saved property before editing.');
-        const property = preparedProperty(clean, prepared, propertyId, (before?.revision || 0) + 1, now), patch = embedProperty(customer.data(), property, data.property.isPrimary === true), updatedAt = nextVersion(customer, now), next = { ...customer.data(), ...patch, updatedAt };
+        const property = { ...preparedProperty(clean, prepared, propertyId, (before?.revision || 0) + 1, now), ...(before?.alerts ? { alerts: before.alerts } : {}) }, patch = embedProperty(customer.data(), property, data.property.isPrimary === true), updatedAt = nextVersion(customer, now), next = { ...customer.data(), ...patch, updatedAt };
         const result = { customer: { ...projections().projectCustomer(customer.id, next, scope.role), lifecycle: lifecycleFor(next), id: customer.id }, properties: canonical(propertiesFor(next)), property: canonical({ ...property, isPrimary: next.primaryPropertyId === property.id }), customerVersion: updatedAt, existing: false };
         tx.update(customer.ref, { ...patch, updatedAt }); record(tx, db, scope, operation, requestFingerprint, 'customer.property.save', result, { customerId: customer.id, propertyId, propertyRevision: property.revision }, now); return result;
       });

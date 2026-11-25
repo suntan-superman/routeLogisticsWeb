@@ -20,6 +20,7 @@ export default function RouteScreen({ user, active, onOpenJob }) {
       {route.data?.truncated && <InlineNotice message="Showing the first 100 eligible assigned stops." />}
       {route.stops.map((stop,index) => <Card key={stop.id}><SectionHeader title={`${index + 1}. ${stop.customerName || 'Assigned stop'}`} subtitle={[stop.time, stop.serviceType].filter(Boolean).join(' · ')} />
         <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>{stop.address || 'Address not provided'}</Text>
+        {!!stop.operationalAlerts?.filter(alert => alert.active && ['critical', 'important'].includes(alert.severity)).length && <Text style={{ color: stop.operationalAlerts.some(alert => alert.active && alert.severity === 'critical') ? palette.danger : palette.secondary, fontSize: 13, fontWeight: '700' }}>⚠ {stop.operationalAlerts.filter(alert => alert.active && ['critical', 'important'].includes(alert.severity)).length} property or job alert(s) · Open work order for details</Text>}
         <View style={{ gap: 10 }}>{!!jobDestination(stop) && <PrimaryButton title={`Navigate to stop ${index + 1}`} icon="navigate-outline" onPress={() => navigate(stop)} />}
           <SecondaryButton title="Open work order" accessibilityLabel={`Open work order for stop ${index + 1}`} onPress={() => onOpenJob(stop)} /></View>
       </Card>)}

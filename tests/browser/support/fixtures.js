@@ -85,6 +85,13 @@ async function seed(info) {
     functionUrl: name => `http://127.0.0.1:5001/${PROJECT}/us-central1/${name}`,
     readDoc, read: (collection, key) => readDoc(`${collection}/${key}`),
     list: async collection => (await db.collection(collection).get()).docs.map(row => ({ id: row.id, ...row.data() })),
+    seedPropertyProfile: async () => {
+      await db.doc(`customers/${ids.customerId}`).update({ serviceProperties: [
+        { id: 'home', label: 'Home', address: insideAddress, accessInstructions: 'Synthetic front gate', alerts: [{ id: 'entry-alert', version: 1, active: true, severity: 'important', title: 'Gate', description: 'Call before entering' }] },
+        { id: 'other', label: 'Office', address: outsideAddress, accessInstructions: 'Synthetic office entry', alerts: [] },
+      ] });
+      await db.doc(`jobs/${ids.jobId}`).update({ servicePropertyId: 'home' });
+    },
     verifyAccount: async email => {
       const account = await auth.getUserByEmail(email);
       await auth.updateUser(account.uid, { emailVerified: true });

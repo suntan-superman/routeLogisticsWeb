@@ -19,6 +19,7 @@ const {
 } = require('./smsProvider');
 const { pilotEligible } = require('./smsPilot');
 const PURPOSES = ['appointment-confirmation', 'pre-visit', 'en-route', 'service-completed', 'service-follow-up', 'review-invitation'];
+const appointmentNotificationEligible = job => job?.status === 'scheduled' && job.rescheduleRequired !== true && !job.schedulingAttention;
 const DEFAULT_TEMPLATES = {
   'appointment-confirmation': 'Your service appointment is confirmed for {date} {time}.',
   'pre-visit': 'Reminder: your service appointment is scheduled for {date} {time}.',
@@ -276,7 +277,7 @@ function smsHandlers(db, config = {}) {
         skipped: true,
         reason: 'customer-unavailable'
       };
-      if (['appointment-confirmation', 'pre-visit'].includes(purpose) && job.get('status') !== 'scheduled' || purpose === 'en-route' && job.get('status') !== 'en-route' || ['service-completed', 'service-follow-up'].includes(purpose) && job.get('status') !== 'completed') return {
+      if (['appointment-confirmation', 'pre-visit'].includes(purpose) && !appointmentNotificationEligible(job.data()) || purpose === 'en-route' && job.get('status') !== 'en-route' || ['service-completed', 'service-follow-up'].includes(purpose) && job.get('status') !== 'completed') return {
         skipped: true,
         reason: 'job-status-changed'
       };
@@ -390,7 +391,7 @@ function smsHandlers(db, config = {}) {
       const company = await tx.get(ref('companies', data.companyId));
       if (company.get('ownerId') !== data.actorId && !members.docs.some(member => member.get('status') === 'active' && ['manager', 'admin'].includes(member.get('role')))) return false;
     }
-    return ['appointment-confirmation', 'pre-visit'].includes(data.purpose) ? job.get('status') === 'scheduled' : data.purpose === 'en-route' ? job.get('status') === 'en-route' : job.get('status') === 'completed';
+    return ['appointment-confirmation', 'pre-visit'].includes(data.purpose) ? appointmentNotificationEligible(job.data()) : data.purpose === 'en-route' ? job.get('status') === 'en-route' : job.get('status') === 'completed';
   }
   return {
     config: async request => {
@@ -537,7 +538,7 @@ function smsHandlers(db, config = {}) {
         skipped: true
       };
       const purposes = [];
-      if (after.status === 'scheduled' && (!before || before.date !== after.date || before.time !== after.time)) purposes.push('appointment-confirmation');
+      if (appointmentNotificationEligible(after) && (!before || before.date !== after.date || before.time !== after.time)) purposes.push('appointment-confirmation');
       if (after.status !== before?.status && after.status === 'en-route') purposes.push('en-route');
       if (after.status !== before?.status && after.status === 'completed') purposes.push('service-completed');
       return Promise.all(purposes.map(purpose => queue(id, purpose, {
@@ -564,7 +565,7 @@ function smsHandlers(db, config = {}) {
         const jobs = await db.collection('jobs').where('companyId', '==', company.id).where('date', '>=', start).where('date', '<=', end).orderBy('date').limit(100).get();
         for (const job of jobs.docs) {
           const at = appointmentTime(job.data(), settings.timeZone);
-          if (job.get('status') === 'scheduled' && Number.isFinite(at) && at - now() >= 0 && at - now() <= settings.reminderMinutes * 60000) {
+          if (appointmentNotificationEligible(job.data()) && Number.isFinite(at) && at - now() >= 0 && at - now() <= settings.reminderMinutes * 60000) {
             const result = await queue(job.id, 'pre-visit', {
               automatic: true
             });
@@ -726,5 +727,6 @@ module.exports = {
   disclosure,
   cleanSettings,
   renderMessage,
-  appointmentTime
+  appointmentTime,
+  appointmentNotificationEligible
 };

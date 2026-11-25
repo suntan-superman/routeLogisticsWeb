@@ -1,7 +1,7 @@
 import { readWorkspace, callWorkspace } from '../services/workspaceApi';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, Image, ScrollView } from 'react-native';
-import { GlassButton as Button } from './Glass';
+import { GlassButton as Button, GlassInput } from './Glass';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { cachedRead, savePhotoOffline, queuedWork, subscribeOffline, resolveOffline } from '../services/offline';
@@ -10,7 +10,15 @@ import { useTheme } from '../theme/ThemeProvider';
 import { useJobResourceRefresh } from '../services/useJobResources';
 
 const accessDenied = error => ['functions/permission-denied', 'functions/unauthenticated', 'functions/not-found'].includes(error?.code);
-const photoState = state => ({ pending: 'Queued on this device', syncing: 'Uploading…', failed: 'Upload failed', conflict: 'Upload needs review' }[state] || state);
+const photoState = photo => {
+  if (photo.metadata?.referenceCategory) {
+    if (photo.state === 'synced') return 'Reference proposal submitted · check Property Profile for approval status';
+    if (photo.uploadedAt) return ['failed', 'conflict'].includes(photo.state) ? 'Uploaded · proposal needs attention' : 'Uploaded · proposal pending synchronization';
+    if (['failed', 'conflict'].includes(photo.state)) return 'Upload needs attention';
+    return photo.state === 'syncing' ? 'Upload pending' : 'Saved locally · upload pending';
+  }
+  return ({ pending: 'Queued on this device', syncing: 'Uploading…', failed: 'Upload failed', conflict: 'Upload needs review' }[photo.state] || photo.state || 'Uploaded photo');
+};
 
 // JobWorkflow keeps one instance mounted for its selected job. The native picker
 // is presented from that screen, never while swapping React Native modals.
@@ -18,6 +26,7 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSav
   const { palette } = useTheme();
   const [photos, setPhotos] = useState([]), [busy, setBusy] = useState(false), [draft, setDraft] = useState(null);
   const [actionError, setActionError] = useState(''), [loadError, setLoadError] = useState(''), [message, setMessage] = useState('');
+  const [referenceCategory, setReferenceCategory] = useState(''), [referenceCaption, setReferenceCaption] = useState('');
   const [ready, setReady] = useState(null), refresh = useRef(null);
   const mounted = useRef(false), generation = useRef(0), loading = useRef(0), locked = useRef(false), selected = useRef(null), retrying = useRef(new Set());
   const deniedRead = useRef(null);
@@ -39,8 +48,11 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSav
       setPhotos([]); setLoadError(saved.reason.message); if (query) throw saved.reason; return;
     }
     const remote = saved.status === 'fulfilled' ? saved.value : [];
-    const queued = local.status === 'fulfilled' ? local.value.filter(row => row.kind === 'photo' && row.jobId === id && !['synced', 'discarded'].includes(row.state)).map(row => ({ id: row.id, url: row.localUri, state: row.state, error: row.error, metadata: row.metadata })) : [];
-    const merged = [...remote, ...queued.filter(row => !remote.some(photo => photo.id === row.id))];
+    const photoRows = local.status === 'fulfilled' ? local.value.filter(row => row.kind === 'photo' && row.jobId === id && row.state !== 'discarded') : [];
+    const merged = [...remote.map(photo => {
+      const operation = photoRows.find(row => `${row.attribution?.userId}_${row.id}` === photo.id && row.metadata?.referenceCategory);
+      return operation ? { ...photo, state: operation.state, metadata: operation.metadata, uploadedAt: operation.uploadedAt, error: operation.error } : photo;
+    }), ...photoRows.filter(row => row.state !== 'synced' && !remote.some(photo => photo.id === `${row.attribution?.userId}_${row.id}`)).map(row => ({ id: row.id, url: row.localUri, state: row.state, error: row.error, metadata: row.metadata, uploadedAt: row.uploadedAt }))];
     setPhotos(merged);
     callbacks.current.onProgressChange?.({ hasPhotos: merged.length > 0, count: merged.length });
     setLoadError([saved.status === 'rejected' ? `Could not load uploaded photos: ${saved.reason.message}` : '', local.status === 'rejected' ? `Could not read saved photos: ${local.reason.message}` : ''].filter(Boolean).join('\n'));
@@ -74,9 +86,10 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSav
     await savePhotoOffline(work, compressed.uri, {
       source: value.source, fileName: value.asset.fileName || null, mimeType: 'image/jpeg',
       width: compressed.width || value.asset.width, height: compressed.height || value.asset.height,
+      ...(value.referenceCategory ? { referenceCategory: value.referenceCategory, referenceCaption: value.referenceCaption } : {}),
     });
     if (!current(ticket, work.id)) return;
-    remember(null); setMessage('Photo saved on this device. Upload status is shown below.'); callbacks.current.onLocalSave?.({ state: 'pending' }); await load();
+    remember(null); setReferenceCategory(''); setReferenceCaption(''); setMessage(value.referenceCategory ? 'Photo and property reference proposal saved on this device. Management must approve it after synchronization.' : 'Photo saved on this device. Upload status is shown below.'); callbacks.current.onLocalSave?.({ state: 'pending' }); await load();
   };
   const capture = async camera => {
     if (locked.current || selected.current || !target.current?.id) return;
@@ -95,7 +108,7 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSav
       if (result.canceled) { setMessage('Photo selection cancelled. You can continue with this job.'); return; }
       const asset = result.assets?.[0];
       if (!asset?.uri) throw new Error('The picker returned no photo. Please take or select the photo again.');
-      const value = { asset: { ...asset }, source: camera ? 'camera' : 'library' };
+      const value = { asset: { ...asset }, source: camera ? 'camera' : 'library', referenceCategory, referenceCaption };
       remember(value); await persist(value, work, ticket);
     } catch (error) {
       if (current(ticket, work.id)) setActionError(`${error.message || 'Could not save this photo.'}${selected.current ? ' Your selected photo is retained. Retry saving it below.' : ' Please try again, or choose a gallery photo.'}`);
@@ -120,6 +133,7 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSav
   const error = [actionError, loadError].filter(Boolean).join('\n');
   return <View style={{ marginVertical: 16 }}>
     <Text style={{ color: palette.text, fontWeight: '700', fontSize: 18, marginBottom: 8 }}>Job photos</Text>
+    {!!(job.customerId && (job.servicePropertyId || job.serviceProperty?.propertyId)) && <View style={{ gap: 8, marginBottom: 12 }}><Text style={{ color: palette.secondary }}>Optional: propose the next photo as a permanent property reference. It will remain job evidence, and management must approve the reference.</Text><ScrollView horizontal>{[['', 'Job evidence only'], ['exterior', 'Exterior'], ['entrance', 'Gate'], ['access', 'Access'], ['equipment', 'Equipment'], ['treatment', 'Treatment area'], ['safety', 'Safety'], ['other', 'Other']].map(([id, label]) => <Button key={id || 'evidence'} title={`${referenceCategory === id ? '✓ ' : ''}${label}`} secondary={referenceCategory !== id} disabled={busy} onPress={() => setReferenceCategory(id)} />)}</ScrollView>{!!referenceCategory && <GlassInput label="Reference caption (optional)" value={referenceCaption} maxLength={500} onChangeText={setReferenceCaption} />}</View>}
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}><Button title="Take photo" disabled={busy || !!draft} onPress={() => capture(true)} /><Button title="Choose photo" disabled={busy || !!draft} onPress={() => capture(false)} /></View>
     {busy && <Text accessibilityLiveRegion="polite" style={{ color: palette.secondary }}>Preparing and saving your photo…</Text>}
     {!!draft && <View><Image accessibilityLabel="Selected job photo" source={{ uri: draft.compressed?.uri || draft.asset.uri }} style={{ width: 140, height: 140, margin: 5, borderRadius: 8 }} /><Text style={{ color: palette.secondary }}>Selected photo has not been saved yet.</Text>{!busy && <><Button title="Retry saving photo" onPress={retryDraft} /><Button title="Discard selected photo" onPress={() => { if (!locked.current) { remember(null); setActionError(''); setMessage('Selected photo discarded.'); } }} /></>}</View>}
@@ -127,7 +141,7 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSav
     {!!message && <Text accessibilityLiveRegion="polite" style={{ color: palette.secondary }}>{message}</Text>}
     {!!error && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{error}</Text>}
     {!!loadError && <Button title="Retry loading photos" disabled={busy} onPress={() => load({ force: true })} />}
-    <ScrollView horizontal>{photos.map(photo => <View key={photo.id}><PrivatePhoto photo={photo} style={{ width: 140, height: 140, margin: 5, borderRadius: 8 }} /><Text style={{ color: palette.secondary }}>{photo.state ? photoState(photo.state) : 'Uploaded photo'}</Text>{!!photo.error && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{photo.error}</Text>}{['failed', 'conflict'].includes(photo.state) && <Button title="Retry photo upload" onPress={() => retryPhoto(photo.id)} />}</View>)}</ScrollView>
+    <ScrollView horizontal>{photos.map(photo => <View key={photo.id}><PrivatePhoto photo={photo} style={{ width: 140, height: 140, margin: 5, borderRadius: 8 }} /><Text style={{ color: palette.secondary }}>{photo.metadata?.referenceCategory ? `${photo.metadata.referenceCategory} · ` : ''}{photoState(photo)}</Text>{!!photo.error && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{photo.error}</Text>}{['failed', 'conflict'].includes(photo.state) && <Button title="Retry photo upload" onPress={() => retryPhoto(photo.id)} />}</View>)}</ScrollView>
   </View>;
 }
 

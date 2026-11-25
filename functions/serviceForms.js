@@ -3,6 +3,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { requireCapability, checkJob, hasCapability } = require('./access');
 const { documentId, rateLimit } = require('./security');
 const { validateTemplate, validateAnswers, serviceReport } = require('./shared/serviceFormSchema');
+const { missingCriticalAcknowledgments } = require('./shared/operationalAlerts');
 const BUILTINS = require('./shared/serviceTemplates.json').map(validateTemplate);
 const INDUSTRY_HINTS = {
   pest: [/\bpest\b/i, /\btermite/i, /\brodent/i, /\binsect/i, /\bexterminat/i],
@@ -110,6 +111,7 @@ function serviceFormsHandler(db, { enabled = () => false, now = () => new Date()
       let answers; try { answers = validateAnswers(template, data.answers, { complete: data.status === 'completed' }); } catch (error) { invalid(error); }
       const fingerprint = hash([jobId,data.templateId,data.templateVersion,data.status,answers]);
       if (previous.exists) { if (previous.get('fingerprint') !== fingerprint) throw new HttpsError('already-exists', 'This operation ID belongs to different service answers.'); return { status: 'synced', version: previous.get('responseVersion'), duplicate: true }; }
+      if ((await missingCriticalAcknowledgments(db, tx, jobId, job.data(), scope.companyId, scope.uid)).length) throw new HttpsError('failed-precondition', 'Acknowledge the current critical property or job alert before recording normal work.');
       openJob(job.data());
       if (data.assignmentVersion !== current.get('assignmentVersion') || data.expectedVersion !== (current.get('responseVersion') || 0)) return { status: 'conflict', server: formView(current.data()), version: current.get('responseVersion') || 0 };
       const photoIds = [...new Set(template.fields.filter(field => field.type === 'photos').flatMap(field => answers[field.id] || []))];

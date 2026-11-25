@@ -11,6 +11,7 @@ const filename = path.resolve(__dirname, '../components/FieldWorkTools.js'), mod
 const requireMock = name => {
   if (name.startsWith('@babel/runtime/')) return require(name);
   if (name === 'react') return React;
+  if (name === './NoteAudience') return ({ audience = 'internal' }) => React.createElement('Text', null, audience === 'customer' ? 'Customer-facing after management approval' : audience === 'management' ? 'Management only' : 'Internal — management and assigned technicians');
   if (name.endsWith('/services/useJobResources')) return { useJobResourceRefresh: (_resource, id, loader, { enabled }) => { React.useEffect(() => { if (enabled) loader({ query: true }).catch(() => {}); }, [id, enabled]); return { refetch: () => loader().catch(() => {}) }; } };
   if (name === 'react-native') return { View: 'View', Text: 'Text', Pressable: 'Pressable', AppState: { currentState: 'active' }, Linking: { openURL: async () => {} } };
   if (name === 'expo-crypto') return { randomUUID: () => `visit-operation-${++operationSequence}` };

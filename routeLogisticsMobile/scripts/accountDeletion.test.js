@@ -145,11 +145,12 @@ test('offline deletion summary includes all account workspaces and failed work, 
 });
 test('purge removes only this UID caches/queues and app-owned queued photos; preserves appearance and another account', async () => {
   const f = modulesFixture(), offline = f.load('services/offline.js'), prefix = 'rl-offline-v1:demo-account-deletion:';
+  assert.equal(offline.propertyCacheAccountSegment('../other'), '%2E%2E%2Fother');
   f.storage.set(`${prefix}tech:old:manager:former:queue`, JSON.stringify([{ kind: 'photo', localUri: 'file:///documents/rl-photos/owned-photo.jpg' }, { kind: 'photo', localUri: 'file:///library/original.jpg' }, { kind: 'photo', localUri: 'file:///documents/rl-photos/../private.jpg' }]));
   f.storage.set(`${prefix}tech:acme:technician:member:cache:policy2:jobs`, 'private'); f.storage.set('rl-session-v3:tech', 'session');
   const other = `${prefix}other:acme:technician:other:queue`; f.storage.set(other, JSON.stringify([{ kind: 'photo', localUri: 'file:///documents/rl-photos/other-photo.jpg' }]));
   f.storage.set('rl-appearance-v1', 'dark'); await offline.pauseOfflineForAccount('tech'); await offline.purgeOfflineForAccount('tech');
-  assert.deepEqual(f.deletedFiles, ['file:///documents/rl-photos/owned-photo.jpg']);
+  assert.deepEqual(f.deletedFiles, ['file:///documents/rl-photos/owned-photo.jpg', 'file:///documents/rl-property-refs/tech/']);
   assert.deepEqual([...f.storage.keys()].sort(), [other, 'rl-appearance-v1'].sort());
   await offline.writeCache('jobs', 'must not return', `${prefix}tech:acme:technician:member`);
   assert.equal(f.storage.size, 2);

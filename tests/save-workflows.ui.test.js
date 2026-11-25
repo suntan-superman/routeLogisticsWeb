@@ -40,6 +40,7 @@ async function estimates(name,data) {
   throw Error('Unexpected estimate operation');
 }
 const mock = name => {
+  if (name.endsWith('/NoteVisibilityBadge')) return { __esModule: true, default: ({ audience }) => React.createElement('span', { 'aria-label': audience === 'management' ? 'Management only' : audience === 'customer' ? 'Customer-facing' : 'Internal — management and assigned technicians' }) };
   if(name==='react')return React;
     if(name.endsWith('/useWorkspaceQuery'))return workspaceHooks;
     if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};

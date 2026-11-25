@@ -77,7 +77,7 @@ function propertyProfileHandler(db, bucketProvider = () => getStorage().bucket()
       let query = collection.where('propertyId', '==', propertyId).orderBy(FieldPath.documentId());
       if (input.after) query = query.startAfter(documentId(input.after, 'cursor'));
       const page = await query.limit(21).get();
-      return { photos: page.docs.slice(0, 20).filter(row => own(scope, row.data()) && (management(scope) || row.get('status') === 'approved')).map(referenceView), next: page.size > 20 ? page.docs[19].id : null };
+      return { photos: page.docs.slice(0, 20).filter(row => own(scope, row.data()) && (management(scope) || row.get('status') === 'approved' || row.get('actorId') === scope.uid && ['proposed', 'rejected'].includes(row.get('status')))).map(referenceView), next: page.size > 20 ? page.docs[19].id : null };
     }
     if (action === 'upload' || action === 'propose') {
       const category = input.category, caption = text(input.caption || '', 500);
@@ -132,16 +132,17 @@ function propertyProfileHandler(db, bucketProvider = () => getStorage().bucket()
         return { dataUri: `data:${metadata.contentType};base64,${bytes.toString('base64')}` };
       }
       if (!management(scope)) throw new HttpsError('permission-denied', 'Management approval is required.');
-      const target = action === 'approve' ? 'approved' : 'archived';
       await db.runTransaction(async tx => {
         const current = await tx.get(reference.ref);
         if (!current.exists || !own(scope, current.data()) || current.get('propertyId') !== propertyId) throw new HttpsError('permission-denied', 'Photo unavailable.');
+        const target = action === 'approve' ? 'approved' : ['proposed', 'rejected'].includes(current.get('status')) ? 'rejected' : 'archived';
         if (current.get('status') === target) return;
         if (action === 'approve' && current.get('status') !== 'proposed') throw new HttpsError('failed-precondition', 'Only proposed photos can be approved.');
         tx.update(reference.ref, { status: target, updatedAt: new Date().toISOString() });
         tx.create(db.collection('rlAudit').doc(), { action: `property.photo.${action}`, companyId: scope.companyId, customerId, propertyId, referenceId: reference.id, actorId: scope.uid, createdAt: new Date().toISOString() });
       });
-      return { status: target };
+      const updated = await reference.ref.get();
+      return { status: updated.get('status') };
     }
     throw new HttpsError('invalid-argument', 'Choose a property profile action.');
   };

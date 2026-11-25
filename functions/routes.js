@@ -4,6 +4,7 @@ const { hasCapability } = require('./access');
 const { servicePropertySite } = require('./serviceAreaWorkflows');
 const { availabilityRef, availabilityView } = require('./staffAvailability');
 const { projectJob } = require('./workData');
+const { alertsForJob } = require('./shared/operationalAlerts');
 function routeDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw new HttpsError('invalid-argument', 'Choose a valid service date.');
   return value;
@@ -69,7 +70,7 @@ function routeHandlers(db) {
         const address = property ? property.address : typeof data.address === 'string' && data.address.trim() ? data.address : [customerData.address, customerData.city, customerData.state, customerData.zipCode].filter((v) => typeof v === 'string' && v.trim()).join(', ');
         const hours = Number(data.estimatedDuration ?? data.duration ?? 0);
         const customerName = data.customerName || customerData.name || [customerData.firstName, customerData.lastName].filter(Boolean).join(' ') || 'Customer';
-        const projected = projectJob(job.id, { ...data, customerName, customerPhone: data.customerPhone || customerData.phone || customerData.phoneNumber || '', address }, scope.role);
+        const projected = projectJob(job.id, { ...data, customerName, customerPhone: data.customerPhone || customerData.phone || customerData.phoneNumber || '', address, operationalAlerts: alertsForJob({ id: job.id, ...data }, customerData) }, scope.role);
         stops.push({ ...projected, customerName, serviceType: data.serviceType || 'Service', time: data.time || '', windowStart: data.windowStart || data.time || '', windowEnd: data.windowEnd || '', durationMinutes: Number.isFinite(hours) ? Math.max(0, hours * 60) : 0, location: property ? coordinates(property) : coordinates(data) || coordinates(customerData), address });
       }
       stops.sort((a, b) => a.time.localeCompare(b.time) || a.id.localeCompare(b.id));

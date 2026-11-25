@@ -6,7 +6,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { auth } from '../constants/firebase';
 import { AppState } from 'react-native';
 import { getClaims, tenantFields, requireWorkspace } from './tenancy';
-import { createQueue, retryDelay, revisionOperation, compatibleJobState, linkRevision, advanceRevision, restoreLegacyDependencies, repairCompletionAfterDeparture, prepareAutomaticRecovery } from './offlineQueueCore';
+import { createQueue, retryDelay, revisionOperation, blockedByAlertAcknowledgment, compatibleJobState, linkRevision, advanceRevision, restoreLegacyDependencies, repairCompletionAfterDeparture, prepareAutomaticRecovery } from './offlineQueueCore';
 import { createWorkNoteDraftStore } from './workNoteDraftCore';
 import { recordOfflineTiming } from './offlineTimings';
 
@@ -47,6 +47,40 @@ function notify() { listeners.forEach((callback) => { try { callback()?.catch?.(
 function queue(scope = offlineScope()) { if (!queues.has(scope)) queues.set(scope, createQueue(AsyncStorage, `${scope}:queue`, notify)); return queues.get(scope); }
 export const queuedWork = () => queue().read();
 export const getQueuedOperation = async id => (await queuedWork()).find(row => row.id === id) || null;
+export const alertKey = alert => `${alert.source}:${alert.id}:${alert.version}`;
+export async function readJobAlerts(jobId, fallbackAlerts = null) {
+  const scope = offlineScope();
+  const cached = await readCache(`job-alerts:${jobId}`, scope);
+  let server = { alerts: Array.isArray(fallbackAlerts) ? fallbackAlerts : cached?.alerts || [], acknowledgments: cached?.acknowledgments || [] };
+  let source = 'device';
+  if (!(await isOffline())) {
+    try {
+      server = await callWorkspace('rlOperationalAlerts', { action: 'status', jobId });
+      if (scope !== offlineScope()) throw new Error('Your workspace changed. Reopen this job.');
+      await writeCache(`job-alerts:${jobId}`, server, scope);
+      source = 'server';
+    } catch (error) {
+      if (['functions/permission-denied', 'functions/unauthenticated'].includes(error.code)) throw error;
+      if (!server) throw error;
+    }
+  }
+  const saved = (await queue(scope).read()).filter(row => row.kind === 'alert-ack' && row.jobId === jobId && !['discarded'].includes(row.state));
+  return { alerts: server.alerts || fallbackAlerts || [], acknowledgments: server.acknowledgments || [], source, local: saved.map(row => ({ alertKey: row.alertKey, state: row.state, error: row.error || '' })) };
+}
+export const saveAlertAcknowledgmentOffline = (job, alert) => saveWork(async () => {
+  const scope = offlineScope(), claims = getClaims(), uid = auth.currentUser?.uid;
+  if (!auth.currentUser?.emailVerified || !job?.id || job.companyId !== claims?.companyId || claims?.role === 'technician' && (job.assignedTo !== claims.membershipId || job.assignedToUid && job.assignedToUid !== uid)) throw new Error('Reopen an assigned job with your verified account before acknowledging this alert.');
+  if (alert?.severity !== 'critical' || alert.active !== true || !alert.source || !alert.id || !Number.isInteger(alert.version)) throw new Error('Refresh the current critical alert before acknowledging it.');
+  const key = alertKey(alert), existing = (await queue(scope).read()).find(row => row.kind === 'alert-ack' && row.jobId === job.id && row.alertKey === key && row.state !== 'discarded');
+  if (existing) {
+    if (['failed', 'conflict'].includes(existing.state)) { await queue(scope).patch(existing.id, { state: 'pending', attempts: 0, nextAttempt: 0, error: '' }); void flushOffline().catch(() => {}); }
+    return { operationId: existing.id, state: existing.state === 'failed' || existing.state === 'conflict' ? 'pending' : existing.state };
+  }
+  const id = Crypto.randomUUID(), occurredAt = new Date().toISOString();
+  await queue(scope).add({ id, kind: 'alert-ack', jobId: job.id, alertKey: key, occurredAt, createdAt: Date.now() });
+  void flushOffline().catch(() => {});
+  return { operationId: id, state: 'pending' };
+});
 export const readCache = async (name, scope = offlineScope()) => JSON.parse(await AsyncStorage.getItem(`${scope}:cache:policy2:${name}`) || 'null');
 export const writeCache = (name, data, scope = offlineScope()) => pausedScope(scope) ? Promise.resolve() : trackWrite(scope.split(':')[2], AsyncStorage.setItem(`${scope}:cache:policy2:${name}`, JSON.stringify(data)));
 export async function cachedRead(name, loader) {
@@ -199,14 +233,25 @@ export const savePhotoOffline = (job, uri, metadata = {}) => saveWork(async () =
   if (offlineScope() !== scope) throw new Error('Your workspace changed. Reopen the job before saving this photo.');
   const base = attribution.companyId ? `companies/${attribution.companyId}` : `users/${attribution.userId}`;
   const safeMetadata = Object.fromEntries(['source', 'fileName', 'mimeType'].filter(key => typeof metadata[key] === 'string').map(key => [key, metadata[key].slice(0, 255)]));
+  if (metadata.referenceCategory && ['exterior', 'entrance', 'access', 'equipment', 'treatment', 'safety', 'other'].includes(metadata.referenceCategory)) {
+    safeMetadata.referenceCategory = metadata.referenceCategory;
+    safeMetadata.referenceCaption = String(metadata.referenceCaption || '').slice(0, 500);
+  }
   for (const key of ['width', 'height']) if (Number.isFinite(metadata[key]) && metadata[key] > 0) safeMetadata[key] = metadata[key];
-  await queue(scope).add({ id, kind: 'photo', jobId: job.id, customerId: job.customerId || null, localUri, metadata: safeMetadata, attribution, storagePath: `${base}/jobs/${job.id}/${id}.jpg`, createdAt: Date.now() });
+  await queue(scope).add({ id, kind: 'photo', jobId: job.id, customerId: job.customerId || null, propertyId: job.servicePropertyId || job.serviceProperty?.propertyId || null, localUri, metadata: safeMetadata, attribution, storagePath: `${base}/jobs/${job.id}/${id}.jpg`, createdAt: Date.now() });
   recordOfflineTiming('photo','local-save',timing); void flushOffline().catch(() => {}); return id;
 });
 async function sendPhoto(row, scope) {
   if (offlineScope() !== scope) throw new Error('Workspace changed.');
-  const base64 = await FileSystem.readAsStringAsync(row.localUri, { encoding: FileSystem.EncodingType.Base64 });
-  await callWorkspace('rlJobPhoto', { action: 'upload', operationId: row.id, jobId: row.jobId, base64 });
+  if (!row.uploadedAt) {
+    const base64 = await FileSystem.readAsStringAsync(row.localUri, { encoding: FileSystem.EncodingType.Base64 });
+    await callWorkspace('rlJobPhoto', { action: 'upload', operationId: row.id, jobId: row.jobId, base64 });
+    await queue(scope).patch(row.id, { uploadedAt: Date.now() });
+  }
+  if (row.metadata?.referenceCategory) {
+    if (!row.customerId || !row.propertyId) throw new Error('The photo was uploaded, but this job has no saved property for a reference proposal. The photo remains available to retry.');
+    await callWorkspace('rlPropertyProfile', { action: 'propose', customerId: row.customerId, propertyId: row.propertyId, jobId: row.jobId, photoId: `${row.attribution.userId}_${row.id}`, operationId: row.id, category: row.metadata.referenceCategory, caption: row.metadata.referenceCaption || '' });
+  }
   return { status: 'synced' };
 }
 export const saveApplicationOffline = (jobId, record) => saveWork(async () => {
@@ -291,20 +336,24 @@ export function flushOffline() {
     // Photos do not advance the job revision chain, so drain other runnable
     // evidence first while retaining FIFO order within each class.
     const queued = await work.read();
-    const scheduled = [...queued.filter(row => row.kind !== 'photo'), ...queued.filter(row => row.kind === 'photo')];
+    const scheduled = [...queued.filter(row => row.kind === 'alert-ack'), ...queued.filter(row => row.kind !== 'photo' && row.kind !== 'alert-ack'), ...queued.filter(row => row.kind === 'photo')];
     for (const saved of scheduled) {
       const row = (await work.read()).find((entry) => entry.id === saved.id);
       if (!row) continue;
       if (pausedScope(scope) || AppState.currentState !== 'active' || offlineScope() !== scope || await isOffline()) break;
       if (row.state !== 'pending' || row.nextAttempt > Date.now()) continue;
       const ordered = await work.read();
+      // A saved critical acknowledgment must be accepted before dependent work.
+      // Keep later evidence pending if it fails; the original queue entries remain intact.
+      if (blockedByAlertAcknowledgment(row, ordered)) continue;
       const earlier = ordered.slice(0, ordered.findIndex((entry) => entry.id === row.id)).find((other) => other.jobId === row.jobId && (revisionOperation(other) || row.patch?.status === 'completed' && other.kind === 'service-form') && !['synced', 'discarded'].includes(other.state));
       if (revisionOperation(row) && earlier) continue;
       if (row.versionDependency && !ordered.some(other => other.id === row.versionDependency && other.state === 'synced')) { await work.patch(row.id, { state:'conflict', error:'An earlier saved operation was changed or discarded. This evidence is retained for management review.', errorCode:'revision-chain-changed' }); continue; }
       await work.patch(row.id, { state: 'syncing', submittedAt: row.submittedAt || Date.now() });
       const syncTiming = Date.now();
       try {
-        const result = row.kind === 'job' ? await callWorkspace('rlApplyJobOperation', { operationId: row.id, jobId: row.jobId, patch: row.patch, expectedVersion: row.expectedVersion }) : row.kind === 'application' ? await callWorkspace('rlRecordApplication', { jobId: row.jobId, operationId: row.id, record: row.record }).then(() => ({ status: 'synced' }))
+        const result = row.kind === 'alert-ack' ? await callWorkspace('rlOperationalAlerts', { action: 'acknowledge', jobId: row.jobId, alertKey: row.alertKey, operationId: row.id, occurredAt: row.occurredAt })
+          : row.kind === 'job' ? await callWorkspace('rlApplyJobOperation', { operationId: row.id, jobId: row.jobId, patch: row.patch, expectedVersion: row.expectedVersion }) : row.kind === 'application' ? await callWorkspace('rlRecordApplication', { jobId: row.jobId, operationId: row.id, record: row.record }).then(() => ({ status: 'synced' }))
           : row.kind === 'service-form' ? await callWorkspace('rlServiceForms', { action: 'save', jobId: row.jobId, operationId: row.id, ...row.record })
           : row.kind === 'visit' ? await callWorkspace('rlJobVisit', { action:'record', jobId:row.jobId, operationId:row.id, evidenceVersion:1, expectedVersion:row.expectedVersion, expectedAssignee:row.expectedAssignee, expectedJobState:row.expectedJobState || null, allowCompatibleRevision:true, ...row.record })
           : row.kind === 'photo' ? await sendPhoto(row, scope) : (() => { throw new Error('Unsupported saved-work type. Retain this change for review.'); })();
@@ -390,12 +439,15 @@ export async function accountOfflineSummary(uid) {
   const drafts=(await Promise.all(keys.map(async key=>JSON.parse(await AsyncStorage.getItem(key)||'null')))).filter(value=>value?.state==='draft'&&value.dirty&&!rows.some(row=>row.id===value.operationId||row.workNoteDraft?.revision===value.revision));
   return { pendingOperations: rows.filter(row => row.kind !== 'photo').length + drafts.length, pendingPhotos: rows.filter(row => row.kind === 'photo').length };
 }
+export const propertyCacheAccountSegment = uid => encodeURIComponent(String(uid || 'signed-out')).replace(/\./g, '%2E');
 export async function purgeOfflineForAccount(uid) {
   const prefix = accountPrefix(uid), records = await accountQueues(uid);
   const directory = `${FileSystem.documentDirectory}rl-photos/`;
   // Never delete arbitrary picker/library paths or another account's photos.
   const photos = new Set(records.flatMap(record => record.rows).filter(row => row.kind === 'photo' && typeof row.localUri === 'string' && row.localUri.startsWith(directory) && /^[A-Za-z0-9-]+\.jpg$/.test(row.localUri.slice(directory.length))).map(row => row.localUri));
   await Promise.all([...photos].map(uri => FileSystem.deleteAsync(uri, { idempotent: true })));
+  // Reference images are private account-scoped caches, separate from queued job evidence.
+  if (uid) await FileSystem.deleteAsync(`${FileSystem.documentDirectory}rl-property-refs/${propertyCacheAccountSegment(uid)}/`, { idempotent: true });
   const keys = (await AsyncStorage.getAllKeys()).filter(key => key.startsWith(prefix) || [`rl-session-v1:${uid}`, `rl-session-v2:${uid}`, `rl-session-v3:${uid}`].includes(key));
   if (keys.length) await AsyncStorage.multiRemove(keys);
   for (const scope of queues.keys()) if (scope.startsWith(prefix)) queues.delete(scope);

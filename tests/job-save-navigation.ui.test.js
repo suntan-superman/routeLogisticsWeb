@@ -36,6 +36,7 @@ function useScopedQuery(key,loader,{enabled=true}={}){
     refetch:fetch,invalidate:async()=>{},setData:updater=>setState(previous=>({...previous,id,data:typeof updater==='function'?updater(previous.data):updater}))};
 }
 const mock = name => {
+  if (name.endsWith('/NoteVisibilityBadge')) return { __esModule: true, default: ({ audience }) => React.createElement('span', { 'aria-label': audience === 'management' ? 'Management only' : audience === 'customer' ? 'Customer-facing' : 'Internal — management and assigned technicians' }) };
   if(name==='react')return React;
   if(name.endsWith('/AppointmentKindBadge'))return{__esModule:true,default:()=>null};
   if(name.endsWith('/appointmentKind'))return{isEstimateVisit:job=>job?.appointmentKind==='estimate_visit',estimateOutcomeLabel:()=>'',estimateOutcomes:[]};
@@ -58,7 +59,7 @@ const mock = name => {
   if(name.endsWith('/components/JobChangeHistory'))return{__esModule:true,default:()=>null,ModifiedBadge:()=>null};
   if(name.endsWith('/components/JobFormModal'))return{__esModule:true,default:env.kind==='warning-parent'?JobEditorProbe:()=>null};
   if(name.endsWith('/components/InvoiceCreationDialog'))return{__esModule:true,default:compile('components/InvoiceCreationDialog.jsx')};
-  if(name.endsWith('/components/StaffAvailabilityEditor')||name.endsWith('/components/JobPhotos')||name.endsWith('/components/JobApplicationLog')||name.endsWith('/components/TeamLocationStatus'))return{__esModule:true,default:()=>null};
+  if(name.endsWith('/components/StaffAvailabilityEditor')||name.endsWith('/components/JobPhotos')||name.endsWith('/components/JobApplicationLog')||name.endsWith('/components/TeamLocationStatus')||name.endsWith('/components/OperationalAlerts'))return{__esModule:true,default:()=>null};
   if(name.endsWith('.css'))return{};
   if(name==='@syncfusion/ej2-react-schedule')return new Proxy({ScheduleComponent:props=>React.createElement('section',{'aria-label':'Calendar probe','data-event-count':props.eventSettings.dataSource.length})},{get:(target,key)=>target[key]||(()=>null)});
   if(name.endsWith('/services/serviceLogService'))return{UNITS:['fl oz','oz'],listServiceLogsForJob:async()=>env.saved&&env.failListAfterSave?{success:false,error:'List unavailable'}:{success:true,logs:[]},addServiceLog:async data=>{env.calls.push({name:'application',data});if(env.savePending)await env.savePending.promise;if(env.throwSave)throw Error('Application request failed.');if(env.failSave)return{success:false,error:'Application could not be saved.'};env.saved=true;return{success:true,id:'application-1'};}};
@@ -73,6 +74,7 @@ const mock = name => {
   if(name.endsWith('/utils/routePlanning'))return{googleNavigation:()=> 'https://example.invalid'};
   if(name.endsWith('/utils/workLocations'))return{LOCATION_LABELS:{},locationState:()=>'',nearestOnDuty:()=>[]};
   if(name.endsWith('/utils/dispatchMap'))return{addressKey:value=>String(value),mapPoint:()=>null,createDispatchAddressResolver:()=>({snapshot:()=>({pending:0,failed:0})})};
+  if(name.endsWith('/components/PropertyProfile'))return{__esModule:true,default:()=>null};
   throw Error('Unexpected dependency '+name);
 };
 function compile(relative) { const result={exports:{}};new Function('React','require','module','exports',transformSync(fs.readFileSync(path.resolve(__dirname,'../routeLogisticsWeb/src',relative),'utf8'),{loader:'jsx',format:'cjs'}).code)(React,mock,result,result.exports);return result.exports.default; }

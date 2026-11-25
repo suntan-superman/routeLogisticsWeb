@@ -8,7 +8,7 @@ const root = path.resolve(__dirname, '..');
 
 function fixture() {
   const storage = new Map(), copies = [], calls = [], operations = new Map(), visitOperations=new Map(), modules = new Map();
-  let online = true, nextId = 0, syncError = null, hold = null, storageError = null, storageReadHold=null, serviceResult = {status:'synced',version:1};
+  let online = true, nextId = 0, syncError = null, proposalError = null, hold = null, storageError = null, storageReadHold=null, serviceResult = {status:'synced',version:1};
   const claims = { companyId: 'acme', role: 'technician', membershipId: 'member' };
   const auth = { currentUser: { uid: 'tech', emailVerified: true }, app: { options: { projectId: 'mi-factotum-field-service' } } };
   const job = { id: 'job', companyId: 'acme', assignedTo: 'member', status: 'in-progress', updatedAt: '2026-11-13T10:00:00.000Z' };
@@ -19,7 +19,7 @@ function fixture() {
   };
   const workspace = {
     readWorkspace: async (resource, data) => { assert.equal(resource, 'jobs'); assert.equal(data.id, job.id); assertAccess(); return { job: { ...job } }; },
-    callWorkspace: async (name, data) => { calls.push({ name, ...data }); if(name==='rlApplyJobOperation') return applyJob(data); assertAccess(); if (syncError) throw syncError;
+    callWorkspace: async (name, data) => { calls.push({ name, ...data }); if(name==='rlApplyJobOperation') return applyJob(data); assertAccess(); if (syncError) throw syncError; if (name === 'rlPropertyProfile' && proposalError) throw proposalError;
       if(name==='rlJobVisit'){
         if(visitOperations.has(data.operationId))return visitOperations.get(data.operationId);
         if(['completed','cancelled','canceled'].includes(job.status))throw Object.assign(new Error('This job is closed.'),{code:'functions/failed-precondition'});
@@ -68,7 +68,7 @@ function fixture() {
   }
   const offline = load('services/offline.js'), completion = load('services/jobCompletion.js'), estimateVisits = load('services/estimateVisitOperations.js'), timings = load('services/offlineTimings.js');
   return { ...offline, ...completion, ...estimateVisits, ...timings, job, claims, auth, copies, calls, operations, visitOperations, storage, restartOffline:()=>{modules.delete(path.resolve(root,'services/offline.js'));return load('services/offline.js');},
-    online: value => { online = value; }, failSync: value => { syncError = value; }, holdSync: value => { hold = value; }, failStorage: value => { storageError = value; }, holdStorageRead:value=>{storageReadHold=value;},serviceResult:value=>{serviceResult=value;} };
+    online: value => { online = value; }, failSync: value => { syncError = value; }, failProposal: value => { proposalError = value; }, holdSync: value => { hold = value; }, failStorage: value => { storageError = value; }, holdStorageRead:value=>{storageReadHold=value;},serviceResult:value=>{serviceResult=value;} };
 }
 const draft = { actualWorkDone: 'Applied treatment', actualHours: '1.5', completionNotes: 'Work documented.' };
 const visit = (type='arrived',extra={})=>({operationId:`offline-visit-${type}-00000001`,type,note:type==='access-blocked'?'Gate locked; attempted customer contact.':'Field evidence',occurredAt:new Date().toISOString(),...extra});
@@ -427,6 +427,38 @@ test('photo queue preserves metadata, copied file and scoped operation when offl
   await assert.rejects(f.savePhotoOffline({ ...f.job }, 'file:///selected-still-available.jpg'), /Storage full/);
   assert.equal(f.copies.at(-1).from, 'file:///selected-still-available.jpg');
   assert.equal((await f.queuedWork()).length, 1);
+});
+
+test('offline property reference proposal retains the job photo and stable operation across restart', async () => {
+  const f = fixture(); f.online(false);
+  Object.assign(f.job, { customerId: 'customer-one', servicePropertyId: 'home' });
+  const id = await f.savePhotoOffline({ ...f.job }, 'file:///gate.jpg', { referenceCategory: 'entrance', referenceCaption: 'Gate from street' });
+  const restored = f.restartOffline();
+  const pending = await restored.getQueuedOperation(id);
+  assert.equal(pending.propertyId, 'home');
+  assert.equal(pending.metadata.referenceCategory, 'entrance');
+  assert.equal(pending.metadata.referenceCaption, 'Gate from street');
+  f.online(true); await restored.flushOffline();
+  const calls = f.calls.filter(row => ['rlJobPhoto', 'rlPropertyProfile'].includes(row.name));
+  assert.deepEqual(calls.map(row => row.name), ['rlJobPhoto', 'rlPropertyProfile']);
+  assert.equal(calls[1].photoId, `tech_${id}`);
+  assert.equal(calls[1].operationId, id);
+  assert.equal((await restored.getQueuedOperation(id)).state, 'synced');
+});
+
+test('uploaded photo stays linked and retries only the proposal after a proposal failure', async () => {
+  const f = fixture(); f.online(false);
+  Object.assign(f.job, { customerId: 'customer-one', servicePropertyId: 'home' });
+  const id = await f.savePhotoOffline({ ...f.job }, 'file:///exterior.jpg', { referenceCategory: 'exterior' });
+  f.failProposal(Object.assign(new Error('Reference review is unavailable.'), { code: 'functions/failed-precondition' }));
+  f.online(true); await f.flushOffline();
+  const retained = await f.getQueuedOperation(id);
+  assert.equal(retained.state, 'failed'); assert.ok(retained.uploadedAt);
+  assert.equal(f.calls.filter(row => row.name === 'rlJobPhoto').length, 1);
+  f.failProposal(null); await f.resolveOffline(id, 'retry'); await f.flushOffline();
+  assert.equal((await f.getQueuedOperation(id)).state, 'synced');
+  assert.equal(f.calls.filter(row => row.name === 'rlJobPhoto').length, 1);
+  assert.equal(f.calls.filter(row => row.name === 'rlPropertyProfile').length, 2);
 });
 
 test('service reports queue durably with a pinned template and reject duplicate pending saves or unauthorized jobs', async () => {

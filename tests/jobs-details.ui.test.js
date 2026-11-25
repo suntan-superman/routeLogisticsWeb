@@ -42,6 +42,8 @@ function compile(relative) {
     } };
     if (name.endsWith('/JobChangeHistory')) return { __esModule: true, default: () => null, ModifiedBadge: () => null };
     if (name.endsWith('/JobFormModal')) return { __esModule: true, default: () => null };
+    if (name.endsWith('/OperationalAlerts')) return { __esModule: true, default: () => null };
+    if (name.endsWith('/PropertyProfile')) return { __esModule: true, default: () => null };
     const section = ['/JobPhotos', '/ServiceChecklist', '/JobApplicationLog'].find(suffix => name.endsWith(suffix));
     if (section) return { __esModule: true, default: ({ job }) => React.createElement('section', { 'aria-label': section.slice(1) }, `${section.slice(1)} for ${job.id}`) };
     if (name.startsWith('.')) {

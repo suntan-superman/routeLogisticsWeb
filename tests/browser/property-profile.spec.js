@@ -6,6 +6,8 @@ test('property profile stays scoped to the selected property in desktop and mobi
   await signIn(page, scenario.accounts.owner);
   await page.goto('/jobs');
   await page.getByRole('button', { name: `View job details for ${scenario.customerName} · ${scenario.jobTitle}`, exact: true }).click();
+  const details = page.getByRole('dialog', { name: 'Job Details', exact: true });
+  await details.getByRole('tab', { name: 'Property', exact: true }).click();
   const profile = page.getByRole('region', { name: 'Property Profile' });
   await expect(profile).toBeVisible();
   await expect(profile.getByText('Synthetic front gate', { exact: false })).toBeVisible();

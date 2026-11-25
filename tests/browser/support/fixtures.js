@@ -92,6 +92,16 @@ async function seed(info) {
       ] });
       await db.doc(`jobs/${ids.jobId}`).update({ servicePropertyId: 'home' });
     },
+    seedPropertyPhotos: async () => {
+      const evidenceId = id('property-evidence'), sourcePath = `rlJobPhotos/${ids.companyId}/${ids.jobId}/${evidenceId}.png`;
+      await bucket.file(sourcePath).save(png, { resumable: false, contentType: 'image/png' });
+      await db.doc(`photos/${evidenceId}`).set({ companyId: ids.companyId, customerId: ids.customerId, jobId: ids.jobId, storagePath: sourcePath, caption: 'Synthetic front entrance', createdAt: now });
+      const approvedId = id('approved-reference'), approvedPath = `rlPropertyReferences/${ids.companyId}/${ids.customerId}/home/${approvedId}.png`;
+      await bucket.file(approvedPath).save(png, { resumable: false, contentType: 'image/png' });
+      await db.doc(`customers/${ids.customerId}/rlPropertyReferences/${approvedId}`).set({ companyId: ids.companyId, customerId: ids.customerId, propertyId: 'home', status: 'approved', category: 'exterior', caption: 'Synthetic property exterior', storagePath: approvedPath, actorId: accounts.owner.uid, createdAt: now.toISOString() });
+      const proposedId = id('pending-reference');
+      await db.doc(`customers/${ids.customerId}/rlPropertyReferences/${proposedId}`).set({ companyId: ids.companyId, customerId: ids.customerId, propertyId: 'home', status: 'proposed', category: 'entrance', caption: 'Synthetic gate proposal', sourceJobId: ids.jobId, sourcePhotoId: evidenceId, storagePath: sourcePath, actorId: accounts.technician.uid, createdAt: now.toISOString() });
+    },
     verifyAccount: async email => {
       const account = await auth.getUserByEmail(email);
       await auth.updateUser(account.uid, { emailVerified: true });

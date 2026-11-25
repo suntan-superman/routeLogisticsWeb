@@ -1,9 +1,10 @@
 import React, { useState, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { uploadJobPhoto, listJobPhotos, deleteJobPhoto, readJobPhoto } from '../services/photoService';
+import { uploadJobPhoto, listJobPhotos, deleteJobPhoto } from '../services/photoService';
 import { canManage } from '../services/tenancy';
 import { useConfirm } from './ConfirmProvider';
 import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
+import AuthorizedPhotoPreview from './AuthorizedPhotoPreview';
 
 const JobPhotos = ({ job }) => {
   const photosQuery = useWorkspaceQuery(['job-photos', job.id], () => listJobPhotos(job.id));
@@ -63,21 +64,22 @@ const JobPhotos = ({ job }) => {
       {photos.length === 0 ? (
         <p className="text-sm text-gray-500">No photos yet.</p>
       ) : (
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {photos.map((photo) => (
-            <div key={photo.id} className="relative group">
-              <PrivatePhoto photo={photo} />
+            <figure key={photo.id} className="relative min-w-0 rounded-lg border border-gray-200 p-2">
+              <AuthorizedPhotoPreview photo={photo} />
+              <figcaption className="mt-2 truncate text-xs text-gray-700" title={photo.caption || 'Job evidence'}>{photo.caption || 'Job evidence'}</figcaption>
               {canManage() && (
                 <button
                   type="button"
                   onClick={() => remove(photo)}
-                  className="absolute top-1 right-1 hidden group-hover:block bg-red-600 text-white text-xs px-1.5 rounded"
+                  className="mt-2 rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
                   aria-label="Delete photo"
                 >
-                  ×
+                  Delete photo
                 </button>
               )}
-            </div>
+            </figure>
           ))}
         </div>
       )}
@@ -86,8 +88,3 @@ const JobPhotos = ({ job }) => {
 };
 
 export default JobPhotos;
-
-function PrivatePhoto({ photo }) {
-  const [url, setUrl] = useState(''), [error, setError] = useState('');
-  return <div>{url ? <img src={url} alt={photo.caption || 'Job photo'} className="max-h-96 w-full object-contain rounded" /> : <button className="w-full rounded border p-5 text-sm underline" onClick={async () => { try { setUrl((await readJobPhoto(photo.id)).dataUri); } catch (e) { setError(e.message); } }}>View photo</button>}{error && <p role="alert">{error}</p>}</div>;
-}

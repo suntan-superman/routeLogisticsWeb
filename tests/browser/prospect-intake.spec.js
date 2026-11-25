@@ -52,7 +52,8 @@ test('PW-INTAKE-01 @smoke prospect inquiry schedules one nonbillable estimate wi
   expect((await scenario.list('customers')).filter(row => row.companyId === scenario.ids.companyId)).toHaveLength(customersBefore.length + 1);
   expect((await scenario.list('invoices')).filter(row => row.companyId === scenario.ids.companyId)).toEqual(invoicesBefore);
   await page.goto(`/jobs?job=${encodeURIComponent(visit.id)}`); const details = page.getByRole('dialog', { name: 'Job Details', exact: true });
-  await expect(details).toBeVisible(); await expect(details.getByText('Estimate Visit', { exact: true })).toBeVisible(); await expect(details.getByText('Synthetic access instruction: use the side gate.', { exact: true })).toBeVisible();
+  await expect(details).toBeVisible(); await details.getByRole('tab', { name: 'Service' }).click();
+  await expect(details.getByText('Estimate Visit', { exact: true })).toBeVisible(); await expect(details.getByText('Synthetic access instruction: use the side gate.', { exact: true })).toBeVisible();
   await expect(details.getByRole('button', { name: /Create invoice/i })).toHaveCount(0); await expect(details.getByRole('link', { name: 'Open linked inquiry', exact: true })).toBeVisible();
 });
 

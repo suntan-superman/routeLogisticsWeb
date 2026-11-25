@@ -68,11 +68,13 @@ test('PW-NOTES-01 technician note replay is idempotent and Jobs/Dispatch share w
   await expect(openJobsDetails).toBeVisible(); await openJobsDetails.click();
   const jobsDialog = page.getByRole('dialog', { name: 'Job Details', exact: true });
   await expect(jobsDialog).toBeVisible();
+  await jobsDialog.getByRole('tab', { name: 'Service' }).click();
   expect(await jobsDialog.getByRole('region', { name: 'Work notes', exact: true }).locator('p').textContent()).toBe(workNotes);
   expect(await jobsDialog.getByRole('region', { name: 'Job instructions', exact: true }).locator('p').textContent()).toBe(scenario.jobInstructions);
   await expect(jobsDialog.getByRole('region', { name: 'Visit record', exact: true }).getByText(visitNote, { exact: true })).toBeVisible();
-  await jobsDialog.getByRole('button', { name: 'Close', exact: true }).last().click();
+  await jobsDialog.getByRole('button', { name: 'Close Job Details' }).click();
   await expect(jobsDialog).toHaveCount(0); await openJobsDetails.click();
+  await jobsDialog.getByRole('tab', { name: 'Service' }).click();
   expect(await jobsDialog.getByRole('region', { name: 'Work notes', exact: true }).locator('p').textContent()).toBe(workNotes);
   await expect(jobsDialog.getByRole('region', { name: 'Visit record', exact: true }).getByText(visitNote, { exact: true })).toBeVisible();
   expect(await scenario.read('jobs', scenario.ids.jobId)).toEqual(saved);
@@ -402,7 +404,7 @@ test('PW-OPS-06 manager schedules an eligible property and the job appears on di
   await row.getByRole('button', { name: 'View Job', exact: true }).click();
   const details = page.getByRole('dialog', { name: 'Job Details', exact: true });
   await expect(details.getByRole('heading', { name: 'Date & Time', exact: true }).locator('..').locator('p')).toHaveText(`${displayedDate} at 2:30 PM`);
-  await details.getByRole('button', { name: 'Close', exact: true }).last().click();
+  await details.getByRole('button', { name: 'Close Job Details' }).click();
   await expect(details).toHaveCount(0);
   const afterDisplay = await scenario.read('jobs', jobs[0].id);
   for (const field of ['date', 'time', 'startTime', 'endTime', 'scheduledStartTime', 'scheduledEndTime', 'estimatedDuration', 'assignedTo', 'customerId', 'companyId', 'serviceProperty', 'createdAt']) {

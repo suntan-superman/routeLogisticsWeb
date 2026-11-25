@@ -70,6 +70,8 @@ const JobManagementPage = () => {
   const isLoading=saving||(jobsQuery.isLoading&&!jobsQuery.data);
   const [searchTerm, setSearchTerm] = useState('');
   const [showViewModal, setShowViewModal] = useState(false);
+  const [detailTab, setDetailTab] = useState('Overview');
+  const [detailActionsOpen, setDetailActionsOpen] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [selection,setSelection]=useState(null);
@@ -94,7 +96,9 @@ const JobManagementPage = () => {
   // Status update form
   const [statusData, setStatusData] = useState(() => statusInput(null));
   const [statusBaseline, setStatusBaseline] = useState(null);
-  const statusSaving = useRef(false), localAction = useRef(0), live = useRef(false), currentJob = useRef(null), escapeAction = useRef(null), viewPanel = useRef(null), statusPanel = useRef(null);
+  const statusSaving = useRef(false), localAction = useRef(0), live = useRef(false), currentJob = useRef(null), escapeAction = useRef(null), viewPanel = useRef(null), detailScroll = useRef(null), statusPanel = useRef(null);
+  useEffect(() => { setDetailTab('Overview'); setDetailActionsOpen(false); }, [selectedSnapshot?.id]);
+  const selectDetailTab = name => { setDetailTab(name); setDetailActionsOpen(false); if (detailScroll.current) detailScroll.current.scrollTop = 0; };
   currentJob.current = selectedJob;
   const statusChanged = showStatusModal && JSON.stringify(statusData) !== JSON.stringify(statusBaseline);
   const { confirmDiscard } = useUnsavedChanges(statusChanged, { message: 'Your job status changes have not been saved. Leave without saving them?' });
@@ -112,7 +116,7 @@ const JobManagementPage = () => {
     const keydown = event => {
       if (event.key !== 'Escape' || event.defaultPrevented || !escapeAction.current) return;
       const panel = statusPanel.current || viewPanel.current;
-      if ([...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].some(dialog => dialog !== panel && !panel?.contains(dialog))) return;
+      if ([...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].some(dialog => dialog !== panel)) return;
       event.preventDefault(); escapeAction.current();
     };
     window.addEventListener('keydown', keydown);
@@ -714,33 +718,29 @@ const JobManagementPage = () => {
           navigate(`/invoices?invoice=${encodeURIComponent(result.id || result.invoiceId)}`);
         }} />}
       {showViewModal && selectedJob && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div ref={viewPanel} role="dialog" aria-modal="true" aria-label="Job Details" className="relative top-10 mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white">
-            <div className="mt-3">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-900">Job Details</h3>
-                <button
-                  onClick={closeView}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <span className="sr-only">Close</span>
-                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-gray-900/60 p-0 sm:p-4">
+          <div ref={viewPanel} role="dialog" aria-modal="true" aria-label="Job Details" className="flex h-full w-full min-w-0 flex-col overflow-hidden border border-gray-200 bg-white shadow-2xl sm:h-[min(92dvh,900px)] sm:max-w-5xl sm:rounded-xl">
+            <div className="flex min-w-0 items-start justify-between gap-3 border-b border-gray-200 px-4 py-3 sm:px-6">
+              <div className="min-w-0">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-primary-700">Job Details</h3>
+                <p className="break-words text-base font-semibold text-gray-900 sm:truncate sm:text-lg" title={selectedJob.serviceType || 'Service'}>{selectedJob.serviceType || 'Service'}</p>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600"><span>{selectedJob.customerName || 'Customer not specified'}</span><span>{selectedJob.assignedToName || (selectedJob.assignedTo ? 'Assigned technician' : 'Unassigned')}</span><span className={`inline-flex items-center rounded-full px-2 py-0.5 font-semibold ${getStatusColor(selectedJob.status)}`}>{getStatusIcon(selectedJob.status)}<span className="ml-1 capitalize">{selectedJob.status?.replace('-', ' ') || 'Unknown'}</span></span></div>
               </div>
-              
-              <div className="space-y-4 max-h-96 overflow-y-auto">
-                <div className="border-b pb-4">
-                  <h4 className="text-xl font-medium text-gray-900">{selectedJob.serviceType || 'Service'}</h4>
-                  <div className="flex items-center space-x-4 mt-2 text-sm text-gray-500">
-                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(selectedJob.status)}`}>
-                      {getStatusIcon(selectedJob.status)}
-                      <span className="ml-1 capitalize">{selectedJob.status?.replace('-', ' ')}</span>
-                    </span>
-                    <span>Created {formatCalendarDate(selectedJob.createdAt)}</span>
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  onClick={closeView}
+                  className="shrink-0 rounded border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  aria-label="Close Job Details"
+                >
+                  Close
+                </button>
+            </div>
+            <nav role="tablist" aria-label="Job detail sections" className="flex shrink-0 gap-1 overflow-x-auto border-b border-gray-200 px-3 py-2 sm:px-6">
+              {['Overview', 'Property', 'Service', 'Photos', 'History'].map(name => <button key={name} type="button" role="tab" aria-selected={detailTab === name} tabIndex={detailTab === name ? 0 : -1} onClick={() => selectDetailTab(name)} onKeyDown={event => { const tabs = ['Overview', 'Property', 'Service', 'Photos', 'History']; const at = tabs.indexOf(detailTab); const next = event.key === 'ArrowRight' ? (at + 1) % tabs.length : event.key === 'ArrowLeft' ? (at + tabs.length - 1) % tabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1; if (next >= 0) { event.preventDefault(); selectDetailTab(tabs[next]); event.currentTarget.parentElement?.querySelectorAll('[role="tab"]')[next]?.focus(); } }} className={`shrink-0 rounded-md px-3 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-600 ${detailTab === name ? 'bg-primary-700 text-white' : 'text-gray-700 hover:bg-gray-100'}`}>{name}</button>)}
+            </nav>
+            <div ref={detailScroll} role="tabpanel" aria-label={`${detailTab} job details`} className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 sm:px-6">
+              <div className={detailTab === 'Overview' ? 'space-y-4' : 'hidden'}>
+                <p className="text-xs text-gray-500">Created {formatCalendarDate(selectedJob.createdAt)}</p>
                 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
@@ -776,20 +776,19 @@ const JobManagementPage = () => {
                   <h5 className="text-sm font-medium text-gray-700 mb-2">Total Cost</h5>
                   <p className="text-lg font-semibold text-gray-900">{formatCurrency(selectedJob.totalCost)}</p>
                 </div>}
-                
                 <OperationalAlerts key={`alerts-${selectedJob.id}`} target="job" jobId={selectedJob.id} initialAlerts={selectedJob.operationalAlerts || []} canManage={can('jobs.schedule')} />
-                {selectedJob.customerId && (selectedJob.servicePropertyId || selectedJob.serviceProperty?.propertyId) && <PropertyProfile customerId={selectedJob.customerId} propertyId={selectedJob.servicePropertyId || selectedJob.serviceProperty.propertyId} jobId={selectedJob.id} canManage={can('customers.manage')} />}
-                <JobWorkDetails key={selectedJob.id} job={selectedJob} allowInquiryLink={can('customers.manage')} />
-
-                <JobChangeHistory job={selectedJob} />
-                <div className="border-t pt-4"><JobPhotos job={selectedJob} /><ServiceChecklist key={selectedJob.id} job={selectedJob} /></div>
-                <div className="border-t pt-4"><JobApplicationLog job={selectedJob} /></div>
               </div>
-              
-              <div className="flex justify-end space-x-3 mt-6">
+              <div className={detailTab === 'Property' ? 'space-y-4' : 'hidden'}>
+                {selectedJob.customerId && (selectedJob.servicePropertyId || selectedJob.serviceProperty?.propertyId)
+                  ? <PropertyProfile customerId={selectedJob.customerId} propertyId={selectedJob.servicePropertyId || selectedJob.serviceProperty.propertyId} jobId={selectedJob.id} canManage={can('customers.manage')} onSectionChange={() => { if (detailScroll.current) detailScroll.current.scrollTop = 0; }} />
+                  : <p className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">This job has no verified service-property link. Its saved address remains in Overview.</p>}
+              </div>
+              <div className={detailTab === 'Service' ? 'space-y-5' : 'hidden'}><JobWorkDetails key={`work-${selectedJob.id}`} job={selectedJob} allowInquiryLink={can('customers.manage')} /><ServiceChecklist key={`checklist-${selectedJob.id}`} job={selectedJob} /><JobApplicationLog job={selectedJob} /></div>
+              <div className={detailTab === 'Photos' ? 'space-y-4' : 'hidden'}><JobPhotos job={selectedJob} /></div>
+              <div className={detailTab === 'History' ? 'space-y-4' : 'hidden'}><JobChangeHistory job={selectedJob} />{!selectedJob.isModified && <p className="text-sm text-gray-600">No job changes recorded.</p>}</div>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-gray-200 bg-white px-4 py-3 sm:px-6">
                 {canManage() && ['scheduled', 'en-route'].includes(selectedJob.status) && <button onClick={() => openEditModal(selectedJob)} className="rounded-md border border-primary-600 px-4 py-2 font-medium text-primary-700 hover:bg-primary-50">Reschedule appointment</button>}
-                {can('jobs.cancel') && ['scheduled', 'en-route'].includes(selectedJob.status) && <button onClick={() => handleCancelJob(selectedJob)} className="rounded-md border border-amber-600 px-4 py-2 text-amber-800 hover:bg-amber-50">Cancel appointment</button>}
-                {can('jobs.cancel') && selectedJob.status !== 'in-progress' && !isEstimateVisit(selectedJob) && <button onClick={() => handleDeleteJob(selectedJob)} className="rounded-md border border-red-600 px-4 py-2 text-red-700 hover:bg-red-50">Permanently delete</button>}
                 {can('invoices.manage') && selectedJob.status === 'completed' && !isEstimateVisit(selectedJob) && selectedJob.billable !== false && (
                   <button
                     onClick={() => handleCreateInvoice(selectedJob)}
@@ -798,20 +797,14 @@ const JobManagementPage = () => {
                     Create Invoice
                   </button>
                 )}
-                <button
-                  onClick={closeView}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-                >
-                  Close
-                </button>
                 {selectedJob.status !== 'cancelled' && <button
                   onClick={() => openStatusModal(selectedJob)}
                   className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
                   Update Status
                 </button>}
+                {can('jobs.cancel') && (['scheduled', 'en-route'].includes(selectedJob.status) || selectedJob.status !== 'in-progress' && !isEstimateVisit(selectedJob)) && <div className="relative"><button type="button" aria-expanded={detailActionsOpen} aria-haspopup="menu" onClick={() => setDetailActionsOpen(value => !value)} className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Actions</button>{detailActionsOpen && <div role="menu" aria-label="Job actions" className="absolute bottom-full right-0 z-10 mb-2 min-w-48 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">{['scheduled', 'en-route'].includes(selectedJob.status) && <button role="menuitem" type="button" onClick={() => { setDetailActionsOpen(false); handleCancelJob(selectedJob); }} className="block w-full rounded px-3 py-2 text-left text-sm text-amber-800 hover:bg-amber-50">Cancel appointment</button>}{selectedJob.status !== 'in-progress' && !isEstimateVisit(selectedJob) && <button role="menuitem" type="button" onClick={() => { setDetailActionsOpen(false); handleDeleteJob(selectedJob); }} className="block w-full rounded px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50">Permanently delete</button>}</div>}</div>}
               </div>
-            </div>
           </div>
         </div>
       )}

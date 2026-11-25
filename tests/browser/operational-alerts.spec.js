@@ -1,4 +1,10 @@
 const { test, expect, signIn } = require('./support/fixtures.js');
+const { createRequire } = require('node:module');
+const path = require('node:path');
+const req = createRequire(path.resolve(__dirname, '../../functions/package.json'));
+const { getApps } = req('firebase-admin/app');
+const { getFirestore } = req('firebase-admin/firestore');
+const { operationalAlertHandlers } = require('../../functions/operationalAlerts');
 
 test('management can add an internal critical job alert and view it in light and dark layouts', async ({ page, scenario }) => {
   await page.emulateMedia({ colorScheme: 'light' });
@@ -17,6 +23,17 @@ test('management can add an internal critical job alert and view it in light and
   await alerts.getByRole('option', { name: 'Critical' }).click();
   await alerts.getByRole('button', { name: 'Save alert' }).click();
   await expect(alerts.getByText('Critical · Unsafe side entrance')).toBeVisible();
+  await expect(alerts.getByText(/Awaiting acknowledgment from/)).toBeVisible();
+  const savedJob = await scenario.read('jobs', scenario.ids.jobId);
+  const savedAlert = savedJob.operationalAlerts.find(row => row.title === 'Unsafe side entrance');
+  const db = getFirestore(getApps().find(app => app.name === 'browser-tests'));
+  await operationalAlertHandlers(db)({
+    data: { action: 'acknowledge', jobId: scenario.ids.jobId, alertKey: `job:${savedAlert.id}:${savedAlert.version}`, operationId: 'browser-critical-ack-0001', occurredAt: new Date().toISOString() },
+    auth: { uid: scenario.accounts.technician.uid, token: { companyId: scenario.ids.companyId, membershipId: scenario.accounts.technician.membershipId, role: 'technician', email_verified: true } },
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(alerts.getByText(/Acknowledged by/)).toBeVisible();
+  await expect(alerts.getByText(/Awaiting acknowledgment from/)).toHaveCount(0);
   await alerts.scrollIntoViewIfNeeded();
   await page.screenshot({ path: test.info().outputPath('job-alert-desktop-light.png'), fullPage: true });
   await page.emulateMedia({ colorScheme: 'dark' });

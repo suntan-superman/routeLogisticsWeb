@@ -776,7 +776,7 @@ const JobManagementPage = () => {
                   <h5 className="text-sm font-medium text-gray-700 mb-2">Total Cost</h5>
                   <p className="text-lg font-semibold text-gray-900">{formatCurrency(selectedJob.totalCost)}</p>
                 </div>}
-                <OperationalAlerts key={`alerts-${selectedJob.id}`} target="job" jobId={selectedJob.id} initialAlerts={selectedJob.operationalAlerts || []} canManage={can('jobs.schedule')} />
+                <OperationalAlerts key={`alerts-${selectedJob.id}`} target="job" jobId={selectedJob.id} assigneeName={selectedJob.assignedToName} initialAlerts={selectedJob.operationalAlerts || []} canManage={can('jobs.schedule')} />
               </div>
               <div className={detailTab === 'Property' ? 'space-y-4' : 'hidden'}>
                 {selectedJob.customerId && (selectedJob.servicePropertyId || selectedJob.serviceProperty?.propertyId)

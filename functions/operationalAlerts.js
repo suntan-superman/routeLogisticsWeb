@@ -10,6 +10,30 @@ const inCompany = (row, scope) => row?.exists && row.get('companyId') === scope.
 const invalid = message => { throw new HttpsError('invalid-argument', message); };
 const currentTime = () => new Date().toISOString();
 
+async function currentAssigneeUid(db, scope, job) {
+  if (!job.assignedTo || typeof job.assignedTo !== 'string') return null;
+  const company = await db.doc(`companies/${scope.companyId}`).get();
+  if (job.assignedTo === company.get('ownerId')) return !job.assignedToUid || job.assignedToUid === job.assignedTo ? job.assignedTo : null;
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(job.assignedTo)) return null;
+  const member = await db.doc(`teamMembers/${job.assignedTo}`).get();
+  if (!member.exists || member.get('companyId') !== scope.companyId || member.get('status') !== 'active' || !member.get('uid')) return null;
+  return job.assignedToUid && job.assignedToUid !== member.get('uid') ? null : member.get('uid');
+}
+
+async function acknowledgmentSummary(db, scope, jobId, job, alerts) {
+  const critical = alerts.filter(row => row.active && row.severity === 'critical');
+  if (!critical.length) return { assigned: Boolean(job.assignedTo), records: [] };
+  const uid = await currentAssigneeUid(db, scope, job);
+  if (!uid) return { assigned: false, records: [] };
+  const keys = critical.map(alert => alertIdentity(alert));
+  const refs = critical.map(alert => db.doc(`rlJobAlertAcknowledgments/${acknowledgmentId(scope.companyId, jobId, uid, alert)}`));
+  const receipts = refs.length ? await db.getAll(...refs) : [];
+  return { assigned: true, records: receipts.flatMap((receipt, index) =>
+    receipt.exists && receipt.get('companyId') === scope.companyId && receipt.get('jobId') === jobId && receipt.get('userId') === uid && receipt.get('alertKey') === keys[index]
+      ? [{ alertKey: keys[index], occurredAt: receipt.get('occurredAt'), receivedAt: receipt.get('receivedAt') }]
+      : []) };
+}
+
 function operationalAlertHandlers(db) {
   async function currentActor(tx, scope) {
     const deleted = await tx.get(db.doc(`rlAccountDeletions/${scope.uid}`));
@@ -47,7 +71,8 @@ function operationalAlertHandlers(db) {
           const job = target.record.data(), propertyId = propertyIdForJob(job);
           const customer = propertyId && job.customerId ? await db.doc(`customers/${documentId(job.customerId, 'customer')}`).get() : null;
           if (customer && !inCompany(customer, scope)) throw new HttpsError('permission-denied', 'The service property is unavailable.');
-          alerts = [...alertsForJob({ id: target.record.id, ...job }, customer?.data()).filter(row => row.source === 'property'), ...alerts];
+          alerts = [...alertsForJob({ id: target.record.id, ...job }, customer?.data()).filter(row => row.source === 'property'), ...alerts.map(row => ({ ...row, source: 'job' }))];
+          return { alerts, targetVersion: target.record.get('updatedAt') || null, acknowledgmentStatus: await acknowledgmentSummary(db, scope, target.record.id, job, alerts) };
         }
         return { alerts, targetVersion: target.record.get('updatedAt') || null };
       }

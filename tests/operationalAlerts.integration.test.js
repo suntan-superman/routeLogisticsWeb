@@ -62,22 +62,36 @@ test('acknowledgment is versioned and idempotent; reassignment and critical edit
   const managerActor = auth(manager, 'manager', company, `${id}-manager-member`);
   const initial = await handler(request({ action: 'status', jobId: job }, tech));
   assert.equal(initial.alerts.length, 1); assert.equal(initial.acknowledgments.length, 0);
+  const managementBefore = await handler(request({ action: 'list', target: 'job', jobId: job }, managerActor));
+  assert.equal(managementBefore.acknowledgmentStatus.assigned, true);
+  assert.deepEqual(managementBefore.acknowledgmentStatus.records, []);
+  assert.equal(managementBefore.alerts[0].source, 'property');
+  await assert.rejects(handler(request({ action: 'list', target: 'job', jobId: job }, tech)), { code: 'permission-denied' });
+  await assert.rejects(handler(request({ action: 'list', target: 'job', jobId: job }, auth(`${id}-other-owner`, 'owner', otherCompany))), { code: 'permission-denied' });
   await assert.rejects(apply(request({ jobId: job, operationId: 'critical-work-operation-001', expectedVersion: '2030-01-01T00:00:00.000Z', patch: { status: 'in-progress' } }, tech)), { code: 'failed-precondition' });
   const originalTime = new Date().toISOString();
   const acknowledgment = { action: 'acknowledge', jobId: job, alertKey: `property:${initial.alerts[0].id}:1`, operationId: 'critical-ack-operation-001', occurredAt: originalTime };
   const receipt = await handler(request(acknowledgment, tech));
   assert.equal(receipt.status, 'synced'); assert.equal((await handler(request(acknowledgment, tech))).occurredAt, originalTime);
   assert.equal((await handler(request({ action: 'status', jobId: job }, tech))).acknowledgments.length, 1);
+  const managementAfter = await handler(request({ action: 'list', target: 'job', jobId: job }, managerActor));
+  assert.deepEqual(managementAfter.acknowledgmentStatus.records, [{ alertKey: acknowledgment.alertKey, occurredAt: originalTime, receivedAt: receipt.receivedAt }]);
   const synced = await apply(request({ jobId: job, operationId: 'critical-work-operation-001', expectedVersion: '2030-01-01T00:00:00.000Z', patch: { status: 'in-progress' } }, tech));
   assert.equal(synced.status, 'synced');
+  await db.doc(`jobs/${job}`).update({ assignedTo: `${id}-manager-member`, assignedToUid: manager });
+  assert.deepEqual((await handler(request({ action: 'list', target: 'job', jobId: job }, managerActor))).acknowledgmentStatus.records, []);
+  await db.doc(`jobs/${job}`).update({ assignedTo: member, assignedToUid: technician });
+  assert.equal((await handler(request({ action: 'list', target: 'job', jobId: job }, managerActor))).acknowledgmentStatus.records.length, 1);
   const edited = await handler(request({ action: 'save', target: 'property', customerId: customer, propertyId: 'front', alertId: initial.alerts[0].id, expectedVersion: 1, operationId: 'property-alert-operation-003', alert: alert('Revised: call manager before entering') }, managerActor));
   assert.equal(edited.alert.version, 2);
   assert.equal((await handler(request({ action: 'status', jobId: job }, tech))).acknowledgments.length, 0);
+  assert.deepEqual((await handler(request({ action: 'list', target: 'job', jobId: job }, managerActor))).acknowledgmentStatus.records, []);
   await assert.rejects(handler(request(acknowledgment, tech)), { code: 'failed-precondition' });
   await db.doc(`jobs/${job}`).update({ assignedTo: `${id}-manager-member`, assignedToUid: manager });
   await assert.rejects(handler(request({ action: 'status', jobId: job }, tech)), { code: 'permission-denied' });
   const managerStatus = await handler(request({ action: 'status', jobId: job }, managerActor));
   assert.equal(managerStatus.alerts[0].version, 2);
+  assert.deepEqual((await handler(request({ action: 'list', target: 'job', jobId: job }, managerActor))).acknowledgmentStatus.records, []);
 });
 
 test('job-specific alerts do not spread to other jobs and inactive alerts leave the current view', async () => {

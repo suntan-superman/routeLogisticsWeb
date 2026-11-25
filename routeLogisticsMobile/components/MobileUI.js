@@ -137,11 +137,11 @@ export function AppointmentBadge({ job }) {
   return <View accessibilityRole="text" accessibilityLabel="Estimate Visit" style={{ alignSelf: 'flex-start', borderRadius: 99, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: palette.glow, borderWidth: 1, borderColor: palette.accent }}><Text style={{ color: palette.text, fontWeight: '700', fontSize: 12, lineHeight: 18 }}>Estimate Visit</Text></View>;
 }
 
-export function JobCard({ job, onPress, featured = false, compact = false }) {
+export function JobCard({ job, onPress, featured = false, compact = false, appointmentLabel }) {
   const { palette } = useTheme();
   const title = job.customerName || 'Assigned customer';
   const address = typeof job.serviceProperty?.address === 'string' && job.serviceProperty.address.trim() ? job.serviceProperty.address : [job.address, job.city, job.state, job.zipCode].filter(value => typeof value === 'string' && value.trim()).join(', ');
-  const appointment = [job.date, job.time || 'Time not set'].filter(Boolean).join(' · ');
+  const appointment = appointmentLabel || [job.date, job.time || 'Time not set'].filter(Boolean).join(' · ');
   const sourceCriticalAlerts = (job.operationalAlerts || []).filter(alert => alert.active && alert.severity === 'critical');
   const [alertStatus, setAlertStatus] = useState(null);
   const alertFingerprint = sourceCriticalAlerts.map(alertKey).join('|');

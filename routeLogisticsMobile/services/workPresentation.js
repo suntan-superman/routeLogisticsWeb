@@ -28,6 +28,21 @@ function dayLabel(day) {
   const [year, month, date] = day.split('-').map(Number);
   return new Date(year, month - 1, date, 12).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 }
+function formatAppointment(job, timeZone = 'America/Los_Angeles', locale) {
+  const rawDate = String(job?.date || ''), match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(rawDate);
+  if (!match) return [rawDate, job?.time || 'Time not set'].filter(Boolean).join(' · ');
+  const [, year, month, day] = match.map(Number);
+  const noon = new Date(Date.UTC(year, month - 1, day, 12));
+  if (noon.getUTCFullYear() !== year || noon.getUTCMonth() + 1 !== month || noon.getUTCDate() !== day) return [rawDate, job?.time || 'Time not set'].join(' · ');
+  const dateLabel = new Intl.DateTimeFormat(locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(noon);
+  const minutes = timeMinutes(job?.time);
+  if (minutes === 24 * 60) return `${dateLabel} · ${job?.time || 'Time not set'}`;
+  const wallTime = new Date(Date.UTC(year, month - 1, day, Math.floor(minutes / 60), minutes % 60));
+  const timeLabel = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' }).format(wallTime);
+  let zone = '';
+  try { zone = new Intl.DateTimeFormat(locale, { timeZone, timeZoneName: 'short' }).formatToParts(noon).find(part => part.type === 'timeZoneName')?.value || ''; } catch { /* A malformed legacy zone cannot hide the appointment. */ }
+  return `${dateLabel} · ${timeLabel}${zone ? ` ${zone}` : ''}`;
+}
 function normalizeJobLocation(job, customer) {
   if (!job) return job;
   const text = value => typeof value === 'string' ? value.trim() : '';
@@ -69,4 +84,4 @@ function jobDestination(job) {
   return selected ? property.address.trim() : [job?.address, job?.city, job?.state, job?.zipCode].filter(value => typeof value === 'string' && value.trim()).join(', ');
 }
 const navigationUrl = job => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(jobDestination(job))}&travelmode=driving`;
-module.exports = { timeMinutes, sortJobs, nextJob, groupJobs, dayLabel, normalizeJobLocation, jobDestination, navigationUrl };
+module.exports = { timeMinutes, sortJobs, nextJob, groupJobs, dayLabel, formatAppointment, normalizeJobLocation, jobDestination, navigationUrl };

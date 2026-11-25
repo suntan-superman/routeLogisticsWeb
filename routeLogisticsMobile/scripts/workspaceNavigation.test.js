@@ -106,10 +106,10 @@ const currentJob = job('active', { status: 'in-progress', time: '14:00' });
 function query(type, jobs = []) {
   const refresh = async () => { refreshes.push(type); };
   return { jobs, isSuccess: true, isLoading: false, isFetching: false, error: null, canAccess: true, canReadWork: true,
-    accessStatus: 'ready', resourceDenied: false, dataChecked: true, refetch: refresh, refreshWork: refresh };
+    accessStatus: 'ready', resourceDenied: false, dataChecked: true, startDate: '2026-11-13', refetch: refresh, refreshWork: refresh };
 }
 function setRole(role) {
-  const user = { id: 'luis', name: 'Luis Gonzales', emailVerified: true, companyId: 'acme', role, membershipId: 'member', workspace: { status: 'company' }, companyName: 'Acme Pest Control', services: ['Business services catalogue'] };
+  const user = { id: 'luis', name: 'Luis Gonzales', emailVerified: true, companyId: 'acme', role, membershipId: 'member', workspace: { status: 'company' }, companyName: 'Acme Pest Control', companyTimeZone: 'America/Los_Angeles', services: ['Business services catalogue'] };
   currentAuth = { user, permissions: workspacePermissions(user.workspace, user), accessStatus: 'ready', refreshUser: async () => { refreshes.push('access'); } };
 }
 function isVisible(node) {
@@ -150,6 +150,22 @@ test('technician Home prioritizes the active job and exposes four accessible nav
   for (const tab of ['Home','Schedule','Route','Settings']) assert.ok(button(`${tab} tab`));
   await press('Open work order'); assert.equal(workflowProps.job.id, 'active');
   assert.equal(workflowMounts, 1); assert.equal(alertCalls.length, 0);
+});
+
+test('technician Home uses a compact informational summary and company-local appointment labels', async () => {
+  await render();
+  const summary = visibleNodes(node => node.props.testID === 'home-daily-summary')[0];
+  assert.ok(summary); assert.equal(summary.props.accessibilityLabel, '4 assigned today, 3 remaining, 1 completed');
+  const columns = summary.findAll(node => node.type === 'View' && node.props.style?.flex === 1);
+  assert.equal(columns.length, 3);
+  assert.deepEqual(columns.map(column => column.findAllByType('Text').at(-1).children.join('')), ['Assigned', 'Remaining', 'Completed']);
+  assert.equal(summary.props.style.paddingVertical, 2);
+  assert.match(visibleText(), /Nov 13, 2026 · 2:00 PM PST/);
+  const viewAll = button('View all scheduled work');
+  assert.equal(viewAll.props.style({ pressed: false }).minHeight, 44);
+  assert.doesNotMatch(visibleText(), /Your assigned visits, in appointment order|View all 4 jobs/);
+  await press('View all scheduled work');
+  assert.equal(button('Schedule tab').props.accessibilityState.selected, true);
 });
 
 test('assigned estimate visits stay in normal Field Home and Schedule with their property and outcome context', async () => {

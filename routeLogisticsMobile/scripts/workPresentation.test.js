@@ -1,6 +1,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { normalizeJobLocation, jobDestination } = require('../services/workPresentation');
+const { normalizeJobLocation, jobDestination, formatAppointment } = require('../services/workPresentation');
+
+test('home appointment labels keep company-local dates and identify the configured time zone', () => {
+  assert.match(formatAppointment({ date: '2026-11-25', time: '09:00' }, 'America/Los_Angeles', 'en-US'), /Wed, Nov 25, 2026 · 9:00 AM PST/);
+  assert.match(formatAppointment({ date: '2026-07-25', time: '09:00' }, 'America/Los_Angeles', 'en-US'), /Sat, Jul 25, 2026 · 9:00 AM PDT/);
+  assert.match(formatAppointment({ date: '2026-11-25', time: '09:00' }, 'America/New_York', 'en-US'), /Wed, Nov 25, 2026 · 9:00 AM EST/);
+  assert.equal(formatAppointment({ date: '2026-11-25', time: '' }, 'America/Los_Angeles', 'en-US'), 'Wed, Nov 25, 2026 · Time not set');
+});
 
 test('legacy object service addresses are normalized without using a different customer location', () => {
   const job = { id: 'job', companyId: 'acme', address: { street: '3 Service Street', city: 'Bakersfield', state: 'CA', zipCode: '93312' }, status: 'scheduled' };

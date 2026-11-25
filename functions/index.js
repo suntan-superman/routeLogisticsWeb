@@ -13,6 +13,7 @@ const { schedulingHandlers } = require('./scheduling');
 const { scheduleMembershipHandlers } = require('./scheduleMembership');
 const { staffAvailabilityHandlers } = require('./staffAvailability');
 const { jobPhotoHandler } = require('./jobPhotos');
+const { propertyProfileHandler } = require('./propertyProfile');
 const { assignmentTarget, buildAssignmentMessage, DEAD_TOKEN_CODES } = require('./notify');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineString } = require('firebase-functions/params');
@@ -174,6 +175,7 @@ exports.rlCleanupCompanyOnboardingDrafts = onSchedule({ schedule: 'every 24 hour
   const batch = db.batch(); expired.docs.forEach(row => batch.delete(row.ref)); await batch.commit();
 });
 exports.rlJobPhoto = onCall({ memory: '512MiB', timeoutSeconds: 60 }, jobPhotoHandler(db));
+exports.rlPropertyProfile = onCall({ memory: '512MiB', timeoutSeconds: 60 }, propertyProfileHandler(db));
 
 const invites = invitationHandlers(db, applyClaims, () => appUrl.value(), emailEnabled);
 exports.sendTeamInviteEmail = onCall(invites.sendTeamInviteEmail);

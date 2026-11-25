@@ -21,6 +21,7 @@ function jobPhotoHandler(db, bucketProvider = () => getStorage().bucket()) {
       if (typeof path !== 'string' || (!path.startsWith(legacyPrefix) && !path.startsWith(privatePrefix) && !(migratedPrefix && path.startsWith(migratedPrefix)))) throw new HttpsError('permission-denied', 'Photo path unavailable.');
       const file = bucketProvider().file(path);
       if (data.action === 'delete') {
+        if ((photo.get('propertyReferenceIds') || []).length) throw new HttpsError('failed-precondition', 'This job photo is also a property reference. Archive the reference; retain original job evidence.');
         await db.collection('rlAudit').add({ action: 'photo.delete', photoId: photo.id, jobId: job.id, companyId: scope.companyId, actorId: scope.uid, createdAt: new Date().toISOString() });
         await file.delete({ ignoreNotFound: true }); await photo.ref.delete(); return { deleted: true };
       }

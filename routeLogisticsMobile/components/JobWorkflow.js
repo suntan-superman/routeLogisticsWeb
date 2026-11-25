@@ -59,7 +59,8 @@ export default function JobWorkflow({ job, visible = true, onClose, onChanged, o
   const serviceBusyRef = useRef(false), serviceDraftRef = useRef(false);
   const requestBusyRef=useRef(false),requestDraftRef=useRef(false);
   const workActionsRef = useRef(null), checklistActionsRef = useRef(null), draftAction = useRef(null);
-  const scrollRef = useRef(null), scrollLayouts = useRef({}), pendingScroll = useRef(null), scrollFrames = useRef([]);
+  const scrollRef = useRef(null), scrollLayouts = useRef({}), pendingScroll = useRef(null), scrollFrames = useRef([]), scrollOffset = useRef(0);
+  const scrollBounds = useRef({ content: 0, viewport: 0 });
   const notify = useRef(onInteractionChange); notify.current = onInteractionChange;
   const hasCompletionDraft = Object.values(draft).some(value => String(value).trim());
   const hasDraft = photoDraft || workDraft || serviceDraft || requestDraft || hasCompletionDraft || !!completionDialog, busy = saving || reviewing || photoBusy || workBusy || serviceBusy || requestBusy || resolvingDrafts;
@@ -79,10 +80,28 @@ export default function JobWorkflow({ job, visible = true, onClose, onChanged, o
   const scrollToMeasured = useCallback(target => {
     const measured = scrollLayouts.current[target], scroller = scrollRef.current;
     if (!measured || !scroller?.scrollTo) return false;
-    scroller.scrollTo({ y: Math.max(0, measured.y), animated: false });
-    if (pendingScroll.current === target) pendingScroll.current = null;
+    const { content, viewport } = scrollBounds.current;
+    const maximum = content && viewport ? Math.max(0, content - viewport) : measured.y;
+    scrollOffset.current = Math.min(Math.max(0, measured.y), maximum);
+    scroller.scrollTo({ y: scrollOffset.current, animated: false });
     return true;
   }, []);
+  const contentResized = useCallback((_width, height) => {
+    scrollBounds.current.content = height;
+    const target = pendingScroll.current;
+    if (target && scrollToMeasured(target)) pendingScroll.current = null;
+    else {
+      const { viewport } = scrollBounds.current;
+      if (viewport && scrollOffset.current > Math.max(0, height - viewport)) {
+        scrollOffset.current = Math.max(0, height - viewport);
+        scrollRef.current?.scrollTo?.({ y: scrollOffset.current, animated: false });
+      }
+    }
+  }, [scrollToMeasured]);
+  const viewportResized = useCallback(event => {
+    scrollBounds.current.viewport = event?.nativeEvent?.layout?.height || 0;
+    if (pendingScroll.current && scrollToMeasured(pendingScroll.current)) pendingScroll.current = null;
+  }, [scrollToMeasured]);
   const requestScroll = useCallback(target => {
     pendingScroll.current = target;
     clearScrollFrames();
@@ -104,7 +123,7 @@ export default function JobWorkflow({ job, visible = true, onClose, onChanged, o
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; generation.current++; clearScrollFrames(); notify.current?.({ busy: false, hasDraft: false }); }; }, [clearScrollFrames]);
   useEffect(() => { notify.current?.({ busy, hasDraft }); }, [busy, hasDraft]);
   useEffect(() => {
-    generation.current++; submitting.current = null; reviewPending.current = null; scrollLayouts.current = {}; pendingScroll.current = 'overview';
+    generation.current++; submitting.current = null; reviewPending.current = null; scrollLayouts.current = {}; scrollBounds.current = { content: 0, viewport: 0 }; scrollOffset.current = 0; pendingScroll.current = 'overview';
     setMode('details'); setActiveStep(null); setStepProgress({ arrival: !!job?.visitEvidence?.arrivedAt, departure: !!job?.visitEvidence?.departedAt, work: !!job?.workNotes, review: job?.status === 'completed' }); setDraft(emptyDraft()); setError(''); setNotice(''); setSaving(false); setReviewing(false);
     setPhotoBusy(false); setPhotoDraft(false); photoBusyRef.current = false; photoDraftRef.current = false;
     setWorkBusy(false); setWorkDraft(false); workBusyRef.current = false; workDraftRef.current = false;
@@ -374,15 +393,15 @@ export default function JobWorkflow({ job, visible = true, onClose, onChanged, o
     ['Visit outcome', visitOutcome],
   ];
   if (mode === 'property') return <View testID="job-property-profile" style={{ flex: 1, backgroundColor: palette.background }}>
-    <ScreenHeader title="Property Profile" subtitle={displayJob.customerName || 'Assigned property'} onBack={() => setMode('details')} />
-    <KeyboardAwareScrollView contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}><GlassButton secondary title="Back to Visit Workflow" onPress={() => { setMode('details'); requestScroll('overview'); }} /><PropertyProfileMobile job={displayJob} /></KeyboardAwareScrollView>
+    <ScreenHeader title="Property Profile" subtitle={displayJob.customerName || 'Assigned property'} onBack={() => { setMode('details'); requestScroll('overview'); }} />
+    <KeyboardAwareScrollView contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}><PropertyProfileMobile job={displayJob} /></KeyboardAwareScrollView>
   </View>;
   return <View testID="job-workflow" style={{ flex: 1, backgroundColor: palette.background }}>
     <View style={{ flex: 1 }} pointerEvents={completionDialog||closeRequested ? 'none' : 'auto'} accessibilityElementsHidden={!!completionDialog||closeRequested} importantForAccessibility={completionDialog||closeRequested ? 'no-hide-descendants' : 'auto'}>
     <ScreenHeader title={overview ? 'Visit Workflow' : activeStepLabel || 'Visit Workflow'} subtitle={overview ? `${displayJob.customerName || 'Assigned customer'} · ${displayJob.serviceType || 'Service visit'}` : displayJob.customerName || 'Assigned visit'} onBack={stageBack ? returnToOverview : undefined}>
       {overview && <GlassButton secondary title="Close" accessibilityLabel="Close job details" disabled={busy} onPress={close} />}
     </ScreenHeader>
-    <KeyboardAwareScrollView scrollRef={scrollRef} contentContainerStyle={{ paddingHorizontal: 20, gap: 20 }}>
+    <KeyboardAwareScrollView scrollRef={scrollRef} onLayout={viewportResized} onContentSizeChange={contentResized} onScroll={event => { scrollOffset.current = event?.nativeEvent?.contentOffset?.y || 0; }} bounces={false} alwaysBounceVertical={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 20 }}>
       {!!error && <InlineNotice tone="error" message={error} />}
       {!!notice && <InlineNotice tone="success" message={notice} />}
       {busy && <View accessibilityLiveRegion="polite" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><ActivityIndicator color={palette.accent} /><Text style={{ flex: 1, color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{saving ? 'Saving completion…' : reviewing ? 'Loading saved work…' : workBusy ? 'Saving your work…' : 'Finish or cancel the current action to continue.'}</Text></View>}

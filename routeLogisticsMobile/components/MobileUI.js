@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, ActivityIndicator, ScrollView, BackHandler, Keyboard, Platform, AccessibilityInfo, findNodeHandle } from 'react-native';
+import { View, Text, Pressable, ActivityIndicator, ScrollView, BackHandler, Keyboard, Platform, AccessibilityInfo, findNodeHandle, AppState } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeProvider';
 import { GlassCard, GlassButton, GlassInput, IconButton } from './Glass';
 import { isEstimateVisit, estimateOutcomeLabel } from '../services/estimateVisitPolicy';
 import { KeyboardScrollContext } from './KeyboardScrollContext';
+import { alertKey, readJobAlerts, subscribeOffline } from '../services/offline';
 
 export const SPACING = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, section: 28 };
 export const PrimaryButton = props => <GlassButton {...props} />;
@@ -141,8 +142,31 @@ export function JobCard({ job, onPress, featured = false, compact = false }) {
   const title = job.customerName || 'Assigned customer';
   const address = typeof job.serviceProperty?.address === 'string' && job.serviceProperty.address.trim() ? job.serviceProperty.address : [job.address, job.city, job.state, job.zipCode].filter(value => typeof value === 'string' && value.trim()).join(', ');
   const appointment = [job.date, job.time || 'Time not set'].filter(Boolean).join(' · ');
-  const importantAlerts = (job.operationalAlerts || []).filter(alert => alert.active && ['important', 'critical'].includes(alert.severity));
-  const criticalCount = importantAlerts.filter(alert => alert.severity === 'critical').length;
+  const sourceCriticalAlerts = (job.operationalAlerts || []).filter(alert => alert.active && alert.severity === 'critical');
+  const [alertStatus, setAlertStatus] = useState(null);
+  const alertFingerprint = sourceCriticalAlerts.map(alertKey).join('|');
+  useEffect(() => {
+    if (!sourceCriticalAlerts.length || !job.id) { setAlertStatus(null); return undefined; }
+    let active = true;
+    const refresh = () => readJobAlerts(job.id, job.operationalAlerts || []).then(result => {
+      if (active) setAlertStatus({ ...result, jobId: job.id, fingerprint: alertFingerprint });
+    }).catch(() => { if (active) setAlertStatus(null); });
+    void refresh();
+    const unsubscribe = subscribeOffline(refresh);
+    const foreground = AppState.addEventListener('change', state => { if (state === 'active') void refresh(); });
+    return () => { active = false; unsubscribe(); foreground?.remove?.(); };
+  }, [job.id, alertFingerprint]);
+  const currentStatus = alertStatus?.jobId === job.id && alertStatus.fingerprint === alertFingerprint ? alertStatus : null;
+  const mergedAlerts = new Map();
+  for (const alert of [...(job.operationalAlerts || []), ...(currentStatus?.alerts || [])]) {
+    const key = `${alert.source}:${alert.id}`;
+    if (!mergedAlerts.has(key) || Number(alert.version) >= Number(mergedAlerts.get(key).version)) mergedAlerts.set(key, alert);
+  }
+  const importantAlerts = [...mergedAlerts.values()].filter(alert => alert.active && ['important', 'critical'].includes(alert.severity));
+  const criticalAlerts = importantAlerts.filter(alert => alert.severity === 'critical');
+  const acknowledged = alert => currentStatus?.acknowledgments?.some(row => row.alertKey === alertKey(alert)) || currentStatus?.local?.some(row => row.alertKey === alertKey(alert) && ['pending', 'syncing', 'synced'].includes(row.state));
+  const unacknowledgedCount = criticalAlerts.filter(alert => !acknowledged(alert)).length;
+  const pendingCount = criticalAlerts.filter(alert => currentStatus?.local?.some(row => row.alertKey === alertKey(alert) && ['pending', 'syncing'].includes(row.state))).length;
   return <Pressable testID={`job-card-${job.id}`} accessibilityRole="button" accessibilityLabel={`Open job for ${title}, ${job.serviceType || 'Service'}, ${appointment}, ${statusLabels[job.status] || job.status || 'Status not set'}${isEstimateVisit(job) ? ', Estimate Visit, ' + estimateOutcomeLabel(job) : ''}`}
     accessibilityHint="Opens the work order and job actions" onPress={onPress}
     style={({ pressed }) => ({ minHeight: 100, padding: featured ? 20 : 16, gap: 12, borderRadius: 20, borderWidth: 1, borderColor: featured ? palette.accent : palette.border, backgroundColor: palette.surface, opacity: pressed ? 0.86 : 1 })}>
@@ -155,7 +179,7 @@ export function JobCard({ job, onPress, featured = false, compact = false }) {
     <Text style={{ color: palette.text, fontSize: 14, lineHeight: 21, fontWeight: '600' }}>{appointment}</Text>
     {!compact && !!address && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{address}</Text>}
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><AppointmentBadge job={job} /><StatusBadge status={job.localCompletionPending ? job.serverStatus || job.status : job.status} />{!!job.syncState && <StatusBadge syncState={job.syncState} />}</View>
-    {!!importantAlerts.length && <Text accessibilityRole="text" style={{ color: criticalCount ? palette.danger : palette.secondary, fontSize: 13, fontWeight: '700' }}>{criticalCount ? `⚠ ${criticalCount} critical alert${criticalCount === 1 ? '' : 's'}` : `${importantAlerts.length} important alert${importantAlerts.length === 1 ? '' : 's'}`} · Open job to review</Text>}
+    {!!importantAlerts.length && <Text accessibilityRole="text" accessibilityLiveRegion="polite" style={{ color: unacknowledgedCount ? palette.danger : criticalAlerts.length ? palette.accent : palette.secondary, fontSize: 13, fontWeight: '700' }}>{unacknowledgedCount ? `⚠ ${unacknowledgedCount} critical alert${unacknowledgedCount === 1 ? '' : 's'} · Open job to acknowledge` : criticalAlerts.length ? `✓ ${criticalAlerts.length} critical alert${criticalAlerts.length === 1 ? '' : 's'} acknowledged${pendingCount ? ' on device · waiting to sync' : ''}` : `${importantAlerts.length} important alert${importantAlerts.length === 1 ? '' : 's'} · Open job to review`}</Text>}
     {job.localCompletionPending && <Text accessibilityLiveRegion="polite" style={{ color: palette.secondary, fontSize: 13, lineHeight: 20 }}>Completion saved on this device — the server has not confirmed the completed status yet.</Text>}
     {isEstimateVisit(job) && <Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 20 }}>{estimateOutcomeLabel(job)}</Text>}
     {!!job.syncError && <Text accessibilityRole="alert" style={{ color: palette.danger, fontSize: 13, lineHeight: 20 }}>{job.syncError}</Text>}

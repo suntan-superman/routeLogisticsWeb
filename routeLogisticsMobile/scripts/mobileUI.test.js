@@ -5,6 +5,9 @@ global.IS_REACT_ACT_ENVIRONMENT = true;
 const cache = new Map(), native = Object.fromEntries(['View', 'Text', 'Pressable', 'ActivityIndicator', 'TextInput', 'ScrollView', 'KeyboardAvoidingView'].map(name => [name, name]));
 native.StyleSheet = { create: value => value };
 native.Platform = { OS: 'android' };
+const offlineListeners = new Set();
+let alertResult = null;
+native.AppState = { addEventListener: () => ({ remove() {} }) };
 const backHandlers = new Set(), keyboardHandlers = new Map(), announcements = [], focusTargets = [];
 let keyboardDismissals = 0;
 native.BackHandler = { addEventListener: (_event, handler) => { backHandlers.add(handler); return { remove: () => backHandlers.delete(handler) }; } };
@@ -20,6 +23,7 @@ function load(relative) {
   if (name.startsWith('@babel/runtime/')) return require(name);
   if(name === 'react') return React;
   if(name === 'react-native') return native;
+  if(name.endsWith('/services/offline')) return { alertKey: alert => `${alert.source}:${alert.id}:${alert.version}`, readJobAlerts: async (_id, alerts) => alertResult || { alerts, acknowledgments: [], local: [] }, subscribeOffline: callback => { offlineListeners.add(callback); return () => offlineListeners.delete(callback); } };
   if(name === '@expo/vector-icons') return { Ionicons: 'Icon' };
   if(name === 'react-native-safe-area-context') return { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 24, right: 0, bottom: 24, left: 0 }) };
   if(name.endsWith('/theme/ThemeProvider')) return { useTheme: () => ({ palette: dark ? { ...palette, background: '#07120F', surface: '#14241F', text: '#EFFAF5', secondary: '#B0C8BE' } : palette, isDark: dark }) };
@@ -31,13 +35,29 @@ function load(relative) {
 }
 const UI=load('components/MobileUI.js'),Glass=load('components/Glass.js');
 async function render(Component,props,options){await act(async()=>{tree=create(React.createElement(Component,props),options)});return tree;}
-afterEach(async()=>{if(tree)await act(async()=>tree.unmount());tree=null;dark=false;native.Platform.OS='android';assert.equal(backHandlers.size,0);assert.equal(keyboardHandlers.size,0);announcements.length=0;focusTargets.length=0;keyboardDismissals=0;});
+afterEach(async()=>{if(tree)await act(async()=>tree.unmount());tree=null;dark=false;alertResult=null;native.Platform.OS='android';assert.equal(backHandlers.size,0);assert.equal(keyboardHandlers.size,0);assert.equal(offlineListeners.size,0);announcements.length=0;focusTargets.length=0;keyboardDismissals=0;});
 
 test('job cards expose clear accessible actions and statuses without financial fields',async()=>{
  let opened=0;await render(UI.JobCard,{job:{id:'job',customerName:'Customer',serviceType:'Inspection',date:'2026-11-13',time:'15:00',status:'in-progress',estimatedCost:999,totalCost:999},onPress:()=>opened++});
  const button=tree.root.findByType('Pressable');assert.equal(button.props.accessibilityRole,'button');assert.match(button.props.accessibilityLabel,/Open job for Customer/);
  await act(async()=>button.props.onPress());assert.equal(opened,1);assert.doesNotMatch(JSON.stringify(tree.toJSON()),/999/);
  assert.match(JSON.stringify(tree.toJSON()),/In progress/);
+});
+
+test('job card updates a critical alert from pending to server acknowledged and requires a new version acknowledgment', async () => {
+  const alert = { source: 'job', id: 'safety-one', version: 2, severity: 'critical', active: true };
+  const record = { id: 'job', customerName: 'Synthetic customer', serviceType: 'Lawn care', operationalAlerts: [alert] };
+  await render(UI.JobCard, { job: record, onPress() {} });
+  assert.match(JSON.stringify(tree.toJSON()), /1 critical alert.*Open job to acknowledge/);
+  alertResult = { alerts: [alert], acknowledgments: [], local: [{ alertKey: 'job:safety-one:2', state: 'pending' }] };
+  await act(async () => { for (const notify of offlineListeners) await notify(); });
+  assert.match(JSON.stringify(tree.toJSON()), /acknowledged on device.*waiting to sync/);
+  alertResult = { alerts: [alert], acknowledgments: [{ alertKey: 'job:safety-one:2' }], local: [] };
+  await act(async () => { for (const notify of offlineListeners) await notify(); });
+  assert.match(JSON.stringify(tree.toJSON()), /1 critical alert acknowledged/);
+  assert.doesNotMatch(JSON.stringify(tree.toJSON()), /Open job to acknowledge/);
+  await act(async () => tree.update(React.createElement(UI.JobCard, { job: { ...record, operationalAlerts: [{ ...alert, version: 3 }] }, onPress() {} })));
+  assert.match(JSON.stringify(tree.toJSON()), /Open job to acknowledge/);
 });
 
 test('estimate visits use the normal job card with a distinct badge and outcome while historical service cards stay unchanged',async()=>{

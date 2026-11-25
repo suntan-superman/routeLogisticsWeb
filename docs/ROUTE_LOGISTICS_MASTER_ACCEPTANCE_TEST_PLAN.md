@@ -4710,3 +4710,9 @@ Detailed architecture and evidence: `docs/ROUTE_LOGISTICS_AI_ASSISTANT_SUPPORT_I
 - PENDING — production kill-switch/fallback exercise.
 
 Automated evidence must not be used to mark these physical checks complete.
+
+## Phase 2/3 iOS physical acceptance — November 25, 2026
+
+The owner completed **25/25 physical iOS checks** on the installed Route Logistics application: existing functionality **6/6**, Property Intelligence **7/7**, operational alerts **5/5**, and offline reliability **7/7**. The Property Intelligence reference-photo capture, management approval, and approved mobile display path was also confirmed in the preceding production acceptance run. This is owner-reported physical evidence; it does not certify Android appearance or a new mobile build.
+
+After that functional run, the owner reported two mobile presentation issues: the Home work-order card continued to show an unacknowledged critical-alert warning after server acknowledgment, and the Visit Workflow could retain an out-of-range scroll position after returning from a longer stage. The Property Profile navigation and cards also needed compact visual refinement. These are tracked as follow-up mobile UI acceptance items. Targeted regression tests cover acknowledgment display, changing alert versions, measured scroll clamping, property tabs, proposals, and service/material history. Physical visual acceptance of the updated iOS and Android installations remains pending; no backend contract or alert enforcement changed.

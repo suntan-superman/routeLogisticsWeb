@@ -4,11 +4,13 @@ const babel=require(path.join(root,'node_modules/@babel/core'));global.IS_REACT_
 const palette={text:'#123',secondary:'#456',accent:'#087',surface:'#fff',input:'#eee',border:'#ddd',danger:'#a00',background:'#fff',button:'#087',glow:'#dfd'};
 let tree,user,permissions,context,data,calls,routeData,operations,view,interactions,mapFits,platform;
 const native={View:'View',Text:'Text',Pressable:'Pressable',ScrollView:'ScrollView',RefreshControl:'RefreshControl',ActivityIndicator:'ActivityIndicator',TextInput:'TextInput',StyleSheet:{create:x=>x},Linking:{openURL:async url=>calls.push(['web',url])},Platform:{get OS(){return platform;}}};
+native.AppState={addEventListener:()=>({remove(){}})};
 const modules=new Map();
 function load(relative){
  const file=path.join(root,relative);if(modules.has(file))return modules.get(file).exports;const module={exports:{}};modules.set(file,module);
  const importer=name=>{
   if(name==='react')return React;if(name==='react-native')return native;
+  if(name.endsWith('/services/offline')&&file.endsWith('MobileUI.js'))return{alertKey:alert=>`${alert.source}:${alert.id}:${alert.version}`,readJobAlerts:async(_id,alerts)=>({alerts,acknowledgments:[],local:[]}),subscribeOffline:()=>()=>{}};
   if(name==='@expo/vector-icons')return{Ionicons:'Icon'};if(name==='react-native-safe-area-context')return{SafeAreaView:'SafeAreaView',useSafeAreaInsets:()=>({top:0,right:0,bottom:0,left:0})};
   if(name==='@react-native-community/datetimepicker')return{__esModule:true,default:'DateTimePicker'};
   if(name==='expo-constants')return{__esModule:true,default:{expoConfig:{extra:{nativeMaps:{androidConfigured:false}}}}};

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Image, Text, View } from 'react-native';
+import { Image, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import NetInfo from '@react-native-community/netinfo';
 import { auth } from '../constants/firebase';
@@ -9,7 +10,17 @@ import { useTheme } from '../theme/ThemeProvider';
 import { Card, SectionHeader } from './MobileUI';
 import { GlassButton } from './Glass';
 
-const tabs = ['Overview', 'Alerts', 'Photos', 'Service History', 'Material History'];
+const tabs = [
+  { label: 'Overview', icon: 'home-outline' },
+  { label: 'Alerts', icon: 'shield-checkmark-outline' },
+  { label: 'Photos', icon: 'images-outline' },
+  { label: 'History', icon: 'time-outline' },
+  { label: 'Materials', icon: 'clipboard-outline' },
+];
+const readableDate = value => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return value || 'Date not recorded';
+  return new Date(`${value}T12:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+};
 const proposalState = row => row.state === 'synced' ? 'Awaiting management approval' : row.state === 'failed' || row.state === 'conflict' ? row.uploadedAt ? 'Uploaded · proposal needs attention' : 'Upload needs attention' : row.uploadedAt ? 'Uploaded · proposal pending synchronization' : row.state === 'syncing' ? 'Upload pending' : 'Saved locally · upload pending';
 const photoFile = (jobId, photoId) => `${FileSystem.documentDirectory}rl-property-refs/${propertyCacheAccountSegment(auth.currentUser?.uid)}/${jobId}/${photoId}.jpg`;
 async function cachePhoto(jobId, photoId, loader) {
@@ -27,62 +38,94 @@ export default function PropertyProfileMobile({ job }) {
   const propertyId = job?.servicePropertyId || job?.serviceProperty?.propertyId;
   const [tab, setTab] = useState('Overview'), [overview, setOverview] = useState(null), [rows, setRows] = useState([]), [next, setNext] = useState(null);
   const [images, setImages] = useState({}), [localProposals, setLocalProposals] = useState([]), [cached, setCached] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [selectedPhoto, setSelectedPhoto] = useState(null);
   const context = `${job?.id || ''}:${job?.customerId || ''}:${propertyId || ''}`;
   const activeContext = useRef(context);
   activeContext.current = context;
   const input = { customerId: job?.customerId, propertyId, jobId: job?.id };
+  const loadPhoto = photo => cachePhoto(job.id, photo.id, () => photo.status === 'approved'
+    ? callWorkspace('rlPropertyProfile', { ...input, action: 'readPhoto', photoId: photo.id })
+    : callWorkspace('rlJobPhoto', { action: 'read', photoId: photo.id }));
   const load = useCallback(async (selected = tab, cursor = null) => {
     if (!input.customerId || !propertyId) return;
     const requestContext = `${job.id}:${input.customerId}:${propertyId}`;
     setBusy(true); setError('');
     try {
-      const action = selected === 'Overview' || selected === 'Alerts' ? 'overview' : selected === 'Photos' ? 'listPhotos' : selected === 'Service History' ? 'history' : 'materials';
+      const action = selected === 'Overview' || selected === 'Alerts' ? 'overview' : selected === 'Photos' ? 'listPhotos' : selected === 'History' ? 'history' : 'materials';
       const name = `property:${job.id}:${propertyId}:${action}:${cursor || 'first'}`;
       const result = await cachedRead(name, () => callWorkspace('rlPropertyProfile', { ...input, action, ...(cursor ? { after: cursor } : {}) }));
       if (activeContext.current !== requestContext) return;
       const connectivity = await NetInfo.fetch();
       if (activeContext.current !== requestContext) return;
-      setCached(connectivity.isConnected === false);
+      setCached(connectivity.isConnected === false || connectivity.isInternetReachable === false);
       if (action === 'overview') {
         setOverview(result);
         // Cache only the first three explicitly authorized references. Never download the full gallery.
         for (const photo of (result.photos || []).slice(0, 3)) {
-          try { const uri = await cachePhoto(job.id, photo.id, () => callWorkspace('rlPropertyProfile', { ...input, action: 'readPhoto', photoId: photo.id })); if (activeContext.current === requestContext) setImages(previous => ({ ...previous, [photo.id]: uri })); } catch { /* The profile remains usable when one image is unavailable. */ }
+          try { const uri = await loadPhoto(photo); if (activeContext.current === requestContext) setImages(previous => ({ ...previous, [photo.id]: uri })); } catch { /* The profile remains usable when one image is unavailable. */ }
         }
       } else {
         setRows(previous => cursor ? [...previous, ...(result.rows || result.photos || [])] : result.rows || result.photos || []);
         setNext(result.next || null);
       }
-      if (selected === 'Photos') { const saved = await queuedWork(); if (activeContext.current === requestContext) setLocalProposals(saved.filter(row => row.kind === 'photo' && row.jobId === job.id && row.propertyId === propertyId && row.metadata?.referenceCategory && row.state !== 'discarded')); }
+      if (selected === 'Photos') {
+        const saved = await queuedWork();
+        if (activeContext.current === requestContext) setLocalProposals(saved.filter(row => row.kind === 'photo' && row.jobId === job.id && row.propertyId === propertyId && row.metadata?.referenceCategory && row.state !== 'discarded'));
+        void Promise.allSettled((result.photos || []).filter(row => row.status === 'approved' || row.sourceJobId).slice(0, 6).map(async photo => {
+          const uri = await loadPhoto(photo);
+          if (activeContext.current === requestContext) setImages(previous => ({ ...previous, [photo.id]: uri }));
+        })); // Captions remain available while thumbnails load or if one fails.
+      }
     } catch (failure) { if (activeContext.current === requestContext) setError(failure.message || 'Property information is unavailable. Open this profile online to cache it.'); }
     finally { if (activeContext.current === requestContext) setBusy(false); }
   }, [job?.id, job?.customerId, propertyId, tab]);
-  useEffect(() => { setOverview(null); setRows([]); setLocalProposals([]); setNext(null); setImages({}); setTab('Overview'); }, [job?.id, propertyId]);
+  useEffect(() => { setOverview(null); setRows([]); setLocalProposals([]); setNext(null); setImages({}); setSelectedPhoto(null); setTab('Overview'); }, [job?.id, propertyId]);
   useEffect(() => { void load(tab); }, [tab, load]);
   useEffect(() => { let active = true; const unsubscribe = subscribeOffline(() => { if (tab === 'Photos') void queuedWork().then(rows => { if (active && activeContext.current === context) setLocalProposals(rows.filter(row => row.kind === 'photo' && row.jobId === job.id && row.propertyId === propertyId && row.metadata?.referenceCategory && row.state !== 'discarded')); }).catch(() => {}); }); return () => { active = false; unsubscribe(); }; }, [tab, context]);
-  const line = (key, value) => <Text key={key} style={{ color: palette.text, fontSize: 14, lineHeight: 22 }}>{value}</Text>;
-  if (!propertyId || !job?.customerId) return <Card><SectionHeader title="Property Profile" /><Text style={{ color: palette.secondary }}>This job has no stable saved property link. Historical work cannot be matched by address alone.</Text></Card>;
-  return <Card><SectionHeader title="Property Profile" subtitle="Internal details for this assigned work order." />
-    <Text style={{ color: palette.secondary }}>{cached ? 'Saved on this device · information may be older' : 'Current server information'}</Text>
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>{tabs.map(name => <GlassButton key={name} title={name} secondary={tab !== name} onPress={() => setTab(name)} />)}</View>
-    {busy && line('loading', 'Loading property information…')}{!!error && <><Text accessibilityRole="alert" style={{ color: palette.danger }}>{error}</Text><GlassButton secondary title="Retry property profile" onPress={() => load(tab)} /></>}
-    {(tab === 'Overview' || tab === 'Alerts') && overview && <View style={{ gap: 7 }}>
-      {tab === 'Overview' && <>{line('property', `${overview.property.label || 'Property'} · ${overview.property.address}`)}{line('customer', `Customer: ${overview.customer.name || 'Name unavailable'}`)}{!!overview.property.accessInstructions && line('access', `Access instructions: ${overview.property.accessInstructions}`)}{line('plans', `Active plans: ${overview.plans.length ? overview.plans.map(row => row.serviceType).join(', ') : 'None linked'}`)}{line('last', `Last service: ${overview.lastCompleted ? `${overview.lastCompleted.serviceType} · ${overview.lastCompleted.date}` : 'No explicitly linked visit'}`)}{line('next', `Upcoming: ${overview.upcoming.length ? overview.upcoming.map(row => `${row.date} ${row.serviceType}`).join('; ') : 'None linked'}`)}</>}
-      {overview.alerts.filter(row => ['critical', 'important'].includes(row.severity)).map(row => line(row.id, `${row.severity === 'critical' ? '⚠ Critical' : 'Important'} · ${row.title}: ${row.description}`))}
-      {!overview.alerts.some(row => ['critical', 'important'].includes(row.severity)) && line('none', 'No active important or critical property alerts.')}
-    </View>}
-    {tab === 'Photos' && <View style={{ gap: 10 }}>
-      {line('approved-heading', 'Approved property references')}
-      {!rows.some(photo => photo.status === 'approved') && line('empty', 'No approved permanent reference photographs yet.')}
-      {rows.filter(photo => photo.status === 'approved').map(photo => <View key={photo.id} style={{ gap: 4 }}>{line(photo.id, `${photo.category} · ${photo.caption || 'No caption'} · Approved`)}{images[photo.id] ? <Image source={{ uri: images[photo.id] }} style={{ width: 180, height: 140, borderRadius: 8 }} /> : <GlassButton secondary title="View reference photo" onPress={async () => { try { const uri = await cachePhoto(job.id, photo.id, () => callWorkspace('rlPropertyProfile', { ...input, action: 'readPhoto', photoId: photo.id })); setImages(previous => ({ ...previous, [photo.id]: uri })); } catch (failure) { setError(failure.message); } }} />}</View>)}
-      {line('proposals-heading', 'Your reference proposals')}
-      <GlassButton secondary title="Refresh proposal status" disabled={busy} onPress={() => load('Photos')} />
-      {rows.filter(photo => ['proposed', 'rejected'].includes(photo.status)).map(photo => line(photo.id, `${photo.category} · ${photo.caption || 'No caption'} · ${photo.status === 'rejected' ? 'Rejected by management · original job photo retained' : 'Awaiting management approval'}`))}
-      {localProposals.filter(row => !rows.some(photo => photo.id === `${row.attribution?.userId}_${row.id}`)).map(row => line(row.id, `${row.metadata.referenceCategory} · ${proposalState(row)}${row.error ? ` · ${row.error}` : ''}`))}
-      {!rows.some(photo => ['proposed', 'rejected'].includes(photo.status)) && !localProposals.some(row => !rows.some(photo => photo.id === `${row.attribution?.userId}_${row.id}`)) && line('no-proposals', 'No proposals from this device or authorized account.')}
-    </View>}
-    {(tab === 'Service History' || tab === 'Material History') && <View style={{ gap: 9 }}>{!rows.length && !busy && line('empty', 'No records with an explicit link to this property. Ambiguous older addresses are omitted.')}{rows.map(row => line(row.id, tab === 'Service History' ? `${row.date} · ${row.serviceType} · ${row.outcome}${row.notes ? `\n${row.notes}` : ''}${row.hasEvidence ? '\nJob photo evidence recorded; open the authorized work order to review it.' : ''}` : `${row.date} · ${row.product} · ${row.quantity} ${row.unit} · ${row.location || 'Location not recorded'} · ${row.method || 'Method not recorded'}`))}</View>}
-    {!!next && <GlassButton secondary title="Load more" disabled={busy} onPress={() => load(tab, next)} />}
-    {tab === 'Photos' && line('proposal', 'To propose a new reference, open Photos and evidence in this job and select a reference category before taking or choosing a photo.')}
-  </Card>;
+  const body = (value, extra = {}) => <Text style={{ color: palette.text, fontSize: 14, lineHeight: 21, ...extra }}>{value}</Text>;
+  const muted = value => <Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 19 }}>{value}</Text>;
+  const itemStyle = { padding: 12, gap: 5, borderRadius: 12, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.input };
+  const empty = value => <View style={{ paddingVertical: 12 }}>{muted(value)}</View>;
+  const photoStatus = photo => photo.status === 'approved' ? 'Approved reference' : photo.status === 'archived' ? 'Archived reference' : photo.status === 'rejected' ? 'Rejected by management · original job photo retained' : 'Awaiting management approval';
+  const photoCard = photo => <View key={photo.id} style={{ ...itemStyle, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+    {images[photo.id] ? <Pressable accessibilityRole="button" accessibilityLabel={`View ${photo.category} reference photograph`} onPress={() => setSelectedPhoto(current => current === photo.id ? null : photo.id)}><Image source={{ uri: images[photo.id] }} style={{ width: 76, height: 76, borderRadius: 9 }} /></Pressable> : <Pressable accessibilityRole={photo.status === 'approved' || photo.sourceJobId ? 'button' : 'image'} accessibilityLabel={photo.status === 'approved' || photo.sourceJobId ? `Load ${photo.category} reference photograph` : `${photo.category} reference thumbnail unavailable`} onPress={photo.status === 'approved' || photo.sourceJobId ? async () => { try { const uri = await loadPhoto(photo); setImages(previous => ({ ...previous, [photo.id]: uri })); } catch (failure) { setError(failure.message || 'This photo is unavailable.'); } } : undefined} style={{ width: 76, height: 76, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.surface }}><Ionicons name="image-outline" size={25} color={palette.secondary} /></Pressable>}
+    <View style={{ flex: 1, gap: 3 }}>{body(photo.category || 'Reference photo', { fontWeight: '700', textTransform: 'capitalize' })}{muted(photo.caption || 'No caption')}{<Text style={{ color: photo.status === 'rejected' ? palette.danger : palette.accent, fontSize: 12, fontWeight: '700' }}>{photoStatus(photo)}</Text>}</View>
+  </View>;
+  if (!propertyId || !job?.customerId) return <Card>{empty('This job has no saved property link. Historical work cannot be matched by address alone.')}</Card>;
+  const property = overview?.property || job?.serviceProperty || {};
+  const address = property.address || job?.address || 'Address unavailable';
+  const syncLabel = error ? 'Property information needs attention' : cached ? 'Saved on device · may be older' : overview ? 'Current server information' : 'Checking property information';
+  return <View testID="property-profile-content" style={{ gap: 12 }}>
+    <Card><View style={{ gap: 5 }}>{body(property.label || 'Service property', { fontSize: 17, lineHeight: 24, fontWeight: '700' })}{muted(address)}<View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}><Ionicons name={error ? 'alert-circle-outline' : cached ? 'cloud-offline-outline' : 'checkmark-circle-outline'} size={15} color={error ? palette.danger : cached ? palette.secondary : palette.accent} /><Text accessibilityLiveRegion="polite" style={{ color: error ? palette.danger : palette.secondary, fontSize: 12 }}>{syncLabel}</Text></View></View></Card>
+    <ScrollView testID="property-profile-tabs" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
+      {tabs.map(({ label, icon }) => <Pressable key={label} testID={`property-tab-${label.toLowerCase()}`} accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected: tab === label }} onPress={() => { if (tab !== label) { setRows([]); setNext(null); setError(''); } setSelectedPhoto(null); setTab(label); }} style={{ minHeight: Platform.OS === 'ios' ? 44 : 48, minWidth: 66, paddingHorizontal: 5, paddingVertical: 5, alignItems: 'center', justifyContent: 'center', gap: 2, borderRadius: 11, borderWidth: 1, borderColor: tab === label ? palette.accent : palette.border, backgroundColor: tab === label ? palette.glow : palette.surface }}><Ionicons name={icon} size={18} color={tab === label ? palette.accent : palette.secondary} /><Text numberOfLines={1} style={{ color: tab === label ? palette.accent : palette.text, fontSize: 11, fontWeight: tab === label ? '700' : '600' }}>{label}</Text></Pressable>)}
+    </ScrollView>
+    <Card>
+      <SectionHeader title={tab === 'History' ? 'Service history' : tab === 'Materials' ? 'Material history' : tab === 'Photos' ? 'Property photographs' : tab === 'Alerts' ? 'Property alerts' : 'Property overview'} />
+      {busy && muted('Loading property information…')}{!!error && <><Text accessibilityRole="alert" style={{ color: palette.danger }}>{error}</Text><GlassButton secondary title="Retry property profile" onPress={() => load(tab)} /></>}
+      {tab === 'Overview' && overview && <View style={{ gap: 8 }}>
+        {body(`Customer: ${overview.customer?.name || 'Name unavailable'}`)}
+        {!!property.accessInstructions && <View style={itemStyle}>{body('Access instructions', { fontWeight: '700' })}{body(property.accessInstructions)}</View>}
+        {body(`Active plans: ${overview.plans?.length ? overview.plans.map(row => row.serviceType).join(', ') : 'None linked'}`)}
+        {body(`Last service: ${overview.lastCompleted ? `${overview.lastCompleted.serviceType} · ${readableDate(overview.lastCompleted.date)}` : 'No linked completed visit'}`)}
+        {body(`Upcoming: ${overview.upcoming?.length ? overview.upcoming.map(row => `${readableDate(row.date)} · ${row.serviceType}`).join('; ') : 'None linked'}`)}
+        {!!overview.alerts?.some(row => row.severity === 'critical') && <Text style={{ color: palette.danger, fontWeight: '700' }}>Critical property alert — open Alerts before work</Text>}
+      </View>}
+      {tab === 'Alerts' && overview && <View style={{ gap: 8 }}>{overview.alerts?.length ? overview.alerts.map(row => <View key={row.id} style={{ ...itemStyle, borderColor: row.severity === 'critical' ? palette.danger : palette.border }}><Text style={{ color: row.severity === 'critical' ? palette.danger : palette.accent, fontSize: 12, fontWeight: '700' }}>{row.severity === 'critical' ? '⚠ Critical' : row.severity === 'important' ? 'Important' : 'Information'}</Text>{body(row.title, { fontWeight: '700' })}{body(row.description)}</View>) : empty('No active property alerts.')}</View>}
+      {tab === 'Photos' && <View style={{ gap: 10 }}>
+        {body('Approved property references', { fontWeight: '700' })}
+        {rows.filter(photo => photo.status === 'approved').length ? rows.filter(photo => photo.status === 'approved').map(photoCard) : !busy && empty('No approved permanent reference photographs yet.')}
+        {selectedPhoto && images[selectedPhoto] && <Pressable accessibilityRole="button" accessibilityLabel="Close enlarged reference photograph" onPress={() => setSelectedPhoto(null)}><Image source={{ uri: images[selectedPhoto] }} resizeMode="contain" style={{ width: '100%', height: 260, borderRadius: 12, backgroundColor: palette.input }} /></Pressable>}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>{body('Your reference proposals', { flex: 1, fontWeight: '700' })}<GlassButton secondary title="Refresh proposal status" disabled={busy} onPress={() => load('Photos')} style={{ paddingHorizontal: 9, minHeight: 44 }} /></View>
+        {rows.filter(photo => ['proposed', 'rejected'].includes(photo.status)).map(photoCard)}
+        {localProposals.filter(row => !rows.some(photo => photo.id === `${row.attribution?.userId}_${row.id}`)).map(row => <View key={row.id} style={{ ...itemStyle, flexDirection: 'row', alignItems: 'center', gap: 12 }}>{!!row.localUri && <Image source={{ uri: row.localUri }} style={{ width: 76, height: 76, borderRadius: 9 }} />}<View style={{ flex: 1, gap: 3 }}>{body(row.metadata.referenceCategory, { fontWeight: '700', textTransform: 'capitalize' })}{muted(row.metadata.referenceCaption || 'No caption')}{muted(proposalState(row))}{!!row.error && <Text style={{ color: palette.danger }}>{row.error}</Text>}</View></View>)}
+        {!rows.some(photo => ['proposed', 'rejected'].includes(photo.status)) && !localProposals.some(row => !rows.some(photo => photo.id === `${row.attribution?.userId}_${row.id}`)) && !busy && empty('No proposals from this account or device.')}
+        {rows.some(photo => photo.status === 'archived') && <>{body('Archived references', { fontWeight: '700' })}{rows.filter(photo => photo.status === 'archived').map(photoCard)}</>}
+        {muted('To propose a reference, open Photos and evidence in this visit and select a category before capturing a photo.')}
+      </View>}
+      {tab === 'History' && <View style={{ gap: 8 }}>{!rows.length && !busy && empty('No service visits linked to this property yet.')}{rows.map(row => <View key={row.id} style={itemStyle}>{muted(readableDate(row.date))}{body(row.serviceType || 'Service visit', { fontWeight: '700' })}{muted(row.outcome === 'completed' ? 'Completed' : row.outcome === 'quote_needed' ? 'Quote needed' : row.outcome || 'Status unavailable')}{!!row.notes && body(row.notes)}{row.hasEvidence && muted('Photo evidence available in the authorized work order')}</View>)}</View>}
+      {tab === 'Materials' && <View style={{ gap: 8 }}>{!rows.length && !busy && empty('No material applications linked to this property yet.')}{rows.map(row => <View key={row.id} style={itemStyle}>{muted(readableDate(row.date))}{body(row.product || 'Material', { fontWeight: '700' })}{body(`${row.quantity || 'Quantity not recorded'} ${row.unit || ''}`.trim())}{muted([row.location, row.method].filter(Boolean).join(' · ') || 'Location and method not recorded')}</View>)}</View>}
+      {!!next && <GlassButton secondary title="Load more" disabled={busy} onPress={() => load(tab, next)} />}
+    </Card>
+  </View>;
 }

@@ -67,6 +67,7 @@ function load(relative) {
   const localRequire = createRequire(filename);
   const mockRequire = name => {
     if (name === 'react-native') return native;
+    if (name.endsWith('/services/offline') && filename.endsWith('MobileUI.js')) return { alertKey: alert => `${alert.source}:${alert.id}:${alert.version}`, readJobAlerts: async (_id, alerts) => ({ alerts, acknowledgments: [], local: [] }), subscribeOffline: () => () => {} };
     if (name === '@expo/vector-icons') return { Ionicons: 'Icon' };
     if (name === 'react-native-safe-area-context') return { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }) };
     if (name === '@react-native-async-storage/async-storage') return { getItem: async key => modeStorage.get(key) || null, setItem: async (key, value) => modeStorage.set(key, value) };

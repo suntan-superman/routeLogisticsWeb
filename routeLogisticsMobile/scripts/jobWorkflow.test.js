@@ -133,6 +133,32 @@ test('workflow view changes use measured stage positions and resume at the activ
  await press('Work details, completed, Work details saved');await layout('workflow-stage-work',240);assert.deepEqual(scrollCommands.at(-1),{y:240,animated:false});
 });
 
+test('short overview clamps stale long-stage scroll position after content shrinks', async () => {
+  await render();
+  const scroll = tree.root.findByType('ScrollView');
+  await act(async () => scroll.props.onLayout({ nativeEvent: { layout: { height: 620 } } }));
+  await act(async () => scroll.props.onContentSizeChange(390, 1900));
+  await act(async () => tree.root.findByProps({ testID: 'workflow-stage-selector' }).props.onLayout({ nativeEvent: { layout: { y: 380, height: 400 } } }));
+  await press('Work details');
+  await act(async () => scroll.props.onContentSizeChange(390, 3100));
+  await press('Back to Visit Workflow');
+  await act(async () => scroll.props.onContentSizeChange(390, 900));
+  assert.deepEqual(scrollCommands.at(-1), { y: 280, animated: false });
+  assert.equal(scroll.props.bounces, false);
+  assert.equal(scroll.props.alwaysBounceVertical, false);
+});
+
+test('shrinking workflow content recovers a scroll position beyond the new bottom', async () => {
+  await render();
+  const scroll = tree.root.findByType('ScrollView');
+  await act(async () => scroll.props.onLayout({ nativeEvent: { layout: { height: 620 } } }));
+  await act(async () => scroll.props.onContentSizeChange(390, 2300));
+  await act(async () => scroll.props.onScroll({ nativeEvent: { contentOffset: { y: 1450 } } }));
+  scrollCommands.length = 0;
+  await act(async () => scroll.props.onContentSizeChange(390, 900));
+  assert.deepEqual(scrollCommands.at(-1), { y: 280, animated: false });
+});
+
 test('each workflow stage opens at its measured beginning and Back restores the selector position',async()=>{
  await render(undefined,{visible:true});
  const layout=async(testID,y)=>act(async()=>tree.root.findByProps({testID}).props.onLayout({nativeEvent:{layout:{y,height:300}}}));
@@ -517,7 +543,8 @@ test('assigned property profile returns to the same guided workflow without losi
   await press('Open Property Profile');
   assert.equal(tree.root.findByProps({ testID: 'job-property-profile' }).type, 'View');
   assert.equal(tree.root.findByType('PropertyProfilePanel').props.jobId, 'assigned');
-  await press('Back to Visit Workflow');
+  assert.equal(control('Back to Visit Workflow'), undefined, 'the header is the single back control');
+  await act(async () => tree.root.findAll(node => node.props.title === 'Property Profile' && typeof node.props.onBack === 'function')[0].props.onBack());
   assert.ok(control('Open Property Profile'));
   assert.equal(tree.root.findAllByType('PropertyProfilePanel').length, 0);
 });

@@ -14,7 +14,7 @@ export const SecondaryButton = props => <GlassButton secondary {...props} />;
 export const FormField = props => <GlassInput {...props} />;
 export const Card = props => <GlassCard {...props} />;
 
-export function KeyboardAwareScrollView({ children, contentContainerStyle, style, scrollRef, keyboardBottomPadding, ...props }) {
+export function KeyboardAwareScrollView({ children, contentContainerStyle, style, scrollRef, keyboardBottomPadding, includeKeyboardOverlapPadding = true, ...props }) {
   const { onLayout, onScroll, onContentSizeChange, ...scrollProps } = props;
   const insets = useSafeAreaInsets(), ownRef = useRef(null), activeRef = scrollRef || ownRef;
   const focused = useRef(null), keyboardFrame = useRef(null), scrollY = useRef(0), frames = useRef([]), [keyboardInset, setKeyboardInset] = useState(0);
@@ -84,7 +84,9 @@ export function KeyboardAwareScrollView({ children, contentContainerStyle, style
   // Android adjustResize and iOS ScrollView keyboard insets each resize the
   // viewport once. The measured reveal then handles the focused field; wrapping
   // this ScrollView in KeyboardAvoidingView would apply a second iOS offset.
-  const bottomPadding = (keyboardBottomPadding ?? SPACING.xxl) + keyboardInset + Math.max(0, insets.bottom);
+  // A bounded workflow viewport already resizes for Android and uses iOS native
+  // keyboard insets. Adding the measured overlap again leaves a large blank tail.
+  const bottomPadding = (keyboardBottomPadding ?? SPACING.xxl) + (includeKeyboardOverlapPadding ? keyboardInset : 0) + Math.max(0, insets.bottom);
   const contentStyle = Array.isArray(contentContainerStyle)
     ? [...contentContainerStyle, { paddingBottom: bottomPadding }]
     : [contentContainerStyle, { paddingBottom: bottomPadding }];

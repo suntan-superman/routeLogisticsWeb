@@ -53,6 +53,7 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
   const [visits, setVisits] = useState([]), [visitsError, setVisitsError] = useState(''), [visitsLoading, setVisitsLoading] = useState(false), [visitsMore, setVisitsMore] = useState(false);
   const [visitDraft, setVisitDraft] = useState(null), [visitAttempted, setVisitAttempted] = useState(false);
   const [visitSaveError,setVisitSaveError]=useState(''),[visitsCached,setVisitsCached]=useState(false);
+  const [showVisitHistory, setShowVisitHistory] = useState(false);
   const mounted = useRef(false), generation = useRef(0), lock = useRef(false), sequence = useRef(0), dirtyRef = useRef(false);
   const visitSequence = useRef(0), visitAttempt = useRef(null), lastVisitJob = useRef(job);
   const visitReceipts=useRef(new Map()),draftState=useRef({notes,form,visitDraft}),lastError=useRef(''),draftAPI=useRef(null);
@@ -321,19 +322,21 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
   if (!job?.id) return null;
   const address = [job.address, job.city, job.state, job.zipCode].filter(value => typeof value === 'string').join(', ');
   const destination = typeof job.latitude === 'number' && typeof job.longitude === 'number' ? `${job.latitude},${job.longitude}` : address;
-  return <View style={{ gap: 20 }}>
+  const relevantVisits = section === 'arrival' ? visits.filter(visit => visit.type === 'arrived' || visit.type === 'access-blocked') : section === 'departure' ? visits.filter(visit => visit.type === 'departed') : visits;
+  return <View style={{ gap: 12 }}>
     {!!error && <InlineNotice tone="error" message={error} />}
     {!!notice && <InlineNotice tone={noticeTone} message={notice} />}
     {showNavigation && !!destination && <SecondaryButton title="Navigate to job" icon="navigate-outline" onPress={() => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`).catch(failure => setError(failure.message || 'Navigation could not open. Check your map application.'))} />}
-    {(section === 'all' || section === 'arrival') && allowWork && ['scheduled', 'en-route'].includes(job.status) && <Card><SectionHeader title="Work progress" subtitle="Update your progress as you travel and begin the visit." />
-      {job.status === 'scheduled' && <PrimaryButton title="Mark en route" busy={busy} disabled={criticalPending} onPress={() => save({ status: 'en-route' })} />}
-      <SecondaryButton title="Start work" busy={busy} disabled={criticalPending} onPress={() => save({ status: 'in-progress' })} />
-    </Card>}
-    {(section === 'all' || section === 'arrival' || section === 'departure') && <View onLayout={onVisitSectionLayout}><Card><SectionHeader title={section === 'arrival' ? 'Arrival' : section === 'departure' ? 'Departure' : 'Visit record'} subtitle="Arrival and departure reports are separate from job status. GPS evidence does not verify property access." />
+    {(section === 'all' || section === 'arrival' || section === 'departure') && <View onLayout={onVisitSectionLayout}><Card><SectionHeader title={section === 'arrival' ? 'Arrival' : section === 'departure' ? 'Departure' : 'Visit record'} />
+      <Text style={{ color: palette.secondary, fontSize: 12, lineHeight: 17 }}>GPS evidence does not verify property access.</Text>
+      {(section === 'all' || section === 'arrival') && allowWork && ['scheduled', 'en-route'].includes(job.status) && <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {job.status === 'scheduled' && <SecondaryButton title="Mark en route" busy={busy} disabled={criticalPending} onPress={() => save({ status: 'en-route' })} />}
+        <SecondaryButton title="Start work" busy={busy} disabled={criticalPending} onPress={() => save({ status: 'in-progress' })} />
+      </View>}
       {visitsLoading && <Text accessibilityLiveRegion="polite" style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>Refreshing visit record…</Text>}
       {!!visitsError && <InlineNotice tone="error" message={visitsError} />}
       {!visits.length && !visitsLoading && !visitsError && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>No visit events recorded.</Text>}
-      {visits.map(visit => <View key={visit.id} style={{ gap: 5, paddingVertical: 12, borderTopWidth: 1, borderColor: palette.border }}>
+      {(showVisitHistory ? relevantVisits : relevantVisits.slice(0, 2)).map(visit => <View key={visit.id} style={{ gap: 4, paddingVertical: 8, borderTopWidth: 1, borderColor: palette.border }}>
         <Text style={{ color: palette.text, fontSize: 16, lineHeight: 23, fontWeight: '600' }}>{visitLabels[visit.type] || 'Visit event'}</Text>
         <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>{visitTime(visitInstant(visit))} · {visitSources[visit.source] || 'Reported visit event'}</Text>
         {!!visit.syncState&&<Text accessibilityLiveRegion="polite" style={{color:['failed','conflict'].includes(visit.syncState)?palette.danger:palette.secondary,lineHeight:21}}>{visitSyncLabel(visit)}</Text>}
@@ -342,8 +345,9 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
         {Number.isFinite(visit.accuracy) && <Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 21 }}>GPS accuracy: ±{Math.round(visit.accuracy)} m{Number.isFinite(visit.distanceMeters) ? ` · approximately ${Math.round(visit.distanceMeters)} m from the service location` : ''}</Text>}
         {!!visit.note && <Text style={{ color: palette.text, fontSize: 14, lineHeight: 22 }}>{visit.note}</Text>}
       </View>)}
-      {visitsMore && <Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 21 }}>Showing the latest 100 visit events.</Text>}
-      <SecondaryButton title="Refresh visit record" disabled={busy || visitsLoading} onPress={loadVisits} />
+      {relevantVisits.length > 2 && <SecondaryButton title={showVisitHistory ? 'Hide earlier visit events' : `Show earlier visit events (${relevantVisits.length - 2})`} onPress={() => setShowVisitHistory(value => !value)} />}
+      {visitsMore && showVisitHistory && <Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 19 }}>Showing the latest 100 visit events.</Text>}
+      <SecondaryButton title="Refresh visit record" accessibilityLabel="Refresh visit record" style={{ alignSelf: 'flex-start', minHeight: 44, paddingHorizontal: 12, paddingVertical: 7 }} disabled={busy || visitsLoading} onPress={loadVisits} />
       {!!visitSaveError&&<InlineNotice tone="error" message={visitSaveError}/>}
       {allowWork && (!visitDraft ? <View style={{ gap: 14 }}>
         {(section === 'arrival' ? ['arrived'] : section === 'departure' ? ['departed'] : ['arrived','departed']).map(type=><VisitAction key={type} type={type} event={type==='arrived'?arrivalRecord:departureRecord} awaitingDeparture={type==='departed'&&!!arrivalRecord&&!departureRecord} busy={busy || criticalPending} loading={visitsLoading} historyError={visitsError} cached={visitsCached}
@@ -358,13 +362,13 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
           style={{ minHeight: 48, paddingVertical: 12, flexDirection: 'row', gap: 10, alignItems: 'center' }}>
           <Text style={{ color: palette.accent, fontSize: 18 }}>{visitDraft.includeLocation ? '☑' : '☐'}</Text><Text style={{ flex: 1, color: palette.text, fontSize: 15, lineHeight: 23 }}>Include current GPS</Text>
         </Pressable>
-        <Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 21 }}>Visits are saved on this device before synchronization, including offline. Optional GPS uses an existing permission and a valid sample while the app is open; no permission prompt or continuous sharing starts here.</Text>
+        <Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 19 }}>Saved on device before sync. GPS is optional and does not independently verify property access.</Text>
         {visitAttempted && <InlineNotice message="This attempt is retained for a safe retry. The same event ID and details will be sent again. Retry to confirm whether it was saved before leaving." />}
         <PrimaryButton title={visitAttempted ? 'Retry visit record' : 'Save visit record'} busy={busy} onPress={()=>saveVisit()} />
         <SecondaryButton title="Cancel visit record" disabled={busy||visitAttempted} onPress={() => {draftState.current.visitDraft=null;setVisitDraft(null); setVisitAttempted(false); visitAttempt.current = null; setError('');setVisitSaveError('');}} />
       </View>)}
     </Card></View>}
-    {(section === 'all' || section === 'work') && <Card><SectionHeader title="Work notes" subtitle="Document observations and work instructions for this visit." />
+    {(section === 'all' || section === 'work') && <Card>
       {!!noteStorageError&&<InlineNotice tone="error" message={noteStorageError}/>}
       <Text accessibilityLiveRegion="polite" style={{color:['failed','conflict','storage-failed'].includes(noteState?.state)?palette.danger:palette.secondary,fontSize:13,lineHeight:21}}>{notesLoading?'Restoring saved work notes…':({saving:'Saving on device…',draft:'Saved on device — draft retained. Select Save work notes to queue synchronization.',pending:'Saved on device — waiting to sync',syncing:'Synchronizing work notes',synced:'Saved to server',failed:'Synchronization failed — retry required',conflict:'Conflict — management attention required. Your work notes are retained.','storage-failed':'Work notes are not saved on device. Retry before leaving.'}[noteState?.state]||'Work notes are separate from dispatcher job instructions.')}</Text>
       {!!noteState?.error&&<InlineNotice tone="error" message={noteState.error}/>}
@@ -374,7 +378,7 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
         {noteState?.state==='failed'&&noteState.operationId&&<SecondaryButton title="Retry work-note synchronization" disabled={busy} onPress={()=>perform(async()=>{await resolveOffline(noteState.operationId,'retry');await restoreNotes();})}/>}
       </> : <Text style={{ color: palette.text, fontSize: 15, lineHeight: 23 }}>{notes || (notesLoading?'Restoring saved work notes…':'No work notes recorded.')}</Text>}
     </Card>}
-    {(section === 'all' || section === 'work') && <Card><SectionHeader title="Product applications" subtitle="Application records for this assigned visit." />
+    {(section === 'all' || section === 'work') && <Card><SectionHeader title={`Product applications · ${records.length}`} />
       {!!recordsError && <InlineNotice tone="error" message={recordsError} />}
       {!records.length && !recordsError && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 22 }}>No product applications recorded.</Text>}
       {records.map(record => <View key={record.id} style={{ gap: 5, paddingVertical: 12, borderTopWidth: 1, borderColor: palette.border }}>

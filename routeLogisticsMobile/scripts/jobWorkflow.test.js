@@ -13,7 +13,7 @@ const saved = new Map();
 const native = Object.fromEntries(['View', 'Text', 'Pressable', 'ScrollView', 'ActivityIndicator'].map(name => [name, name]));
 native.Platform = { OS: 'ios' };
 native.Linking = { openURL: async url => navigationCalls.push(url) };
-native.Keyboard = { dismiss() {} };
+native.Keyboard = { dismiss() {}, addListener: () => ({ remove() {} }) };
 const appStateHandlers = new Set();
 native.AppState = { addEventListener: (_event, handler) => { appStateHandlers.add(handler); return { remove: () => appStateHandlers.delete(handler) }; } };
 const palette = { text: '#FFF', secondary: '#CCC', danger: '#F00', accent: '#0F0', background: '#000' };
@@ -100,7 +100,7 @@ test('estimate details retain property access and dispatcher notes and completio
  let prepared=null;await render(job({appointmentKind:'estimate_visit',billable:false,estimateOutcome:'estimate_pending',inquiryId:'inquiry-one',serviceProperty:{address:'22 Rental Road',label:'Rental',unit:'B'},address:'Old billing street',propertyAccessInstructions:'Gate 2468',dispatchNotes:'Inspect exterior only'}),{onPrepareEstimate:selected=>{prepared=selected;}});
   assert.match(text(),/Estimate Visit/);assert.match(text(),/22 Rental Road/);assert.match(text(),/Gate 2468/);await press('Job instructions');assert.match(text(),/Inspect exterior only/);assert.doesNotMatch(text(),/Old billing street/);
  await press('Prepare Estimate');assert.equal(prepared.id,'assigned');
- await press('Review and completion');assert.match(text(),/Review & Complete/);assert.ok(control('Completion outcome: Visit completed — quote needed'));await input('Work completed','Inspected for a quote');await press('Completion outcome: Customer declined');await press('Complete Visit');assert.equal(calls[0].draft.estimateOutcome,'customer_declined');assert.equal(calls[0].job.billable,false);assert.equal(photoMounts,1);
+ await press('Review and completion');assert.match(text(),/Visit summary/);assert.ok(control('Completion outcome: Visit completed — quote needed'));await input('Work completed','Inspected for a quote');await press('Completion outcome: Customer declined');await press('Complete Visit');assert.equal(calls[0].draft.estimateOutcome,'customer_declined');assert.equal(calls[0].job.billable,false);assert.equal(photoMounts,1);
 });
 
 test('guided workflow shows one focused stage, returns after durable saves and reopens completed steps',async()=>{
@@ -159,8 +159,8 @@ test('workflow view changes use measured stage positions and resume at the activ
  const layout=async(testID,y)=>act(async()=>tree.root.findByProps({testID}).props.onLayout({nativeEvent:{layout:{y,height:320}}}));
  await layout('workflow-stage-selector',36);scrollCommands.length=0;
  await press('Work details');await layout('workflow-stage-work',240);assert.deepEqual(scrollCommands.at(-1),{y:240,animated:false});
- const beforeResume=scrollCommands.length;await act(async()=>[...appStateHandlers][0]('active'));await new Promise(resolve=>setTimeout(resolve,5));
- assert.ok(scrollCommands.length>beforeResume);assert.deepEqual(scrollCommands.at(-1),{y:240,animated:false});
+ const beforeResume=scrollCommands.length;assert.equal(appStateHandlers.size,0);await new Promise(resolve=>setTimeout(resolve,5));
+ assert.equal(scrollCommands.length,beforeResume); // Foregrounding the same stage preserves its position.
  await act(async()=>workProps.onLocalSave('work',{state:'pending'}));await layout('workflow-stage-selector',36);assert.deepEqual(scrollCommands.at(-1),{y:36,animated:false});
  await press('Work details, completed, Work details saved');await layout('workflow-stage-work',240);assert.deepEqual(scrollCommands.at(-1),{y:240,animated:false});
 });
@@ -175,6 +175,7 @@ test('short overview clamps stale long-stage scroll position after content shrin
   await act(async () => scroll.props.onContentSizeChange(390, 3100));
   await press('Back to Visit Workflow');
   await act(async () => scroll.props.onContentSizeChange(390, 900));
+  await act(async () => tree.root.findByProps({ testID: 'workflow-stage-selector' }).props.onLayout({ nativeEvent: { layout: { y: 380, height: 400 } } }));
   assert.deepEqual(scrollCommands.at(-1), { y: 280, animated: false });
   assert.equal(scroll.props.bounces, false);
   assert.equal(scroll.props.alwaysBounceVertical, false);
@@ -198,7 +199,7 @@ test('each workflow stage opens at its measured beginning and Back restores the 
  const stages=[['Arrival','arrival',140],['Work details','work',180],['Photos and evidence','photos',220],['Departure','departure',260],['Review and completion','review',300]];
  for(const[label,id,y]of stages){
    await press(label);await layout(`workflow-stage-${id}`,y);assert.deepEqual(scrollCommands.at(-1),{y,animated:false});
-   await press('Back to Visit Workflow');assert.deepEqual(scrollCommands.at(-1),{y:28,animated:false});
+   await press('Back to Visit Workflow');await layout('workflow-stage-selector',28);assert.deepEqual(scrollCommands.at(-1),{y:28,animated:false});
  }
 });
 
@@ -207,6 +208,13 @@ test('estimate outcome is part of the single completion draft and survives stage
  assert.ok(control('Completion outcome: Visit completed — quote needed'));await press('Completion outcome: Customer declined');await input('Work completed','Customer declined the proposed work');
  await press('Back to Visit Workflow');assert.equal(interactions.at(-1).hasDraft,true);await press('Review and completion');
  assert.equal(tree.root.findByProps({accessibilityLabel:'Work completed'}).props.value,'Customer declined the proposed work');assert.ok(control('Completion outcome: Customer declined'));
+});
+
+test('review summary links reopen existing stages without discarding completion edits',async()=>{
+ await render();await press('Review and completion');await input('Work completed','Synthetic work retained');
+ await press('Review Work details: Not yet saved');assert.equal(workProps.section,'work');
+ await press('Back to Visit Workflow');await press('Review and completion');
+ assert.equal(tree.root.findByProps({accessibilityLabel:'Work completed'}).props.value,'Synthetic work retained');
 });
 
 test('an open reassignment request cannot be silently discarded by job close or completion',async()=>{
@@ -223,7 +231,7 @@ test('reassignment request submission participates in the existing work-order bu
 
 test('job workflow uses exclusive inline pages and preserves one photo owner through child navigation', async () => {
   await render(); assert.equal(photoMounts, 1); assert.equal(tree.root.findAllByType('Modal').length, 0);
-  await draft(); assert.match(text(), /Review & Complete/); assert.ok(control('Complete Visit'));
+  await draft(); assert.match(text(), /Visit summary/); assert.ok(control('Complete Visit'));
   await press('Back to Visit Workflow'); assert.match(text(), /Visit Workflow/); assert.equal(photoMounts, 1); assert.equal(photoUnmounts, 0);
   await press('Review and completion');
   assert.equal(tree.root.findByProps({ accessibilityLabel: 'Work completed' }).props.value, 'Inspected and treated the site');
@@ -386,7 +394,7 @@ test('work-note, application and visit drafts protect back navigation and comple
 
 test('structured job details expose accessible navigation and safe customer contact actions', async () => {
   await render(job({ address: '1 Service Street', city: 'Bakersfield', state: 'CA', customerPhone: '(555) 010-2000' }));
-  assert.match(text(), /Service location/); assert.match(text(), /Visit photos/);
+  assert.match(text(), /Service location/); assert.ok(control('Photos and evidence'));
   await press('Navigate to job'); await press('Call customer');
   assert.match(navigationCalls[0], /google.com\/maps\/dir/); assert.equal(navigationCalls[1], 'tel:5550102000');
 });

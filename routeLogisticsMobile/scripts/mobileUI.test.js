@@ -107,6 +107,15 @@ test('iOS uses one keyboard-inset strategy and measured focus visibility',async(
  assert.ok(scrolls.some(value=>value.y>0&&value.animated===true));assert.equal(tree.root.findByType('TextInput').props.value,'Several retained lines');
 });
 
+test('bounded visit workflow omits duplicate keyboard overlap padding while retaining measured focus reveal',async()=>{
+ const viewport={scrollTo(){},measureInWindow:callback=>callback(0,100,360,600)};
+ const input={measureInWindow:callback=>callback(20,470,320,112)};
+ await render(UI.KeyboardAwareScrollView,{includeKeyboardOverlapPadding:false,children:React.createElement(Glass.GlassInput,{label:'Visit note',multiline:true,value:'Retained note',onChangeText(){}})},{createNodeMock:element=>element.type==='ScrollView'?viewport:element.type==='TextInput'?input:null});
+ await act(async()=>{tree.root.findByType('TextInput').props.onFocus({});for(const handler of keyboardHandlers.get('keyboardDidShow')||[])handler({endCoordinates:{height:300,screenY:500}});await new Promise(resolve=>setTimeout(resolve,40));});
+ const scroll=tree.root.findByType('ScrollView');assert.ok(scroll.props.contentContainerStyle.some(value=>value?.paddingBottom===48));
+ assert.equal(tree.root.findByType('TextInput').props.value,'Retained note');
+});
+
 test('invalid glass inputs are visibly and accessibly identified beside the field',async()=>{
  await render(Glass.GlassInput,{label:'Scope of work',multiline:true,value:'',error:'Scope of work is required.',onChangeText(){}});
  const field=tree.root.findByType('TextInput');assert.equal(field.props.accessibilityInvalid,true);

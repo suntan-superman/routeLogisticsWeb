@@ -20,7 +20,7 @@ function load(relative) {
     if (name.endsWith('/useJobResources')) return { useJobResourceRefresh: (_resource, id, loader, { enabled }) => { React.useEffect(() => { if (enabled) loader({ query: true }).catch(() => {}); }, [id, enabled]); return { refetch: () => loader().catch(() => {}) }; } };
     if (name.startsWith('@babel/runtime/')) return require(name);
     if (name === 'react-native') return Object.fromEntries(['View', 'Text', 'Button', 'Image', 'ScrollView'].map(key => [key, key]));
-    if (name === './Glass') return { GlassButton: props => React.createElement('Button', props) };
+    if (name === './Glass') return { GlassButton: props => React.createElement('Button', props), GlassInput: props => React.createElement('TextInput', props) };
     if (name === 'expo-image-picker') return {
       UIImagePickerPresentationStyle: { FULL_SCREEN: 'fullScreen' }, requestCameraPermissionsAsync: async () => permission,
       launchCameraAsync: options => { calls.push({ source: 'camera', options }); return picker(); },
@@ -48,7 +48,7 @@ const props = id => ({ job: job(id), onBusyChange: value => busyEvents.push(valu
 const text = () => JSON.stringify(tree.toJSON());
 const button = title => tree.root.findAll(node => node.type === 'Button' && node.props.title === title)[0];
 async function settle() { for (let turn = 0; turn < 4; turn++) await act(async () => { await Promise.resolve(); }); }
-async function render(id = 'job-one') { await act(async () => { tree = create(React.createElement(Photos, props(id))); }); await settle(); }
+async function render(id = 'job-one', extra = {}) { await act(async () => { tree = create(React.createElement(Photos, { ...props(id), job: { ...job(id), ...extra } })); }); await settle(); }
 async function press(title) { const target = button(title); assert.ok(target, `Button ${title} exists`); await act(async () => target.props.onPress()); await settle(); }
 beforeEach(() => {
   tree = null; rows = []; remote = []; pickerResult = chosen(); permission = { granted: true }; calls = []; saves = []; manipulations = []; retries = []; busyEvents = []; draftEvents = []; progressEvents = []; interactions = 0;
@@ -67,6 +67,20 @@ test('camera capture uses image-only SDK54 options and preserves metadata in the
   assert.equal(saves.length, 1); assert.equal(saves[0][0].id, 'job-one'); assert.equal(saves[0][1], 'file:///compressed.jpg');
   assert.deepEqual(saves[0][2], { source: 'camera', fileName: asset.fileName, mimeType: 'image/jpeg', width: 1600, height: 1067 });
   assert.match(text(), /Queued on this device/); assert.equal(draftEvents.at(-1), false); assert.equal(busyEvents.at(-1), false); assert.equal(progressEvents.at(-1).hasPhotos, true);
+});
+test('job evidence is the default and property reference capture requires an explicit category', async () => {
+  await render('job-one', { servicePropertyId: 'property-one' });
+  assert.match(text(), /Job evidence/);
+  assert.equal(button('Take photo').props.iconPlacement, 'above');
+  await press('Propose as property reference (optional)');
+  assert.equal(button('Take photo').props.disabled, true);
+  await press('Exterior');
+  assert.match(text(), /Property reference · exterior/);
+  await press('Choose photo');
+  assert.equal(saves.length, 1);
+  assert.equal(saves[0][2].referenceCategory, 'exterior');
+  assert.match(text(), /Job evidence/);
+  assert.match(text(), /property reference proposal saved on this device/);
 });
 test('an existing retained or uploaded photo restores the completed evidence step after restart', async () => {
   remote = [{ id: 'existing-photo', jobId: 'job-one' }]; await render();

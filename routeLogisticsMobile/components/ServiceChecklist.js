@@ -83,10 +83,10 @@ export default function ServiceChecklist({ job, readOnly = false, onBusyChange, 
   const choice = (field, value, checked, label = value) => <Pressable key={value} accessibilityRole={field.type === 'select' ? 'radio' : 'checkbox'} accessibilityLabel={label} accessibilityState={{ checked, disabled: !editable || busy }} disabled={!editable || busy}
     onPress={() => change(field, field.type === 'select' ? value : checked ? (answers[field.id] || []).filter(item => item !== value) : [...(answers[field.id] || []), value])}
     style={{ minHeight: 48, flexDirection: 'row', gap: 10, paddingVertical: 10, alignItems: 'center' }}><Text style={{ color: palette.accent }}>{checked ? '☑' : '☐'}</Text><Text style={{ flex: 1, color: palette.text, fontSize: 15, lineHeight: 23 }}>{label}</Text></Pressable>;
-  return <Card><SectionHeader title="Service checklist" subtitle="Versioned service observations. Chemical application records remain separate." />
+  return <Card><SectionHeader title="Service checklist" />
     {loading && <Text style={{ color: palette.secondary }}>Loading service template…</Text>}{!!error && <InlineNotice tone="error" message={error} />}{!!notice && <InlineNotice tone="success" message={notice} />}
     {data && !data.enabled && <InlineNotice message="Service forms are not enabled yet. Your existing job workflow and chemical records remain available." />}
-    {data && !form && <Text style={{ color: palette.secondary, lineHeight: 22 }}>No service template is attached. A manager can select a template for this job.</Text>}
+    {data && !form && <Text style={{ color: palette.secondary, lineHeight: 20 }}>No checklist assigned. Ask a manager to attach one if needed.</Text>}
     {form && <><SectionHeader title={form.template.name} subtitle={`${form.template.industry} · template v${form.template.version} · report revision ${form.responseVersion} · service date ${form.serviceDate || 'not set'}`} />
       {!!form.template.description && <Text style={{ color: palette.secondary, lineHeight: 22 }}>{form.template.description}</Text>}
       {form.template.fields.map(field => <View key={field.id} style={{ gap: 5 }}>

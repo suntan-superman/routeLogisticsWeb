@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, ActivityIndicator, Linking, Keyboard, AppState, Platform } from 'react-native';
+import { View, Text, Pressable, ActivityIndicator, Linking, Keyboard, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../theme/ThemeProvider';
@@ -40,6 +40,13 @@ function WorkflowSteps({ active, completed, onSelect, palette, disabled = false,
     })}
   </View>;
 }
+function LocationAction({ icon, label, accessibilityLabel = label, onPress, palette }) {
+  return <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel} onPress={onPress}
+    style={({ pressed }) => ({ flexGrow: 1, flexBasis: 82, minHeight: Platform.OS === 'ios' ? 44 : 48, paddingHorizontal: 6, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.input, alignItems: 'center', justifyContent: 'center', gap: 2, opacity: pressed ? 0.75 : 1 })}>
+    <Ionicons name={icon} size={18} color={palette.accent} />
+    <Text numberOfLines={1} style={{ color: palette.text, fontSize: 13, fontWeight: '700', textAlign: 'center' }}>{label}</Text>
+  </Pressable>;
+}
 function workAccessReason(job, user, permissions) {
   if (!user?.emailVerified || !permissions?.canAccess || !permissions.can?.('jobs.work')) return 'Verify your email and refresh your workspace before changing this job.';
   if (!job?.id) return 'Reopen the job from your job list.';
@@ -71,8 +78,9 @@ export default function JobWorkflow({ job, visible = true, onClose, onChanged, o
   const serviceBusyRef = useRef(false), serviceDraftRef = useRef(false);
   const requestBusyRef=useRef(false),requestDraftRef=useRef(false);
   const workActionsRef = useRef(null), checklistActionsRef = useRef(null), draftAction = useRef(null);
-  const scrollRef = useRef(null), scrollLayouts = useRef({}), pendingScroll = useRef(null), scrollFrames = useRef([]), scrollOffset = useRef(0);
+  const scrollRef = useRef(null), scrollLayouts = useRef({}), pendingScroll = useRef(null), scrollOffset = useRef(0);
   const scrollBounds = useRef({ content: 0, viewport: 0 });
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const notify = useRef(onInteractionChange); notify.current = onInteractionChange;
   const hasCompletionDraft = Object.values(draft).some(value => String(value).trim());
   const hasDraft = photoDraft || workDraft || serviceDraft || requestDraft || hasCompletionDraft || !!completionDialog, busy = saving || reviewing || photoBusy || workBusy || serviceBusy || requestBusy || resolvingDrafts;
@@ -85,10 +93,6 @@ export default function JobWorkflow({ job, visible = true, onClose, onChanged, o
     const unsubscribe = subscribeOffline(() => { void refresh(); });
     return () => { live = false; unsubscribe(); };
   }, [job?.id, job?.updatedAt, alertFingerprint, visible]);
-  const clearScrollFrames = useCallback(() => {
-    const cancel = globalThis.cancelAnimationFrame || clearTimeout;
-    scrollFrames.current.forEach(cancel); scrollFrames.current = [];
-  }, []);
   const scrollToMeasured = useCallback(target => {
     const measured = scrollLayouts.current[target], scroller = scrollRef.current;
     if (!measured || !scroller?.scrollTo) return false;
@@ -100,39 +104,37 @@ export default function JobWorkflow({ job, visible = true, onClose, onChanged, o
   }, []);
   const contentResized = useCallback((_width, height) => {
     scrollBounds.current.content = height;
-    const target = pendingScroll.current;
-    if (target && scrollToMeasured(target)) pendingScroll.current = null;
-    else {
-      const { viewport } = scrollBounds.current;
-      if (viewport && scrollOffset.current > Math.max(0, height - viewport)) {
-        scrollOffset.current = Math.max(0, height - viewport);
-        scrollRef.current?.scrollTo?.({ y: scrollOffset.current, animated: false });
-      }
+    const { viewport } = scrollBounds.current;
+    if (viewport && scrollOffset.current > Math.max(0, height - viewport)) {
+      scrollOffset.current = Math.max(0, height - viewport);
+      scrollRef.current?.scrollTo?.({ y: scrollOffset.current, animated: false });
     }
+    if (pendingScroll.current) scrollToMeasured(pendingScroll.current);
   }, [scrollToMeasured]);
   const viewportResized = useCallback(event => {
     scrollBounds.current.viewport = event?.nativeEvent?.layout?.height || 0;
-    if (pendingScroll.current && scrollToMeasured(pendingScroll.current)) pendingScroll.current = null;
+    if (pendingScroll.current) scrollToMeasured(pendingScroll.current);
   }, [scrollToMeasured]);
   const requestScroll = useCallback(target => {
+    // A hidden stage can retain an old layout position after another stage or an
+    // alert changes height. Wait for its new onLayout instead of using that y.
+    delete scrollLayouts.current[target];
     pendingScroll.current = target;
-    clearScrollFrames();
-    if (scrollToMeasured(target)) return;
-    const frame = globalThis.requestAnimationFrame || (next => setTimeout(next, 0));
-    const first = frame(() => {
-      const second = frame(() => scrollToMeasured(target));
-      scrollFrames.current = [second];
-    });
-    scrollFrames.current = [first];
-  }, [clearScrollFrames, scrollToMeasured]);
+    scrollOffset.current = 0;
+    scrollRef.current?.scrollTo?.({ y: 0, animated: false });
+  }, []);
   const captureScrollLayout = useCallback((target, event) => {
     const layout = event?.nativeEvent?.layout;
     if (!layout || !Number.isFinite(layout.y)) return;
     scrollLayouts.current[target] = { y: layout.y, height: layout.height || 0 };
-    if (pendingScroll.current === target) scrollToMeasured(target);
+    if (pendingScroll.current === target && scrollToMeasured(target)) pendingScroll.current = null;
   }, [scrollToMeasured]);
-  const currentScrollTarget = useCallback(() => mode === 'details' ? (activeStep ? `stage:${activeStep}` : 'overview') : mode, [activeStep, mode]);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; generation.current++; clearScrollFrames(); notify.current?.({ busy: false, hasDraft: false }); }; }, [clearScrollFrames]);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; generation.current++; notify.current?.({ busy: false, hasDraft: false }); }; }, []);
+  useEffect(() => {
+    const show = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () => setKeyboardOpen(true));
+    const hide = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => setKeyboardOpen(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
   useEffect(() => { notify.current?.({ busy, hasDraft }); }, [busy, hasDraft]);
   useEffect(() => {
     generation.current++; submitting.current = null; reviewPending.current = null; scrollLayouts.current = {}; scrollBounds.current = { content: 0, viewport: 0 }; scrollOffset.current = 0; pendingScroll.current = 'overview';
@@ -382,11 +384,8 @@ export default function JobWorkflow({ job, visible = true, onClose, onChanged, o
     const step = mode === 'details' ? activeStep : mode === 'property' ? 'property' : 'review';
     onNavigationStateChange?.({ jobId: job?.id, activeStep: step, mode, label: workflowSteps.find(([id]) => id === step)?.[1] || 'Visit Workflow' });
   }, [activeStep, job?.id, mode, onNavigationStateChange]);
-  useEffect(() => { if (visible) requestScroll(currentScrollTarget()); }, [visible, currentScrollTarget, requestScroll]);
-  useEffect(() => {
-    const subscription = AppState?.addEventListener?.('change', state => { if (visible && state === 'active') requestScroll(currentScrollTarget()); });
-    return () => subscription?.remove?.();
-  }, [currentScrollTarget, requestScroll, visible]);
+  // A retained workflow keeps its scroll position on tab return and app resume.
+  // Stage changes explicitly request a fresh measured position in openStage.
   if (!job?.id) return <View><InlineNotice tone="error" message="Reopen the job from your job list." /><GlassButton title="Return to jobs" onPress={onClose} /></View>;
   // Dispatch instructions are projected separately from editable work notes.
   // Offline work-note patches deliberately use the legacy `notes` field.
@@ -395,6 +394,7 @@ export default function JobWorkflow({ job, visible = true, onClose, onChanged, o
   const destination = jobDestination(displayJob);
   const navigate = () => Linking.openURL('https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(destination) + '&travelmode=driving').catch(failure => setError(failure.message || 'Navigation could not open. Check your map application.'));
   const activeStepLabel = workflowSteps.find(([id]) => id === activeStep)?.[1];
+  const activeStepNumber = workflowSteps.findIndex(([id]) => id === activeStep) + 1;
   const overview = mode === 'details' && !activeStep;
   const scopedAlertStatus = alertStatus.jobId === job?.id ? alertStatus : { alerts: displayJob.operationalAlerts || [], acknowledgments: [], local: [] };
   const currentAlerts = scopedAlertStatus.alerts || displayJob.operationalAlerts || [];
@@ -423,12 +423,13 @@ export default function JobWorkflow({ job, visible = true, onClose, onChanged, o
     <View testID="workflow-compact-header" style={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 10, gap: 5, borderBottomWidth: 1, borderColor: palette.border }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         {stageBack && <Pressable accessibilityRole="button" accessibilityLabel="Back to Visit Workflow" onPress={returnToOverview} style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="arrow-back-outline" size={22} color={palette.text} /></Pressable>}
-        <View style={{ flex: 1 }}><Text accessibilityRole="header" style={{ color: palette.text, fontSize: 19, lineHeight: 25, fontWeight: '700' }}>{overview ? 'Visit Workflow' : activeStepLabel || 'Visit Workflow'}</Text><Text style={{ color: palette.text, fontSize: 14, lineHeight: 19, fontWeight: '600' }}>{displayJob.customerName || 'Assigned customer'} · {displayJob.serviceType || 'Service visit'}</Text></View>
+        <View style={{ flex: 1 }}><Text accessibilityRole="header" style={{ color: palette.text, fontSize: 22, lineHeight: 27, fontWeight: '700' }}>{overview ? 'Visit Workflow' : activeStepLabel || 'Visit Workflow'}</Text><Text style={{ color: palette.text, fontSize: 14, lineHeight: 19, fontWeight: '600' }}>{displayJob.customerName || 'Assigned customer'} · {displayJob.serviceType || 'Service visit'}</Text></View>
         {overview && <GlassButton secondary title="Close" accessibilityLabel="Close job details" disabled={busy} onPress={close} style={{ minHeight: 44, paddingVertical: 6, paddingHorizontal: 12 }} />}
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 7 }}><Text style={{ flexShrink: 1, color: palette.secondary, fontSize: 12, lineHeight: 17 }}>{appointmentLabel} · Estimated duration: {durationLabel}</Text><StatusBadge status={displayJob.status} />{!!displayJob.syncState && <StatusBadge syncState={displayJob.syncState} />}{estimateVisit && <Text style={{ color: palette.accent, fontSize: 12, fontWeight: '700' }}>Estimate Visit</Text>}{submitted?.status === 'queued' && <Text style={{ color: palette.secondary, fontSize: 12 }}>Awaiting synchronization</Text>}</View>
+      {!!activeStepNumber && <Text accessibilityLabel={`Visit step ${activeStepNumber} of 5: ${activeStepLabel}`} style={{ color: palette.secondary, fontSize: 12 }}>Step {activeStepNumber} of 5</Text>}
     </View>
-    <KeyboardAwareScrollView scrollRef={scrollRef} onLayout={viewportResized} onContentSizeChange={contentResized} onScroll={event => { scrollOffset.current = event?.nativeEvent?.contentOffset?.y || 0; }} bounces={false} alwaysBounceVertical={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 12 }}>
+    <KeyboardAwareScrollView scrollRef={scrollRef} includeKeyboardOverlapPadding={false} onLayout={viewportResized} onContentSizeChange={contentResized} onScroll={event => { scrollOffset.current = event?.nativeEvent?.contentOffset?.y || 0; }} bounces={false} alwaysBounceVertical={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 12 }}>
       {!!error && <InlineNotice tone="error" message={error} />}
       {!!notice && <InlineNotice tone="success" message={notice} />}
       {busy && <View accessibilityLiveRegion="polite" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><ActivityIndicator color={palette.accent} /><Text style={{ flex: 1, color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{saving ? 'Saving completion…' : reviewing ? 'Loading saved work…' : workBusy ? 'Saving your work…' : 'Finish or cancel the current action to continue.'}</Text></View>}
@@ -442,11 +443,11 @@ export default function JobWorkflow({ job, visible = true, onClose, onChanged, o
           const status = confirmed ? 'Acknowledged and saved to server · hazard remains active' : onDevice ? 'Acknowledged on device · waiting to sync · hazard remains active' : local?.state === 'failed' || local?.state === 'conflict' ? `Needs attention: ${local.error || 'Refresh and acknowledge again.'}` : 'Acknowledgment required before normal work';
           return <View key={key} style={{ borderWidth: 1, borderColor: alert.severity === 'critical' && !confirmed && !onDevice ? palette.danger : palette.border, borderRadius: 11, padding: 9, gap: 5 }}>
             <Pressable accessibilityRole="button" accessibilityLabel={`${expanded ? 'Collapse' : 'Open'} ${alert.title} alert`} accessibilityState={{ expanded }} onPress={() => setExpandedAlerts(previous => ({ ...previous, [key]: !expanded }))} style={{ minHeight: Platform.OS === 'ios' ? 44 : 48, flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-              <Ionicons name={alert.severity === 'critical' ? 'warning-outline' : 'information-circle-outline'} size={18} color={alert.severity === 'critical' && !confirmed && !onDevice ? palette.danger : palette.accent} />
+              <Ionicons name={alert.severity === 'critical' ? 'warning-outline' : 'information-circle-outline'} size={18} color={alert.severity === 'critical' ? (confirmed || onDevice ? '#D97706' : palette.danger) : palette.accent} />
               <Text style={{ color: palette.text, fontWeight: '700', fontSize: 14, flex: 1 }}>{alert.severity === 'critical' ? 'Critical' : alert.severity === 'important' ? 'Important' : 'Information'} · {alert.title}</Text>
               <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={17} color={palette.secondary} />
             </Pressable>
-            {alert.severity === 'critical' && <Text accessibilityLiveRegion="polite" style={{ color: confirmed ? palette.accent : onDevice ? palette.secondary : palette.danger, fontSize: 12, lineHeight: 17 }}>{status}</Text>}
+            {alert.severity === 'critical' && <Text accessibilityLiveRegion="polite" style={{ color: confirmed || onDevice ? '#D97706' : palette.danger, fontSize: 12, lineHeight: 17 }}>{status}</Text>}
             {expanded && <><Text selectable style={{ color: palette.text, fontSize: 14, lineHeight: 20 }}>{alert.description}</Text>
               {alert.severity === 'critical' && !confirmed && !onDevice && <GlassButton secondary title={alertBusy === key ? 'Saving acknowledgment…' : 'I have read this critical alert'} disabled={!!alertBusy} onPress={async () => { setAlertBusy(key); try { await saveAlertAcknowledgmentOffline(displayJob, alert); setAlertStatus(previous => ({ ...previous, local: [...(previous.local || []).filter(row => row.alertKey !== key), { alertKey: key, state: 'pending' }] })); } catch (failure) { setError(failure.message || 'The acknowledgment was not saved.'); } finally { setAlertBusy(''); } }} />}
             </>}
@@ -463,9 +464,9 @@ export default function JobWorkflow({ job, visible = true, onClose, onChanged, o
         {!!(displayJob.serviceProperty?.label || displayJob.serviceProperty?.unit) && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 21 }}>Property: {displayJob.serviceProperty.label || 'Service property'}{displayJob.serviceProperty.unit ? ' · Unit ' + displayJob.serviceProperty.unit : ''}</Text>}
         {!estimateVisit && permissions.can?.('jobs.pricing') && (displayJob.estimatedCost ?? displayJob.totalCost) != null && <Text style={{ color: palette.secondary, fontSize: 13 }}>Estimated cost: {'$' + Number(displayJob.estimatedCost ?? displayJob.totalCost).toFixed(2)}</Text>}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
-          {!!destination && <GlassButton secondary title="Navigate" accessibilityLabel="Navigate to job" icon="navigate-outline" onPress={navigate} style={{ flex: 1, minWidth: 90, minHeight: Platform.OS === 'ios' ? 44 : 48, paddingHorizontal: 7, paddingVertical: 7 }} />}
-          {!!displayJob.customerPhone && <GlassButton secondary title="Call" accessibilityLabel="Call customer" icon="call-outline" onPress={() => Linking.openURL('tel:' + String(displayJob.customerPhone).replace(/[^+0-9]/g, '')).catch(failure => setError(failure.message || 'The phone application could not open.'))} style={{ flex: 1, minWidth: 75, minHeight: Platform.OS === 'ios' ? 44 : 48, paddingHorizontal: 7, paddingVertical: 7 }} />}
-          <GlassButton secondary title="Property" accessibilityLabel="Open Property Profile" icon="home-outline" onPress={() => setMode('property')} style={{ flex: 1, minWidth: 90, minHeight: Platform.OS === 'ios' ? 44 : 48, paddingHorizontal: 7, paddingVertical: 7 }} />
+          {!!destination && <LocationAction icon="navigate-outline" label="Navigate" accessibilityLabel="Navigate to job" palette={palette} onPress={navigate} />}
+          {!!displayJob.customerPhone && <LocationAction icon="call-outline" label="Call" accessibilityLabel="Call customer" palette={palette} onPress={() => Linking.openURL('tel:' + String(displayJob.customerPhone).replace(/[^+0-9]/g, '')).catch(failure => setError(failure.message || 'The phone application could not open.'))} />}
+          <LocationAction icon="home-outline" label="Property" accessibilityLabel="Open Property Profile" palette={palette} onPress={() => setMode('property')} />
         </View>
       </Card>}
       {overview && !!dispatchNotes.trim() && <View style={{ borderWidth: 1, borderColor: palette.border, borderRadius: 16, paddingHorizontal: 12, backgroundColor: palette.surface }}>
@@ -476,20 +477,19 @@ export default function JobWorkflow({ job, visible = true, onClose, onChanged, o
       <View testID={activeStep && ['arrival','departure','work'].includes(activeStep) ? `workflow-stage-${activeStep}` : 'workflow-stage-work-tools'} onLayout={event => { if (activeStep && ['arrival','departure','work'].includes(activeStep)) captureScrollLayout(`stage:${activeStep}`, event); }} style={{ display: mode === 'details' && ['arrival','departure','work'].includes(activeStep) ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details' || !['arrival','departure','work'].includes(activeStep)} importantForAccessibility={mode === 'details' && ['arrival','departure','work'].includes(activeStep) ? 'auto' : 'no-hide-descendants'} pointerEvents={mode === 'details' && ['arrival','departure','work'].includes(activeStep) ? 'auto' : 'none'}>
         <FieldWorkTools key={job.id} job={job} section={activeStep === 'arrival' || activeStep === 'departure' || activeStep === 'work' ? activeStep : 'hidden'} active={mode === 'details' && !completionDialog} draftActionsRef={workActionsRef} readOnly={!!accessReason || ['completed', 'cancelled', 'canceled'].includes(displayJob.status)} criticalPending={missingCritical.length > 0} showNavigation={false} onChanged={onChanged} onBusyChange={updateWorkBusy} onDraftChange={updateWorkDraft} onProgressChange={workProgress} onLocalSave={localWorkSaved} />
       </View>
-      <View style={{ display: mode === 'details' && activeStep === 'work' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details' || activeStep !== 'work'} importantForAccessibility={mode === 'details' && activeStep === 'work' ? 'auto' : 'no-hide-descendants'} pointerEvents={mode === 'details' && activeStep === 'work' ? 'auto' : 'none'}><Card><SectionHeader title={estimateVisit ? 'Inspection scope and draft estimate' : 'Service checklist'} subtitle={estimateVisit ? 'Record inspection notes and scope. Pricing and customer delivery remain under management control.' : 'Complete the assigned service observations and product applications.'} />
-        {estimateVisit && onPrepareEstimate && (permissions.can?.('estimates.manage') || permissions.can?.('estimates.prepareAssigned')) && !['cancelled', 'canceled'].includes(displayJob.status) && <GlassButton title={displayJob.estimateId ? 'View Estimate' : 'Prepare Estimate'} disabled={busy || hasDraft} onPress={() => onPrepareEstimate(displayJob)} />}
+      <View style={{ display: mode === 'details' && activeStep === 'work' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details' || activeStep !== 'work'} importantForAccessibility={mode === 'details' && activeStep === 'work' ? 'auto' : 'no-hide-descendants'} pointerEvents={mode === 'details' && activeStep === 'work' ? 'auto' : 'none'}>
+        {estimateVisit && onPrepareEstimate && (permissions.can?.('estimates.manage') || permissions.can?.('estimates.prepareAssigned')) && !['cancelled', 'canceled'].includes(displayJob.status) && <Card><SectionHeader title="Inspection scope" /><GlassButton title={displayJob.estimateId ? 'View Estimate' : 'Prepare Estimate'} disabled={busy || hasDraft} onPress={() => onPrepareEstimate(displayJob)} /></Card>}
         {!estimateVisit && <ServiceChecklist key={job.id} job={job} active={mode === 'details' && activeStep === 'work' && !completionDialog} draftActionsRef={checklistActionsRef} readOnly={!!accessReason || ['completed','cancelled','canceled'].includes(displayJob.status)} onBusyChange={updateServiceBusy} onDraftChange={updateServiceDraft} onLocalSave={result => { setLocalSteps(previous => ({ ...previous, work: result?.state || 'pending' })); completeStep('work', 'Service checklist saved on this device.'); }} />}
-      </Card></View>
+      </View>
       <View testID="workflow-stage-photos" onLayout={event => captureScrollLayout('stage:photos', event)} style={{ display: mode === 'details' && activeStep === 'photos' ? 'flex' : 'none' }} accessibilityElementsHidden={mode !== 'details' || activeStep !== 'photos'} importantForAccessibility={mode === 'details' && activeStep === 'photos' ? 'auto' : 'no-hide-descendants'} pointerEvents={mode === 'details' && activeStep === 'photos' ? 'auto' : 'none'}>
-        <Card><SectionHeader title="Visit photos" subtitle="Document the site and completed work. Saved photos show their upload status." />
+        <Card>
           <JobPhotos key={job.id} job={job} active={mode === 'details' && !completionDialog} onBusyChange={updatePhotoBusy} onDraftChange={updatePhotoDraft} onProgressChange={photoProgress} onLocalSave={result => { setLocalSteps(previous => ({ ...previous, photos: result?.state || 'pending' })); completeStep('photos', 'Photo saved on this device.'); }} />
           <GlassButton secondary title="Mark evidence reviewed and return" disabled={busy || photoDraft} onPress={() => completeStep('photos', 'Photo evidence reviewed.')} />
         </Card>
       </View>
       <View testID="workflow-stage-review" onLayout={event => captureScrollLayout('stage:review', event)} style={{display:mode==='details'&&activeStep==='review'?'flex':'none',gap:16}} accessibilityElementsHidden={mode!=='details'||activeStep!=='review'} importantForAccessibility={mode==='details'&&activeStep==='review'?'auto':'no-hide-descendants'} pointerEvents={mode==='details'&&activeStep==='review'?'auto':'none'}>
-        {!completionRecorded && <JobReassignmentRequest key={job.id} job={job} user={user} permissions={permissions} active={mode==='details'&&activeStep==='review'&&!completionDialog} readOnly={!!accessReason||['cancelled','canceled'].includes(displayJob.status)} onChanged={onChanged} onBusyChange={updateRequestBusy} onDraftChange={updateRequestDraft}/>}
-        <Card><SectionHeader title={completionRecorded ? 'Visit review' : 'Review & Complete'} subtitle={completionRecorded ? 'Read-only record of the completed visit.' : 'Confirm the visit record, add the completion details, then complete the visit once.'} />
-          <View style={{gap:8}}>{completionSummary.map(([label,value])=><View key={label} style={{flexDirection:'row',gap:12,justifyContent:'space-between'}}><Text style={{color:palette.secondary,fontSize:14,lineHeight:21}}>{label}</Text><Text style={{flex:1,color:palette.text,fontSize:14,lineHeight:21,fontWeight:'600',textAlign:'right'}}>{value}</Text></View>)}</View>
+        <Card><SectionHeader title={completionRecorded ? 'Completed visit' : 'Visit summary'} />
+          <View style={{gap:4}}>{completionSummary.map(([label,value],index)=>index < 4 && !completionRecorded ? <Pressable key={label} accessibilityRole="button" accessibilityLabel={`Review ${label}: ${value}`} disabled={busy || missingCritical.length > 0} onPress={() => openStage(workflowSteps[index][0])} style={{minHeight:Platform.OS==='ios'?44:48,flexDirection:'row',gap:12,alignItems:'center',justifyContent:'space-between',borderBottomWidth:1,borderColor:palette.border}}><Text style={{color:palette.secondary,fontSize:14,lineHeight:21}}>{label}</Text><Text style={{flex:1,color:palette.text,fontSize:14,lineHeight:21,fontWeight:'600',textAlign:'right'}}>{value}</Text><Ionicons name="chevron-forward" size={15} color={palette.secondary}/></Pressable> : <View key={label} style={{minHeight:36,flexDirection:'row',gap:12,alignItems:'center',justifyContent:'space-between'}}><Text style={{color:palette.secondary,fontSize:14,lineHeight:21}}>{label}</Text><Text style={{flex:1,color:palette.text,fontSize:14,lineHeight:21,fontWeight:'600',textAlign:'right'}}>{value}</Text></View>)}</View>
           {completionRecorded ? <View style={{gap:8}} testID="completed-visit-readonly">
             {!!displayJob.actualWorkDone&&<Text style={{color:palette.text,fontSize:15,lineHeight:23}}>Work completed: {displayJob.actualWorkDone}</Text>}
             {displayJob.actualHours!=null&&displayJob.actualHours!==''&&<Text style={{color:palette.secondary,fontSize:14,lineHeight:22}}>Actual hours: {displayJob.actualHours}</Text>}
@@ -504,13 +504,13 @@ export default function JobWorkflow({ job, visible = true, onClose, onChanged, o
             <NoteAudience /><GlassInput label="Completion notes" value={draft.completionNotes} onChangeText={value=>setDraft(current=>({...current,completionNotes:value}))} editable={!saving} multiline/>
             {estimateVisit&&<InlineNotice message={displayJob.estimateId?'A draft estimate is linked to this visit. Management review and customer delivery remain separate.':'Completing this visit will place it in management’s Quote Needed queue. It will not create pricing or contact the customer.'}/>}
             {!!savedChange?.server&&<InlineNotice tone="error"><SectionHeader title="Review the latest online work"/><Text style={{color:palette.text,lineHeight:22}}>Status: {savedChange.server.status||'Not supplied'}</Text><Text style={{color:palette.text,lineHeight:22}}>Work completed: {savedChange.server.actualWorkDone||'Not recorded'}</Text><Text style={{color:palette.text,lineHeight:22}}>Notes: {savedChange.server.notes||savedChange.server.completionNotes||'Not recorded'}</Text></InlineNotice>}
-            {canComplete&&<GlassButton title="Complete Visit" busy={saving||reviewing} disabled={busy} onPress={review}/>}
             {!canComplete&&<InlineNotice tone={completionRecorded?'success':'error'} message={blockedCompletionReason()}/>}
           </View>}
         </Card>
+        {!completionRecorded && <JobReassignmentRequest key={job.id} job={job} user={user} permissions={permissions} active={mode==='details'&&activeStep==='review'&&!completionDialog} readOnly={!!accessReason||['cancelled','canceled'].includes(displayJob.status)} onChanged={onChanged} onBusyChange={updateRequestBusy} onDraftChange={updateRequestDraft}/>}
       </View>
-      {stageBack && <GlassButton secondary title="Back to Visit Workflow" disabled={busy} onPress={returnToOverview} />}
     </KeyboardAwareScrollView>
+    {activeStep === 'review' && canComplete && !keyboardOpen && <View testID="workflow-review-footer" style={{ paddingHorizontal: 20, paddingVertical: 8, borderTopWidth: 1, borderColor: palette.border, backgroundColor: palette.background }}><GlassButton title="Complete Visit" busy={saving || reviewing} disabled={busy} onPress={review} style={{ minHeight: 50, paddingVertical: 9 }} /></View>}
     </View>
     {closeRequested&&!completionDialog&&<ActionDialog testID="close-work-drafts-dialog" title="Keep your work?" message="Save supported work drafts before closing. A failed save keeps the work order open and retains your text." busy={busy} onClose={()=>{if(!busy)setCloseRequested(false);}}>
       {(hasCompletionDraft||retryOperationId)&&<InlineNotice message="Resume or cancel the completion draft before saving and closing. Previously queued work remains on the device."/>}

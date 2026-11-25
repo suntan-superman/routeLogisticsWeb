@@ -26,7 +26,7 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSav
   const { palette } = useTheme();
   const [photos, setPhotos] = useState([]), [busy, setBusy] = useState(false), [draft, setDraft] = useState(null);
   const [actionError, setActionError] = useState(''), [loadError, setLoadError] = useState(''), [message, setMessage] = useState('');
-  const [referenceCategory, setReferenceCategory] = useState(''), [referenceCaption, setReferenceCaption] = useState('');
+  const [referenceCategory, setReferenceCategory] = useState(''), [referenceCaption, setReferenceCaption] = useState(''), [referenceMode, setReferenceMode] = useState(false);
   const [ready, setReady] = useState(null), refresh = useRef(null);
   const mounted = useRef(false), generation = useRef(0), loading = useRef(0), locked = useRef(false), selected = useRef(null), retrying = useRef(new Set());
   const deniedRead = useRef(null);
@@ -63,7 +63,7 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSav
   const resource = useJobResourceRefresh('photos', job?.id, load, { enabled: ready === job?.id && active }); refresh.current = resource.refetch;
   useEffect(() => {
     mounted.current = true; generation.current++; locked.current = false; selected.current = null; deniedRead.current = null;
-    setPhotos([]); setDraft(null); setBusy(false); setActionError(''); setLoadError(''); setMessage('');
+    setPhotos([]); setDraft(null); setBusy(false); setActionError(''); setLoadError(''); setMessage(''); setReferenceMode(false); setReferenceCategory(''); setReferenceCaption('');
     callbacks.current.onBusyChange?.(false); callbacks.current.onDraftChange?.(false); callbacks.current.onProgressChange?.({ hasPhotos: false, count: 0 });
     setReady(job?.id);
     const unsubscribe = subscribeOffline(() => refresh.current?.());
@@ -89,7 +89,7 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSav
       ...(value.referenceCategory ? { referenceCategory: value.referenceCategory, referenceCaption: value.referenceCaption } : {}),
     });
     if (!current(ticket, work.id)) return;
-    remember(null); setReferenceCategory(''); setReferenceCaption(''); setMessage(value.referenceCategory ? 'Photo and property reference proposal saved on this device. Management must approve it after synchronization.' : 'Photo saved on this device. Upload status is shown below.'); callbacks.current.onLocalSave?.({ state: 'pending' }); await load();
+    remember(null); setReferenceMode(false); setReferenceCategory(''); setReferenceCaption(''); setMessage(value.referenceCategory ? 'Photo and property reference proposal saved on this device. Management must approve it after synchronization.' : 'Photo saved on this device. Upload status is shown below.'); callbacks.current.onLocalSave?.({ state: 'pending' }); await load();
   };
   const capture = async camera => {
     if (locked.current || selected.current || !target.current?.id) return;
@@ -131,17 +131,23 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSav
   };
   if (!job?.id) return null;
   const error = [actionError, loadError].filter(Boolean).join('\n');
-  return <View style={{ marginVertical: 16 }}>
-    <Text style={{ color: palette.text, fontWeight: '700', fontSize: 18, marginBottom: 8 }}>Job photos</Text>
-    {!!(job.customerId && (job.servicePropertyId || job.serviceProperty?.propertyId)) && <View style={{ gap: 8, marginBottom: 12 }}><Text style={{ color: palette.secondary }}>Optional: propose the next photo as a permanent property reference. It will remain job evidence, and management must approve the reference.</Text><ScrollView horizontal>{[['', 'Job evidence only'], ['exterior', 'Exterior'], ['entrance', 'Gate'], ['access', 'Access'], ['equipment', 'Equipment'], ['treatment', 'Treatment area'], ['safety', 'Safety'], ['other', 'Other']].map(([id, label]) => <Button key={id || 'evidence'} title={`${referenceCategory === id ? '✓ ' : ''}${label}`} secondary={referenceCategory !== id} disabled={busy} onPress={() => setReferenceCategory(id)} />)}</ScrollView>{!!referenceCategory && <GlassInput label="Reference caption (optional)" value={referenceCaption} maxLength={500} onChangeText={setReferenceCaption} />}</View>}
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}><Button title="Take photo" disabled={busy || !!draft} onPress={() => capture(true)} /><Button title="Choose photo" disabled={busy || !!draft} onPress={() => capture(false)} /></View>
+  return <View style={{ gap: 12 }}>
+    <Text style={{ color: palette.text, fontWeight: '700', fontSize: 17 }}>Photo purpose: {referenceMode ? referenceCategory ? `Property reference · ${referenceCategory}` : 'Choose a reference category' : 'Job evidence'}</Text>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><Button title="Take photo" icon="camera-outline" iconPlacement="above" style={{ flexGrow: 1, minWidth: 120 }} disabled={busy || !!draft || referenceMode && !referenceCategory} onPress={() => capture(true)} /><Button title="Choose photo" icon="images-outline" iconPlacement="above" style={{ flexGrow: 1, minWidth: 120 }} disabled={busy || !!draft || referenceMode && !referenceCategory} onPress={() => capture(false)} /></View>
+    {!!(job.customerId && (job.servicePropertyId || job.serviceProperty?.propertyId)) && <View style={{ gap: 8 }}>
+      <Button title={referenceMode ? 'Use as job evidence instead' : 'Propose as property reference (optional)'} secondary disabled={busy || !!draft} onPress={() => { setReferenceMode(value => !value); setReferenceCategory(''); setReferenceCaption(''); }} />
+      {referenceMode && <><Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 19 }}>The photo stays as job evidence. Management approves any permanent reference.</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>{[['exterior', 'Exterior'], ['entrance', 'Gate'], ['access', 'Access'], ['equipment', 'Equipment'], ['treatment', 'Treatment area'], ['safety', 'Safety'], ['other', 'Other']].map(([id, label]) => <Button key={id} title={label} secondary={referenceCategory !== id} style={{ flexGrow: 1, minWidth: 96, paddingHorizontal: 8, paddingVertical: 8 }} disabled={busy} onPress={() => setReferenceCategory(id)} />)}</View>
+        {!!referenceCategory && <GlassInput label="Reference caption (optional)" value={referenceCaption} maxLength={500} onChangeText={setReferenceCaption} />}
+      </>}
+    </View>}
     {busy && <Text accessibilityLiveRegion="polite" style={{ color: palette.secondary }}>Preparing and saving your photo…</Text>}
     {!!draft && <View><Image accessibilityLabel="Selected job photo" source={{ uri: draft.compressed?.uri || draft.asset.uri }} style={{ width: 140, height: 140, margin: 5, borderRadius: 8 }} /><Text style={{ color: palette.secondary }}>Selected photo has not been saved yet.</Text>{!busy && <><Button title="Retry saving photo" onPress={retryDraft} /><Button title="Discard selected photo" onPress={() => { if (!locked.current) { remember(null); setActionError(''); setMessage('Selected photo discarded.'); } }} /></>}</View>}
-    <Text style={{ color: palette.secondary, marginVertical: 6 }}>Photos stay on this device until uploaded. Sync resumes while the app is open and connected.</Text>
+    <Text style={{ color: palette.secondary, fontSize: 12 }}>Photos save on this device before uploading.</Text>
     {!!message && <Text accessibilityLiveRegion="polite" style={{ color: palette.secondary }}>{message}</Text>}
     {!!error && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{error}</Text>}
     {!!loadError && <Button title="Retry loading photos" disabled={busy} onPress={() => load({ force: true })} />}
-    <ScrollView horizontal>{photos.map(photo => <View key={photo.id}><PrivatePhoto photo={photo} style={{ width: 140, height: 140, margin: 5, borderRadius: 8 }} /><Text style={{ color: palette.secondary }}>{photo.metadata?.referenceCategory ? `${photo.metadata.referenceCategory} · ` : ''}{photoState(photo)}</Text>{!!photo.error && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{photo.error}</Text>}{['failed', 'conflict'].includes(photo.state) && <Button title="Retry photo upload" onPress={() => retryPhoto(photo.id)} />}</View>)}</ScrollView>
+    {!!photos.length && <ScrollView horizontal contentContainerStyle={{ gap: 10, paddingBottom: 4 }}>{photos.map(photo => <View key={photo.id} style={{ width: 116, gap: 4 }}><PrivatePhoto photo={photo} style={{ width: 108, height: 88, borderRadius: 9 }} /><Text style={{ color: palette.secondary, fontSize: 12 }}>{photo.metadata?.referenceCategory ? `${photo.metadata.referenceCategory} · ` : ''}{photoState(photo)}</Text>{!!photo.error && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{photo.error}</Text>}{['failed', 'conflict'].includes(photo.state) && <Button title="Retry photo upload" onPress={() => retryPhoto(photo.id)} />}</View>)}</ScrollView>}
   </View>;
 }
 

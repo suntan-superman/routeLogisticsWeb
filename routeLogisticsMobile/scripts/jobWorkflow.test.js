@@ -7,10 +7,11 @@ const { create, act } = require('react-test-renderer');
 const babel = require('@babel/core');
 const { workspacePermissions } = require('../services/workspacePolicy');
 global.IS_REACT_ACT_ENVIRONMENT = true;
-let account, tree, photoProps, workProps, checklistProps, requestProps, photoMounts, photoUnmounts, calls, loader, savedRead, reads, changes, closes, interactions, discarded, navigationCalls, scrollCommands;
+let account, tree, photoProps, workProps, checklistProps, requestProps, photoMounts, photoUnmounts, calls, loader, savedRead, alertRead, reads, changes, closes, interactions, discarded, navigationCalls, scrollCommands;
 let workDrafts, checklistDrafts, savedDraftCalls, discardedDraftCalls, saveWorkDrafts, saveChecklistDrafts, discardWorkDrafts, visitStatus, departureOpened;
 const saved = new Map();
-const native = Object.fromEntries(['View', 'Text', 'ScrollView', 'ActivityIndicator'].map(name => [name, name]));
+const native = Object.fromEntries(['View', 'Text', 'Pressable', 'ScrollView', 'ActivityIndicator'].map(name => [name, name]));
+native.Platform = { OS: 'ios' };
 native.Linking = { openURL: async url => navigationCalls.push(url) };
 native.Keyboard = { dismiss() {} };
 const appStateHandlers = new Set();
@@ -30,6 +31,7 @@ function load() {
     if (specifier.startsWith('@babel/runtime/')) return require(specifier);
     if (specifier === 'react') return React;
     if (specifier === 'react-native') return native;
+    if (specifier === '@expo/vector-icons') return { Ionicons: props => React.createElement('Ionicon', props) };
     if (specifier.endsWith('/contexts/AuthContext')) return { useAuth: () => account };
     if (specifier.endsWith('/theme/ThemeProvider')) return { useTheme: () => ({ palette }) };
     if (specifier === './Glass') return { GlassButton: button, GlassInput: ({ label, ...props }) => React.createElement('TextInput', { accessibilityLabel: label, ...props }) };
@@ -59,7 +61,7 @@ function load() {
       return React.createElement('ServiceChecklist');
     };
     if (specifier.endsWith('/services/jobCompletion')) return { completeJob: async (job, draft, options) => { calls.push({ job, draft, options }); return loader(job, draft, options); } };
-    if (specifier.endsWith('/services/offline')) return { getQueuedOperation: async id => { reads.push(id); return savedRead(id); }, resolveOffline: async (id, action) => { discarded.push({ id, action }); saved.delete(id); }, alertKey: alert => `${alert.source}:${alert.id}:${alert.version}`, readJobAlerts: async (_id, alerts) => ({ alerts, acknowledgments: [], local: [] }), saveAlertAcknowledgmentOffline: async () => ({ state: 'pending' }), subscribeOffline: () => () => {} };
+    if (specifier.endsWith('/services/offline')) return { getQueuedOperation: async id => { reads.push(id); return savedRead(id); }, resolveOffline: async (id, action) => { discarded.push({ id, action }); saved.delete(id); }, alertKey: alert => `${alert.source}:${alert.id}:${alert.version}`, readJobAlerts: async (_id, alerts) => alertRead(alerts), saveAlertAcknowledgmentOffline: async () => ({ state: 'pending' }), subscribeOffline: () => () => {} };
     throw new Error(`Unexpected dependency ${specifier}`);
   };
   const transformed = babel.transformSync(fs.readFileSync(filename, 'utf8'), { filename, configFile: false, babelrc: false, presets: [[require.resolve('babel-preset-expo'), { jsxRuntime: 'classic' }]], plugins: [require.resolve('@babel/plugin-transform-modules-commonjs')] }).code;
@@ -72,6 +74,7 @@ const props = selected => ({ job: selected, onClose: () => { closes++; }, onChan
 async function render(selected = job(), overrides = {}) { await act(async () => { tree = create(React.createElement(Workflow, { ...props(selected), ...overrides })); }); }
 const text = () => JSON.stringify(tree.toJSON());
 const visible = node => { for (let parent = node; parent; parent = parent.parent) { if (parent.props.accessibilityElementsHidden) return false; const styles = Array.isArray(parent.props.style) ? parent.props.style.flat(Infinity) : [parent.props.style]; if (styles.some(style => style?.display === 'none')) return false; } return true; };
+const displayed = () => tree.root.findAll(node => node.type === 'Text' && visible(node)).map(node => node.children.filter(value => typeof value === 'string' || typeof value === 'number').join('')).join(' ');
 const aliases = { 'Return to work order': 'Return to My Work' };
 const control = label => { label=aliases[label]||label;const matches=tree.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityLabel === label);return matches.find(visible)||(['Complete Visit','Prepare Estimate','View Estimate'].includes(label)?matches[0]:undefined); };
 async function press(label) {
@@ -84,6 +87,7 @@ beforeEach(() => {
   account = { user, permissions: workspacePermissions(user.workspace, user) };
   tree = null; photoProps = workProps = requestProps = null; navigationCalls = []; scrollCommands = []; photoMounts = photoUnmounts = changes = closes = 0; calls = []; interactions = []; discarded = []; reads = []; saved.clear(); savedRead = async id => saved.get(id);
   loader = async selected => ({ status: 'synced', operationId: 'operation', jobId: selected.id, message: 'Job completed and synchronized.' });
+  alertRead = async alerts => ({ alerts, acknowledgments: [], local: [] }); native.Platform.OS = 'ios';
   workDrafts = checklistDrafts = undefined; savedDraftCalls = []; discardedDraftCalls = []; checklistProps = null;
   saveWorkDrafts = async () => { savedDraftCalls.push('work'); workDrafts = { notes: false, application: false, visit: false, hasDraft: false }; workProps.onDraftChange(false); return { success: true }; };
   saveChecklistDrafts = async () => { savedDraftCalls.push('checklist'); checklistDrafts = { checklist: false, hasDraft: false }; checklistProps.onDraftChange(false); return { success: true }; };
@@ -94,7 +98,7 @@ afterEach(async () => { if (tree) await act(async () => tree.unmount()); assert.
 
 test('estimate details retain property access and dispatcher notes and completion offers quote-needed outcome',async()=>{
  let prepared=null;await render(job({appointmentKind:'estimate_visit',billable:false,estimateOutcome:'estimate_pending',inquiryId:'inquiry-one',serviceProperty:{address:'22 Rental Road',label:'Rental',unit:'B'},address:'Old billing street',propertyAccessInstructions:'Gate 2468',dispatchNotes:'Inspect exterior only'}),{onPrepareEstimate:selected=>{prepared=selected;}});
- assert.match(text(),/Estimate Visit/);assert.match(text(),/22 Rental Road/);assert.match(text(),/Gate 2468/);assert.match(text(),/Inspect exterior only/);assert.doesNotMatch(text(),/Old billing street/);
+  assert.match(text(),/Estimate Visit/);assert.match(text(),/22 Rental Road/);assert.match(text(),/Gate 2468/);await press('Job instructions');assert.match(text(),/Inspect exterior only/);assert.doesNotMatch(text(),/Old billing street/);
  await press('Prepare Estimate');assert.equal(prepared.id,'assigned');
  await press('Review and completion');assert.match(text(),/Review & Complete/);assert.ok(control('Completion outcome: Visit completed — quote needed'));await input('Work completed','Inspected for a quote');await press('Completion outcome: Customer declined');await press('Complete Visit');assert.equal(calls[0].draft.estimateOutcome,'customer_declined');assert.equal(calls[0].job.billable,false);assert.equal(photoMounts,1);
 });
@@ -120,6 +124,34 @@ test('current critical alert blocks normal stages until a durable local acknowle
   await press('I have read this critical alert');
   assert.equal(!!control('Work details').props.disabled, false);
   assert.match(text(), /Acknowledged on device/);
+  assert.ok(control('Open Hazard at entry alert'));
+  assert.doesNotMatch(text(), /Review the full access warning before work/);
+  await press('Open Hazard at entry alert');
+  assert.match(text(), /Review the full access warning before work/);
+});
+
+test('server-confirmed critical alerts collapse, but a revised version expands and requires fresh acknowledgment', async () => {
+  const critical = { id: 'gate', source: 'property', version: 2, active: true, severity: 'critical', title: 'Hazard at entry', description: 'Keep clear of the gate.' };
+  alertRead = async alerts => ({ alerts, source: 'server', acknowledgments: [{ alertKey: 'property:gate:2' }], local: [] });
+  await render(job({ operationalAlerts: [critical] }));
+  assert.ok(control('Open Hazard at entry alert'));
+  assert.match(displayed(), /1 active/); assert.match(displayed(), /Acknowledged and saved to server/);
+  assert.doesNotMatch(text(), /Keep clear of the gate/);
+  await press('Open Hazard at entry alert'); assert.match(text(), /Keep clear of the gate/);
+  await act(async () => tree.update(React.createElement(Workflow, props(job({ operationalAlerts: [{ ...critical, version: 3, description: 'Updated gate hazard requires new acknowledgment.' }] })))));
+  assert.match(text(), /Updated gate hazard requires new acknowledgment/);
+  assert.ok(control('I have read this critical alert'));
+  assert.equal(control('Work details').props.disabled, true);
+});
+
+test('compact steps preserve local save state and Android touch targets without an empty alert card', async () => {
+  native.Platform.OS = 'android'; await render(job({ estimatedDuration: 1, serviceProperty: { label: 'Front yard', address: '1 Example Road' } }));
+  assert.equal(tree.root.findAll(node => node.props.testID === 'job-operational-alerts').length, 0);
+  assert.match(displayed(), /Estimated duration: 1 hour/); assert.match(displayed(), /Front yard/);
+  const step = control('Arrival'); assert.equal(step.props.style({ pressed: false }).minHeight, 48); assert.equal(step.props.accessibilityHint, 'Next step');
+  await press('Arrival'); await act(async () => workProps.onLocalSave('arrived', { state: 'pending' }));
+  assert.equal(control('Arrival, completed, Arrival saved').props.accessibilityHint, 'Saved on device');
+  await press('Arrival, completed, Arrival saved'); assert.equal(workProps.section, 'arrival');
 });
 
 test('workflow view changes use measured stage positions and resume at the active stage',async()=>{
@@ -223,7 +255,7 @@ test('completion validates fields, shows saving, suppresses duplicate taps and r
   await act(async () => { first = confirm(); second = confirm(); });
   assert.equal(calls.length, 1); assert.match(text(), /Saving completion/); assert.equal(control('Close job details'), undefined);
   await act(async () => { resolve({ status: 'synced', operationId: 'once', jobId: 'assigned' }); await Promise.all([first, second]); });
-  assert.equal(changes, 1); assert.match(text(), /Visit Workflow/); assert.match(text(), /Status:.*completed/); assert.match(text(), /Visit Completed/);
+   assert.equal(changes, 1); assert.match(text(), /Visit Workflow/); assert.match(text(), /"children":\["completed"\]/); assert.match(text(), /Visit Completed/);
   assert.equal(control('Complete Visit'), undefined); assert.ok(control('Return to work order'));
   await press('Return to work order'); assert.equal(closes, 1);
 });
@@ -253,7 +285,7 @@ test('completion failure keeps context and draft and retries the same durable op
 test('queued completion is explicit and later synchronization failure restores its draft for retry', async () => {
   await render(); await draft();
   loader = async () => ({ status: 'queued', operationId: 'offline-completion', message: 'Completion saved on this device and awaiting authorized synchronization.' });
-  await press('Complete Visit'); assert.match(text(), /Awaiting Synchronization/); assert.match(text(), /awaiting synchronization/);
+   await press('Complete Visit'); assert.match(text(), /Awaiting Synchronization/); assert.match(text(), /Awaiting synchronization/);
   await act(async () => tree.update(React.createElement(Workflow, props(job({ status: 'in-progress', syncState: 'failed', syncOperationId: 'offline-completion', syncError: 'Your assignment was removed.' })))));
   assert.match(text(), /Your assignment was removed/);
   assert.equal(tree.root.findByProps({ accessibilityLabel: 'Work completed' }).props.value, 'Inspected and treated the site');
@@ -306,13 +338,13 @@ test('discarding a failed saved completion is explicit and a late completion cal
 
 test('a confirmed server refresh supersedes local completion when management reopens or cancels the job', async () => {
   await render(job({ updatedAt: '2026-11-13T20:00:00.000Z' })); await draft(); await press('Complete Visit');
-  assert.match(text(), /Status:.*completed/);
+   assert.match(text(), /"children":\["completed"\]/);
   await press('Review Visit');
   await act(async () => tree.update(React.createElement(Workflow, props(job({ status: 'completed', updatedAt: '2026-11-13T20:01:00.000Z' })))));
   await act(async () => tree.update(React.createElement(Workflow, props(job({ status: 'scheduled', updatedAt: '2026-11-13T20:02:00.000Z' })))));
-  assert.ok(control('Complete Visit')); await press('Back to Visit Workflow'); assert.match(text(), /Status:.*scheduled/);
+   assert.ok(control('Complete Visit')); await press('Back to Visit Workflow'); assert.match(text(), /"children":\["scheduled"\]/);
   await act(async () => tree.update(React.createElement(Workflow, props(job({ status: 'cancelled', updatedAt: '2026-11-13T20:03:00.000Z' })))));
-  assert.match(text(), /Status:.*cancelled/); assert.equal(control('Complete'), undefined);
+   assert.match(text(), /"children":\["cancelled"\]/); assert.equal(control('Complete'), undefined);
 });
 
 test('saved-work review ignores duplicate taps and asynchronous results after unmount', async () => {
@@ -365,6 +397,7 @@ test('technician and management roles see selectable multiline dispatch instruct
     if (tree) { await act(async () => tree.unmount()); tree = null; }
     account.user = { ...account.user, role }; account.permissions = workspacePermissions(account.user.workspace, account.user);
     await render(job({ status: 'completed', dispatchNotes: instructions, serviceInstructions: 'Customer prefers the rear path.', workNotes: 'Technician observed activity.', notes: 'Legacy work-note alias.', completionNotes: 'Previous completion summary.' }));
+    await press('Job instructions');
     const note = tree.root.findAll(node => node.type === 'Text' && node.props.testID === 'job-dispatch-notes');
     assert.equal(note.length, 1); assert.equal(note[0].props.selectable, true);
     assert.equal(note[0].children.join(''), instructions);
@@ -393,6 +426,7 @@ test('same-job instruction refresh preserves photo, work-tool and completion dra
   await act(async () => { photoProps.onDraftChange(true); workProps.onDraftChange(true); });
   selected = { ...selected, dispatchNotes: 'Updated gate instructions\nUse the side path.', updatedAt: '2026-11-13T20:01:00.000Z' };
   await act(async () => { await Promise.resolve(); tree.update(React.createElement(Workflow, props(selected))); });
+  await press('Job instructions');
   assert.equal(tree.root.findByProps({ testID: 'job-dispatch-notes' }).children.join(''), selected.dispatchNotes);
   assert.equal(photoMounts, 1); assert.equal(photoUnmounts, 0);
   assert.deepEqual(interactions.at(-1), { busy: false, hasDraft: true });
@@ -429,7 +463,8 @@ test('switching jobs replaces dispatch instructions and never carries another vi
   await render(job({ dispatchNotes: 'First property gate instructions' }));
   await draft();
   await act(async () => tree.update(React.createElement(Workflow, props(job({ id: 'another', customerName: 'Another property', dispatchNotes: 'Second property access instructions' })))));
-  assert.match(text(), /Second property access instructions/); assert.doesNotMatch(text(), /First property gate instructions|Gate secured/);
+   await press('Job instructions');
+   assert.match(text(), /Second property access instructions/); assert.doesNotMatch(text(), /First property gate instructions|Gate secured/);
   assert.equal(tree.root.findByProps({ testID: 'job-dispatch-notes' }).children.join(''), 'Second property access instructions');
   await press('Review and completion');assert.ok(control('Complete Visit'));
   assert.equal(calls.length, 0); assert.equal(photoMounts, 2); assert.equal(photoUnmounts, 1);

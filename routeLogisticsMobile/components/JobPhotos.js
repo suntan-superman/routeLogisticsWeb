@@ -22,7 +22,7 @@ const photoState = photo => {
 
 // JobWorkflow keeps one instance mounted for its selected job. The native picker
 // is presented from that screen, never while swapping React Native modals.
-export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSave, onProgressChange, active = true }) {
+export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSave, onProgressChange, criticalPending = false, active = true }) {
   const { palette } = useTheme();
   const [photos, setPhotos] = useState([]), [busy, setBusy] = useState(false), [draft, setDraft] = useState(null);
   const [actionError, setActionError] = useState(''), [loadError, setLoadError] = useState(''), [message, setMessage] = useState('');
@@ -92,6 +92,7 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSav
     remember(null); setReferenceMode(false); setReferenceCategory(''); setReferenceCaption(''); setMessage(value.referenceCategory ? 'Photo and property reference proposal saved on this device. Management must approve it after synchronization.' : 'Photo saved on this device. Upload status is shown below.'); callbacks.current.onLocalSave?.({ state: 'pending' }); await load();
   };
   const capture = async camera => {
+    if (criticalPending) { setActionError('Acknowledge the current critical alert before capturing job evidence.'); return; }
     if (locked.current || selected.current || !target.current?.id) return;
     const work = { ...target.current }, ticket = generation.current, release = beginNativeInteraction();
     activity(true); setActionError(''); setMessage('');
@@ -115,6 +116,7 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSav
     } finally { release(); if (current(ticket, work.id)) activity(false); }
   };
   const retryDraft = async () => {
+    if (criticalPending) { setActionError('Acknowledge the current critical alert before saving job evidence.'); return; }
     if (locked.current || !selected.current) return;
     const work = { ...target.current }, ticket = generation.current, value = selected.current;
     activity(true); setActionError('');
@@ -123,6 +125,7 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSav
     finally { if (current(ticket, work.id)) activity(false); }
   };
   const retryPhoto = async id => {
+    if (criticalPending) { setActionError('Acknowledge the current critical alert before uploading job evidence.'); return; }
     if (retrying.current.has(id)) return;
     retrying.current.add(id); const workId = target.current?.id, ticket = generation.current;
     try { await resolveOffline(id, 'retry'); if (current(ticket, workId)) await load(); }
@@ -133,7 +136,7 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSav
   const error = [actionError, loadError].filter(Boolean).join('\n');
   return <View style={{ gap: 12 }}>
     <Text style={{ color: palette.text, fontWeight: '700', fontSize: 17 }}>Photo purpose: {referenceMode ? referenceCategory ? `Property reference · ${referenceCategory}` : 'Choose a reference category' : 'Job evidence'}</Text>
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><Button title="Take photo" icon="camera-outline" iconPlacement="above" style={{ flexGrow: 1, minWidth: 120 }} disabled={busy || !!draft || referenceMode && !referenceCategory} onPress={() => capture(true)} /><Button title="Choose photo" icon="images-outline" iconPlacement="above" style={{ flexGrow: 1, minWidth: 120 }} disabled={busy || !!draft || referenceMode && !referenceCategory} onPress={() => capture(false)} /></View>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><Button title="Take photo" icon="camera-outline" iconPlacement="above" style={{ flexGrow: 1, minWidth: 120 }} disabled={busy || criticalPending || !!draft || referenceMode && !referenceCategory} onPress={() => capture(true)} /><Button title="Choose photo" icon="images-outline" iconPlacement="above" style={{ flexGrow: 1, minWidth: 120 }} disabled={busy || criticalPending || !!draft || referenceMode && !referenceCategory} onPress={() => capture(false)} /></View>
     {!!(job.customerId && (job.servicePropertyId || job.serviceProperty?.propertyId)) && <View style={{ gap: 8 }}>
       <Button title={referenceMode ? 'Use as job evidence instead' : 'Propose as property reference (optional)'} secondary disabled={busy || !!draft} onPress={() => { setReferenceMode(value => !value); setReferenceCategory(''); setReferenceCaption(''); }} />
       {referenceMode && <><Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 19 }}>The photo stays as job evidence. Management approves any permanent reference.</Text>
@@ -142,7 +145,7 @@ export default function JobPhotos({ job, onBusyChange, onDraftChange, onLocalSav
       </>}
     </View>}
     {busy && <Text accessibilityLiveRegion="polite" style={{ color: palette.secondary }}>Preparing and saving your photo…</Text>}
-    {!!draft && <View><Image accessibilityLabel="Selected job photo" source={{ uri: draft.compressed?.uri || draft.asset.uri }} style={{ width: 140, height: 140, margin: 5, borderRadius: 8 }} /><Text style={{ color: palette.secondary }}>Selected photo has not been saved yet.</Text>{!busy && <><Button title="Retry saving photo" onPress={retryDraft} /><Button title="Discard selected photo" onPress={() => { if (!locked.current) { remember(null); setActionError(''); setMessage('Selected photo discarded.'); } }} /></>}</View>}
+    {!!draft && <View><Image accessibilityLabel="Selected job photo" source={{ uri: draft.compressed?.uri || draft.asset.uri }} style={{ width: 140, height: 140, margin: 5, borderRadius: 8 }} /><Text style={{ color: palette.secondary }}>Selected photo has not been saved yet.</Text>{!busy && <><Button title="Retry saving photo" disabled={criticalPending} onPress={retryDraft} /><Button title="Discard selected photo" onPress={() => { if (!locked.current) { remember(null); setActionError(''); setMessage('Selected photo discarded.'); } }} /></>}</View>}
     <Text style={{ color: palette.secondary, fontSize: 12 }}>Photos save on this device before uploading.</Text>
     {!!message && <Text accessibilityLiveRegion="polite" style={{ color: palette.secondary }}>{message}</Text>}
     {!!error && <Text accessibilityRole="alert" style={{ color: palette.danger }}>{error}</Text>}

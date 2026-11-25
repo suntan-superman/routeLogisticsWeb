@@ -3,13 +3,14 @@ import { useColorScheme, AccessibilityInfo } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SystemUI from 'expo-system-ui';
 import { COLORS } from '../constants/colors';
-import { loadAppearance, saveAppearance, resolveMode } from './preferences';
+import { loadAppearance, saveAppearance, loadDensity, saveDensity, resolveMode } from './preferences';
+import { tokensForDensity } from './designTokens';
 
 const ThemeContext = createContext(null);
 export function ThemeProvider({ children }) {
   const system = useColorScheme();
-  const [mode, setMode] = useState('system'), [ready, setReady] = useState(false), [reduceTransparency, setReduceTransparency] = useState(false);
-  useEffect(() => { let mounted = true; loadAppearance(AsyncStorage).then(saved => { if (mounted) setMode(saved); }).catch(() => {}).finally(() => { if (mounted) setReady(true); }); return () => { mounted = false; }; }, []);
+  const [mode, setMode] = useState('system'), [density, setDensity] = useState('comfortable'), [ready, setReady] = useState(false), [reduceTransparency, setReduceTransparency] = useState(false);
+  useEffect(() => { let mounted = true; Promise.allSettled([loadAppearance(AsyncStorage), loadDensity(AsyncStorage)]).then(([appearance, savedDensity]) => { if (!mounted) return; if (appearance.status === 'fulfilled') setMode(appearance.value); if (savedDensity.status === 'fulfilled') setDensity(savedDensity.value); }).finally(() => { if (mounted) setReady(true); }); return () => { mounted = false; }; }, []);
   useEffect(() => {
     AccessibilityInfo.isReduceTransparencyEnabled?.().then(setReduceTransparency).catch(() => {});
     const subscription = AccessibilityInfo.addEventListener('reduceTransparencyChanged', setReduceTransparency);
@@ -34,6 +35,8 @@ export function ThemeProvider({ children }) {
   }), [palette, isDark]);
   useEffect(() => { SystemUI.setBackgroundColorAsync(palette.background).catch(() => {}); }, [palette.background]);
   const changeMode = async next => { await saveAppearance(AsyncStorage, next); setMode(next); };
-  return <ThemeContext.Provider value={{ mode, changeMode, ready, isDark, palette, colors, reduceTransparency }}>{children}</ThemeContext.Provider>;
+  const changeDensity = async next => { await saveDensity(AsyncStorage, next); setDensity(next); };
+  const tokens = useMemo(() => tokensForDensity(density), [density]);
+  return <ThemeContext.Provider value={{ mode, changeMode, density, changeDensity, tokens, ready, isDark, palette, colors, reduceTransparency }}>{children}</ThemeContext.Provider>;
 }
 export const useTheme = () => useContext(ThemeContext);

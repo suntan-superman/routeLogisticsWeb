@@ -8,7 +8,7 @@ import { Card, SectionHeader, PrimaryButton, SecondaryButton, FormField, InlineN
 import { useJobResourceRefresh } from '../services/useJobResources';
 const { validateAnswers } = require('../../functions/shared/serviceFormSchema');
 
-export default function ServiceChecklist({ job, readOnly = false, onBusyChange, onDraftChange, onLocalSave, draftActionsRef, active = true }) {
+export default function ServiceChecklist({ job, readOnly = false, criticalPending = false, onBusyChange, onDraftChange, onLocalSave, draftActionsRef, active = true }) {
   const { permissions } = useAuth(), { palette } = useTheme();
   const [data, setData] = useState(null), [catalog, setCatalog] = useState([]), [catalogChecked, setCatalogChecked] = useState(false), [answers, setAnswers] = useState({}), [pending, setPending] = useState(null);
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [dirty, setDirty] = useState(false), [loading, setLoading] = useState(true);
@@ -56,6 +56,7 @@ export default function ServiceChecklist({ job, readOnly = false, onBusyChange, 
   };
   const save = status => perform(async () => {
     const form = formRef.current;
+    if (criticalPending) throw new Error('Acknowledge the current critical alert before recording service checklist answers.');
     if (!form || !data?.enabled || pending || readOnly || ['completed','cancelled','canceled'].includes(job.status)) throw new Error('This form is read-only or has saved work requiring synchronization.');
     const numeric = { ...answers };
     for (const field of form.template.fields) if (field.type === 'number' && numeric[field.id] !== '' && numeric[field.id] != null) numeric[field.id] = Number(numeric[field.id]);
@@ -79,7 +80,7 @@ export default function ServiceChecklist({ job, readOnly = false, onBusyChange, 
       return { success: true };
     },
   }));
-  const form = data?.form, editable = !!data?.enabled && !!form && !readOnly && !pending && !['completed','cancelled','canceled'].includes(job.status);
+  const form = data?.form, editable = !!data?.enabled && !!form && !readOnly && !criticalPending && !pending && !['completed','cancelled','canceled'].includes(job.status);
   const choice = (field, value, checked, label = value) => <Pressable key={value} accessibilityRole={field.type === 'select' ? 'radio' : 'checkbox'} accessibilityLabel={label} accessibilityState={{ checked, disabled: !editable || busy }} disabled={!editable || busy}
     onPress={() => change(field, field.type === 'select' ? value : checked ? (answers[field.id] || []).filter(item => item !== value) : [...(answers[field.id] || []), value])}
     style={{ minHeight: 48, flexDirection: 'row', gap: 10, paddingVertical: 10, alignItems: 'center' }}><Text style={{ color: palette.accent }}>{checked ? '☑' : '☐'}</Text><Text style={{ flex: 1, color: palette.text, fontSize: 15, lineHeight: 23 }}>{label}</Text></Pressable>;

@@ -25,6 +25,7 @@ const mockRequire = name => {
     { id: 'rejected-ref', category: 'safety', status: 'rejected' },
   ] } : input.action === 'history' ? { rows: [{ id: 'visit-one', date: '2026-11-25', serviceType: 'Lawn maintenance', outcome: 'completed', notes: 'Synthetic work summary', hasEvidence: true }] } : input.action === 'materials' ? { rows: [{ id: 'material-one', date: '2026-11-25', product: 'Synthetic product', quantity: 2, unit: 'oz', location: 'Garden', method: 'Applied by hand' }] } : { rows: [] } };
   if (name.endsWith('/ThemeProvider')) return { useTheme: () => ({ palette: { text: '#fff', secondary: '#ccc', danger: '#f66', accent: '#0f8', border: '#555', surface: '#222', input: '#111', glow: '#183' } }) };
+  if (name.endsWith('/theme/designTokens')) return require('../theme/designTokens');
   if (name === './MobileUI') return { Card: props => React.createElement('Card', props), SectionHeader: props => React.createElement('SectionHeader', props) };
   if (name === './Glass') return { GlassButton: props => React.createElement('Button', props) };
   throw new Error(`Unexpected dependency ${name}`);

@@ -1,7 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { workspacePermissions, companyProfile, parseInvitationLink } = require('../services/workspacePolicy');
-const { loadAppearance, saveAppearance, resolveMode, THEME_KEY } = require('../theme/preferences');
+const { loadAppearance, saveAppearance, loadDensity, saveDensity, resolveMode, THEME_KEY, DENSITY_KEY } = require('../theme/preferences');
+const { tokensForDensity, touchTarget } = require('../theme/designTokens');
 
 test('missing, pending, and revoked workspace states never grant management or company access', () => {
   for (const status of [undefined, 'pending', 'unavailable', 'verify-email']) {
@@ -52,4 +53,21 @@ test('appearance survives a new load and follows system only when selected', asy
   assert.equal(resolveMode('system', 'dark'), 'dark');
   await assert.rejects(() => saveAppearance(storage, 'admin'));
   await assert.rejects(() => saveAppearance({ setItem: async () => { throw new Error('disk full'); } }, 'light'));
+});
+test('density defaults safely, persists independently of appearance, and keeps accessible targets', async () => {
+  const saved = new Map(), storage = { getItem: async key => saved.get(key) ?? null, setItem: async (key, value) => saved.set(key, value) };
+  assert.equal(await loadDensity(storage), 'compact');
+  await saveAppearance(storage, 'dark');
+  assert.equal(await loadDensity(storage), 'comfortable');
+  for (const density of ['compact', 'comfortable', 'large']) {
+    await saveDensity(storage, density);
+    assert.equal(await loadDensity(storage), density);
+    assert.equal(saved.get(DENSITY_KEY), density);
+  }
+  assert.equal(await loadAppearance(storage), 'dark');
+  assert.equal(tokensForDensity('compact').type.title.fontSize, 22);
+  assert.equal(tokensForDensity('large').type.body.fontSize, 18);
+  assert.equal(touchTarget('ios'), 44);
+  assert.equal(touchTarget('android'), 48);
+  await assert.rejects(() => saveDensity(storage, 'tiny'));
 });

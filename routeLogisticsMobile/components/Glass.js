@@ -1,9 +1,10 @@
 import React, { useRef } from 'react';
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, TextInput } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, TextInput, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeProvider';
 import { useKeyboardScroll } from './KeyboardScrollContext';
+import { tokensForDensity, touchTarget } from '../theme/designTokens';
 
 export function GlassScreen({ children, style, edges = ['top', 'left', 'right', 'bottom'] }) {
   const { palette } = useTheme();
@@ -12,38 +13,42 @@ export function GlassScreen({ children, style, edges = ['top', 'left', 'right', 
   </View>;
 }
 export function GlassCard({ children, style, contentStyle }) {
-  const { palette } = useTheme();
-  return <View style={[styles.card, { borderColor: palette.border, backgroundColor: palette.surface }, style]}>
-    <View style={[{ padding: 20, gap: 12 }, contentStyle]}>{children}</View>
+  const { palette, tokens: supplied } = useTheme();
+  const tokens = supplied || tokensForDensity();
+  return <View style={[styles.card, { borderRadius: tokens.radius.card, borderColor: palette.border, backgroundColor: palette.surface }, style]}>
+    <View style={[{ padding: tokens.spacing.card, gap: tokens.spacing.section }, contentStyle]}>{children}</View>
   </View>;
 }
 export function GlassButton({ title, onPress, icon, iconPlacement = 'inline', secondary = false, disabled = false, busy = false, style, accessibilityLabel }) {
-  const { palette } = useTheme();
+  const { palette, tokens: supplied } = useTheme();
+  const tokens = supplied || tokensForDensity();
   const color = secondary ? palette.text : '#FFFFFF';
   return <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel || title} accessibilityState={{ disabled: disabled || busy, busy }} disabled={disabled || busy} onPress={onPress}
-    style={({ pressed }) => [styles.button, iconPlacement === 'above' && { flexDirection: 'column', minHeight: 64, paddingVertical: 8, gap: 3 }, { backgroundColor: secondary ? palette.input : palette.button, borderColor: secondary ? palette.border : 'rgba(255,255,255,0.18)', opacity: disabled || busy ? 0.5 : pressed ? 0.8 : 1 }, style]}>
-    {busy ? <ActivityIndicator color={color} /> : icon ? <Ionicons name={icon} size={19} color={color} /> : null}
-    <Text style={{ fontSize: 15, fontWeight: '700', color, textAlign: 'center', flexShrink: 1 }}>{title}</Text>
+    style={({ pressed }) => [styles.button, { minHeight: touchTarget(Platform.OS), borderRadius: tokens.radius.control, paddingHorizontal: tokens.button.horizontal, paddingVertical: tokens.button.vertical }, iconPlacement === 'above' && { flexDirection: 'column', minHeight: 64, paddingVertical: 8, gap: 3 }, { backgroundColor: secondary ? palette.input : palette.button, borderColor: secondary ? palette.border : 'rgba(255,255,255,0.18)', opacity: disabled || busy ? 0.5 : pressed ? 0.8 : 1 }, style]}>
+    {busy ? <ActivityIndicator color={color} /> : icon ? <Ionicons name={icon} size={tokens.icon.inline} color={color} /> : null}
+    <Text style={{ ...tokens.type.button, color, textAlign: 'center', flexShrink: 1 }}>{title}</Text>
   </Pressable>;
 }
 export function IconButton({ icon, label, onPress, disabled = false }) {
-  const { palette } = useTheme();
-  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={[styles.icon, { backgroundColor: palette.surface, borderColor: palette.border, opacity: disabled ? 0.5 : 1 }]}><Ionicons name={icon} size={21} color={palette.text} /></Pressable>;
+  const { palette, tokens: supplied } = useTheme();
+  const tokens = supplied || tokensForDensity();
+  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={[styles.icon, { width: touchTarget(Platform.OS), height: touchTarget(Platform.OS), borderRadius: tokens.radius.control, backgroundColor: palette.surface, borderColor: palette.border, opacity: disabled ? 0.5 : 1 }]}><Ionicons name={icon} size={tokens.icon.navigation} color={palette.text} /></Pressable>;
 }
 export function GlassInput({ label, right, style, inputRef, error, ...props }) {
-  const { palette, isDark } = useTheme();
+  const { palette, isDark, tokens: supplied } = useTheme();
+  const tokens = supplied || tokensForDensity();
   const localRef = useRef(null), focused = useRef(false), keyboardScroll = useKeyboardScroll();
   const ref = inputRef || localRef;
   const onFocus = event => { focused.current = true; keyboardScroll?.(ref.current); props.onFocus?.(event); };
   const onBlur = event => { focused.current = false; props.onBlur?.(event); };
   const onContentSizeChange = event => { if (focused.current) keyboardScroll?.(ref.current); props.onContentSizeChange?.(event); };
-  return <View style={{ gap: 7 }}>
-    {!!label && <Text style={{ color: palette.text, fontSize: 14, lineHeight: 21, fontWeight: '600' }}>{label}</Text>}
+  return <View style={{ gap: tokens.spacing.xs }}>
+    {!!label && <Text style={{ color: palette.text, ...tokens.type.body, fontWeight: '600' }}>{label}</Text>}
     <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: palette.input, borderWidth: 1, borderColor: error ? palette.danger : palette.border, borderRadius: 14 }}>
-      <TextInput ref={ref} accessibilityLabel={label} accessibilityInvalid={!!error} keyboardAppearance={isDark ? 'dark' : 'light'} placeholderTextColor={palette.secondary} selectionColor={palette.accent} style={[{ flex: 1, minHeight: props.multiline ? 112 : 50, padding: 14, color: palette.text, fontSize: 16, lineHeight: 23, textAlignVertical: props.multiline ? 'top' : 'center' }, style]} {...props} onFocus={onFocus} onBlur={onBlur} onContentSizeChange={onContentSizeChange} />
+      <TextInput ref={ref} accessibilityLabel={label} accessibilityInvalid={!!error} keyboardAppearance={isDark ? 'dark' : 'light'} placeholderTextColor={palette.secondary} selectionColor={palette.accent} style={[{ flex: 1, minHeight: props.multiline ? 104 : touchTarget(Platform.OS), padding: tokens.spacing.md, color: palette.text, ...tokens.type.body, textAlignVertical: props.multiline ? 'top' : 'center' }, style]} {...props} onFocus={onFocus} onBlur={onBlur} onContentSizeChange={onContentSizeChange} />
       {right}
     </View>
-    {!!error && <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={{ color: palette.danger, fontSize: 13, lineHeight: 19 }}>{error}</Text>}
+    {!!error && <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={{ color: palette.danger, ...tokens.type.support }}>{error}</Text>}
   </View>;
 }
 const styles = StyleSheet.create({

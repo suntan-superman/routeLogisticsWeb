@@ -9,6 +9,7 @@ import { callWorkspace } from '../services/workspaceApi';
 import { useTheme } from '../theme/ThemeProvider';
 import { Card, SectionHeader } from './MobileUI';
 import { GlassButton } from './Glass';
+import { tokensForDensity, touchTarget } from '../theme/designTokens';
 
 const tabs = [
   { label: 'Overview', icon: 'home-outline' },
@@ -34,7 +35,8 @@ async function cachePhoto(jobId, photoId, loader) {
 }
 
 export default function PropertyProfileMobile({ job }) {
-  const { palette } = useTheme();
+  const { palette, tokens: suppliedTokens } = useTheme();
+  const tokens = suppliedTokens || tokensForDensity();
   const propertyId = job?.servicePropertyId || job?.serviceProperty?.propertyId;
   const [tab, setTab] = useState('Overview'), [overview, setOverview] = useState(null), [rows, setRows] = useState([]), [next, setNext] = useState(null);
   const [images, setImages] = useState({}), [localProposals, setLocalProposals] = useState([]), [cached, setCached] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
@@ -82,9 +84,9 @@ export default function PropertyProfileMobile({ job }) {
   useEffect(() => { setOverview(null); setRows([]); setLocalProposals([]); setNext(null); setImages({}); setSelectedPhoto(null); setTab('Overview'); }, [job?.id, propertyId]);
   useEffect(() => { void load(tab); }, [tab, load]);
   useEffect(() => { let active = true; const unsubscribe = subscribeOffline(() => { if (tab === 'Photos') void queuedWork().then(rows => { if (active && activeContext.current === context) setLocalProposals(rows.filter(row => row.kind === 'photo' && row.jobId === job.id && row.propertyId === propertyId && row.metadata?.referenceCategory && row.state !== 'discarded')); }).catch(() => {}); }); return () => { active = false; unsubscribe(); }; }, [tab, context]);
-  const body = (value, extra = {}) => <Text style={{ color: palette.text, fontSize: 14, lineHeight: 21, ...extra }}>{value}</Text>;
-  const muted = value => <Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 19 }}>{value}</Text>;
-  const itemStyle = { padding: 12, gap: 5, borderRadius: 12, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.input };
+  const body = (value, extra = {}) => <Text style={{ color: palette.text, ...tokens.type.body, ...extra }}>{value}</Text>;
+  const muted = value => <Text style={{ color: palette.secondary, ...tokens.type.support }}>{value}</Text>;
+  const itemStyle = { padding: tokens.spacing.card, gap: tokens.spacing.xs, borderRadius: tokens.radius.control, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.input };
   const empty = value => <View style={{ paddingVertical: 12 }}>{muted(value)}</View>;
   const photoStatus = photo => photo.status === 'approved' ? 'Approved reference' : photo.status === 'archived' ? 'Archived reference' : photo.status === 'rejected' ? 'Rejected by management · original job photo retained' : 'Awaiting management approval';
   const photoCard = photo => <View key={photo.id} style={{ ...itemStyle, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -95,10 +97,10 @@ export default function PropertyProfileMobile({ job }) {
   const property = overview?.property || job?.serviceProperty || {};
   const address = property.address || job?.address || 'Address unavailable';
   const syncLabel = error ? 'Property information needs attention' : cached ? 'Saved on device · may be older' : overview ? 'Current server information' : 'Checking property information';
-  return <View testID="property-profile-content" style={{ gap: 12 }}>
+  return <View testID="property-profile-content" style={{ gap: tokens.spacing.section }}>
     <Card><View style={{ gap: 5 }}>{body(property.label || 'Service property', { fontSize: 17, lineHeight: 24, fontWeight: '700' })}{muted(address)}<View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}><Ionicons name={error ? 'alert-circle-outline' : cached ? 'cloud-offline-outline' : 'checkmark-circle-outline'} size={15} color={error ? palette.danger : cached ? palette.secondary : palette.accent} /><Text accessibilityLiveRegion="polite" style={{ color: error ? palette.danger : palette.secondary, fontSize: 12 }}>{syncLabel}</Text></View></View></Card>
     <ScrollView testID="property-profile-tabs" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
-      {tabs.map(({ label, icon }) => <Pressable key={label} testID={`property-tab-${label.toLowerCase()}`} accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected: tab === label }} onPress={() => { if (tab !== label) { setRows([]); setNext(null); setError(''); } setSelectedPhoto(null); setTab(label); }} style={{ minHeight: Platform.OS === 'ios' ? 44 : 48, minWidth: 66, paddingHorizontal: 5, paddingVertical: 5, alignItems: 'center', justifyContent: 'center', gap: 2, borderRadius: 11, borderWidth: 1, borderColor: tab === label ? palette.accent : palette.border, backgroundColor: tab === label ? palette.glow : palette.surface }}><Ionicons name={icon} size={18} color={tab === label ? palette.accent : palette.secondary} /><Text numberOfLines={1} style={{ color: tab === label ? palette.accent : palette.text, fontSize: 11, fontWeight: tab === label ? '700' : '600' }}>{label}</Text></Pressable>)}
+      {tabs.map(({ label, icon }) => <Pressable key={label} testID={`property-tab-${label.toLowerCase()}`} accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected: tab === label }} onPress={() => { if (tab !== label) { setRows([]); setNext(null); setError(''); } setSelectedPhoto(null); setTab(label); }} style={{ minHeight: touchTarget(Platform.OS), minWidth: 66, paddingHorizontal: 5, paddingVertical: 5, alignItems: 'center', justifyContent: 'center', gap: 2, borderRadius: tokens.radius.control, borderWidth: 1, borderColor: tab === label ? palette.accent : palette.border, backgroundColor: tab === label ? palette.glow : palette.surface }}><Ionicons name={icon} size={tokens.icon.inline} color={tab === label ? palette.accent : palette.secondary} /><Text numberOfLines={1} style={{ color: tab === label ? palette.accent : palette.text, fontSize: 11, fontWeight: tab === label ? '700' : '600' }}>{label}</Text></Pressable>)}
     </ScrollView>
     <Card>
       <SectionHeader title={tab === 'History' ? 'Service history' : tab === 'Materials' ? 'Material history' : tab === 'Photos' ? 'Property photographs' : tab === 'Alerts' ? 'Property alerts' : 'Property overview'} />

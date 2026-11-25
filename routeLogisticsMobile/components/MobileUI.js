@@ -3,6 +3,7 @@ import { View, Text, Pressable, ActivityIndicator, ScrollView, BackHandler, Keyb
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeProvider';
+import { tokensForDensity } from '../theme/designTokens';
 import { GlassCard, GlassButton, GlassInput, IconButton } from './Glass';
 import { isEstimateVisit, estimateOutcomeLabel } from '../services/estimateVisitPolicy';
 import { KeyboardScrollContext } from './KeyboardScrollContext';
@@ -100,13 +101,14 @@ export function KeyboardAwareScrollView({ children, contentContainerStyle, style
 }
 
 export function ScreenHeader({ title, subtitle, onBack, children }) {
-  const { palette } = useTheme();
-  return <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 16, gap: 12 }}>
+  const { palette, tokens: supplied } = useTheme();
+  const tokens = supplied || tokensForDensity();
+  return <View style={{ paddingHorizontal: 20, paddingTop: tokens.spacing.sm, paddingBottom: tokens.spacing.md, gap: tokens.spacing.sm }}>
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
       {onBack && <IconButton icon="arrow-back-outline" label={`Back from ${title}`} onPress={onBack} />}
       <View style={{ flex: 1, gap: 4 }}>
-        <Text accessibilityRole="header" style={{ color: palette.text, fontSize: 26, lineHeight: 33, fontWeight: '700', letterSpacing: -0.5 }}>{title}</Text>
-        {!!subtitle && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{subtitle}</Text>}
+        <Text accessibilityRole="header" style={{ color: palette.text, ...tokens.type.title, letterSpacing: -0.5 }}>{title}</Text>
+        {!!subtitle && <Text style={{ color: palette.secondary, ...tokens.type.support }}>{subtitle}</Text>}
       </View>
       {children}
     </View>
@@ -114,10 +116,11 @@ export function ScreenHeader({ title, subtitle, onBack, children }) {
 }
 
 export function SectionHeader({ title, subtitle, action }) {
-  const { palette } = useTheme();
+  const { palette, tokens: supplied } = useTheme();
+  const tokens = supplied || tokensForDensity();
   return <View style={{ gap: 5 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-    <Text accessibilityRole="header" style={{ flex: 1, color: palette.text, fontSize: 18, lineHeight: 25, fontWeight: '700' }}>{title}</Text>{action}
-  </View>{!!subtitle && <Text style={{ color: palette.secondary, fontSize: 14, lineHeight: 21 }}>{subtitle}</Text>}</View>;
+    <Text accessibilityRole="header" style={{ flex: 1, color: palette.text, ...tokens.type.section }}>{title}</Text>{action}
+  </View>{!!subtitle && <Text style={{ color: palette.secondary, ...tokens.type.support }}>{subtitle}</Text>}</View>;
 }
 
 const statusLabels = { scheduled: 'Scheduled', 'en-route': 'En route', 'in-progress': 'In progress', completed: 'Completed', cancelled: 'Cancelled', canceled: 'Cancelled' };

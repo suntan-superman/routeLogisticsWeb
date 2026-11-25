@@ -191,7 +191,7 @@ test('technician Home and Settings display company data without management contr
   assert.match(textOf(settings), /Termite Inspection/); assert.match(textOf(settings), /Rodent Control/);
   assert.doesNotMatch(textOf(settings), /Manage services|Open company settings on the web/);
   assert.equal(settings.root.findAll(node => node.type === 'TextInput' && node.props.accessibilityLabel === 'Business name').length, 0);
-  assert.equal(settings.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityRole === 'radio').length, 3);
+  assert.equal(settings.root.findAll(node => node.type === 'Pressable' && node.props.accessibilityRole === 'radio').length, 6);
   await unmount(settings);
 });
 test('manager Home keeps work management but company ownership controls remain owner-only', async () => {

@@ -64,6 +64,7 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
   callbacks.current = { onChanged, onDraftChange, onBusyChange, onVisitEditorOpened, onLocalSave, onProgressChange }; target.current = job;
   const current = (ticket, id) => mounted.current && generation.current === ticket && target.current?.id === id;
   const allowWork = !readOnly && !['completed', 'cancelled', 'canceled'].includes(job?.status);
+  const allowNormalWork = allowWork && !criticalPending;
   const reportError=(message,visit=false)=>{lastError.current=message;setError(message);if(visit)setVisitSaveError(message);};
   const restoreNotes=useCallback(async()=>{
     const selected=target.current,ticket=generation.current,edit=noteEdit.current;
@@ -183,7 +184,7 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
     setNotice(result.queued ? 'Work saved on this device. Synchronization will check your current assignment.' : 'Work saved.');
     void changed(ticket, selected.id);
   });
-  const saveNotes=()=>perform(async(selected,ticket)=>{
+  const saveNotes=()=>criticalPending ? (reportError('Acknowledge the current critical alert before recording work notes.'), Promise.resolve(false)) : perform(async(selected,ticket)=>{
     const edit=noteEdit.current,value=draftState.current.notes;
     let saved=noteWrite.current?.edit===edit?await noteWrite.current.promise:noteSnapshot.current;
     if(!saved||saved.text!==value)saved=await persistNotes(value,{increment:false,editedAt:noteRetry.current?.editedAt||Date.now()});
@@ -204,6 +205,7 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
     void changed(ticket,selected.id);
   });
   const saveApplication = () => {
+    if (criticalPending) { reportError('Acknowledge the current critical alert before recording a product application.'); return Promise.resolve(false); }
     const application=draftState.current.form;
     if (!application?.product.trim() || !application?.targetPest.trim() || !Number.isFinite(Number(application?.amount)) || Number(application?.amount) <= 0) { reportError('Enter a product, target pest and positive quantity before saving.'); return Promise.resolve(false); }
     const record = { ...application, amount: Number(application.amount) };
@@ -372,9 +374,9 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
       {!!noteStorageError&&<InlineNotice tone="error" message={noteStorageError}/>}
       <Text accessibilityLiveRegion="polite" style={{color:['failed','conflict','storage-failed'].includes(noteState?.state)?palette.danger:palette.secondary,fontSize:13,lineHeight:21}}>{notesLoading?'Restoring saved work notes…':({saving:'Saving on device…',draft:'Saved on device — draft retained. Select Save work notes to queue synchronization.',pending:'Saved on device — waiting to sync',syncing:'Synchronizing work notes',synced:'Saved to server',failed:'Synchronization failed — retry required',conflict:'Conflict — management attention required. Your work notes are retained.','storage-failed':'Work notes are not saved on device. Retry before leaving.'}[noteState?.state]||'Work notes are separate from dispatcher job instructions.')}</Text>
       {!!noteState?.error&&<InlineNotice tone="error" message={noteState.error}/>}
-      {allowWork ? <><NoteAudience /><FormField label="Work notes" value={notes} maxLength={10000} onChangeText={value=>{void persistNotes(value).catch(()=>{});}} editable={!busy} multiline />
+      {allowWork ? <><NoteAudience /><FormField label="Work notes" value={notes} maxLength={10000} onChangeText={value=>{if (allowNormalWork) void persistNotes(value).catch(()=>{});}} editable={!busy && allowNormalWork} multiline />
         {noteStorageError&&<SecondaryButton title="Retry saving notes on device" disabled={busy} onPress={()=>{const draft=noteRetry.current;if(draft)void persistNotes(draft.text,{editedAt:draft.editedAt,increment:false}).catch(()=>{});else void restoreNotes();}}/>}
-        <SecondaryButton title="Save work notes" disabled={!dirty} busy={busy} onPress={saveNotes} />
+        <SecondaryButton title="Save work notes" disabled={!dirty || !allowNormalWork} busy={busy} onPress={saveNotes} />
         {noteState?.state==='failed'&&noteState.operationId&&<SecondaryButton title="Retry work-note synchronization" disabled={busy} onPress={()=>perform(async()=>{await resolveOffline(noteState.operationId,'retry');await restoreNotes();})}/>}
       </> : <Text style={{ color: palette.text, fontSize: 15, lineHeight: 23 }}>{notes || (notesLoading?'Restoring saved work notes…':'No work notes recorded.')}</Text>}
     </Card>}
@@ -386,9 +388,9 @@ export default function FieldWorkTools({ job, onChanged, onDraftChange, onBusyCh
         {!!record.epaRegNo && <Text style={{ color: palette.secondary, fontSize: 13, lineHeight: 20 }}>EPA registration: {record.epaRegNo}</Text>}{!!record.notes && <Text style={{ color: palette.text, fontSize: 14, lineHeight: 21 }}>{record.notes}</Text>}
         {!!record.syncState && <StatusBadge syncState={record.syncState} />}{!!record.error && <InlineNotice tone="error" message={record.error} />}
       </View>)}
-      {allowWork && (!form ? <SecondaryButton title="Record product application" icon="add-outline" disabled={busy} onPress={() => { setError('');const application=emptyApplication();draftState.current.form=application;setForm(application); }} /> : <View style={{ gap: 12 }}>
-        {Object.entries(applicationFields).map(([key, label]) => <React.Fragment key={key}>{key === 'notes' && <NoteAudience />}<FormField label={label} value={form[key]} onChangeText={value => {const application={...draftState.current.form,[key]:value};draftState.current.form=application;setForm(application);}} editable={!busy} multiline={key === 'notes'} keyboardType={key === 'amount' ? 'decimal-pad' : 'default'} /></React.Fragment>)}
-        <PrimaryButton title="Save application" busy={busy} onPress={()=>saveApplication()} /><SecondaryButton title="Cancel application" disabled={busy} onPress={() => {draftState.current.form=null;setForm(null); setError('');}} />
+      {allowWork && (!form ? <SecondaryButton title="Record product application" icon="add-outline" disabled={busy || !allowNormalWork} onPress={() => { setError('');const application=emptyApplication();draftState.current.form=application;setForm(application); }} /> : <View style={{ gap: 12 }}>
+        {Object.entries(applicationFields).map(([key, label]) => <React.Fragment key={key}>{key === 'notes' && <NoteAudience />}<FormField label={label} value={form[key]} onChangeText={value => {const application={...draftState.current.form,[key]:value};draftState.current.form=application;setForm(application);}} editable={!busy && allowNormalWork} multiline={key === 'notes'} keyboardType={key === 'amount' ? 'decimal-pad' : 'default'} /></React.Fragment>)}
+        <PrimaryButton title="Save application" disabled={!allowNormalWork} busy={busy} onPress={()=>saveApplication()} /><SecondaryButton title="Cancel application" disabled={busy} onPress={() => {draftState.current.form=null;setForm(null); setError('');}} />
       </View>)}
     </Card>}
   </View>;

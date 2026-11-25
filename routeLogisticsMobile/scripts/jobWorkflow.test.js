@@ -34,6 +34,7 @@ function load() {
     if (specifier === '@expo/vector-icons') return { Ionicons: props => React.createElement('Ionicon', props) };
     if (specifier.endsWith('/contexts/AuthContext')) return { useAuth: () => account };
     if (specifier.endsWith('/theme/ThemeProvider')) return { useTheme: () => ({ palette }) };
+    if (specifier.endsWith('/theme/designTokens')) return require('../theme/designTokens');
     if (specifier === './Glass') return { GlassButton: button, GlassInput: ({ label, ...props }) => React.createElement('TextInput', { accessibilityLabel: label, ...props }) };
     if (specifier === './MobileUI') {
       const panel = ({ title, message, children, ...props }) => React.createElement('View', props, title && React.createElement('Text', null, title), message && React.createElement('Text', null, message), children);
@@ -100,7 +101,7 @@ test('estimate details retain property access and dispatcher notes and completio
  let prepared=null;await render(job({appointmentKind:'estimate_visit',billable:false,estimateOutcome:'estimate_pending',inquiryId:'inquiry-one',serviceProperty:{address:'22 Rental Road',label:'Rental',unit:'B'},address:'Old billing street',propertyAccessInstructions:'Gate 2468',dispatchNotes:'Inspect exterior only'}),{onPrepareEstimate:selected=>{prepared=selected;}});
   assert.match(text(),/Estimate Visit/);assert.match(text(),/22 Rental Road/);assert.match(text(),/Gate 2468/);await press('Job instructions');assert.match(text(),/Inspect exterior only/);assert.doesNotMatch(text(),/Old billing street/);
  await press('Prepare Estimate');assert.equal(prepared.id,'assigned');
- await press('Review and completion');assert.match(text(),/Visit summary/);assert.ok(control('Completion outcome: Visit completed — quote needed'));await input('Work completed','Inspected for a quote');await press('Completion outcome: Customer declined');await press('Complete Visit');assert.equal(calls[0].draft.estimateOutcome,'customer_declined');assert.equal(calls[0].job.billable,false);assert.equal(photoMounts,1);
+ await press('Review and completion');assert.match(text(),/Review & complete/);assert.ok(control('Completion outcome: Visit completed — quote needed'));await input('Work completed','Inspected for a quote');await press('Completion outcome: Customer declined');await press('Complete Visit');assert.equal(calls[0].draft.estimateOutcome,'customer_declined');assert.equal(calls[0].job.billable,false);assert.equal(photoMounts,1);
 });
 
 test('guided workflow shows one focused stage, returns after durable saves and reopens completed steps',async()=>{
@@ -123,6 +124,7 @@ test('current critical alert blocks normal stages until a durable local acknowle
   assert.equal(control('Work details').props.disabled, true);
   await press('I have read this critical alert');
   assert.equal(!!control('Work details').props.disabled, false);
+  await press('1 active critical hazard, acknowledgment waiting to sync. Show warning details');
   assert.match(text(), /Acknowledged on device/);
   assert.ok(control('Open Hazard at entry alert'));
   assert.doesNotMatch(text(), /Review the full access warning before work/);
@@ -134,6 +136,8 @@ test('server-confirmed critical alerts collapse, but a revised version expands a
   const critical = { id: 'gate', source: 'property', version: 2, active: true, severity: 'critical', title: 'Hazard at entry', description: 'Keep clear of the gate.' };
   alertRead = async alerts => ({ alerts, source: 'server', acknowledgments: [{ alertKey: 'property:gate:2' }], local: [] });
   await render(job({ operationalAlerts: [critical] }));
+  assert.equal(tree.root.findAll(node => node.props.testID === 'job-operational-alerts').length, 0);
+  await press('1 active critical hazard, acknowledged where required. Show warning details');
   assert.ok(control('Open Hazard at entry alert'));
   assert.match(displayed(), /1 active/); assert.match(displayed(), /Acknowledged and saved to server/);
   assert.doesNotMatch(text(), /Keep clear of the gate/);
@@ -211,14 +215,14 @@ test('estimate outcome is part of the single completion draft and survives stage
 });
 
 test('review summary links reopen existing stages without discarding completion edits',async()=>{
- await render();await press('Review and completion');await input('Work completed','Synthetic work retained');
+ await render();await press('Review and completion');await input('Work completed','Synthetic work retained');await press('Show visit stage summary');
  await press('Review Work details: Not yet saved');assert.equal(workProps.section,'work');
  await press('Back to Visit Workflow');await press('Review and completion');
  assert.equal(tree.root.findByProps({accessibilityLabel:'Work completed'}).props.value,'Synthetic work retained');
 });
 
 test('an open reassignment request cannot be silently discarded by job close or completion',async()=>{
- await render();assert.equal(requestProps.active,false);await press('Review and completion');assert.equal(requestProps.active,true);await act(async()=>requestProps.onDraftChange(true));assert.equal(interactions.at(-1).hasDraft,true);
+ await render();assert.equal(requestProps.active,false);await press('Review and completion');await press('Request reassignment');assert.equal(requestProps.active,true);await act(async()=>requestProps.onDraftChange(true));assert.equal(interactions.at(-1).hasDraft,true);
  await press('Complete Visit');assert.match(text(),/Finish submitting or explicitly cancel the reassignment request/);assert.equal(control('Save drafts and continue').props.disabled,true);assert.equal(control('Discard unsaved drafts and continue').props.disabled,true);assert.equal(calls.length,0);
  await press('Keep editing');await press('Back to Visit Workflow');await press('Close job details');assert.equal(closes,0);assert.match(text(),/before closing this work order/);
  await press('Keep editing');await act(async()=>requestProps.onDraftChange(false));assert.equal(requestProps.active,false);assert.equal(photoMounts,1);
@@ -231,7 +235,7 @@ test('reassignment request submission participates in the existing work-order bu
 
 test('job workflow uses exclusive inline pages and preserves one photo owner through child navigation', async () => {
   await render(); assert.equal(photoMounts, 1); assert.equal(tree.root.findAllByType('Modal').length, 0);
-  await draft(); assert.match(text(), /Visit summary/); assert.ok(control('Complete Visit'));
+  await draft(); assert.match(text(), /Review & complete/); assert.ok(control('Complete Visit'));
   await press('Back to Visit Workflow'); assert.match(text(), /Visit Workflow/); assert.equal(photoMounts, 1); assert.equal(photoUnmounts, 0);
   await press('Review and completion');
   assert.equal(tree.root.findByProps({ accessibilityLabel: 'Work completed' }).props.value, 'Inspected and treated the site');

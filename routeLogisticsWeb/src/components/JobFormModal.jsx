@@ -310,6 +310,15 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
           {!compactInquirySchedule && company?.id && form.customerId && <ServicePropertyDirectory key={form.customerId} customerId={form.customerId} value={form.servicePropertyId} disabled={saving} locked={inquiryLinked} autoSelectDefault={!isEdit && !addressEditing && !defaults?.serviceProperty && !defaults?.address} onSelect={saved => {
             if (savingRef.current || !saved) return;
             initialCustomerPending.current = false; setAddressEditing(false); setSaveCustomerAddress(false); setAddressValidation(null);
+            if (isEdit && form.customerId === job.customerId && saved.id === job.servicePropertyId) {
+              // The directory address may have changed since this appointment
+              // was booked. Reselecting it must retain the recorded snapshot.
+              const original = propertyFor(job, selectedCustomer, company?.serviceCategories);
+              const category = form.serviceType === job.serviceType ? original.serviceCategory : catalogCategory(form.serviceType, company?.serviceCategories) || original.serviceCategory;
+              setProperty({ ...original, serviceCategory: category, exceptionId: category === original.serviceCategory ? original.exceptionId : null });
+              setForm(previous => ({ ...previous, servicePropertyId: job.servicePropertyId, address: emptyForm(defaults, job).address }));
+              return;
+            }
             setProperty(previous => { const category = catalogCategory(form.serviceType, company?.serviceCategories) || previous.serviceCategory; return { ...previous, address: saved.address, serviceCategory: category, exceptionId: category === saved.serviceCategory ? saved.serviceAreaExceptionId || null : null, confirmed: false }; });
             setForm(previous => ({ ...previous, servicePropertyId: saved.id, address: saved.address }));
           }} />}

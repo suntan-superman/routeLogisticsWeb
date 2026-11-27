@@ -38,6 +38,7 @@ test('PW-INTAKE-01 @smoke prospect inquiry schedules one nonbillable estimate wi
   await expect(form.getByRole('combobox', { name: 'Appointment kind', exact: true })).toHaveCount(0);
   await expect(form.getByRole('combobox', { name: 'Customer', exact: true })).toHaveCount(0);
   await expect(form.getByRole('combobox', { name: 'Saved service property', exact: true })).toHaveCount(0);
+  await form.getByRole('tab', { name: 'Schedule', exact: true }).click();
   const date = new Date(); date.setDate(date.getDate() + 7); const dateValue = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   await form.locator('input[type="date"]').fill(dateValue);
   await selectValue(form.getByRole('combobox', { name: 'Assigned technician', exact: true }), scenario.accounts.technician.membershipId);

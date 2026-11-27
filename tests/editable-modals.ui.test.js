@@ -67,7 +67,7 @@ test('job duplicate submission and repeated Escape cannot bypass the outstanding
   let finish;pending=new Promise(done=>{finish=done;});const submit=tree.root.findByType('form').props.onSubmit;let first;await act(async()=>{first=submit({preventDefault(){}});submit({preventDefault(){}});});assert.equal(writes.length,1);assert.equal(button('Cancel').props.disabled,true);await act(async()=>{finish();await first;});assert.equal(created.length,1);
 });
 
-test('an empty new job draft does not enable Schedule until the user enters a change',async()=>{
+test('a new job remains unschedulable until required customer and service selections are present',async()=>{
   await render(Job,{customers:[],onClose:()=>closed++,onCreated:value=>created.push(value)});assert.equal(button('Schedule Job').props.disabled,true);assert.equal(dirty,false);
-  await act(async()=>tree.root.findByProps({placeholder:'Gate code, pets, areas of concern…'}).props.onChange({target:{value:'Gate code provided'}}));assert.equal(button('Schedule Job').props.disabled,false);assert.equal(dirty,true);
+  await act(async()=>tree.root.findByProps({placeholder:'Gate code, pets, areas of concern…'}).props.onChange({target:{value:'Gate code provided'}}));assert.equal(button('Schedule Job').props.disabled,true);assert.equal(dirty,true);
 });

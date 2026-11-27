@@ -22,7 +22,7 @@ function compile(relative) {
   const module = { exports: {} };
   const mock = name => {
     if (name === 'react') return React;
-    if (name.endsWith('/ServicePropertyDirectory')) return { __esModule: true, default: () => null };
+    if (name.endsWith('/ServicePropertyDirectory')) return { __esModule: true, default: directory => { env.propertyDirectory = directory; return null; } };
     if(name.endsWith('/useWorkspaceQuery'))return queryMock;
     if(name.endsWith('/SelectControl'))return{__esModule:true,default:selectControlMock(React)};
     if (name === 'react-hot-toast') { const toast = message => env.toasts.push(message); toast.success = toast; toast.error = toast; return { __esModule: true, default: toast }; }
@@ -85,6 +85,42 @@ test('one-time scheduling sends the selected technician in the same create reque
   assert.equal(writes()[0].data.recurring, undefined); assert.equal(env.created.length, 1);
   assert.ok(env.calls.filter(call => call.name === 'rlManageJob').every(call => call.data.action !== 'assign'));
 });
+test('tab changes preserve draft values and submit directly from review', async () => {
+  await render();
+  const panel = name => tree.root.findByProps({ id: `job-form-panel-${name}` });
+  assert.equal(panel('property').props.hidden, false);
+  await click('Details & Review');
+  assert.equal(panel('details').props.hidden, false);
+  await act(async () => tree.root.findByProps({ id: 'job-notes' }).props.onChange({ target: { value: 'Synthetic gate instruction' } }));
+  await click('Schedule');
+  assert.equal(panel('schedule').props.hidden, false);
+  await click('Details & Review');
+  assert.equal(tree.root.findByProps({ id: 'job-notes' }).props.value, 'Synthetic gate instruction');
+  await submit();
+  assert.equal(writes().length, 1);
+  assert.equal(writes()[0].data.job.notes, 'Synthetic gate instruction');
+});
+test('submitting from another tab opens the field with an invalid value', async () => {
+  await render();
+  await click('Details & Review');
+  await act(async () => tree.root.findByProps({ type: 'number', min: '0' }).props.onChange({ target: { value: '-1' } }));
+  await click('Schedule');
+  await submit();
+  assert.equal(writes().length, 0);
+  assert.equal(tree.root.findByProps({ id: 'job-form-panel-details' }).props.hidden, false);
+  assert.match(text(), /Price must be zero or greater/);
+});
+test('new jobs use a saved default property without replacing an explicitly supplied address', async () => {
+  await render();
+  assert.equal(env.propertyDirectory.autoSelectDefault, true);
+  await act(async () => env.propertyDirectory.onSelect({ id: 'saved-default', address: '200 Default Lane, Bakersfield, CA 93312', serviceCategory: 'Pest Control' }));
+  await submit();
+  assert.equal(writes()[0].data.job.servicePropertyId, 'saved-default');
+  assert.equal(writes()[0].data.job.address, '200 Default Lane, Bakersfield, CA 93312');
+  await act(async () => tree.unmount()); tree = null;
+  await render({ defaults: { customerId: customer.id, serviceType: 'Pest Control', date: '2030-01-10', serviceProperty: { address: '300 Explicit Lane' } } });
+  assert.equal(env.propertyDirectory.autoSelectDefault, false);
+});
 
 test('estimate visits retain availability checks but cannot create billable or recurring work', async () => {
   await render(); assert.equal(select('Appointment kind').props.value, 'service'); await choose('Appointment kind', 'estimate_visit');
@@ -135,7 +171,7 @@ test('monthly day-of-month preview explains shorter-month handling and saves the
 
 test('editing an existing recurring visit changes only that visit and cannot rewrite its plan', async () => {
   const job = { id: 'existing-job', customerId: customer.id, customerName: customer.name, serviceType: 'Pest Control', date: '2030-01-10', time: '09:00', estimatedDuration: 1, assignedTo: 'tech-1', assignedToName: 'Technician One', address: customer.address, servicePlanId: 'retained-plan', priority: 'medium', notes: '', totalCost: 0, updatedAt: 'original-version' };
-  await render({ job }); assert.equal(!!select('Appointment type'), false); assert.match(text(), /Changes here apply to this visit only/);
+  await render({ job }); assert.equal(!!select('Appointment type'), false); assert.match(text(), /Changes to this appointment do not change its recurring service plan or other visits/);
   await chooseCombobox('Assigned technician', 'Technician Two'); await chooseCombobox('Start time', '10:15 AM'); await submit();
   assert.equal(writes().length, 1); const saved = writes()[0].data;
   assert.equal(saved.action, 'update'); assert.equal(saved.id, job.id); assert.equal(saved.expectedVersion, job.updatedAt); assert.equal(saved.job.assignedTo, 'tech-2'); assert.equal(saved.job.time, '10:15');
@@ -146,7 +182,7 @@ test('editing an existing recurring visit changes only that visit and cannot rew
 
 test('recurring retry reuses its operation ID and preserves explicit permanent-address and technician options', async () => {
   await render(); await chooseCombobox('Assigned technician', 'Technician One'); await choose('Appointment type', 'recurring'); await choose('Repeat frequency', 'quarterly'); await choose('Monthly repeat pattern', 'weekday'); await choose('Recurring technician fallback', 'auto');
-  await click('Enable Editing'); await act(async () => input('Service property address').props.onChange({ target: { value: '200 Corrected Street, Example, CA 93312' } }));
+  await click('Use a different address for this job'); await act(async () => input('Service property address').props.onChange({ target: { value: '200 Corrected Street, Example, CA 93312' } }));
   const permanent = tree.root.findAll(node => node.type === 'input' && node.props['aria-label'] === "Update customer's saved address")[0]; assert.equal(permanent.props.checked, false); await act(async () => permanent.props.onChange({ target: { checked: true } }));
   env.saveFailure = new Error('The response was unavailable.'); await submit(); assert.equal(writes().length, 1); const first = writes()[0].data;
   assert.match(first.operationId, /^[a-f0-9-]{36}$/); assert.equal(first.saveCustomerAddress, true); assert.equal(first.expectedCustomerVersion, customer.updatedAt); assert.equal(first.job.assignedTo, 'tech-1');
@@ -173,7 +209,7 @@ test('a warning save keeps the new job open and address correction updates the s
 
 test('repeated warning corrections use the latest saved revision and Done closes without another save or callback',async()=>{
   const job={id:'existing-job',customerId:customer.id,customerName:customer.name,serviceType:'Pest Control',date:'2030-01-10',time:'09:00',estimatedDuration:1,assignedTo:'tech-1',address:customer.address,priority:'medium',notes:'Saved instructions',totalCost:0,updatedAt:'original-version'};
-  await render({job});await click('Enable Editing');await act(async()=>input('Service property address').props.onChange({target:{value:'201 Unverified Street, Example, CA 93312'}}));env.addressWarning=unverifiedAddressWarning;
+  await render({job});await click('Use a different address for this job');await act(async()=>input('Service property address').props.onChange({target:{value:'201 Unverified Street, Example, CA 93312'}}));env.addressWarning=unverifiedAddressWarning;
   await submit();assert.equal(writes()[0].data.expectedVersion,'original-version');assert.equal(env.created[0][1].keepOpen,true);assert.equal(button('Save Changes').props.disabled,true);
   await click('Edit address');await act(async()=>input('Service property address').props.onChange({target:{value:'202 Still Unverified Street, Example, CA 93312'}}));
   await submit();assert.equal(writes()[1].data.id,job.id);assert.equal(writes()[1].data.expectedVersion,'server-revision-1');assert.equal(writes().filter(call=>call.data.action==='create').length,0);assert.equal(env.saved.size,1);

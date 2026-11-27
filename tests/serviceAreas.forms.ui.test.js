@@ -47,7 +47,7 @@ const refreshCustomers=async customers=>act(async()=>{jobProps={...jobProps,cust
 const selectCustomer=async id=>act(async()=>tree.root.findAllByType('select').find(node=>node.props['aria-label']==='Customer').props.onChange({target:{value:id}}));
 const changeNotes=async value=>act(async()=>tree.root.findByProps({placeholder:'Gate code, pets, areas of concern…'}).props.onChange({target:{value}}));
 const propertyInput=()=>tree.root.findByProps({'aria-label':'Mock explicit property'});
-const enableAddressEditing=async()=>{assert.ok(button('Enable Editing'),'An explicit Enable Editing action must exist');await act(async()=>button('Enable Editing').props.onClick());};
+const enableAddressEditing=async()=>{assert.ok(button('Use a different address for this job'),'An explicit different-address action must exist');await act(async()=>button('Use a different address for this job').props.onClick());};
 const changeProperty=async value=>{if(checker.addressReadOnly)await enableAddressEditing();await act(async()=>propertyInput().props.onChange({target:{value}}));};
 const businessOptions=write=>{const options=write.options;if(!options)return options;if(options.operationId)assert.match(options.operationId,/^[a-f0-9-]{36}$/i);const {operationId,...rest}=options;return Object.keys(rest).length?rest:undefined;};
 const permanentCheckbox=()=>tree.root.findAll(node=>node.type==='input'&&node.props['aria-label']==="Update customer's saved address")[0];
@@ -197,7 +197,7 @@ test('without customer-management permission an address can change for this job 
 });
 test('solo scheduling saves the visible service address instead of a hidden customer suggestion',async()=>{
  company=null;await renderJob();assert.equal(checker,null);
- if(button('Enable Editing'))await enableAddressEditing();
+ if(button('Use a different address for this job'))await enableAddressEditing();
  const address=tree.root.findByProps({placeholder:"Defaults to the customer's address"});await act(async()=>address.props.onChange({target:{value:'A chosen independent-business visit address'}}));
  await changeNotes('Save the visible solo address');await submit();assert.equal(writes.length,1);assert.equal(writes[0].value.address,'A chosen independent-business visit address');assert.equal(Object.hasOwn(writes[0].value,'serviceProperty'),false);
 });

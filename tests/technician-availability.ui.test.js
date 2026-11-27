@@ -35,7 +35,7 @@ const base = { companyId: 'company-a', memberId: 'tech-1', date: '2030-01-07', t
 const textOf = node => typeof node === 'string' ? node : Array.isArray(node) ? node.map(textOf).join('') : (node?.children || []).map(textOf).join('');
 const text = () => textOf(tree.toJSON());
 const select = () => tree.root.findByProps({ 'aria-label': 'Assigned technician' });
-const button = label => tree.root.findAll(node => node.type === 'button' && node.children.join('') === label)[0];
+const button = label => tree.root.findAll(node => node.type === 'button' && (node.children.join('') === label || node.props['aria-label'] === label))[0];
 const alternativeButtons = () => tree.root.findAll(node => node.type === 'button' && node.children.join('').startsWith('Use '));
 const click = async label => { assert.ok(button(label), label); await act(async () => button(label).props.onClick()); await act(settle); };
 function reset(handler) { env = { calls: [], members: [], alternatives: [], handler: handler || ((_name, data) => data.action === 'roster' ? roster : available) }; }
@@ -53,7 +53,7 @@ test('roster and automatic preflight use authorized endpoint payloads and only s
   assert.deepEqual(env.calls[1].data, { action: 'check', companyId: 'company-a', memberId: 'tech-1', date: base.date, time: base.time, estimatedDuration: 1.5, jobId: base.jobId });
   assert.deepEqual(tree.root.findAllByType('option').map(option => option.children.join('')), ['Unassigned', 'Company owner', 'Technician One', 'Technician Two', 'Active manager']);
   assert.match(text(), /Available for this appointment/); assert.match(text(), /Checks scheduled work; travel time is not included/); assert.doesNotMatch(text(), /on-duty|GPS|unavailable because/i);
-  assert.match(text(), /8:00 AM–6:00 PM/); assert.match(text(), /America\/Los_Angeles/);
+  assert.doesNotMatch(text(), /Alternative search window/, 'Secondary search details remain hidden until a conflict');
   await act(async () => select().props.onChange({ target: { value: 'tech-2' } })); assert.deepEqual(env.members, ['tech-2']);
   assert.equal(env.calls.length, 2, 'Selecting a technician only asks the parent to update its draft');
 });

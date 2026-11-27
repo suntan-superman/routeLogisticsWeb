@@ -25,7 +25,7 @@ async function rpc(name, data) {
   assert.equal(name, 'rlManageInquiry');
   if (data.action === 'list') return { inquiries: env.inquiries };
   if (data.action === 'matches') return { matches: env.matches };
-  if (data.action === 'properties') return { properties: [property], customerVersion: 'customer-v1', customerLifecycle: env.lifecycle };
+  if (data.action === 'properties') return { properties: env.properties || [property], customerVersion: 'customer-v1', customerLifecycle: env.lifecycle };
   if (env.pending) await env.pending;
   if (env.failure) throw env.failure;
   if (data.action === 'create') {
@@ -120,6 +120,33 @@ test('service property edits require explicit address unlocking and retain a sta
 });
 test('directory refresh preserves a recorded property selection and does not silently select a primary location', async () => {
   const selected = [], onSelect = value => selected.push(value); await mount('components/ServicePropertyDirectory.jsx', { customerId: customer.id, value: '', onSelect }); assert.equal(control('Saved service property').props.value, ''); assert.equal(selected.length, 0); await change('Saved service property', property.id); assert.equal(selected[0].id, property.id); const Directory = load('components/ServicePropertyDirectory.jsx').default; await act(async () => tree.update(React.createElement(Directory, { customerId: customer.id, value: property.id, onSelect }))); assert.match(content(), /Use side entrance/);
+});
+test('new scheduling defaults to the sole property or the explicitly marked default', async () => {
+  const selected = [], onSelect = value => selected.push(value);
+  await mount('components/ServicePropertyDirectory.jsx', { customerId: customer.id, value: '', onSelect, autoSelectDefault: true });
+  assert.equal(selected.length, 1); assert.equal(selected[0].id, property.id, 'A sole saved property is used even when it has no primary flag.');
+  await act(async () => tree.unmount()); tree = null;
+  env.properties = [{ ...property, id: 'other-property' }, { ...property, id: 'preferred-property', isPrimary: true }];
+  await mount('components/ServicePropertyDirectory.jsx', { customerId: customer.id, value: '', onSelect, autoSelectDefault: true });
+  assert.equal(selected.length, 2); assert.equal(selected[1].id, 'preferred-property');
+  const Directory = load('components/ServicePropertyDirectory.jsx').default;
+  await act(async () => tree.update(React.createElement(Directory, { customerId: customer.id, value: 'other-property', onSelect, autoSelectDefault: true })));
+  assert.equal(selected.length, 2, 'An explicit property choice is never replaced by the default.');
+});
+test('a new inquiry selects the customer’s sole saved service property', async () => {
+  await mount(); await click('New Inquiry'); await change('Find existing customer', 'Existing'); await click('Find matching customers'); await click('Use this customer');
+  assert.equal(control('Saved service property').props.value, property.id);
+});
+test('a different saved property can be marked as default without changing its category or exception', async () => {
+  env.properties = [{ ...property, isPrimary: false }, { ...property, id: 'old-default', isPrimary: true }];
+  await mount('components/ServicePropertyDirectory.jsx', { customerId: customer.id, value: property.id });
+  await click('Make default');
+  assert.equal(button('Save service property').props.disabled, false);
+  await click('Save service property');
+  const request = env.calls.find(row => row.action === 'saveProperty');
+  assert.equal(request.propertyId, property.id); assert.equal(request.property.isPrimary, true);
+  assert.equal(request.property.address, property.address); assert.equal(request.serviceCategory, property.serviceCategory);
+  assert.equal(request.serviceAreaExceptionId, property.serviceAreaExceptionId);
 });
 test('explicit lifecycle changes are separate from archive status and preserve the customer identity', async () => {
   const api = load('services/inquiryService.js'); assert.equal(api.customerLifecycle({ isActive: false }), 'active'); assert.equal(api.customerLifecycle({ lifecycle: 'prospect', isActive: true }), 'prospect');

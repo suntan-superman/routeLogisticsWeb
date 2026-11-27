@@ -180,6 +180,23 @@ test('editing an existing recurring visit changes only that visit and cannot rew
   assert.ok(env.calls.filter(call => call.name === 'rlCheckAvailability' && call.data.action === 'check').every(call => call.data.jobId === job.id));
 });
 
+test('rescheduling a saved-property job does not resubmit its legacy address as a property change', async () => {
+  const job = { id: 'saved-property-job', customerId: customer.id, customerName: customer.name, servicePropertyId: 'property-one', serviceProperty: { address: '100 Saved Street, Example, CA 93312', propertyId: 'property-one' }, serviceCategory: 'Pest Control', serviceType: 'Pest Control', date: '2030-01-10', time: '09:00', estimatedDuration: 1, assignedTo: 'tech-1', address: '100 Saved St, Example, CA 93312', priority: 'medium', notes: '', totalCost: 0, updatedAt: 'original-version' };
+  await render({ job });
+  await act(async () => input('Date').props.onChange({ target: { value: '2030-01-15' } }));
+  await submit();
+  assert.equal(writes().length, 1);
+  const request = writes()[0].data;
+  assert.equal(request.action, 'update');
+  assert.equal(request.expectedVersion, 'original-version');
+  assert.equal(request.job.date, '2030-01-15');
+  assert.equal(Object.hasOwn(request.job, 'address'), false);
+  assert.equal(Object.hasOwn(request.job, 'serviceProperty'), false);
+  assert.equal(request.job.servicePropertyId, 'property-one');
+  assert.deepEqual(request.job.revisions.at(-1).changes.map(change => change.field), ['date']);
+  assert.equal(env.saved.get(job.id).serviceProperty.address, job.serviceProperty.address);
+});
+
 test('recurring retry reuses its operation ID and preserves explicit permanent-address and technician options', async () => {
   await render(); await chooseCombobox('Assigned technician', 'Technician One'); await choose('Appointment type', 'recurring'); await choose('Repeat frequency', 'quarterly'); await choose('Monthly repeat pattern', 'weekday'); await choose('Recurring technician fallback', 'auto');
   await click('Use a different address for this job'); await act(async () => input('Service property address').props.onChange({ target: { value: '200 Corrected Street, Example, CA 93312' } }));

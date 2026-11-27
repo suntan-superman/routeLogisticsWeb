@@ -226,7 +226,7 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
       time: form.time,
       estimatedDuration: duration,
       assignedTo: form.assignedTo || null,
-      address: isEdit && !locationChanged ? form.address.trim() || job.address || '' : (company?.id ? property.address.trim() : '') || form.address.trim() || customerAddress(customer),
+      address: isEdit && !locationChanged ? job.address ?? '' : (company?.id ? property.address.trim() : '') || form.address.trim() || customerAddress(customer),
       ...(company?.id && (locationChanged || !isEdit && property.address.trim()) ? { serviceProperty: { address: property.address.trim() }, serviceCategory: property.serviceCategory.trim(), serviceAreaExceptionId: property.exceptionId || null } : {}),
       totalCost: cost,
       priority: form.priority,
@@ -247,6 +247,9 @@ const JobFormModal = ({ customers, defaults, job: initialJob, onClose, onCreated
         toast('No changes to save');
         return onClose();
       }
+      // A schedule-only edit must not resubmit the legacy display address as
+      // a property change. The server preserves the selected property snapshot.
+      if (job.servicePropertyId && !locationChanged && !saveCustomerAddress && edit) delete edit.address;
       const res = await JobManagementService.updateJob(job.id, edit || details, job.updatedAt ?? null, options);
       if (!alive.current)return;
       if (!res.success) throw Object.assign(Error(res.error || 'Could not update job'), { addressValidation: res.addressValidation, scheduling: res.scheduling });
